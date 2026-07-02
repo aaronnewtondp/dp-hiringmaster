@@ -14,10 +14,6 @@
   ],
   "crons": [
     {
-      "path": "/api/cron/sla-check",
-      "schedule": "*/15 * * * *"
-    },
-    {
       "path": "/api/cron/email-digest",
       "schedule": "15 8 * * *"
     }
