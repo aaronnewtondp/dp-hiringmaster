@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/index.ts",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/api/index.ts"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/sla-check",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/email-digest",
+      "schedule": "15 8 * * *"
+    }
+  ]
+}
