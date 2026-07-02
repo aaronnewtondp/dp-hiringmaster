@@ -1,3 +1,4 @@
+import 'express-async-errors';
 /**
  * Express server entry point.
  *
@@ -76,5 +77,12 @@ if (!isVercel) {
     console.log(`🚀 HMS backend running on http://localhost:${PORT}`);
   });
 }
+
+
+// Global async error handler — catches all unhandled async route errors
+app.use((err: Error, req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
+  console.error('[ERROR]', err.message, err.stack?.split('\n')[1]);
+  res.status(500).json({ error: 'Internal server error', detail: err.message });
+});
 
 export default app;

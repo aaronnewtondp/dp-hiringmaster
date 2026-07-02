@@ -33,6 +33,7 @@ services:
     environment:
       NODE_ENV: development
       PORT: 4000
+      DATABASE_URL: postgresql://hms_user:hms_password@dp_hms_db:5432/dp_hms
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: ${DB_USER:-hms_user}

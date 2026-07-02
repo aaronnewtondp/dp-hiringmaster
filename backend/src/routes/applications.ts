@@ -260,8 +260,8 @@ router.post('/:id/screening', async (req: Request, res: Response) => {
       const role = await client.query('SELECT title FROM roles WHERE id=$1', [app.role_id]);
       await client.query(
         `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue)
-         VALUES ('HR / Recruiter','High','Schedule interview','Schedule Round 1 for '||$3||' applying for '||$4,$1,$3,$4,0)`,
-        [req.params.id, null, cand.rows[0]?.full_name, role.rows[0]?.title]
+         VALUES ('HR / Recruiter','High','Schedule interview','Schedule Round 1 for '||$2||' applying for '||$3,$1,$2,$3,0)`,
+        [req.params.id, cand.rows[0]?.full_name, role.rows[0]?.title]
       );
     }
   });
@@ -335,8 +335,8 @@ router.post('/:id/founder-flag', async (req: Request, res: Response) => {
       await client.query(
         `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue)
          VALUES ('Leadership / Founders','High','Founder Review',
-         'Review flagged candidate '||$3||' for '||$4,$1,$3,$4,0)`,
-        [app.id, null, cand.rows[0]?.full_name, role.rows[0]?.title]
+         'Review flagged candidate '||$2||' for '||$3,$1,$2,$3,0)`,
+        [app.id, cand.rows[0]?.full_name, role.rows[0]?.title]
       );
     } else {
       await client.query(
