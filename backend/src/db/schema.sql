@@ -14,6 +14,8 @@ CREATE SEQUENCE IF NOT EXISTS seq_interview   START 1  INCREMENT 1;
 CREATE SEQUENCE IF NOT EXISTS seq_agency      START 16 INCREMENT 1;
 CREATE SEQUENCE IF NOT EXISTS seq_assignment  START 5  INCREMENT 1;
 CREATE SEQUENCE IF NOT EXISTS seq_refcheck    START 1  INCREMENT 1;
+CREATE SEQUENCE IF NOT EXISTS seq_eval_question  START 1 INCREMENT 1;
+CREATE SEQUENCE IF NOT EXISTS seq_comp_benchmark START 1 INCREMENT 1;
 
 -- ─── Users ───────────────────────────────────────────────────────────────────
 CREATE TABLE users (
@@ -292,7 +294,7 @@ CREATE TABLE ref_checks (
 
 -- ─── Eval Questions ───────────────────────────────────────────────────────────
 CREATE TABLE eval_questions (
-  id               TEXT PRIMARY KEY DEFAULT 'Q' || LPAD(nextval('seq_refcheck')::TEXT, 3, '0'),
+  id                  TEXT PRIMARY KEY DEFAULT 'Q' || LPAD(nextval('seq_eval_question')::TEXT, 3, '0'), 3, '0'),
   evaluation_area  TEXT NOT NULL,
   role_category    TEXT NOT NULL DEFAULT 'All',
   experience_level TEXT NOT NULL DEFAULT 'All',
@@ -307,7 +309,7 @@ CREATE TABLE eval_questions (
 
 -- ─── Comp Benchmarks ──────────────────────────────────────────────────────────
 CREATE TABLE comp_benchmarks (
-  id                  TEXT PRIMARY KEY DEFAULT 'BEN' || LPAD(nextval('seq_refcheck')::TEXT, 3, '0'),
+  id                    TEXT PRIMARY KEY DEFAULT 'BEN' || LPAD(nextval('seq_comp_benchmark')::TEXT, 3, '0'), 3, '0'),
   role_category       TEXT NOT NULL,
   experience_range    TEXT NOT NULL,
   internal_band_min   DECIMAL(8,2),
@@ -395,5 +397,13 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER roles_ctc_change AFTER UPDATE ON roles FOR EACH ROW EXECUTE FUNCTION flag_ctc_change();
+
+
+-- GIN indexes on applications array columns (AI scoring + HR tags)
+CREATE INDEX IF NOT EXISTS idx_applications_ai_skills_matched ON applications USING GIN(ai_skills_matched) WHERE ai_skills_matched IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_applications_ai_missing_skills  ON applications USING GIN(ai_missing_skills)  WHERE ai_missing_skills  IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_applications_ai_eval_areas      ON applications USING GIN(ai_eval_areas)      WHERE ai_eval_areas      IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_applications_ai_risk_flags      ON applications USING GIN(ai_risk_flags)      WHERE ai_risk_flags      IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_applications_hr_tags            ON applications USING GIN(hr_tags)            WHERE hr_tags            IS NOT NULL;
 
 COMMIT;
