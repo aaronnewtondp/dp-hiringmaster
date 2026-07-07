@@ -411,3 +411,104 @@ CREATE INDEX IF NOT EXISTS idx_applications_ai_risk_flags      ON applications U
 CREATE INDEX IF NOT EXISTS idx_applications_hr_tags            ON applications USING GIN(hr_tags)            WHERE hr_tags            IS NOT NULL;
 
 COMMIT;
+-- ═════════════════════════════════════════════════════════════════════════════
+-- CONSOLIDATED SCHEMA PATCH — everything added during this session
+-- Safe to run multiple times (all IF NOT EXISTS). Apply to:
+--   1. Local Docker DB directly (immediate fix)
+--   2. schema.sql (permanent — survives docker-compose down -v)
+-- ═════════════════════════════════════════════════════════════════════════════
+
+-- ── candidates: real profile fields (replaces "parsed_*" assumption) ──────────
+ALTER TABLE candidates
+  ADD COLUMN IF NOT EXISTS current_ctc_fixed     NUMERIC,
+  ADD COLUMN IF NOT EXISTS current_ctc_variable  NUMERIC,
+  ADD COLUMN IF NOT EXISTS current_esops         NUMERIC,
+  ADD COLUMN IF NOT EXISTS expected_ctc          NUMERIC,
+  ADD COLUMN IF NOT EXISTS notice_period_days    INTEGER,
+  ADD COLUMN IF NOT EXISTS current_company       TEXT,
+  ADD COLUMN IF NOT EXISTS current_industry      TEXT,
+  ADD COLUMN IF NOT EXISTS current_designation   TEXT,
+  ADD COLUMN IF NOT EXISTS current_location      TEXT,
+  ADD COLUMN IF NOT EXISTS years_of_experience   NUMERIC,
+  ADD COLUMN IF NOT EXISTS resume_drive_link     TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_candidates_yoe ON candidates(years_of_experience);
+CREATE INDEX IF NOT EXISTS idx_candidates_expected_ctc ON candidates(expected_ctc);
+
+-- ── applications: missing updated_at (trigger target) ──────────────────────────
+ALTER TABLE applications
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+-- ── applications: 8-dimension ResumeIQ scoring rubric ──────────────────────────
+ALTER TABLE applications
+  ADD COLUMN IF NOT EXISTS score_technical       INTEGER,
+  ADD COLUMN IF NOT EXISTS score_technical_note  TEXT,
+  ADD COLUMN IF NOT EXISTS score_experience      INTEGER,
+  ADD COLUMN IF NOT EXISTS score_experience_note TEXT,
+  ADD COLUMN IF NOT EXISTS score_industry_fit       INTEGER,
+  ADD COLUMN IF NOT EXISTS score_industry_fit_note  TEXT,
+  ADD COLUMN IF NOT EXISTS score_culture_fit        INTEGER,
+  ADD COLUMN IF NOT EXISTS score_culture_fit_note   TEXT,
+  ADD COLUMN IF NOT EXISTS score_role_alignment      INTEGER,
+  ADD COLUMN IF NOT EXISTS score_role_alignment_note TEXT,
+  ADD COLUMN IF NOT EXISTS score_trajectory       INTEGER,
+  ADD COLUMN IF NOT EXISTS score_trajectory_note  TEXT,
+  ADD COLUMN IF NOT EXISTS score_leadership       INTEGER,
+  ADD COLUMN IF NOT EXISTS score_leadership_note  TEXT,
+  ADD COLUMN IF NOT EXISTS score_communication      INTEGER,
+  ADD COLUMN IF NOT EXISTS score_communication_note TEXT,
+  ADD COLUMN IF NOT EXISTS score_avg              NUMERIC(3,1),
+  ADD COLUMN IF NOT EXISTS score_strengths        TEXT[],
+  ADD COLUMN IF NOT EXISTS score_red_flags        TEXT[],
+  ADD COLUMN IF NOT EXISTS score_summary          TEXT,
+  ADD COLUMN IF NOT EXISTS score_recommendation   TEXT CHECK (score_recommendation IN ('Strong Yes','Yes','Maybe','No')),
+  ADD COLUMN IF NOT EXISTS score_resume_read      BOOLEAN,
+  ADD COLUMN IF NOT EXISTS score_computed_at      TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS idx_applications_score_avg ON applications(score_avg DESC NULLS LAST);
+CREATE INDEX IF NOT EXISTS idx_applications_score_red_flags
+  ON applications USING GIN(score_red_flags) WHERE score_red_flags IS NOT NULL;
+
+-- ── applications: GIN indexes on AI/HR array columns (perf) ────────────────────
+CREATE INDEX IF NOT EXISTS idx_applications_ai_skills_matched
+  ON applications USING GIN(ai_skills_matched) WHERE ai_skills_matched IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_applications_ai_missing_skills
+  ON applications USING GIN(ai_missing_skills) WHERE ai_missing_skills IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_applications_ai_eval_areas
+  ON applications USING GIN(ai_eval_areas) WHERE ai_eval_areas IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_applications_ai_risk_flags
+  ON applications USING GIN(ai_risk_flags) WHERE ai_risk_flags IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_applications_hr_tags
+  ON applications USING GIN(hr_tags) WHERE hr_tags IS NOT NULL;
+
+-- ── roles: fields from the Requisition Form not previously captured ────────────
+ALTER TABLE roles
+  ADD COLUMN IF NOT EXISTS new_or_replacement    TEXT,
+  ADD COLUMN IF NOT EXISTS vacancy_reason         TEXT,
+  ADD COLUMN IF NOT EXISTS appointment_type       TEXT,
+  ADD COLUMN IF NOT EXISTS qualification_required TEXT,
+  ADD COLUMN IF NOT EXISTS requisition_source_row TEXT;
+
+-- ── users: OAuth columns (google_id, avatar_url, auth_provider) ────────────────
+-- Only needed if this hasn't already been applied — safe no-op otherwise.
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS google_id      TEXT UNIQUE,
+  ADD COLUMN IF NOT EXISTS avatar_url     TEXT,
+  ADD COLUMN IF NOT EXISTS auth_provider  TEXT NOT NULL DEFAULT 'password'
+    CHECK (auth_provider IN ('password','google','both'));
+ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+
+-- ── eval_questions / comp_benchmarks: dedicated sequences (dedup fix) ──────────
+CREATE SEQUENCE IF NOT EXISTS seq_eval_question  START 14 INCREMENT 1;
+CREATE SEQUENCE IF NOT EXISTS seq_comp_benchmark START 13 INCREMENT 1;
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- VERIFICATION — run after applying, should return 39+ rows
+-- ═════════════════════════════════════════════════════════════════════════════
+-- SELECT table_name, column_name FROM information_schema.columns
+-- WHERE table_schema='public' AND (
+--   (table_name='candidates' AND column_name IN ('current_ctc_fixed','current_ctc_variable','current_esops','expected_ctc','notice_period_days','current_company','current_industry','current_designation','current_location','years_of_experience','resume_drive_link'))
+--   OR (table_name='applications' AND (column_name='updated_at' OR column_name LIKE 'score_%'))
+--   OR (table_name='roles' AND column_name IN ('new_or_replacement','vacancy_reason','appointment_type','qualification_required','requisition_source_row'))
+--   OR (table_name='users' AND column_name IN ('google_id','avatar_url','auth_provider'))
+-- ) ORDER BY table_name, column_name;
