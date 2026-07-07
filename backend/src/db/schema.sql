@@ -22,7 +22,10 @@ CREATE TABLE users (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name           TEXT NOT NULL,
   email          TEXT UNIQUE NOT NULL,
-  password_hash  TEXT NOT NULL,
+  password_hash  TEXT,
+  google_id      TEXT UNIQUE,
+  avatar_url     TEXT,
+  auth_provider  TEXT NOT NULL DEFAULT 'password' CHECK (auth_provider IN ('password','google','both')),
   persona        TEXT NOT NULL CHECK (persona IN ('hr_recruiter','hiring_manager','interviewer','leadership')),
   department     TEXT,
   is_active      BOOLEAN NOT NULL DEFAULT true,
@@ -221,6 +224,7 @@ CREATE TABLE applications (
   sla_hours                     INTEGER,
   sla_breach                    BOOLEAN NOT NULL DEFAULT false,
   last_updated                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   next_action                   TEXT,
   next_action_owner             TEXT,
   UNIQUE(candidate_id, role_id)
@@ -294,7 +298,7 @@ CREATE TABLE ref_checks (
 
 -- ─── Eval Questions ───────────────────────────────────────────────────────────
 CREATE TABLE eval_questions (
-  id                  TEXT PRIMARY KEY DEFAULT 'Q' || LPAD(nextval('seq_eval_question')::TEXT, 3, '0'), 3, '0'),
+  id                  TEXT PRIMARY KEY DEFAULT 'Q' || LPAD(nextval('seq_eval_question')::TEXT, 3, '0'),
   evaluation_area  TEXT NOT NULL,
   role_category    TEXT NOT NULL DEFAULT 'All',
   experience_level TEXT NOT NULL DEFAULT 'All',
@@ -309,7 +313,7 @@ CREATE TABLE eval_questions (
 
 -- ─── Comp Benchmarks ──────────────────────────────────────────────────────────
 CREATE TABLE comp_benchmarks (
-  id                    TEXT PRIMARY KEY DEFAULT 'BEN' || LPAD(nextval('seq_comp_benchmark')::TEXT, 3, '0'), 3, '0'),
+  id                    TEXT PRIMARY KEY DEFAULT 'BEN' || LPAD(nextval('seq_comp_benchmark')::TEXT, 3, '0'),
   role_category       TEXT NOT NULL,
   experience_range    TEXT NOT NULL,
   internal_band_min   DECIMAL(8,2),
