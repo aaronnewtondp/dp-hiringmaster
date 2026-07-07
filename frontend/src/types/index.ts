@@ -70,24 +70,29 @@ export interface Application {
   ectc?:                       number;
   notice_period_days?:         number;
   resume_drive_link?:          string;
+  // AI scoring
   ai_fit_score?:               number;
   ai_priority_bucket?:         string;
+  ai_skills_matched?:          string[];   // ← added
   ai_missing_skills?:          string[];
   ai_risk_flags?:              string[];
   ai_eval_areas?:              string[];
   ai_score_summary?:           string;
   ai_score_breakdown?:         { skills: number; experience: number; industry: number; location: number };
+  ai_scored_at?:               string;
+  // HR notes
   hr_recruiter_summary?:       string;
   hr_key_positives?:           string;
   hr_key_concerns?:            string;
   hr_priority_override?:       string;
   hr_tags?:                    string[];
+  // Governance
   founder_review_flag:         boolean;
   sla_breach:                  boolean;
   stage_entry_time:            string;
   last_updated:                string;
   next_action?:                string;
-  // joined
+  // Joined from backend
   candidate_name?:             string;
   role_title?:                 string;
   role_priority?:              Priority;
@@ -101,41 +106,45 @@ export interface InterviewRound {
   round_number:             number;
   interviewer_names?:       string;
   scheduled_date?:          string;
+  focus_areas?:             string[];   // ← added: used to pre-populate feedback modal
   feedback_status:          'Pending' | 'Submitted' | 'Overdue';
+  feedback_submitted_at?:   string;
   overall_round_score?:     number;
   overall_assessment?:      string;
   round_recommendation?:    string;
+  // Assignment fields
   assignment_deadline?:     string;
   assignment_outcome?:      string;
+  assignment_submission_link?: string;
 }
 
 export interface PendingAction {
-  id:             number;
-  owner_type:     string;
-  priority_level: string;
-  action_type:    string;
-  description:    string;
+  id:              number;
+  owner_type:      string;
+  priority_level:  string;
+  action_type:     string;
+  description:     string;
   application_id?: string;
   candidate_name?: string;
-  role_title?:    string;
-  hours_overdue:  number;
-  created_at:     string;
+  role_title?:     string;
+  hours_overdue:   number;
+  created_at:      string;
 }
 
 export interface DashboardData {
   metrics: {
-    open_roles_count:       number;
-    open_roles_by_priority: Record<Priority, number>;
-    active_candidates:      number;
-    strong_fit_candidates:  number;
-    sla_breaches:           number;
-    total_pending_actions:  number;
-    red_aging_roles:        number;
-    joining_risk_count:     number;
+    open_roles_count:        number;
+    open_roles_by_priority:  Record<Priority, number>;
+    active_candidates:       number;
+    strong_fit_candidates:   number;
+    sla_breaches:            number;
+    total_pending_actions:   number;
+    red_aging_roles:         number;
+    joining_risk_count:      number;
   };
-  pending_actions_by_owner: Record<string, PendingAction[]>;
-  aging_roles: Array<Role & { active_count: number }>;
-  hiring_funnel: Array<{ stage: string; count: string }>;
+  pending_actions_by_owner:  Record<string, PendingAction[]>;
+  aging_roles:               Array<Role & { active_count: number }>;
+  hiring_funnel:             Array<{ stage: string; count: string }>;
 }
 
 // ─── Utility constants ────────────────────────────────────────────────────────

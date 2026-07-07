@@ -1,19 +1,131 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ExternalLink, Star } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Star, ChevronDown, ChevronUp, CalendarPlus, MessageSquare } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { candidatesApi, applicationsApi } from '../services/api.ts';
-import { Candidate, Application, STAGES, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
+import { candidatesApi, applicationsApi, interviewsApi } from '../services/api.ts';
+import { Candidate, Application, InterviewRound, STAGES, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
 import { StageBadge, StatusBadge, FitScore, PriorityBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import InterviewFeedbackModal from '../components/InterviewFeedbackModal.tsx';
+import ScheduleRoundModal from '../components/ScheduleRoundModal.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { formatDistanceToNow, format } from 'date-fns';
 
+// ─── ResumeIQ panel ───────────────────────────────────────────────────────────
+function ResumeIQPanel({ app }: { app: Application }) {
+  if (!app.ai_fit_score) return null;
+
+  const breakdown = app.ai_score_breakdown;
+  const bucket    = app.ai_priority_bucket;
+  const bucketColor =
+    bucket === 'Strong Fit'   ? 'bg-green-100 text-green-800' :
+    bucket === 'Review'       ? 'bg-amber-100 text-amber-800' :
+    bucket === 'Low Priority' ? 'bg-orange-100 text-orange-800' :
+    'bg-red-100 text-red-800';
+
+  const Bar = ({ val, max, color }: { val: number; max: number; color: string }) => (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 bg-gray-100 rounded-full h-1.5">
+        <div className={`h-1.5 rounded-full ${color}`} style={{ width: `${(val / max) * 100}%` }} />
+      </div>
+      <span className="text-xs text-gray-500 w-10 text-right">{val}/{max}</span>
+    </div>
+  );
+
+  return (
+    <div className="border-t border-gray-100 pt-3 mt-3">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">ResumeIQ Analysis</span>
+        <div className="flex items-center gap-2">
+          <span className="text-lg font-bold text-gray-900">{app.ai_fit_score}</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${bucketColor}`}>{bucket}</span>
+        </div>
+      </div>
+
+      {breakdown && (
+        <div className="space-y-1.5 mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400 w-24">Skills</span>
+            <Bar val={breakdown.skills} max={50} color="bg-dp-500" />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400 w-24">Experience</span>
+            <Bar val={breakdown.experience} max={25} color="bg-dp-400" />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400 w-24">Industry</span>
+            <Bar val={breakdown.industry} max={15} color="bg-dp-300" />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400 w-24">Location</span>
+            <Bar val={breakdown.location} max={10} color="bg-dp-200" />
+          </div>
+        </div>
+      )}
+
+      {(app.ai_skills_matched?.length || app.ai_missing_skills?.length) && (
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          {app.ai_skills_matched && app.ai_skills_matched.length > 0 && (
+            <div>
+              <div className="text-xs text-green-600 font-medium mb-1">✓ Matched</div>
+              <div className="flex flex-wrap gap-1">
+                {app.ai_skills_matched.map(s => (
+                  <span key={s} className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-700">{s}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {app.ai_missing_skills && app.ai_missing_skills.length > 0 && (
+            <div>
+              <div className="text-xs text-red-500 font-medium mb-1">✗ Missing</div>
+              <div className="flex flex-wrap gap-1">
+                {app.ai_missing_skills.map(s => (
+                  <span key={s} className="text-xs px-1.5 py-0.5 rounded bg-red-50 text-red-600">{s}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {app.ai_score_summary && (
+        <p className="text-xs text-gray-500 leading-relaxed italic">"{app.ai_score_summary}"</p>
+      )}
+
+      {app.ai_eval_areas && app.ai_eval_areas.length > 0 && (
+        <div className="mt-2">
+          <div className="text-xs text-gray-400 mb-1">Suggested interview areas</div>
+          <div className="flex flex-wrap gap-1">
+            {app.ai_eval_areas.map(a => (
+              <span key={a} className="text-xs px-2 py-0.5 rounded-full bg-dp-50 text-dp-700 border border-dp-100">{a}</span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Round feedback status badge ─────────────────────────────────────────────
+function FeedbackBadge({ status }: { status: string }) {
+  if (status === 'Submitted') return (
+    <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">Submitted</span>
+  );
+  if (status === 'Overdue') return (
+    <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium animate-pulse">Overdue</span>
+  );
+  return (
+    <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">Pending</span>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
 export default function CandidateDetail() {
   const { id } = useParams<{ id: string }>();
   const { canHR, user } = useAuth();
   const qc = useQueryClient();
 
+  // Stage / status modals
   const [showStageModal,    setShowStageModal]    = useState(false);
   const [showStatusModal,   setShowStatusModal]   = useState(false);
   const [selectedAppId,     setSelectedAppId]     = useState<string>('');
@@ -23,6 +135,22 @@ export default function CandidateDetail() {
   const [rejectionDetail,   setRejectionDetail]   = useState('');
   const [saving,            setSaving]            = useState(false);
 
+  // Interview modals
+  const [feedbackRound,     setFeedbackRound]     = useState<(InterviewRound & { candidate_name?: string; role_title?: string }) | null>(null);
+  const [scheduleAppId,     setScheduleAppId]     = useState<string | null>(null);
+  const [scheduleNextNum,   setScheduleNextNum]   = useState(1);
+
+  // Expanded applications
+  const [expandedApps,      setExpandedApps]      = useState<Set<string>>(new Set());
+
+  const toggleApp = (appId: string) =>
+    setExpandedApps(prev => {
+      const s = new Set(prev);
+      s.has(appId) ? s.delete(appId) : s.add(appId);
+      return s;
+    });
+
+  // ── Queries ─────────────────────────────────────────────────────────────────
   const { data, isLoading } = useQuery<{ data: { candidate: Candidate; applications: Application[] } }>({
     queryKey: ['candidate', id],
     queryFn:  () => candidatesApi.get(id!),
@@ -37,6 +165,22 @@ export default function CandidateDetail() {
   const applications = data?.data?.applications || [];
   const activity     = actData?.data?.activity || [];
 
+  // Fetch all interview rounds for all applications
+  const { data: roundsMap, refetch: refetchRounds } = useQuery<Record<string, InterviewRound[]>>({
+    queryKey: ['interview-rounds', applications.map(a => a.id).join(',')],
+    queryFn:  async () => {
+      if (!applications.length) return {};
+      const results = await Promise.all(applications.map(a => interviewsApi.list(a.id)));
+      const map: Record<string, InterviewRound[]> = {};
+      applications.forEach((a, i) => {
+        map[a.id] = (results[i] as { data: { rounds: InterviewRound[] } }).data.rounds || [];
+      });
+      return map;
+    },
+    enabled: applications.length > 0,
+  });
+
+  // ── Handlers ─────────────────────────────────────────────────────────────────
   const handleStageUpdate = async () => {
     if (!selectedAppId || !stageValue) return;
     setSaving(true);
@@ -57,9 +201,9 @@ export default function CandidateDetail() {
     setSaving(true);
     try {
       await applicationsApi.updateStatus(selectedAppId, {
-        new_status: statusValue,
-        rejection_reason_cat: rejectionCat || undefined,
-        rejection_reason_detail: rejectionDetail || undefined,
+        new_status:               statusValue,
+        rejection_reason_cat:     rejectionCat   || undefined,
+        rejection_reason_detail:  rejectionDetail || undefined,
       });
       toast.success(`Status updated to ${statusValue}`);
       setShowStatusModal(false);
@@ -68,6 +212,7 @@ export default function CandidateDetail() {
     setSaving(false);
   };
 
+  // ── Render ───────────────────────────────────────────────────────────────────
   if (isLoading) return <div className="flex justify-center p-12"><Spinner size="lg" /></div>;
   if (!candidate) return <EmptyState title="Candidate not found" />;
 
@@ -86,8 +231,7 @@ export default function CandidateDetail() {
             <h1 className="text-xl font-semibold text-gray-900">{candidate.full_name}</h1>
             <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
               {candidate.email && <span>{candidate.email}</span>}
-              {candidate.phone && <span>·</span>}
-              {candidate.phone && <span>{candidate.phone}</span>}
+              {candidate.phone && <><span>·</span><span>{candidate.phone}</span></>}
               {candidate.linkedin_url && (
                 <a href={candidate.linkedin_url} target="_blank" rel="noopener noreferrer"
                    className="text-dp-600 hover:underline flex items-center gap-1">
@@ -104,7 +248,7 @@ export default function CandidateDetail() {
         </div>
       </div>
 
-      {/* Parsed resume + applications */}
+      {/* Parsed profile + applications */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Parsed profile */}
         <div className="card p-5 space-y-3">
@@ -152,58 +296,153 @@ export default function CandidateDetail() {
             <div className="p-8"><EmptyState title="No applications" /></div>
           ) : (
             <div className="divide-y divide-gray-50">
-              {applications.map(app => (
-                <div key={app.id} className={`p-4 ${app.sla_breach ? 'bg-red-50/30' : ''}`}>
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Link to={`/roles/${app.role_id}`} className="font-medium text-gray-900 hover:text-dp-600 text-sm">
-                          {(app as Application & { role_title?: string }).role_title}
-                        </Link>
-                        {(app as Application & { role_priority?: string }).role_priority && (
-                          <PriorityBadge priority={(app as Application & { role_priority?: string }).role_priority as 'P0'|'P1'|'P2'|'P3'} />
-                        )}
-                        {app.sla_breach && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">SLA</span>}
-                        {app.founder_review_flag && <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded"><Star className="w-3 h-3 inline" /> Founder</span>}
+              {applications.map(app => {
+                const rounds = roundsMap?.[app.id] || [];
+                const expanded = expandedApps.has(app.id);
+
+                return (
+                  <div key={app.id} className={`${app.sla_breach ? 'bg-red-50/30' : ''}`}>
+                    {/* Application summary row */}
+                    <div className="p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Link to={`/roles/${app.role_id}`} className="font-medium text-gray-900 hover:text-dp-600 text-sm">
+                              {(app as Application & { role_title?: string }).role_title}
+                            </Link>
+                            {(app as Application & { role_priority?: string }).role_priority && (
+                              <PriorityBadge priority={(app as Application & { role_priority?: string }).role_priority as 'P0'|'P1'|'P2'|'P3'} />
+                            )}
+                            {app.sla_breach && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">SLA</span>}
+                            {app.founder_review_flag && <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded"><Star className="w-3 h-3 inline" /> Founder</span>}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                            <StageBadge stage={app.stage} />
+                            <StatusBadge status={app.status} />
+                            <span className="text-xs text-gray-400">{app.recruiter_screening_status}</span>
+                            <FitScore score={app.ai_fit_score} />
+                          </div>
+                          <div className="flex gap-3 mt-2 text-xs text-gray-400">
+                            <span>Source: {app.source_channel || '—'}</span>
+                            {app.ectc && <span>ECTC: ₹{app.ectc}L</span>}
+                            {app.notice_period_days != null && <span>Notice: {app.notice_period_days}d</span>}
+                            <span>Updated {formatDistanceToNow(new Date(app.last_updated), { addSuffix: true })}</span>
+                            {rounds.length > 0 && (
+                              <span>{rounds.length} round{rounds.length !== 1 ? 's' : ''}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex gap-2 shrink-0 items-start">
+                          {canHR && (
+                            <>
+                              <button
+                                onClick={() => { setSelectedAppId(app.id); setStageValue(app.stage); setShowStageModal(true); }}
+                                className="btn-secondary text-xs py-1.5 px-3"
+                              >
+                                Stage
+                              </button>
+                              <button
+                                onClick={() => { setSelectedAppId(app.id); setStatusValue(app.status); setShowStatusModal(true); }}
+                                className="btn-secondary text-xs py-1.5 px-3"
+                              >
+                                Status
+                              </button>
+                            </>
+                          )}
+                          <button
+                            onClick={() => toggleApp(app.id)}
+                            className="text-gray-400 hover:text-gray-600 p-1"
+                            title={expanded ? 'Collapse' : 'Expand details'}
+                          >
+                            {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                        <StageBadge stage={app.stage} />
-                        <StatusBadge status={app.status} />
-                        <span className="text-xs text-gray-400">{app.recruiter_screening_status}</span>
-                        <FitScore score={app.ai_fit_score} />
-                      </div>
-                      {app.ai_score_summary && (
-                        <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">{app.ai_score_summary}</p>
-                      )}
-                      {app.hr_recruiter_summary && (
-                        <p className="text-xs text-gray-600 mt-1 italic">"{app.hr_recruiter_summary}"</p>
-                      )}
                     </div>
-                    {canHR && (
-                      <div className="flex gap-2 shrink-0">
-                        <button
-                          onClick={() => { setSelectedAppId(app.id); setStageValue(app.stage); setShowStageModal(true); }}
-                          className="btn-secondary text-xs py-1.5 px-3"
-                        >
-                          Stage
-                        </button>
-                        <button
-                          onClick={() => { setSelectedAppId(app.id); setStatusValue(app.status); setShowStatusModal(true); }}
-                          className="btn-secondary text-xs py-1.5 px-3"
-                        >
-                          Status
-                        </button>
+
+                    {/* Expanded: ResumeIQ + interview rounds */}
+                    {expanded && (
+                      <div className="px-4 pb-4 space-y-4">
+                        {/* ResumeIQ panel */}
+                        <ResumeIQPanel app={app} />
+
+                        {/* HR summary */}
+                        {app.hr_recruiter_summary && (
+                          <div className="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2 italic border-l-2 border-dp-300">
+                            "{app.hr_recruiter_summary}"
+                          </div>
+                        )}
+
+                        {/* Interview rounds */}
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Interview rounds</span>
+                            {canHR && (
+                              <button
+                                onClick={() => {
+                                  setScheduleAppId(app.id);
+                                  setScheduleNextNum(rounds.length + 1);
+                                }}
+                                className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium"
+                              >
+                                <CalendarPlus className="w-3.5 h-3.5" />
+                                Schedule round
+                              </button>
+                            )}
+                          </div>
+
+                          {rounds.length === 0 ? (
+                            <p className="text-xs text-gray-400">No rounds scheduled yet.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {rounds.map(round => (
+                                <div key={round.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 border border-gray-100">
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-medium text-gray-900">
+                                        Round {round.round_number} — {round.round_name}
+                                      </span>
+                                      <FeedbackBadge status={round.feedback_status} />
+                                      {round.round_type === 'Assignment' && (
+                                        <span className="text-xs px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">Assignment</span>
+                                      )}
+                                    </div>
+                                    <div className="text-xs text-gray-400 mt-0.5 flex gap-3">
+                                      {round.interviewer_names && <span>👤 {round.interviewer_names}</span>}
+                                      {round.scheduled_date && (
+                                        <span>📅 {format(new Date(round.scheduled_date), 'MMM d, h:mm a')}</span>
+                                      )}
+                                      {round.overall_assessment && (
+                                        <span className="font-medium text-gray-600">{round.overall_assessment} · {round.round_recommendation}</span>
+                                      )}
+                                      {round.overall_round_score != null && (
+                                        <span>Score: {Number(round.overall_round_score).toFixed(1)}/5</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {round.feedback_status !== 'Submitted' && (
+                                    <button
+                                      onClick={() => setFeedbackRound({
+                                        ...round,
+                                        candidate_name: candidate.full_name,
+                                        role_title:     (app as Application & { role_title?: string }).role_title,
+                                      })}
+                                      className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium shrink-0 ml-3"
+                                    >
+                                      <MessageSquare className="w-3.5 h-3.5" />
+                                      Submit feedback
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
-                  <div className="flex gap-3 mt-2 text-xs text-gray-400">
-                    <span>Source: {app.source_channel || '—'}</span>
-                    {app.ectc && <span>ECTC: ₹{app.ectc}L</span>}
-                    {app.notice_period_days != null && <span>Notice: {app.notice_period_days}d</span>}
-                    <span>Updated {formatDistanceToNow(new Date(app.last_updated), { addSuffix: true })}</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -218,7 +457,7 @@ export default function CandidateDetail() {
           <div className="p-8"><EmptyState title="No activity logged yet" /></div>
         ) : (
           <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
-            {(activity as Array<Record<string,unknown>>).map((evt, i) => (
+            {(activity as Array<Record<string, unknown>>).map((evt, i) => (
               <div key={i} className="px-5 py-3 flex items-start gap-3">
                 <div className="w-2 h-2 rounded-full bg-dp-400 mt-1.5 shrink-0" />
                 <div className="flex-1 min-w-0">
@@ -239,7 +478,7 @@ export default function CandidateDetail() {
         )}
       </div>
 
-      {/* Stage modal */}
+      {/* ── Modals ───────────────────────────────────────────────────────────── */}
       {showStageModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
@@ -257,13 +496,12 @@ export default function CandidateDetail() {
         </div>
       )}
 
-      {/* Status modal */}
       {showStatusModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
             <h3 className="text-base font-semibold">Update status</h3>
             <select value={statusValue} onChange={e => setStatusValue(e.target.value)} className="select">
-              {['Active','On Hold','Rejected','Withdrawn','Hold for Future'].map(s => (
+              {['Active', 'On Hold', 'Rejected', 'Withdrawn', 'Hold for Future'].map(s => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
@@ -291,6 +529,29 @@ export default function CandidateDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {feedbackRound && (
+        <InterviewFeedbackModal
+          round={feedbackRound}
+          onClose={() => setFeedbackRound(null)}
+          onSuccess={() => {
+            qc.invalidateQueries({ queryKey: ['interview-rounds'] });
+            refetchRounds();
+          }}
+        />
+      )}
+
+      {scheduleAppId && (
+        <ScheduleRoundModal
+          applicationId={scheduleAppId}
+          nextRoundNumber={scheduleNextNum}
+          onClose={() => setScheduleAppId(null)}
+          onSuccess={() => {
+            qc.invalidateQueries({ queryKey: ['interview-rounds'] });
+            refetchRounds();
+          }}
+        />
       )}
     </div>
   );

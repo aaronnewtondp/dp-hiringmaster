@@ -10,6 +10,7 @@ import Candidates from './pages/Candidates.tsx';
 import CandidateDetail from './pages/CandidateDetail.tsx';
 import NewCandidate from './pages/NewCandidate.tsx';
 import Agencies from './pages/Agencies.tsx';
+import HMQueue from './pages/HMQueue.tsx';
 import { Spinner } from './components/shared/Badges.tsx';
 
 function AppRoutes() {
@@ -44,6 +45,7 @@ function AppRoutes() {
         <Route path="/candidates/new"          element={<NewCandidate />} />
         <Route path="/candidates/:id"          element={<CandidateDetail />} />
         <Route path="/agencies"                element={<Agencies />} />
+        <Route path="/hm-queue"                element={<HMQueue />} />
         <Route path="*"                        element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Layout>

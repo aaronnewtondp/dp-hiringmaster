@@ -1,17 +1,25 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, Users, Building2, LogOut, Droplets } from 'lucide-react';
+import { LayoutDashboard, Briefcase, Users, Building2, LogOut, Droplets, ListChecks } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { PERSONAS } from '../../types/index.ts';
 
 const NAV = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/roles',     icon: Briefcase,       label: 'Roles' },
-  { to: '/candidates',icon: Users,           label: 'Candidates' },
-  { to: '/agencies',  icon: Building2,       label: 'Agencies', hrOnly: true },
+  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard',  hrOnly: false, queueOnly: false },
+  { to: '/roles',     icon: Briefcase,       label: 'Roles',      hrOnly: false, queueOnly: false },
+  { to: '/candidates',icon: Users,           label: 'Candidates', hrOnly: false, queueOnly: false },
+  { to: '/hm-queue',  icon: ListChecks,      label: 'My Queue',   hrOnly: false, queueOnly: true  },
+  { to: '/agencies',  icon: Building2,       label: 'Agencies',   hrOnly: true,  queueOnly: false },
 ];
 
 export default function Sidebar() {
   const { user, logout, canHR } = useAuth();
+  const isHM = user?.persona === 'hiring_manager' || user?.persona === 'interviewer' || user?.persona === 'leadership';
+
+  const visible = NAV.filter(n => {
+    if (n.hrOnly && !canHR) return false;
+    if (n.queueOnly && !isHM) return false;
+    return true;
+  });
 
   return (
     <aside className="w-56 shrink-0 bg-dp-800 flex flex-col h-screen sticky top-0">
@@ -28,7 +36,7 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {NAV.filter(n => !n.hrOnly || canHR).map(({ to, icon: Icon, label }) => (
+        {visible.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}
