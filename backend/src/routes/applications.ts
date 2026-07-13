@@ -42,6 +42,10 @@ router.get('/', async (req: Request, res: Response) => {
 
   let sql = `
     SELECT a.*, c.full_name AS candidate_name, c.email, c.phone,
+           c.current_ctc_fixed AS candidate_ctc_fixed,
+           c.current_ctc_variable AS candidate_ctc_variable,
+           c.expected_ctc AS candidate_expected_ctc,
+           c.notice_period_days AS candidate_notice_period_days,
            r.title AS role_title, r.priority AS role_priority,
            ag.name AS agency_name
     FROM applications a
@@ -124,7 +128,7 @@ router.post('/:id/stage', requireHR, async (req: Request, res: Response) => {
   });
 
   // Trigger ResumeIQ when entering Resume Review — async, non-blocking
-  if (new_stage === 'Resume Review' && !app.ai_fit_score) {
+  if (new_stage === 'Resume Review' && !app.score_avg) {
     setImmediate(async () => {
       try {
         const candidate = await queryOne<Candidate>('SELECT * FROM candidates WHERE id=$1', [app.candidate_id]);
@@ -134,20 +138,34 @@ router.post('/:id/stage', requireHR, async (req: Request, res: Response) => {
         const result = await scoreCandidate(candidate, role);
         await query(
           `UPDATE applications SET
-             ai_fit_score=$1, ai_priority_bucket=$2, ai_score_breakdown=$3,
-             ai_skills_matched=$4, ai_missing_skills=$5, ai_risk_flags=$6,
-             ai_eval_areas=$7, ai_score_summary=$8, ai_scored_at=NOW()
-           WHERE id=$9`,
+             score_technical=$1, score_technical_note=$2,
+             score_experience=$3, score_experience_note=$4,
+             score_industry_fit=$5, score_industry_fit_note=$6,
+             score_culture_fit=$7, score_culture_fit_note=$8,
+             score_role_alignment=$9, score_role_alignment_note=$10,
+             score_trajectory=$11, score_trajectory_note=$12,
+             score_leadership=$13, score_leadership_note=$14,
+             score_communication=$15, score_communication_note=$16,
+             score_avg=$17, score_strengths=$18, score_red_flags=$19,
+             score_summary=$20, score_recommendation=$21, score_resume_read=$22,
+             score_computed_at=NOW()
+           WHERE id=$23`,
           [
-            result.fit_score, result.priority_bucket,
-            JSON.stringify(result.score_breakdown),
-            result.skills_matched, result.missing_skills,
-            result.risk_flags, result.eval_areas, result.score_summary,
+            result.technical.score, result.technical.note,
+            result.experience.score, result.experience.note,
+            result.industryFit.score, result.industryFit.note,
+            result.cultureFit.score, result.cultureFit.note,
+            result.roleAlignment.score, result.roleAlignment.note,
+            result.trajectory.score, result.trajectory.note,
+            result.leadership.score, result.leadership.note,
+            result.communication.score, result.communication.note,
+            result.avgScore, result.strengths, result.redFlags,
+            result.summary, result.recommendation, result.resumeRead,
             app.id,
           ]
         );
-        // Update SLA now we know the fit score
-        const refinedSla = result.fit_score >= 75 ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL;
+        // Update SLA now we know the fit score (avgScore is out of 10)
+        const refinedSla = result.avgScore >= 8 ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL;
         await query('UPDATE applications SET sla_hours=$1 WHERE id=$2', [refinedSla, app.id]);
         await query(
           `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by_name)

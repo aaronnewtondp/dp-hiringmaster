@@ -3,171 +3,151 @@ import { Candidate, Role } from '../types/index.js';
 
 const client = new Anthropic();
 
-interface ScoreBreakdown {
-  skills: number;       // 0–50
-  experience: number;   // 0–25
-  industry: number;     // 0–15
-  location: number;     // 0–10
+// ─── Types matching the digitalpaani-candidate-scoring skill rubric exactly ──
+export interface DimensionScore {
+  score: number;   // 0–10 integer
+  note:  string;   // max ~8 words
 }
 
-interface ResumeIQResult {
-  fit_score: number;
-  priority_bucket: 'Strong Fit' | 'Review' | 'Low Priority' | 'Reject';
-  score_breakdown: ScoreBreakdown;
-  skills_matched: string[];
-  missing_skills: string[];
-  risk_flags: string[];
-  eval_areas: string[];
-  score_summary: string;
+export interface ResumeIQResult {
+  technical:      DimensionScore;
+  experience:     DimensionScore;
+  industryFit:    DimensionScore;
+  cultureFit:     DimensionScore;
+  roleAlignment:  DimensionScore;
+  trajectory:     DimensionScore;
+  leadership:     DimensionScore;
+  communication:  DimensionScore;
+  avgScore:       number;   // mean of the 8 scores, 1 decimal
+  strengths:      string[]; // exactly 3
+  redFlags:       string[]; // empty if none
+  summary:        string;   // max 2 sentences
+  recommendation: 'Strong Yes' | 'Yes' | 'Maybe' | 'No';
+  resumeRead:     boolean;  // false if resume text could not be fetched
 }
 
-// ─── Main scoring function (Section 10.2) ────────────────────────────────────
+// ─── Main scoring function ────────────────────────────────────────────────────
+// Mirrors the digitalpaani-candidate-scoring skill's Step 5 prompt exactly, so
+// scores are consistent whether generated from the HMS app or the Claude skill.
 export async function scoreCandidate(
   candidate: Candidate,
   role: Role,
-  resumeText?: string
+  resumeText?: string | null
 ): Promise<ResumeIQResult> {
 
-  // ── Rule-based scoring (no AI needed for this part) ──────────────────────
-  const mustHaveSkills = (role.must_have_skills || '')
-    .split(/[;,]/).map(s => s.trim().toLowerCase()).filter(Boolean);
+  const resumeRead = !!resumeText;
 
-  const candidateSkills = (candidate.parsed_skills || []).map(s => s.toLowerCase());
+  const prompt = `You are a senior HR analyst for DigitalPaani, a water-tech AI company.
 
-  // Skills (50 pts) — matched/uncertain/missing
-  let skillsScore = 0;
-  const skillsMatched: string[] = [];
-  const missingSkills: string[] = [];
+ROLE: ${role.title}
 
-  for (const skill of mustHaveSkills) {
-    const confirmed = candidateSkills.some(cs => cs.includes(skill) || skill.includes(cs));
-    const uncertain = !confirmed && (resumeText || '').toLowerCase().includes(skill);
-    if (confirmed) {
-      skillsScore += 50 / mustHaveSkills.length;
-      skillsMatched.push(skill);
-    } else if (uncertain) {
-      skillsScore += (50 / mustHaveSkills.length) * 0.5;
-      skillsMatched.push(`${skill} (uncertain)`);
-    } else {
-      missingSkills.push(skill);
-    }
-  }
-  skillsScore = Math.round(Math.min(50, skillsScore));
+JOB REQUIREMENTS (Must Have):
+${role.must_have_skills || 'Not specified'}
 
-  // Experience (25 pts)
-  let experienceScore = 0;
-  if (candidate.parsed_total_yoe != null) {
-    const yoeText = role.yoe_required || '';
-    const match = yoeText.match(/(\d+)[\s-]*(?:to|\+)?[\s-]*(\d+)?/);
-    if (match) {
-      const min = parseFloat(match[1]);
-      const max = match[2] ? parseFloat(match[2]) : min + 3;
-      const yoe = candidate.parsed_total_yoe;
-      if (yoe >= min && yoe <= max) experienceScore = 25;
-      else if (Math.abs(yoe - min) <= 1 || Math.abs(yoe - max) <= 1) experienceScore = 15;
-      else if (Math.abs(yoe - min) <= 2 || Math.abs(yoe - max) <= 2) experienceScore = 8;
-    }
-  }
+NICE TO HAVE:
+${role.nice_to_have_skills || 'Not specified'}
 
-  // Industry (15 pts)
-  const dpIndustries = ['water treatment','industrial automation','iot','environmental',
-    'saas','tech','wastewater','etp','stp','wtp'];
-  const adjacentIndustries = ['construction','utilities','industrial','infrastructure',
-    'manufacturing','energy','environment'];
+KEY RESPONSIBILITIES:
+${role.kpi_expectations || 'Not specified'}
 
-  const candidateIndustries = (candidate.parsed_industries || []).map(i => i.toLowerCase());
-  const industryText = candidateIndustries.join(' ');
+CANDIDATE PROFILE:
+Name: ${candidate.full_name}
+Current CTC: ${formatCtc(candidate)}
+Expected CTC: ${candidate.expected_ctc ? `${candidate.expected_ctc} LPA` : 'Not specified'}
+Notice Period: ${candidate.notice_period_days != null ? `${candidate.notice_period_days} days` : 'Not specified'}
+Location: ${candidate.current_location || 'Not specified'}
+Current Company: ${candidate.current_company || 'Not specified'}
+Current Designation: ${candidate.current_designation || 'Not specified'}
+Industry: ${candidate.current_industry || 'Not specified'}
+Years of Experience: ${candidate.years_of_experience != null ? candidate.years_of_experience : 'Not specified'}
 
-  let industryScore = 7; // neutral default
-  if (dpIndustries.some(di => industryText.includes(di))) industryScore = 15;
-  else if (adjacentIndustries.some(ai => industryText.includes(ai))) industryScore = 8;
+RESUME CONTENT:
+${resumeText || '(No resume text available — score based on profile fields only)'}
 
-  // Location (10 pts)
-  const roleLocation = (role.location || '').toLowerCase();
-  const candLocation = (candidate.parsed_skills ? '' : '').toLowerCase(); // use current_location from application
-  let locationScore = 5; // neutral
-  if (roleLocation && candLocation) {
-    if (candLocation.includes(roleLocation.split('/')[0]) || roleLocation.includes(candLocation)) {
-      locationScore = 10;
-    }
-  }
-
-  const totalScore = skillsScore + experienceScore + industryScore + locationScore;
-
-  // Risk flags
-  const riskFlags: string[] = [];
-  if (candidate.job_stability_months && candidate.job_stability_months < 18) {
-    riskFlags.push('Short average tenure (<18 months)');
-  }
-  if (missingSkills.length > mustHaveSkills.length / 2) {
-    riskFlags.push('Missing >50% of mandatory skills');
-  }
-
-  // Priority bucket
-  const bucket = totalScore >= 75 ? 'Strong Fit'
-    : totalScore >= 50 ? 'Review'
-    : totalScore >= 25 ? 'Low Priority'
-    : 'Reject';
-
-  // ── AI: generate summary and eval areas ──────────────────────────────────
-  let scoreSummary = '';
-  let evalAreas: string[] = [];
-
-  try {
-    const prompt = `You are a recruitment AI evaluating a candidate for a ${role.title} role at DigitalPaani.
-
-Candidate profile:
-- Total experience: ${candidate.parsed_total_yoe ?? 'unknown'} years
-- Skills: ${candidateSkills.join(', ') || 'not parsed'}
-- Industries: ${(candidate.parsed_industries || []).join(', ') || 'not parsed'}
-- Education: ${candidate.parsed_education || 'not parsed'}
-- Job stability: ${candidate.job_stability_months ? `${candidate.job_stability_months} months avg tenure` : 'unknown'}
-
-Role requirements:
-- Must-have skills: ${role.must_have_skills}
-- KPI expectations: ${role.kpi_expectations || 'not specified'}
-
-Scoring result: ${totalScore}/100 (${bucket})
-- Skills: ${skillsScore}/50 | Skills matched: ${skillsMatched.join(', ')} | Missing: ${missingSkills.join(', ')}
-- Experience: ${experienceScore}/25
-- Industry: ${industryScore}/15
-- Location: ${locationScore}/10
-- Risk flags: ${riskFlags.join(', ') || 'none'}
-
-Respond with a JSON object only (no markdown, no explanation outside JSON):
+Score this candidate. Return ONLY valid JSON, no markdown, no code fences:
 {
-  "summary": "2-3 sentence plain-English explanation of this score",
-  "eval_areas": ["3-5 evaluation areas to probe in interviews, as strings"]
-}`;
+  "technical": {"score": 0, "note": ""},
+  "experience": {"score": 0, "note": ""},
+  "industryFit": {"score": 0, "note": ""},
+  "cultureFit": {"score": 0, "note": ""},
+  "roleAlignment": {"score": 0, "note": ""},
+  "trajectory": {"score": 0, "note": ""},
+  "leadership": {"score": 0, "note": ""},
+  "communication": {"score": 0, "note": ""},
+  "avgScore": 0.0,
+  "strengths": ["", "", ""],
+  "redFlags": [],
+  "summary": "",
+  "recommendation": ""
+}
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 400,
-      messages: [{ role: 'user', content: prompt }],
-    });
+Rules: scores 0-10 integers, avgScore = mean of 8 scores (1 decimal),
+notes max 8 words, summary max 2 sentences,
+recommendation = "Strong Yes"|"Yes"|"Maybe"|"No",
+strengths = exactly 3 strings, redFlags = array (empty if none).`;
 
-    const text = response.content[0].type === 'text' ? response.content[0].text : '';
-    const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
-    scoreSummary = parsed.summary || '';
-    evalAreas = parsed.eval_areas || [];
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-5',
+    max_tokens: 1024,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  const textBlock = response.content.find(b => b.type === 'text');
+  const rawText = textBlock && 'text' in textBlock ? textBlock.text : '{}';
+
+  // Strip any accidental markdown fences before parsing
+  const cleaned = rawText.replace(/```json|```/g, '').trim();
+
+  let parsed: Omit<ResumeIQResult, 'resumeRead'>;
+  try {
+    parsed = JSON.parse(cleaned);
   } catch {
-    scoreSummary = `${bucket} with ${totalScore}/100. Skills match: ${skillsMatched.length}/${mustHaveSkills.length} mandatory skills.`;
-    evalAreas = missingSkills.slice(0, 3).map(s => `Probe ${s} depth and context`);
+    // Fallback — should rarely happen given the strict prompt
+    parsed = {
+      technical:     { score: 0, note: 'Scoring failed' },
+      experience:    { score: 0, note: 'Scoring failed' },
+      industryFit:   { score: 0, note: 'Scoring failed' },
+      cultureFit:    { score: 0, note: 'Scoring failed' },
+      roleAlignment: { score: 0, note: 'Scoring failed' },
+      trajectory:    { score: 0, note: 'Scoring failed' },
+      leadership:    { score: 0, note: 'Scoring failed' },
+      communication: { score: 0, note: 'Scoring failed' },
+      avgScore: 0,
+      strengths: ['Unable to score', 'Unable to score', 'Unable to score'],
+      redFlags: ['AI scoring returned invalid output — retry needed'],
+      summary: 'Automated scoring failed; manual review required.',
+      recommendation: 'Maybe',
+    };
   }
 
-  return {
-    fit_score:       totalScore,
-    priority_bucket: bucket,
-    score_breakdown: {
-      skills:     skillsScore,
-      experience: experienceScore,
-      industry:   industryScore,
-      location:   locationScore,
-    },
-    skills_matched:  skillsMatched,
-    missing_skills:  missingSkills,
-    risk_flags:      riskFlags,
-    eval_areas:      evalAreas,
-    score_summary:   scoreSummary,
-  };
+  return { ...parsed, resumeRead };
+}
+
+// ─── Fetch resume text from a Google Drive link ───────────────────────────────
+// Extracts the file ID from either URL format used by the Google Form:
+//   https://drive.google.com/open?id=FILE_ID
+//   https://drive.google.com/file/d/FILE_ID/view
+export function extractDriveFileId(url: string): string | null {
+  const openMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (openMatch) return openMatch[1];
+  const fileMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (fileMatch) return fileMatch[1];
+  return null;
+}
+
+// ─── Helper: format current CTC breakdown for the prompt ─────────────────────
+function formatCtc(candidate: Candidate): string {
+  const parts: string[] = [];
+  if (candidate.current_ctc_fixed != null) parts.push(`${candidate.current_ctc_fixed} Fixed`);
+  if (candidate.current_ctc_variable != null) parts.push(`${candidate.current_ctc_variable} Variable`);
+  if (candidate.current_esops != null) parts.push(`${candidate.current_esops} ESOPs`);
+  return parts.length ? `${parts.join(' + ')} LPA` : 'Not specified';
+}
+
+// ─── Priority bucket derived from avgScore (for dashboard filtering/sorting) ──
+export function priorityBucketFromScore(avgScore: number): 'Strong Fit' | 'Review' | 'Low Priority' | 'Reject' {
+  if (avgScore >= 8) return 'Strong Fit';
+  if (avgScore >= 6) return 'Review';
+  if (avgScore >= 4) return 'Low Priority';
+  return 'Reject';
 }

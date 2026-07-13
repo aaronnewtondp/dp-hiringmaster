@@ -56,21 +56,5 @@ services:
     volumes:
       - ./backend/src:/app/src
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: dp_hms_frontend
-    restart: unless-stopped
-    depends_on:
-      - backend
-    environment:
-      VITE_API_URL: http://localhost:4000/api
-      VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID}
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend/src:/app/src
-
 volumes:
   postgres_data:

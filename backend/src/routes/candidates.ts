@@ -79,7 +79,12 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 // ─── POST /api/candidates — create candidate + optional application ───────────
 router.post('/', requireHR, async (req: Request, res: Response) => {
-  const { full_name, email, phone, linkedin_url, role_id, source_channel, agency_id } = req.body;
+  const {
+    full_name, email, phone, linkedin_url, role_id, source_channel, agency_id,
+    current_ctc_fixed, current_ctc_variable, current_esops, expected_ctc,
+    notice_period_days, current_company, current_industry, current_designation,
+    current_location, years_of_experience, resume_drive_link,
+  } = req.body;
 
   if (!full_name) { res.status(400).json({ error: 'full_name required' }); return; }
 
@@ -102,9 +107,19 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
 
   const result = await transaction(async (client) => {
     const cand = await client.query(
-      `INSERT INTO candidates (full_name, email, phone, linkedin_url)
-       VALUES ($1,$2,$3,$4) RETURNING *`,
-      [full_name, email?.toLowerCase(), phone, linkedin_url]
+      `INSERT INTO candidates (
+         full_name, email, phone, linkedin_url,
+         current_ctc_fixed, current_ctc_variable, current_esops, expected_ctc,
+         notice_period_days, current_company, current_industry, current_designation,
+         current_location, years_of_experience, resume_drive_link
+       )
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+      [
+        full_name, email?.toLowerCase(), phone, linkedin_url,
+        current_ctc_fixed ?? null, current_ctc_variable ?? null, current_esops ?? null, expected_ctc ?? null,
+        notice_period_days ?? null, current_company ?? null, current_industry ?? null, current_designation ?? null,
+        current_location ?? null, years_of_experience ?? null, resume_drive_link ?? null,
+      ]
     );
     const candidate = cand.rows[0] as Candidate;
 

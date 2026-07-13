@@ -1,4 +1,5 @@
 import 'express-async-errors';
+import roleIngestRoutes from './routes/roleIngest.js';
 /**
  * Express server entry point.
  *
@@ -26,6 +27,7 @@ import { evalQuestionsRouter, compBenchmarksRouter } from './routes/lookups.js';
 import cronRouter          from './routes/cron.js';   // ← new
 
 const app = express();
+app.use('/api/roles', roleIngestRoutes);
 
 app.set('trust proxy', 1);  // Required behind Vercel's edge network
 
