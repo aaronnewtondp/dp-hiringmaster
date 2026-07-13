@@ -126,12 +126,12 @@ export default function Candidates() {
                   <td className="table-td"><FitScore score={app.ai_fit_score} /></td>
                   <td className="table-td text-xs text-gray-500">{app.source_channel || '—'}</td>
                   <td className="table-td text-xs text-gray-500 whitespace-nowrap">
-                    {app.current_ctc_fixed ? `₹${app.current_ctc_fixed}L` : '—'}
+                    {app.candidate_ctc_fixed ? `₹${app.candidate_ctc_fixed}L` : '—'}
                     {' → '}
-                    {app.ectc ? `₹${app.ectc}L` : '—'}
+                    {app.candidate_expected_ctc ? `₹${app.candidate_expected_ctc}L` : '—'}
                   </td>
                   <td className="table-td text-xs text-gray-500">
-                    {app.notice_period_days != null ? `${app.notice_period_days}d` : '—'}
+                    {app.candidate_notice_period_days != null ? `${app.candidate_notice_period_days}d` : '—'}
                   </td>
                   <td className="table-td text-xs text-gray-400 whitespace-nowrap">
                     {app.last_updated ? formatDistanceToNow(new Date(app.last_updated), { addSuffix: true }) : '—'}

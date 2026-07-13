@@ -3,6 +3,7 @@ export type Priority = 'P0' | 'P1' | 'P2' | 'P3';
 export type AgingAlert = 'ok' | 'yellow' | 'red';
 export type ApplicationStatus = 'Active' | 'On Hold' | 'Rejected' | 'Withdrawn' | 'Hold for Future' | 'Joined' | 'Closed';
 export type ScreeningStatus = 'New' | 'Under Recruiter Review' | 'Awaiting HM Review' | 'HM Shortlisted' | 'Screening Hold' | 'Screening Rejected';
+export type Recommendation = 'Strong Yes' | 'Yes' | 'Maybe' | 'No';
 
 export interface AuthUser {
   id:          string;
@@ -40,19 +41,26 @@ export interface Role {
 }
 
 export interface Candidate {
-  id:                    string;
-  full_name:             string;
-  email?:                string;
-  phone?:                string;
-  linkedin_url?:         string;
-  parsed_total_yoe?:     number;
-  parsed_skills?:        string[];
-  parsed_industries?:    string[];
-  parsed_education?:     string;
-  job_stability_months?: number;
-  parsing_completeness:  'Complete' | 'Partial' | 'Not Parsed';
-  hr_tags?:              string[];
-  created_at:            string;
+  id:                     string;
+  full_name:              string;
+  email?:                 string;
+  phone?:                 string;
+  linkedin_url?:          string;
+  hr_tags?:               string[];
+  created_at:             string;
+
+  // ── Real candidate-entered profile fields (replaces old "parsed_*" fields) ──
+  current_ctc_fixed?:     number;
+  current_ctc_variable?:  number;
+  current_esops?:         number;
+  expected_ctc?:          number;
+  notice_period_days?:    number;
+  current_company?:       string;
+  current_industry?:      string;
+  current_designation?:   string;
+  current_location?:      string;
+  years_of_experience?:   number;
+  resume_drive_link?:     string;
 }
 
 export interface Application {
@@ -66,32 +74,47 @@ export interface Application {
   stage:                       string;
   status:                      ApplicationStatus;
   recruiter_screening_status:  ScreeningStatus;
-  current_ctc_fixed?:          number;
-  ectc?:                       number;
-  notice_period_days?:         number;
   resume_drive_link?:          string;
-  // AI scoring
-  ai_fit_score?:               number;
-  ai_priority_bucket?:         string;
-  ai_skills_matched?:          string[];   // ← added
-  ai_missing_skills?:          string[];
-  ai_risk_flags?:              string[];
-  ai_eval_areas?:              string[];
-  ai_score_summary?:           string;
-  ai_score_breakdown?:         { skills: number; experience: number; industry: number; location: number };
-  ai_scored_at?:               string;
+
+  // ── ResumeIQ 8-dimension scoring (matches digitalpaani-candidate-scoring skill) ──
+  score_technical?:            number;
+  score_technical_note?:       string;
+  score_experience?:           number;
+  score_experience_note?:      string;
+  score_industry_fit?:         number;
+  score_industry_fit_note?:    string;
+  score_culture_fit?:          number;
+  score_culture_fit_note?:     string;
+  score_role_alignment?:       number;
+  score_role_alignment_note?:  string;
+  score_trajectory?:           number;
+  score_trajectory_note?:      string;
+  score_leadership?:           number;
+  score_leadership_note?:      string;
+  score_communication?:        number;
+  score_communication_note?:   string;
+  score_avg?:                  number;
+  score_strengths?:            string[];
+  score_red_flags?:            string[];
+  score_summary?:              string;
+  score_recommendation?:       Recommendation;
+  score_resume_read?:          boolean;
+  score_computed_at?:          string;
+
   // HR notes
   hr_recruiter_summary?:       string;
   hr_key_positives?:           string;
   hr_key_concerns?:            string;
   hr_priority_override?:       string;
   hr_tags?:                    string[];
+
   // Governance
   founder_review_flag:         boolean;
   sla_breach:                  boolean;
   stage_entry_time:            string;
   last_updated:                string;
   next_action?:                string;
+
   // Joined from backend
   candidate_name?:             string;
   role_title?:                 string;
@@ -106,13 +129,12 @@ export interface InterviewRound {
   round_number:             number;
   interviewer_names?:       string;
   scheduled_date?:          string;
-  focus_areas?:             string[];   // ← added: used to pre-populate feedback modal
+  focus_areas?:             string[];
   feedback_status:          'Pending' | 'Submitted' | 'Overdue';
   feedback_submitted_at?:   string;
   overall_round_score?:     number;
   overall_assessment?:      string;
   round_recommendation?:    string;
-  // Assignment fields
   assignment_deadline?:     string;
   assignment_outcome?:      string;
   assignment_submission_link?: string;
