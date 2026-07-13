@@ -27,7 +27,7 @@ import { evalQuestionsRouter, compBenchmarksRouter } from './routes/lookups.js';
 import cronRouter          from './routes/cron.js';   // ← new
 
 const app = express();
-app.use('/api/roles', roleIngestRoutes);
+
 
 app.set('trust proxy', 1);  // Required behind Vercel's edge network
 
@@ -37,6 +37,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '2mb' }));
+app.use('/api/roles', roleIngestRoutes);
 
 // Rate limiters — disabled outside production so tests run freely
 const skip = () => process.env.NODE_ENV !== 'production';
