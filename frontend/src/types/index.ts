@@ -20,25 +20,62 @@ export interface Role {
   hiring_manager_name?:     string;
   priority:                 Priority;
   status:                   string;
+  new_replacement?:         string;
+  replacement_reason?:      string;
   num_openings:             number;
   location?:                string;
+  employment_type?:         string;
   yoe_required?:            string;
   ctc_band?:                string;
   kpi_expectations?:        string;
+  job_description?:         string;
   must_have_skills?:        string;
   nice_to_have_skills?:     string;
   suggested_interviewers?:  string;
   assignment_required:      boolean;
+  recruitment_mode?:        string[];
+  additional_remarks?:      string;
   start_date?:              string;
   target_closure_date?:     string;
+  approver_name?:           string;
+  approval_date?:           string;
+  approval_note?:           string;
   jd_drive_link?:           string;
   social_jd_drive_link?:    string;
+  whatsapp_forward_link?:   string;
+  referral_message_link?:   string;
+  approval_summary_link?:   string;
+  posting_status?:          Record<string, string>;
   created_at:               string;
   // computed
   days_open:                number;
   aging_alert:              AgingAlert;
   active_candidate_count?:  number;
   shortlisted_count?:       number;
+}
+
+export interface Agency {
+  id:                          string;
+  name:                        string;
+  contact_name?:               string;
+  contact_email?:              string;
+  contact_phone?:              string;
+  contract_status:             'Active' | 'Inactive' | 'On Hold';
+  tier1_band?:                 string;
+  tier1_rate?:                 string;
+  tier2_band?:                 string;
+  tier2_rate?:                 string;
+  tier3_band?:                 string;
+  tier3_rate?:                 string;
+  replacement_guarantee_days?: number;
+  specialisations?:            string;
+  agreement_drive_link?:       string;
+  notes?:                      string;
+  created_at:                  string;
+  updated_at:                  string;
+  // computed (list query only)
+  total_submitted?:            number;
+  total_hired?:                number;
 }
 
 export interface Candidate {

@@ -140,6 +140,36 @@ CREATE TABLE agencies (
   updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ── candidate_edit_log / agency_edit_log: inline-editing audit trail ───────────
+-- Same shape as role_edit_log, added for Phase 3 inline editing (Roles,
+-- Candidates, Agencies) so all three entities get a consistent audit trail.
+-- Must come after both candidates and agencies (FK references).
+CREATE TABLE candidate_edit_log (
+  id           BIGSERIAL PRIMARY KEY,
+  candidate_id TEXT NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+  field_name   TEXT NOT NULL,
+  old_value    TEXT,
+  new_value    TEXT,
+  changed_by   UUID REFERENCES users(id),
+  changed_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  note         TEXT
+);
+
+CREATE INDEX idx_candidate_edit_log_candidate ON candidate_edit_log(candidate_id);
+
+CREATE TABLE agency_edit_log (
+  id         BIGSERIAL PRIMARY KEY,
+  agency_id  TEXT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+  field_name TEXT NOT NULL,
+  old_value  TEXT,
+  new_value  TEXT,
+  changed_by UUID REFERENCES users(id),
+  changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  note       TEXT
+);
+
+CREATE INDEX idx_agency_edit_log_agency ON agency_edit_log(agency_id);
+
 -- ─── Assignment Repository (must come BEFORE interview_rounds) ────────────────
 CREATE TABLE assignment_repo (
   id                TEXT PRIMARY KEY DEFAULT 'ASN' || LPAD(nextval('seq_assignment')::TEXT, 3, '0'),

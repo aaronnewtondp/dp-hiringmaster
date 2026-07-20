@@ -74,10 +74,28 @@ live.
       role/candidate should get a Drive folder automatically; currently none
       do. (`driveService.ts` already has working Drive API access via the
       service account — this needs a `createFolder`-equivalent added there.)
-- [ ] **Inline editing — Roles, Candidates, Agencies.** Scope, as defined:
-  - All fields on each entity (not a subset)
-  - Detail page only (not list/table views)
-  - Explicit Save / Cancel per field or per section (not autosave)
+- [x] **Inline editing — Roles, Candidates, Agencies.** Live. One reusable
+      component (`components/shared/EditableSection.tsx`, config-driven,
+      per-section Save/Cancel) applied to all three entities:
+  - **Roles**: was closest to pure frontend work — backend `PATCH /:id` was
+    already fully whitelisted with an edit log; just needed ~12 missing
+    fields added to the frontend `Role` type. `ctc_band` hidden entirely for
+    non-HR personas (not masked — not rendered).
+  - **Candidates**: the `PATCH /:id` allowlist was stale — it only accepted
+    legacy `parsed_*` fields, silently no-opping on every real profile field
+    actually shown on screen (`current_company`, `current_ctc_fixed`, etc.).
+    Fixed the allowlist; added `candidate_edit_log` (new table, same shape as
+    `role_edit_log`).
+  - **Agencies**: had no detail page at all — only a list view. Built
+    `AgencyDetail.tsx` + `/agencies/:id` route + row-click wiring from
+    scratch; added `agency_edit_log` (new table).
+  - All fields editable including Drive links (`resume_drive_link`,
+    `jd_drive_link`, etc.) per explicit scope decision — excluded only
+    IDs/timestamps/computed-only fields. `status` stays out of scope on
+    Roles (already has its own dedicated Change Status modal).
+  - Verified end-to-end in-browser for all three entities: edit/save
+    persists + logs correctly, Cancel discards with zero API calls, non-HR
+    persona gating confirmed on `ctc_band`.
 
 ---
 

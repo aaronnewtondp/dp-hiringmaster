@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { candidatesApi, applicationsApi, interviewsApi } from '../services/api.ts';
 import { Candidate, Application, InterviewRound, STAGES, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
 import { StageBadge, StatusBadge, PriorityBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import EditableSection from '../components/shared/EditableSection.tsx';
 import ResumeIQPanel from '../components/ResumeIQPanel.tsx';
 import InterviewFeedbackModal from '../components/InterviewFeedbackModal.tsx';
 import ScheduleRoundModal from '../components/ScheduleRoundModal.tsx';
@@ -16,14 +17,6 @@ function FeedbackBadge({ status }: { status: string }) {
   if (status === 'Submitted') return <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">Submitted</span>;
   if (status === 'Overdue') return <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium animate-pulse">Overdue</span>;
   return <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">Pending</span>;
-}
-
-function formatCtc(candidate: Candidate): string {
-  const parts: string[] = [];
-  if (candidate.current_ctc_fixed != null) parts.push(`${candidate.current_ctc_fixed}F`);
-  if (candidate.current_ctc_variable != null) parts.push(`${candidate.current_ctc_variable}V`);
-  if (candidate.current_esops != null) parts.push(`${candidate.current_esops} ESOP`);
-  return parts.length ? `${parts.join(' + ')} LPA` : '—';
 }
 
 export default function CandidateDetail() {
@@ -79,6 +72,11 @@ export default function CandidateDetail() {
     },
     enabled: applications.length > 0,
   });
+
+  const saveCandidateFields = async (changes: Record<string, unknown>) => {
+    await candidatesApi.update(id!, changes);
+    qc.invalidateQueries({ queryKey: ['candidate', id] });
+  };
 
   const handleStageUpdate = async () => {
     if (!selectedAppId || !stageValue) return;
@@ -151,20 +149,51 @@ export default function CandidateDetail() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="card p-5 space-y-3">
-          <h2 className="text-sm font-semibold text-gray-900">Profile</h2>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-gray-400">Company</span><span className="font-medium text-right max-w-[150px] truncate">{candidate.current_company || '—'}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">Designation</span><span className="font-medium text-right max-w-[150px] truncate">{candidate.current_designation || '—'}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">Industry</span><span className="font-medium text-right max-w-[150px] truncate">{candidate.current_industry || '—'}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">Location</span><span className="font-medium">{candidate.current_location || '—'}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">Experience</span><span className="font-medium">{candidate.years_of_experience != null ? `${candidate.years_of_experience} yrs` : '—'}</span></div>
-          </div>
-          <div className="border-t border-gray-100 pt-3 space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-gray-400">Current CTC</span><span className="font-medium">{formatCtc(candidate)}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">Expected CTC</span><span className="font-medium">{candidate.expected_ctc != null ? `${candidate.expected_ctc} LPA` : '—'}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">Notice Period</span><span className="font-medium">{candidate.notice_period_days != null ? `${candidate.notice_period_days}d` : '—'}</span></div>
-          </div>
+        <div className="space-y-4">
+          <EditableSection
+            title="Identity"
+            data={candidate}
+            onSave={saveCandidateFields}
+            fields={[
+              { key: 'full_name', label: 'Full Name', type: 'text' },
+              { key: 'email', label: 'Email', type: 'text' },
+              { key: 'phone', label: 'Phone', type: 'text' },
+              { key: 'linkedin_url', label: 'LinkedIn', type: 'text', linkify: true },
+            ]}
+          />
+          <EditableSection
+            title="Current Role"
+            data={candidate}
+            onSave={saveCandidateFields}
+            fields={[
+              { key: 'current_company', label: 'Company', type: 'text' },
+              { key: 'current_designation', label: 'Designation', type: 'text' },
+              { key: 'current_industry', label: 'Industry', type: 'text' },
+              { key: 'current_location', label: 'Location', type: 'text' },
+              { key: 'years_of_experience', label: 'Experience (yrs)', type: 'number' },
+            ]}
+          />
+          <EditableSection
+            title="Compensation"
+            data={candidate}
+            onSave={saveCandidateFields}
+            fields={[
+              { key: 'current_ctc_fixed', label: 'Current CTC (Fixed)', type: 'number' },
+              { key: 'current_ctc_variable', label: 'Current CTC (Variable)', type: 'number' },
+              { key: 'current_esops', label: 'Current ESOPs', type: 'number' },
+              { key: 'expected_ctc', label: 'Expected CTC', type: 'number' },
+              { key: 'notice_period_days', label: 'Notice Period (days)', type: 'number' },
+            ]}
+          />
+          <EditableSection
+            title="Resume & Tags"
+            data={candidate}
+            onSave={saveCandidateFields}
+            fields={[
+              { key: 'resume_drive_link', label: 'Resume Link', type: 'text', linkify: true },
+              { key: 'hr_tags', label: 'HR Tags', type: 'tags' },
+            ]}
+          />
         </div>
 
         <div className="lg:col-span-2 card overflow-hidden">

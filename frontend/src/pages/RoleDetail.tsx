@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ExternalLink, Users, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Users, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../services/api.ts';
 import { Role, Application } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, FitScore, Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import EditableSection from '../components/shared/EditableSection.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 
 const ROLE_STATUSES = ['Draft', 'Under Review', 'Approved', 'Live – Sourcing', 'On Hold', 'Closed – Filled', 'Closed – Cancelled'];
@@ -36,6 +37,11 @@ export default function RoleDetail() {
   const role     = roleData?.data?.role;
   const pipeline = pipelineData?.data?.pipeline || {};
   const total    = pipelineData?.data?.total || 0;
+
+  const saveRoleFields = async (changes: Record<string, unknown>) => {
+    await rolesApi.update(id!, changes);
+    qc.invalidateQueries({ queryKey: ['role', id] });
+  };
 
   const handleStatusUpdate = async () => {
     if (!statusValue) return;
@@ -97,58 +103,87 @@ export default function RoleDetail() {
         </div>
       </div>
 
-      {/* Role details */}
+      {/* Role details — all fields inline-editable, per-section Save/Cancel */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="card p-5 space-y-3">
-          <h2 className="text-sm font-semibold text-gray-900">Requirements</h2>
-          <div>
-            <div className="text-xs text-gray-400 mb-1">Must-have skills</div>
-            <div className="text-sm text-gray-700">{role.must_have_skills || '—'}</div>
-          </div>
-          <div>
-            <div className="text-xs text-gray-400 mb-1">Experience</div>
-            <div className="text-sm text-gray-700">{role.yoe_required || '—'}</div>
-          </div>
-          {role.ctc_band && (
-            <div>
-              <div className="text-xs text-gray-400 mb-1">CTC Band</div>
-              <div className="text-sm text-gray-700">{role.ctc_band}</div>
-            </div>
-          )}
-        </div>
-        <div className="card p-5">
-          <h2 className="text-sm font-semibold text-gray-900 mb-3">KPI Expectations</h2>
-          <p className="text-sm text-gray-700 leading-relaxed">{role.kpi_expectations || '—'}</p>
-        </div>
-        <div className="card p-5 space-y-3">
-          <h2 className="text-sm font-semibold text-gray-900">Links & Assets</h2>
-          {role.jd_drive_link ? (
-            <a href={role.jd_drive_link} target="_blank" rel="noopener noreferrer"
-               className="flex items-center gap-2 text-sm text-dp-600 hover:underline">
-              <ExternalLink className="w-3.5 h-3.5" /> Long-form JD
-            </a>
-          ) : role.status === 'Approved' ? (
-            <div className="flex items-center gap-2 text-sm text-gray-400">
-              <Spinner size="sm" /> Generating JD…
-            </div>
-          ) : <div className="text-sm text-gray-400">JD not generated yet</div>}
-          {role.social_jd_drive_link ? (
-            <a href={role.social_jd_drive_link} target="_blank" rel="noopener noreferrer"
-               className="flex items-center gap-2 text-sm text-dp-600 hover:underline">
-              <ExternalLink className="w-3.5 h-3.5" /> Social JD
-            </a>
-          ) : role.status === 'Approved' ? (
-            <div className="flex items-center gap-2 text-sm text-gray-400">
-              <Spinner size="sm" /> Generating social JD…
-            </div>
-          ) : <div className="text-sm text-gray-400">Social JD not generated yet</div>}
-          <div className="text-xs text-gray-400">
-            Open: {role.start_date} · Close target: {role.target_closure_date}
-          </div>
-          <div className="text-xs text-gray-400">
-            Openings: {role.num_openings} · Assignment: {role.assignment_required ? 'Yes' : 'No'}
-          </div>
-        </div>
+        <EditableSection
+          title="Basic Info"
+          data={role}
+          onSave={saveRoleFields}
+          fields={[
+            { key: 'title', label: 'Title', type: 'text' },
+            { key: 'department', label: 'Department', type: 'text' },
+            { key: 'hiring_manager_name', label: 'Hiring Manager', type: 'text' },
+            { key: 'priority', label: 'Priority', type: 'select', options: ['P0', 'P1', 'P2', 'P3'] },
+            { key: 'new_replacement', label: 'New / Replacement', type: 'select', options: ['New Position', 'Replacement'] },
+            { key: 'replacement_reason', label: 'Replacement Reason', type: 'text' },
+            { key: 'location', label: 'Location', type: 'text' },
+            { key: 'employment_type', label: 'Employment Type', type: 'text' },
+            { key: 'num_openings', label: 'Openings', type: 'number' },
+          ]}
+        />
+        <EditableSection
+          title="Requirements"
+          data={role}
+          onSave={saveRoleFields}
+          fields={[
+            { key: 'yoe_required', label: 'Experience', type: 'text' },
+            { key: 'ctc_band', label: 'CTC Band', type: 'text', hidden: !canHR },
+            { key: 'must_have_skills', label: 'Must-have skills', type: 'textarea' },
+            { key: 'nice_to_have_skills', label: 'Nice-to-have skills', type: 'textarea' },
+            { key: 'suggested_interviewers', label: 'Suggested Interviewers', type: 'text' },
+            { key: 'assignment_required', label: 'Assignment Required', type: 'boolean' },
+            { key: 'recruitment_mode', label: 'Recruitment Mode', type: 'tags' },
+          ]}
+        />
+        <EditableSection
+          title="Description"
+          data={role}
+          onSave={saveRoleFields}
+          fields={[
+            { key: 'job_description', label: 'Job Description', type: 'textarea' },
+            { key: 'kpi_expectations', label: 'KPI Expectations', type: 'textarea' },
+            { key: 'additional_remarks', label: 'Additional Remarks', type: 'textarea' },
+          ]}
+        />
+        <EditableSection
+          title="Dates"
+          data={role}
+          onSave={saveRoleFields}
+          fields={[
+            { key: 'start_date', label: 'Open Date', type: 'date' },
+            { key: 'target_closure_date', label: 'Close Target', type: 'date' },
+          ]}
+        />
+        <EditableSection
+          title="Approval"
+          data={role}
+          onSave={saveRoleFields}
+          fields={[
+            { key: 'approver_name', label: 'Approver', type: 'text' },
+            { key: 'approval_date', label: 'Approval Date', type: 'date' },
+            { key: 'approval_note', label: 'Approval Note', type: 'textarea' },
+          ]}
+        />
+        <EditableSection
+          title="Links & Assets"
+          data={role}
+          onSave={saveRoleFields}
+          pendingLabels={role.status === 'Approved' ? {
+            jd_drive_link: 'Generating JD…',
+            social_jd_drive_link: 'Generating social JD…',
+          } : undefined}
+          fields={[
+            { key: 'jd_drive_link', label: 'Long-form JD', type: 'text', linkify: true },
+            { key: 'social_jd_drive_link', label: 'Social JD', type: 'text', linkify: true },
+            { key: 'whatsapp_forward_link', label: 'WhatsApp Forward Link', type: 'text', linkify: true },
+            { key: 'referral_message_link', label: 'Referral Message Link', type: 'text', linkify: true },
+            { key: 'approval_summary_link', label: 'Approval Summary Link', type: 'text', linkify: true },
+            { key: 'posting_status', label: 'Posting Status', type: 'json' },
+          ]}
+        />
+      </div>
+      <div className="text-xs text-gray-400 -mt-2">
+        Openings: {role.num_openings} · Assignment: {role.assignment_required ? 'Yes' : 'No'}
       </div>
 
       {/* Pipeline */}

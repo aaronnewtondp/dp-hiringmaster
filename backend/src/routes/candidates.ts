@@ -149,33 +149,74 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
   res.status(201).json(result);
 });
 
-// ─── PATCH /api/candidates/:id — update profile fields ───────────────────────
+// ─── PATCH /api/candidates/:id — update profile fields, with edit log ────────
 router.patch('/:id', requireHR, async (req: Request, res: Response) => {
-  const allowed = ['full_name','email','phone','linkedin_url','parsed_total_yoe',
+  const existing = await queryOne<Candidate>('SELECT * FROM candidates WHERE id = $1', [req.params.id]);
+  if (!existing) { res.status(404).json({ error: 'Candidate not found' }); return; }
+
+  const allowedFields = [
+    'full_name','email','phone','linkedin_url','parsed_total_yoe',
     'parsed_skills','parsed_industries','parsed_education','job_stability_months',
-    'career_progression','parsing_completeness','hr_tags','duplicate_flag'];
+    'career_progression','parsing_completeness','hr_tags','duplicate_flag',
+    'current_ctc_fixed','current_ctc_variable','current_esops','expected_ctc',
+    'notice_period_days','current_company','current_industry','current_designation',
+    'current_location','years_of_experience','resume_drive_link',
+  ];
 
   const updates: string[] = [];
   const values: unknown[] = [];
-  let i = 1;
+  const editLogEntries: Array<{ field: string; old: string; new_val: string }> = [];
+  let idx = 1;
 
-  for (const field of allowed) {
+  for (const field of allowedFields) {
     if (req.body[field] !== undefined) {
-      updates.push(`${field} = $${i++}`);
-      values.push(req.body[field]);
+      const oldVal = String((existing as Record<string, unknown>)[field] ?? '');
+      const newVal = String(req.body[field]);
+      if (oldVal !== newVal) {
+        updates.push(`${field} = $${idx++}`);
+        values.push(req.body[field]);
+        editLogEntries.push({ field, old: oldVal, new_val: newVal });
+      }
     }
   }
 
-  if (!updates.length) { res.status(400).json({ error: 'No valid fields provided' }); return; }
+  if (updates.length === 0) {
+    res.json({ candidate: existing, message: 'No changes detected' });
+    return;
+  }
 
   values.push(req.params.id);
-  const candidate = await queryOne<Candidate>(
-    `UPDATE candidates SET ${updates.join(', ')} WHERE id = $${i} RETURNING *`,
-    values
-  );
+  const candidate = await transaction(async (client) => {
+    const result = await client.query(
+      `UPDATE candidates SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *`,
+      values
+    );
 
-  if (!candidate) { res.status(404).json({ error: 'Candidate not found' }); return; }
+    for (const entry of editLogEntries) {
+      await client.query(
+        `INSERT INTO candidate_edit_log (candidate_id, field_name, old_value, new_value, changed_by)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [req.params.id, entry.field, entry.old, entry.new_val, req.user!.userId]
+      );
+    }
+
+    return result.rows[0] as Candidate;
+  });
+
   res.json({ candidate });
+});
+
+// ─── GET /api/candidates/:id/edit-log ─────────────────────────────────────────
+router.get('/:id/edit-log', async (req: Request, res: Response) => {
+  const logs = await query(
+    `SELECT el.*, u.name AS changed_by_name
+     FROM candidate_edit_log el
+     LEFT JOIN users u ON u.id = el.changed_by
+     WHERE el.candidate_id = $1
+     ORDER BY el.changed_at DESC`,
+    [req.params.id]
+  );
+  res.json({ logs });
 });
 
 // ─── GET /api/candidates/:id/activity — full activity timeline ────────────────
