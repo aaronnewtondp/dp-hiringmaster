@@ -65,6 +65,7 @@ CREATE TABLE roles (
   approval_note            TEXT,
   jd_drive_link            TEXT,
   social_jd_drive_link     TEXT,
+  generated_jd_content     JSONB,
   whatsapp_forward_link    TEXT,
   referral_message_link    TEXT,
   approval_summary_link    TEXT,

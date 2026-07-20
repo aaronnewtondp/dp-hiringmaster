@@ -70,10 +70,6 @@ live.
       on the role detail page's Links & Assets card; a "Change status"
       control was added since none existed before (needed to actually reach
       Approved from the UI).
-- [ ] **Drive auto-folder creation** on Role and Candidate creation — every
-      role/candidate should get a Drive folder automatically; currently none
-      do. (`driveService.ts` already has working Drive API access via the
-      service account — this needs a `createFolder`-equivalent added there.)
 - [x] **Inline editing — Roles, Candidates, Agencies.** Live. One reusable
       component (`components/shared/EditableSection.tsx`, config-driven,
       per-section Save/Cancel) applied to all three entities:
@@ -109,9 +105,27 @@ live.
       Expected CTC, Notice Period, Current Company, Industry, Designation,
       Location, YOE, Resume Link — all already exist as real columns on
       `candidates` (added this project's schema work).
-- [ ] **ResumeIQ scores against the generated JD document**, not the short DB
-      fields it currently uses. Depends on the Phase 3 JD generation feature
-      existing first — there's nothing to score against otherwise.
+- [x] **ResumeIQ scores against the generated JD document.** Live. The
+      structured content `jdContent.ts` generates for the JD PDFs (narrative,
+      condensed key responsibilities, must-haves/good-to-haves, tags) was
+      being discarded after rendering — persisted it instead as
+      `roles.generated_jd_content` (JSONB), written alongside the two Drive
+      links in the same JD-generation trigger. `resumeIQ.ts`'s
+      `buildRoleRequirementsSection()` reads it when present, giving the
+      scoring prompt a genuinely fuller picture of the role than the three
+      short DB fields (`must_have_skills`/`nice_to_have_skills`/
+      `kpi_expectations`) ever did. Falls back to those same three fields,
+      byte-for-byte unchanged, for any role without generated content — no
+      behavior change for roles not yet through the Approved+JD-generation
+      flow. Verified both code paths directly against real data (R008).
+- [ ] **Drive auto-folder creation** on Role and Candidate creation — every
+      role/candidate should get a Drive folder automatically; currently none
+      do. (`driveService.ts` already has working Drive API access via the
+      service account, including a write-capable client added for JD PDF
+      uploads via domain-wide delegation — this needs a `createFolder`-
+      equivalent added there.) *Moved from Phase 3 — everything else in that
+      phase is done; this one fits more naturally alongside Phase 4's
+      candidate-ingestion work.*
 - [x] **Resume text fetched from Google Drive** — done. Real PDF/DOCX/Google
       Doc extraction via service account, wired into the scoring trigger,
       confirmed working end-to-end (verified with a real resume producing a

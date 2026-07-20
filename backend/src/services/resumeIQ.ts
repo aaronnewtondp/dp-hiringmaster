@@ -41,14 +41,7 @@ export async function scoreCandidate(
 
 ROLE: ${role.title}
 
-JOB REQUIREMENTS (Must Have):
-${role.must_have_skills || 'Not specified'}
-
-NICE TO HAVE:
-${role.nice_to_have_skills || 'Not specified'}
-
-KEY RESPONSIBILITIES:
-${role.kpi_expectations || 'Not specified'}
+${buildRoleRequirementsSection(role)}
 
 CANDIDATE PROFILE:
 Name: ${candidate.full_name}
@@ -133,6 +126,58 @@ export function extractDriveFileId(url: string): string | null {
   const fileMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
   if (fileMatch) return fileMatch[1];
   return null;
+}
+
+// ─── Helper: role requirements section of the prompt ─────────────────────────
+// Prefers the rich structured content generated for the role's JD PDFs
+// (jdContent.ts's JdContent, persisted as roles.generated_jd_content) over the
+// short must_have_skills/nice_to_have_skills/kpi_expectations DB fields — but
+// only once a role has actually been through the Approved+JD-generation flow.
+// Falls back to the original three-field format unchanged for any role
+// without generated content, so scoring behavior for those roles is identical
+// to before this change.
+interface GeneratedJdContentForScoring {
+  aboutRoleParagraph?: string;
+  keyResponsibilities?: string[];
+  mustHaves?: string[];
+  goodToHaves?: string[];
+  goodToHaveLabel?: string;
+  tags?: Array<{ text: string }>;
+}
+
+function bulletList(items?: string[]): string {
+  return items && items.length ? items.map(i => `- ${i}`).join('\n') : 'Not specified';
+}
+
+function buildRoleRequirementsSection(role: Role): string {
+  const content = role.generated_jd_content as GeneratedJdContentForScoring | null | undefined;
+
+  if (!content) {
+    return `JOB REQUIREMENTS (Must Have):
+${role.must_have_skills || 'Not specified'}
+
+NICE TO HAVE:
+${role.nice_to_have_skills || 'Not specified'}
+
+KEY RESPONSIBILITIES:
+${role.kpi_expectations || 'Not specified'}`;
+  }
+
+  const tags = content.tags && content.tags.length ? content.tags.map(t => t.text).join(', ') : 'Not specified';
+
+  return `ABOUT THE ROLE:
+${content.aboutRoleParagraph || 'Not specified'}
+
+KEY RESPONSIBILITIES:
+${bulletList(content.keyResponsibilities)}
+
+MUST HAVES:
+${bulletList(content.mustHaves)}
+
+${(content.goodToHaveLabel || 'GOOD TO HAVE').toUpperCase()}:
+${bulletList(content.goodToHaves)}
+
+SKILL/TECH TAGS: ${tags}`;
 }
 
 // ─── Helper: format current CTC breakdown for the prompt ─────────────────────

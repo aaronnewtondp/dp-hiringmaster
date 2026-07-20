@@ -207,10 +207,13 @@ router.patch('/:id', requireHR, async (req: Request, res: Response) => {
 
         // Only write the links once every step above has succeeded — a
         // partial failure leaves both columns untouched so the guard above
-        // allows a clean retry on the next role edit.
+        // allows a clean retry on the next role edit. generated_jd_content
+        // persists the structured content itself (not just the rendered
+        // PDFs) so ResumeIQ can score against it directly instead of
+        // re-deriving structure from PDF text later.
         await query(
-          'UPDATE roles SET jd_drive_link=$1, social_jd_drive_link=$2 WHERE id=$3',
-          [longFormUpload.webViewLink, socialUpload.webViewLink, updatedRole.id]
+          'UPDATE roles SET jd_drive_link=$1, social_jd_drive_link=$2, generated_jd_content=$3 WHERE id=$4',
+          [longFormUpload.webViewLink, socialUpload.webViewLink, JSON.stringify(content), updatedRole.id]
         );
         await query(
           `INSERT INTO activity_log (role_id, event_type, event_detail, performed_by_name)
