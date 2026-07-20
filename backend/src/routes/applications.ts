@@ -3,6 +3,7 @@ import { query, queryOne, transaction } from '../db/index.js';
 import { authenticate, requireHR, stripRestrictedFields } from '../middleware/auth.js';
 import { Application, SLA_HOURS, Candidate, Role } from '../types/index.js';
 import { scoreCandidate } from '../services/resumeIQ.js';
+import { fetchResumeText } from '../services/driveService.js';
 
 const router = Router();
 router.use(authenticate);
@@ -135,7 +136,19 @@ router.post('/:id/stage', requireHR, async (req: Request, res: Response) => {
         const role      = await queryOne<Role>('SELECT * FROM roles WHERE id=$1', [app.role_id]);
         if (!candidate || !role) return;
 
-        const result = await scoreCandidate(candidate, role);
+        // Fetch actual resume text from Drive if a link is on file.
+        // Falls back gracefully to profile-fields-only scoring on any failure.
+        let resumeText: string | null = null;
+        if (candidate.resume_drive_link) {
+          resumeText = await fetchResumeText(candidate.resume_drive_link);
+          if (resumeText) {
+            console.log(`[ResumeIQ] Resume text fetched for ${candidate.id} (${resumeText.length} chars)`);
+          } else {
+            console.warn(`[ResumeIQ] Could not fetch resume for ${candidate.id} — scoring from profile fields only`);
+          }
+        }
+
+        const result = await scoreCandidate(candidate, role, resumeText);
         await query(
           `UPDATE applications SET
              score_technical=$1, score_technical_note=$2,

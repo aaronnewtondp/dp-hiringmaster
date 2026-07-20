@@ -2,12 +2,34 @@ import { Router, Request, Response } from 'express';
 import { query, queryOne } from '../db/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { AGING_THRESHOLDS, Priority } from '../types/index.js';
+import { runSlaCheck } from '../jobs/slaChecker.js';
+
+// ─── Compute-on-read SLA trigger ──────────────────────────────────────────────
+// Vercel Hobby tier only supports daily cron, not the 15-min interval the SLA
+// checker needs. Instead of an always-on scheduler, run the same check
+// opportunistically on dashboard load — the moment SLA data actually needs to
+// be fresh. Throttled to avoid re-running on every request if polled often.
+let lastSlaCheckAt = 0;
+const SLA_CHECK_THROTTLE_MS = 3 * 60 * 1000; // 3 minutes
+
+async function maybeRunSlaCheck(): Promise<void> {
+  const now = Date.now();
+  if (now - lastSlaCheckAt < SLA_CHECK_THROTTLE_MS) return;
+  lastSlaCheckAt = now;
+  try {
+    await runSlaCheck();
+  } catch (err) {
+    console.error('[SLA] compute-on-read check failed:', err);
+  }
+}
 
 const router = Router();
 router.use(authenticate);
 
 // ─── GET /api/dashboard — all Phase 1 metrics in one call ────────────────────
 router.get('/', async (req: Request, res: Response) => {
+  maybeRunSlaCheck(); // fire-and-forget — don't block the response
+
   const persona = req.user!.persona;
   const userId  = req.user!.userId;
 
