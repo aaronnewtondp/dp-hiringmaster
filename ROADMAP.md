@@ -56,11 +56,20 @@ live.
       priority, new/replacement, vacancy reason, appointment type,
       qualification, must/nice-to-have skills, YOE, CTC band, JD text,
       remarks, dates). Deduped via `requisition_source_row`.
-- [ ] **JD generation on role status → Approved.** Auto-trigger (not a manual
-      button — this was explicitly decided) that generates both long-form and
-      social JD PDFs using the exact logic of the `digitalpaani-long-jd` and
-      `digitalpaani-social-jd` skills, built from the role's stored fields.
-      Output must be downloadable from the role detail page.
+- [x] **JD generation on role status → Approved.** Live. Auto-triggers (not a
+      manual button) on the Draft/Under Review → Approved transition, guarded
+      by `!jd_drive_link` so it only runs once per role. Claude condenses raw
+      role fields into structured content (`jdContent.ts`), then two Node/TS
+      renderers ported from the `digitalpaani-long-jd`/`digitalpaani-social-jd`
+      skills' ReportLab source produce the PDFs (`pdf/longFormJd.ts` via
+      pdfmake, `pdf/socialJd.ts` via pdfkit — colors/fonts/layout ported 1:1,
+      verified by rendering and visually inspecting output against the
+      skills' reference PDFs). Uploaded to Drive via domain-wide delegation
+      (`GOOGLE_DRIVE_IMPERSONATE_EMAIL` — a bare service account has no Drive
+      storage quota of its own, confirmed against the real API). Links shown
+      on the role detail page's Links & Assets card; a "Change status"
+      control was added since none existed before (needed to actually reach
+      Approved from the UI).
 - [ ] **Drive auto-folder creation** on Role and Candidate creation — every
       role/candidate should get a Drive folder automatically; currently none
       do. (`driveService.ts` already has working Drive API access via the
