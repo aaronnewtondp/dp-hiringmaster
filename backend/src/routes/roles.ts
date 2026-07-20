@@ -2,6 +2,10 @@ import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
 import { authenticate, requireHR } from '../middleware/auth.js';
 import { Role, AGING_THRESHOLDS, Priority } from '../types/index.js';
+import { generateJdContent } from '../services/jdContent.js';
+import { renderLongFormJd } from '../services/pdf/longFormJd.js';
+import { renderSocialJd } from '../services/pdf/socialJd.js';
+import { uploadJdPdf } from '../services/driveService.js';
 
 const router = Router();
 router.use(authenticate);
@@ -169,6 +173,56 @@ router.patch('/:id', requireHR, async (req: Request, res: Response) => {
 
     return result.rows[0] as Role;
   });
+
+  // Trigger JD generation when a role transitions into Approved — async,
+  // non-blocking, mirrors the ResumeIQ trigger pattern in applications.ts.
+  // Guarded on the transition itself (not just current status) plus
+  // !existing.jd_drive_link, so a role PATCHed with status already 'Approved'
+  // (e.g. an unrelated field edit) never regenerates the JDs.
+  if (updatedRole.status === 'Approved' && existing.status !== 'Approved' && !existing.jd_drive_link) {
+    setImmediate(async () => {
+      try {
+        const content = await generateJdContent(updatedRole);
+        if (!content) {
+          console.error(`[JD-Gen] Skipping ${updatedRole.id} — content generation failed`);
+          return;
+        }
+
+        const folderId = process.env.DRIVE_JD_FOLDER_ID;
+        if (!folderId) {
+          console.error(`[JD-Gen] DRIVE_JD_FOLDER_ID not set — skipping upload for ${updatedRole.id}`);
+          return;
+        }
+
+        const [longFormBuffer, socialBuffer] = await Promise.all([
+          renderLongFormJd(updatedRole, content),
+          renderSocialJd(updatedRole, content),
+        ]);
+
+        const safeTitle = updatedRole.title.replace(/[^a-zA-Z0-9]+/g, '_');
+        const [longFormUpload, socialUpload] = await Promise.all([
+          uploadJdPdf(longFormBuffer, `DP_JD_${updatedRole.id}_${safeTitle}.pdf`, folderId),
+          uploadJdPdf(socialBuffer, `Social_${updatedRole.id}_${safeTitle}.pdf`, folderId),
+        ]);
+
+        // Only write the links once every step above has succeeded — a
+        // partial failure leaves both columns untouched so the guard above
+        // allows a clean retry on the next role edit.
+        await query(
+          'UPDATE roles SET jd_drive_link=$1, social_jd_drive_link=$2 WHERE id=$3',
+          [longFormUpload.webViewLink, socialUpload.webViewLink, updatedRole.id]
+        );
+        await query(
+          `INSERT INTO activity_log (role_id, event_type, event_detail, performed_by_name)
+           VALUES ($1, 'JD Generated', $2, 'System')`,
+          [updatedRole.id, `Long-form + social JD generated for ${updatedRole.title}`]
+        );
+        console.log(`[JD-Gen] Generated JDs for ${updatedRole.id}`);
+      } catch (err) {
+        console.error(`[JD-Gen] Generation failed for ${updatedRole.id}:`, err);
+      }
+    });
+  }
 
   res.json({ role: enrichRole(updatedRole) });
 });

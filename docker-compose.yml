@@ -34,6 +34,10 @@ services:
       NODE_ENV: development
       PORT: 4000
       DATABASE_URL: postgresql://hms_user:hms_password@dp_hms_db:5432/dp_hms
+      GOOGLE_APPLICATION_CREDENTIALS: /app/dp-hiring-master-key.json
+      ROLE_INGEST_SECRET: 22fc0ba4d5799b9fcfeb167b36820247264e87780571fa21566ce048d7b69400
+      DRIVE_JD_FOLDER_ID: ${DRIVE_JD_FOLDER_ID:-}
+      GOOGLE_DRIVE_IMPERSONATE_EMAIL: ${GOOGLE_DRIVE_IMPERSONATE_EMAIL:-}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: ${DB_USER:-hms_user}
@@ -55,6 +59,7 @@ services:
       - "4000:4000"
     volumes:
       - ./backend/src:/app/src
+      - ./dp-hiring-master-6dc8eabb38a8.json:/app/dp-hiring-master-key.json:ro
 
 volumes:
   postgres_data:

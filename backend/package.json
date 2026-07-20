@@ -27,6 +27,8 @@
     "node-cron": "^3.0.3",
     "nodemailer": "^6.9.14",
     "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.15.2",
+    "pdfmake": "^0.2.23",
     "pg": "^8.12.0",
     "uuid": "^10.0.0"
   },
@@ -39,6 +41,7 @@
     "@types/node": "^20.14.10",
     "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^6.4.15",
+    "@types/pdfkit": "^0.13.9",
     "@types/pg": "^8.11.6",
     "@types/uuid": "^10.0.0",
     "tsx": "^4.16.2",

@@ -32,6 +32,7 @@ export interface Role {
   start_date?:              string;
   target_closure_date?:     string;
   jd_drive_link?:           string;
+  social_jd_drive_link?:    string;
   created_at:               string;
   // computed
   days_open:                number;

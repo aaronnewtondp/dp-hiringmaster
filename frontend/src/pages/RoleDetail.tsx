@@ -1,16 +1,31 @@
+import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ExternalLink, Users, ChevronRight } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { rolesApi } from '../services/api.ts';
 import { Role, Application } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, FitScore, Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import { useAuth } from '../contexts/AuthContext.tsx';
+
+const ROLE_STATUSES = ['Draft', 'Under Review', 'Approved', 'Live – Sourcing', 'On Hold', 'Closed – Filled', 'Closed – Cancelled'];
 
 export default function RoleDetail() {
   const { id } = useParams<{ id: string }>();
+  const { canHR } = useAuth();
+  const qc = useQueryClient();
+
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [statusValue, setStatusValue] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const { data: roleData, isLoading: roleLoading } = useQuery<{ data: { role: Role } }>({
     queryKey: ['role', id],
     queryFn:  () => rolesApi.get(id!),
+    refetchInterval: (query) => {
+      const r = query.state.data?.data?.role;
+      return r?.status === 'Approved' && !r.jd_drive_link ? 10_000 : false;
+    },
   });
 
   const { data: pipelineData } = useQuery<{ data: { pipeline: Record<string, Application[]>; total: number } }>({
@@ -21,6 +36,18 @@ export default function RoleDetail() {
   const role     = roleData?.data?.role;
   const pipeline = pipelineData?.data?.pipeline || {};
   const total    = pipelineData?.data?.total || 0;
+
+  const handleStatusUpdate = async () => {
+    if (!statusValue) return;
+    setSaving(true);
+    try {
+      await rolesApi.update(id!, { status: statusValue });
+      toast.success(`Status updated to ${statusValue}`);
+      setShowStatusModal(false);
+      qc.invalidateQueries({ queryKey: ['role', id] });
+    } catch { toast.error('Failed to update status'); }
+    setSaving(false);
+  };
 
   if (roleLoading) return <div className="flex justify-center p-12"><Spinner size="lg" /></div>;
   if (!role) return <EmptyState title="Role not found" />;
@@ -53,9 +80,19 @@ export default function RoleDetail() {
               <AgingBadge alert={role.aging_alert} days={role.days_open} />
             </div>
           </div>
-          <div className="text-right">
-            <div className="text-2xl font-bold text-gray-900">{total}</div>
-            <div className="text-xs text-gray-500">active candidates</div>
+          <div className="text-right shrink-0 space-y-2">
+            <div>
+              <div className="text-2xl font-bold text-gray-900">{total}</div>
+              <div className="text-xs text-gray-500">active candidates</div>
+            </div>
+            {canHR && (
+              <button
+                onClick={() => { setStatusValue(role.status); setShowStatusModal(true); }}
+                className="btn-secondary text-xs py-1.5 px-3"
+              >
+                Change status
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -90,7 +127,21 @@ export default function RoleDetail() {
                className="flex items-center gap-2 text-sm text-dp-600 hover:underline">
               <ExternalLink className="w-3.5 h-3.5" /> Long-form JD
             </a>
+          ) : role.status === 'Approved' ? (
+            <div className="flex items-center gap-2 text-sm text-gray-400">
+              <Spinner size="sm" /> Generating JD…
+            </div>
           ) : <div className="text-sm text-gray-400">JD not generated yet</div>}
+          {role.social_jd_drive_link ? (
+            <a href={role.social_jd_drive_link} target="_blank" rel="noopener noreferrer"
+               className="flex items-center gap-2 text-sm text-dp-600 hover:underline">
+              <ExternalLink className="w-3.5 h-3.5" /> Social JD
+            </a>
+          ) : role.status === 'Approved' ? (
+            <div className="flex items-center gap-2 text-sm text-gray-400">
+              <Spinner size="sm" /> Generating social JD…
+            </div>
+          ) : <div className="text-sm text-gray-400">Social JD not generated yet</div>}
           <div className="text-xs text-gray-400">
             Open: {role.start_date} · Close target: {role.target_closure_date}
           </div>
@@ -149,6 +200,21 @@ export default function RoleDetail() {
           </div>
         )}
       </div>
+
+      {showStatusModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+            <h3 className="text-base font-semibold">Update status</h3>
+            <select value={statusValue} onChange={e => setStatusValue(e.target.value)} className="select">
+              {ROLE_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowStatusModal(false)} className="btn-secondary">Cancel</button>
+              <button onClick={handleStatusUpdate} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Update'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
