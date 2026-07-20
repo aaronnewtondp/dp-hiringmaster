@@ -91,6 +91,16 @@ function textWidth(text: string, font: string, size: number): number {
   return measureDoc.widthOfString(text);
 }
 
+/** Wrapped text height at a given width — used to size a rounded-rect
+ * background canvas to exactly fit variable-length text (pdfmake has no
+ * "measure this paragraph" API of its own; reuse the pdfkit doc above). */
+function textHeight(text: string, font: string, size: number, width: number, lineHeightMultiplier: number): number {
+  measureDoc.font(font).fontSize(size);
+  const naturalLineHeight = measureDoc.currentLineHeight();
+  const lineGap = size * lineHeightMultiplier - naturalLineHeight;
+  return measureDoc.heightOfString(text, { width, lineGap });
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Inline `<b>...</b>` → pdfmake rich-text spans (theme.ts's ABOUT_DP_BULLETS
 // and LONG_JD_FOOTER_NOTE, plus any AI-generated content string, use this
@@ -275,14 +285,21 @@ function bulletMarkerCanvas(style: BulletStyle): unknown[] {
   }];
 }
 
-/** One bullet row: small marker glyph in a fixed-width column + wrapping body text. */
+/** One bullet row: small marker glyph in a fixed-width column + wrapping body text.
+ * Column width/gap tuned against the reference JD (DP_JD6_Customer_Success_Manager.pdf)
+ * — the original 12pt column + 2pt gap sat the marker too close to the margin and
+ * too close to the text compared to that reference. The 'must'/'good' diamond
+ * markers render inside the narrower twoColRequirements table cells rather than
+ * a full-width stack, so the same 16/6 arrow tuning left a much bigger visual
+ * gap there (measured ~3x too wide against the reference) — tightened separately. */
 function bulletRow(item: string, style: BulletStyle) {
+  const isDiamond = style === 'must' || style === 'good';
   return {
     columns: [
-      { width: 12, margin: [0, 3, 0, 0], canvas: bulletMarkerCanvas(style) },
+      { width: isDiamond ? 10 : 16, margin: [2, 3, 0, 0], canvas: bulletMarkerCanvas(style) },
       { width: '*', text: parseInlineBold(item), font: 'Helvetica', fontSize: 9, color: C.bodyTxt, lineHeight: 1.3 },
     ],
-    columnGap: 2,
+    columnGap: isDiamond ? 3 : 6,
   };
 }
 
@@ -509,32 +526,34 @@ function cardHeader(role: Role, content: JdContent) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Highlight box — HighlightBox ported as a single-cell table: fillColor for
-// the light-blue background, a 4pt-wide left vLine for the teal accent bar.
-// Table rows auto-fit wrapped paragraph height (unlike ReportLab, which had
-// to pre-wrap the Paragraph to compute an exact box height by hand) — the
-// tradeoff is square corners instead of HighlightBox's 5pt roundRect corners.
+// Highlight box — HighlightBox ported with real 5pt rounded corners (a table
+// with fillColor, the first-pass approach, only produces square corners —
+// same class of gap fixed in why2x2() below, confirmed against the
+// reference JD). Height is variable (depends on the quote's wrapped line
+// count), so it's measured up front via textHeight() rather than fixed like
+// why2x2()'s cells, then drawn as a canvas rect + negatively-margined overlay.
 // ─────────────────────────────────────────────────────────────────────────
 
 function highlightBox(quote: string, width: number = FRAME_W) {
+  const text = `"${quote}"`;
+  const textW = width - 19; // 10 (left pad) + 8 (right pad) + ~1 buffer, matching the old table's padding
+  const textH = textHeight(text, 'Helvetica-Oblique', 9, textW, 1.3);
+  const boxH = textH + 16; // 8pt top + 8pt bottom padding
+
   return {
-    table: {
-      widths: [width],
-      body: [[{
+    stack: [
+      {
+        canvas: [
+          { type: 'rect', x: 0, y: 0, w: width, h: boxH, r: 5, color: C.lightBlue },
+          { type: 'rect', x: 0, y: 0, w: 4, h: boxH, color: C.accent },
+        ],
+      },
+      {
+        margin: [10, -boxH + 8, 8, 0],
         text: [{ text: '"' }, ...parseInlineBold(quote), { text: '"' }],
         font: 'Helvetica', italics: true, fontSize: 9, color: C.highlightText, lineHeight: 1.3,
-      }]],
-    },
-    layout: {
-      hLineWidth: () => 0,
-      vLineWidth: (i: number) => (i === 0 ? 4 : 0),
-      vLineColor: () => C.accent,
-      paddingLeft: (i: number) => (i === 0 ? 10 : 6),
-      paddingRight: () => 8,
-      paddingTop: () => 8,
-      paddingBottom: () => 8,
-      fillColor: () => C.lightBlue,
-    },
+      },
+    ],
     margin: [0, 3, 0, 0],
   };
 }
@@ -582,50 +601,71 @@ function twoColRequirements(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Why Join Us — 2x2 grid, ported from Why2x2. Same table-with-fillColor
-// tradeoff as highlightBox() (square corners instead of 6pt roundRect).
+// Why Join Us — 2x2 grid, ported from Why2x2. Uses the same
+// canvas-background + negatively-margined-overlay technique as cardHeader()
+// so the cells get real 6pt rounded corners — a plain table+fillColor (the
+// first-pass approach) only produces square corners, a clear mismatch
+// against the reference JD (DP_JD6_Customer_Success_Manager.pdf).
 // ─────────────────────────────────────────────────────────────────────────
 
-function why2x2Cell(item: WhyJoinUsItem) {
+const WHY_CELL_H = 62;
+const WHY_GAP = 9;
+const WHY_TOP_PAD = 12;
+const WHY_LEFT_PAD = 12;
+const WHY_RIGHT_PAD = 10;
+const WHY_ICON_SIZE = 20;
+const WHY_COL_GAP = 8;
+
+// A stack's total reported height is the sum of each child's own height plus
+// its margins — a negatively-margined overlay only "gives back" exactly
+// (WHY_CELL_H - WHY_TOP_PAD) of that sum if its own content happens to be
+// that tall. Real content (icon fixed at 20pt, but description text height
+// varies with wrapping) is usually shorter, so the naive version under-
+// reports the cell's total height and the next row starts too early,
+// visually overlapping the canvas rect above it. Fixed by measuring the
+// actual content height (via textHeight(), the same pdfkit-based measurer
+// highlightBox() uses) and padding the remainder with an explicit spacer so
+// every cell's stack sums to exactly WHY_CELL_H regardless of content.
+function why2x2Cell(item: WhyJoinUsItem, colW: number) {
+  const bg = item.isGreen ? C.lightGreen : C.lightBlue;
+  const textColW = colW - WHY_LEFT_PAD - WHY_RIGHT_PAD - WHY_COL_GAP - WHY_ICON_SIZE;
+  const descH = textHeight(item.description, 'Helvetica', 8, textColW, 1.3);
+  const titleH = 9 * 1.2;
+  const contentH = Math.max(WHY_ICON_SIZE, titleH + 2 + descH);
+  const availableH = WHY_CELL_H - WHY_TOP_PAD;
+  const spacerH = Math.max(0, availableH - contentH);
+
   return {
-    columns: [
-      { svg: whyIconSvg(item.iconKey), width: 20, height: 20 },
+    stack: [
+      { canvas: [{ type: 'rect', x: 0, y: 0, w: colW, h: WHY_CELL_H, r: 6, color: bg }] },
       {
-        width: '*',
-        stack: [
-          { text: item.title, font: 'Helvetica', bold: true, fontSize: 9, color: C.navy },
-          { text: item.description, font: 'Helvetica', fontSize: 8, color: C.muted, lineHeight: 1.3, margin: [0, 2, 0, 0] },
+        margin: [WHY_LEFT_PAD, -availableH, WHY_RIGHT_PAD, 0],
+        columns: [
+          { svg: whyIconSvg(item.iconKey), width: WHY_ICON_SIZE, height: WHY_ICON_SIZE },
+          {
+            width: '*',
+            stack: [
+              { text: item.title, font: 'Helvetica', bold: true, fontSize: 9, color: C.navy },
+              { text: item.description, font: 'Helvetica', fontSize: 8, color: C.muted, lineHeight: 1.3, margin: [0, 2, 0, 0] },
+            ],
+          },
         ],
+        columnGap: WHY_COL_GAP,
       },
+      { canvas: [], margin: [0, 0, 0, spacerH] },
     ],
-    columnGap: 8,
   };
 }
 
 function why2x2(items: WhyJoinUsItem[]) {
   const [a, b, c, d] = items;
-  const colW = (FRAME_W - 9) / 2;
+  const colW = (FRAME_W - WHY_GAP) / 2;
 
   return {
-    table: {
-      widths: [colW, colW],
-      body: [
-        [why2x2Cell(a), why2x2Cell(b)],
-        [why2x2Cell(c), why2x2Cell(d)],
-      ],
-    },
-    layout: {
-      hLineWidth: () => 0,
-      vLineWidth: () => 0,
-      paddingLeft: () => 12,
-      paddingRight: () => 10,
-      paddingTop: () => 12,
-      paddingBottom: () => 12,
-      fillColor: (rowIndex: number, _node: unknown, columnIndex: number) => {
-        const item = [a, b, c, d][rowIndex * 2 + columnIndex];
-        return item.isGreen ? C.lightGreen : C.lightBlue;
-      },
-    },
+    stack: [
+      { columns: [why2x2Cell(a, colW), why2x2Cell(b, colW)], columnGap: WHY_GAP },
+      { columns: [why2x2Cell(c, colW), why2x2Cell(d, colW)], columnGap: WHY_GAP, margin: [0, WHY_GAP, 0, 0] },
+    ],
   };
 }
 

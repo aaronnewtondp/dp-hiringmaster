@@ -13,6 +13,10 @@ build/
 .env.*.local
 .env.production
 
+# Google service account key files — never commit
+*service-account*.json
+dp-hiring-master-*.json
+
 # Logs
 *.log
 npm-debug.log*
