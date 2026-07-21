@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { checkApplicationSLAs } from '../jobs/slaChecker.js';
+import { runSlaCheck, sendDailyDigest } from '../jobs/slaChecker.js';
 
 const router = Router();
 
@@ -16,22 +16,31 @@ function verifyCron(req: Request, res: Response): boolean {
   return true;
 }
 
-// POST /api/cron/sla-check
+// POST /api/cron/sla-check — runs all 4 checks (application SLAs, assignment
+// deadlines, role aging, joining risk), same as dashboard.ts's compute-on-read
+// path, so Vercel Cron and a dashboard load are equivalent instead of the
+// cron route silently covering less.
 router.post('/sla-check', async (req: Request, res: Response) => {
   if (!verifyCron(req, res)) return;
   try {
-    const result = await checkApplicationSLAs();
-    res.json({ ok: true, ...result });
+    await runSlaCheck();
+    res.json({ ok: true });
   } catch (err) {
     console.error('[cron] SLA check failed', err);
     res.status(500).json({ error: 'SLA check failed' });
   }
 });
 
-// POST /api/cron/email-digest (stub — email not yet implemented)
+// POST /api/cron/email-digest
 router.post('/email-digest', async (req: Request, res: Response) => {
   if (!verifyCron(req, res)) return;
-  res.json({ ok: true, message: 'Email digest not yet implemented' });
+  try {
+    await sendDailyDigest();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[cron] Email digest failed', err);
+    res.status(500).json({ error: 'Email digest failed' });
+  }
 });
 
 export default router;

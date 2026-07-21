@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
 import { authenticate, requireHR, stripRestrictedFields } from '../middleware/auth.js';
 import { Application, SLA_HOURS, Candidate, Role } from '../types/index.js';
-import { scoreCandidate } from '../services/resumeIQ.js';
+import { scoreCandidate, priorityBucketFromScore } from '../services/resumeIQ.js';
 import { fetchResumeText } from '../services/driveService.js';
 
 const router = Router();
@@ -149,6 +149,13 @@ router.post('/:id/stage', requireHR, async (req: Request, res: Response) => {
         }
 
         const result = await scoreCandidate(candidate, role, resumeText);
+        // ai_fit_score/ai_priority_bucket are the legacy 0-100-scale columns
+        // still read by the dashboard's fit buckets, the role-pipeline sort,
+        // and the SLA-by-fit-score branch above (line ~116) — nothing wrote
+        // to them once scoring moved to the 8-dimension score_* columns, so
+        // derive them from avgScore (0-10) here to keep every reader in sync.
+        const aiFitScore = Math.round(result.avgScore * 10);
+        const aiPriorityBucket = priorityBucketFromScore(result.avgScore);
         await query(
           `UPDATE applications SET
              score_technical=$1, score_technical_note=$2,
@@ -161,8 +168,8 @@ router.post('/:id/stage', requireHR, async (req: Request, res: Response) => {
              score_communication=$15, score_communication_note=$16,
              score_avg=$17, score_strengths=$18, score_red_flags=$19,
              score_summary=$20, score_recommendation=$21, score_resume_read=$22,
-             score_computed_at=NOW()
-           WHERE id=$23`,
+             score_computed_at=NOW(), ai_fit_score=$23, ai_priority_bucket=$24
+           WHERE id=$25`,
           [
             result.technical.score, result.technical.note,
             result.experience.score, result.experience.note,
@@ -174,6 +181,7 @@ router.post('/:id/stage', requireHR, async (req: Request, res: Response) => {
             result.communication.score, result.communication.note,
             result.avgScore, result.strengths, result.redFlags,
             result.summary, result.recommendation, result.resumeRead,
+            aiFitScore, aiPriorityBucket,
             app.id,
           ]
         );
@@ -184,8 +192,8 @@ router.post('/:id/stage', requireHR, async (req: Request, res: Response) => {
           `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by_name)
            VALUES ($1,$2,$3,'ResumeIQ Scoring Completed',$4,$5,'System')`,
           [app.id, app.candidate_id, app.role_id,
-           `Score: ${result.fit_score}/100 (${result.priority_bucket})`,
-           result.priority_bucket]
+           `Score: ${aiFitScore}/100 (${aiPriorityBucket})`,
+           aiPriorityBucket]
         );
       } catch (err) {
         console.error('[ResumeIQ] Scoring failed for', app.id, err);
