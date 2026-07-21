@@ -11,7 +11,7 @@ test.describe('POST /api/auth/login', () => {
     const body = await res.json();
     expect(body.token).toBeTruthy();
     expect(body.user.email).toBe(USERS.hr.email);
-    expect(body.user.persona).toBe('hr_recruiter');
+    expect(body.user.persona).toBe(USERS.hr.persona);
     expect(body.user).not.toHaveProperty('password_hash');
   });
 
@@ -65,7 +65,7 @@ test.describe('GET /api/auth/me', () => {
     expect(res.status()).toBe(200);
     const body = await res.json();
     expect(body.user.email).toBe(USERS.hr.email);
-    expect(body.user.persona).toBe('hr_recruiter');
+    expect(body.user.persona).toBe(USERS.hr.persona);
   });
 
   test('returns 401 with no token', async ({ request }) => {

@@ -29,6 +29,11 @@ export default defineConfig({
       use: { baseURL: API_URL },
     },
     {
+      name: 'db',
+      testMatch: 'tests/db/**/*.spec.ts',
+      use: { baseURL: API_URL },
+    },
+    {
       name: 'e2e',
       testMatch: 'tests/e2e/**/*.spec.ts',
       use: {

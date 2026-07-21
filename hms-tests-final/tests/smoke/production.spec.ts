@@ -12,6 +12,52 @@
 import { test, expect } from '@playwright/test';
 import { BASE, USERS, getToken, authed } from '../helpers/api';
 
+// ─── Phase 3/4 ingestion webhooks — auth-rejection paths ONLY ─────────────────
+// These routes have no JWT/authenticate middleware (Apps Script can't hold a
+// user session) and are guarded solely by a shared secret — perfect smoke
+// candidates since a wrong/missing secret is guaranteed to 401 without ever
+// touching the database, safe to run against production on every check.
+test('POST /api/roles/ingest — wrong secret returns 401 (never reaches the DB)', async ({ request }) => {
+  const res = await request.post(`${BASE}/api/roles/ingest`, {
+    headers: { 'x-ingest-secret': 'definitely-not-the-real-secret' },
+    data: { job_title: 'Smoke Test Role — should never be created' },
+  });
+  expect(res.status()).toBe(401);
+});
+
+test('POST /api/roles/ingest — missing secret header returns 401', async ({ request }) => {
+  const res = await request.post(`${BASE}/api/roles/ingest`, {
+    data: { job_title: 'Smoke Test Role — should never be created' },
+  });
+  expect(res.status()).toBe(401);
+});
+
+test('POST /api/candidates/ingest — wrong secret returns 401 (never reaches the DB)', async ({ request }) => {
+  const res = await request.post(`${BASE}/api/candidates/ingest`, {
+    headers: { 'x-ingest-secret': 'definitely-not-the-real-secret' },
+    data: { email: 'smoke-test@example.com', full_name: 'Smoke Test — should never be created' },
+  });
+  expect(res.status()).toBe(401);
+});
+
+test('POST /api/candidates/ingest — missing secret header returns 401', async ({ request }) => {
+  const res = await request.post(`${BASE}/api/candidates/ingest`, {
+    data: { email: 'smoke-test@example.com', full_name: 'Smoke Test — should never be created' },
+  });
+  expect(res.status()).toBe(401);
+});
+
+// ─── Phase 4 candidate-role linking — auth-rejection path only ───────────────
+// authenticate() runs before the route handler, so a request with no token
+// 401s before any candidate/role lookup — safe against production regardless
+// of what real IDs currently exist.
+test('POST /api/candidates/:id/applications — no token returns 401 (never reaches the DB)', async ({ request }) => {
+  const res = await request.post(`${BASE}/api/candidates/C0001/applications`, {
+    data: { role_id: 'R001' },
+  });
+  expect(res.status()).toBe(401);
+});
+
 test('GET /health — server is running', async ({ request }) => {
   const res  = await request.get(`${BASE}/health`);
   expect(res.status()).toBe(200);
@@ -26,7 +72,7 @@ test('POST /api/auth/login — valid credentials return token', async ({ request
   expect(res.status()).toBe(200);
   const body = await res.json();
   expect(body.token).toBeTruthy();
-  expect(body.user.persona).toBe('hr_recruiter');
+  expect(body.user.persona).toBe(USERS.hr.persona);
 });
 
 test('POST /api/auth/login — wrong password returns 401', async ({ request }) => {

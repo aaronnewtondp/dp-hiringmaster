@@ -5,9 +5,42 @@ import path from 'path';
 export const BASE          = process.env.TEST_API_URL      || 'http://localhost:4000';
 export const FRONTEND_BASE = process.env.TEST_FRONTEND_URL || 'http://localhost:5173';
 
+// ─── Ingest webhook secrets ────────────────────────────────────────────────────
+// Defaults match docker-compose.yml's local dev values (already committed
+// there in plaintext — same precedent followed here). Override via env var
+// for any run against an environment with different secrets.
+export const ROLE_INGEST_SECRET      = process.env.ROLE_INGEST_SECRET      || '22fc0ba4d5799b9fcfeb167b36820247264e87780571fa21566ce048d7b69400';
+export const CANDIDATE_INGEST_SECRET = process.env.CANDIDATE_INGEST_SECRET || 'e9ba2e63e3a1167ce31671ee98831a884efc7f7e35986e778e9fce72fea4ed3f';
+export const CRON_SECRET             = process.env.CRON_SECRET            || 'local_dev_cron_secret_not_for_prod';
+
+// ─── Generic async-condition poller ───────────────────────────────────────────
+// Several flows are fire-and-forget async on the backend (JD generation,
+// ResumeIQ scoring) — there's nothing to await from the triggering request,
+// so tests must poll the resulting state instead.
+export async function pollUntil<T>(
+  fn: () => Promise<T>,
+  predicate: (result: T) => boolean,
+  { timeoutMs = 30000, intervalMs = 1500 }: { timeoutMs?: number; intervalMs?: number } = {}
+): Promise<T> {
+  const start = Date.now();
+  let last: T;
+  while (Date.now() - start < timeoutMs) {
+    last = await fn();
+    if (predicate(last)) return last;
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return last!;
+}
+
 // ─── Credential map ──────────────────────────────────────────────────────────
 export const USERS = {
-  hr:          { email: 'aaron.newton@digitalpaani.com', password: 'password123', persona: 'hr_recruiter'    },
+  // aaron.newton@ is genuinely seeded as 'leadership' (Founders Office), not
+  // 'hr_recruiter' — confirmed directly against the DB. Kept as the 'hr' key
+  // since leadership is a superset of hr_recruiter access everywhere in this
+  // app (requireHR allows both), so it still works as the general
+  // HR-privileged test identity; only its own persona field had to be
+  // corrected to match reality.
+  hr:          { email: 'aaron.newton@digitalpaani.com', password: 'password123', persona: 'leadership'      },
   hr2:         { email: 'garima@digitalpaani.com',       password: 'password123', persona: 'hr_recruiter'    },
   hm_alex:     { email: 'alex@digitalpaani.com',         password: 'password123', persona: 'hiring_manager'  },
   hm_satyadev: { email: 'satyadev@digitalpaani.com',     password: 'password123', persona: 'hiring_manager'  },

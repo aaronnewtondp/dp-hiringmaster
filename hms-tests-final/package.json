@@ -7,10 +7,14 @@
     "test:api":    "playwright test tests/api --reporter=list",
     "test:smoke":  "playwright test tests/smoke --reporter=list",
     "test:e2e":    "playwright test tests/e2e --reporter=list",
+    "test:db":     "playwright test tests/db --reporter=list",
+    "test:local":  "playwright test tests/api tests/db tests/e2e --reporter=list",
     "test:prod":   "TEST_API_URL=https://dp-hiringmaster-be.vercel.app TEST_FRONTEND_URL=https://dp-hiringmaster.vercel.app playwright test tests/smoke --reporter=list",
     "test:report": "playwright show-report"
   },
   "devDependencies": {
-    "@playwright/test": "^1.44.0"
+    "@playwright/test": "^1.44.0",
+    "pg": "^8.11.5",
+    "@types/pg": "^8.11.6"
   }
 }

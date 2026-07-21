@@ -69,8 +69,10 @@ test.describe('Dashboard API', () => {
     test('HM sees only their own queue', async ({ request }) => {
       const token   = await getToken(request, 'hm_alex');
       const { actions } = await (await authed(request, token).get('/api/dashboard/pending')).json();
+      // dashboard.ts filters HM's queue to the literal owner_type string
+      // 'Hiring Manager' (Title Case) — confirmed directly from source.
       for (const a of actions) {
-        expect(['hiring_manager', 'hm_alex']).toContain(a.owner_type);
+        expect(a.owner_type).toBe('Hiring Manager');
       }
     });
 

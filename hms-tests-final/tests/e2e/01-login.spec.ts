@@ -36,8 +36,9 @@ test('Login page loads with Google Sign-In button', async ({ page }) => {
 test('Authenticated user reaches dashboard', async ({ page }) => {
   await loginViaApi(page);
   await expect(page).toHaveURL(/\/dashboard/);
-  // Dashboard should have some heading
-  await expect(page.locator('h1, h2, [data-testid="dashboard"]')).toBeVisible({ timeout: 10000 });
+  // Dashboard renders several headings (page h1 + per-card h2s) — assert the
+  // page-level h1 specifically rather than a locator that matches all of them.
+  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible({ timeout: 10000 });
 });
 
 test('Unauthenticated user is redirected to login', async ({ page }) => {
