@@ -74,6 +74,18 @@ export interface Candidate {
   email?:                 string;
   phone?:                 string;
   linkedin_url?:          string;
+  current_ctc_fixed?:     number;
+  current_ctc_variable?:  number;
+  current_esops?:         number;
+  expected_ctc?:          number;
+  notice_period_days?:    number;
+  current_company?:       string;
+  current_industry?:      string;
+  current_designation?:   string;
+  current_location?:      string;
+  years_of_experience?:   number;
+  resume_drive_link?:     string;
+  languages_known?:       string;
   parsed_total_yoe?:      number;
   parsed_skills?:         string[];
   parsed_industries?:     string[];
@@ -113,6 +125,7 @@ export interface Application {
   notice_period_days?:          number;
   current_location?:            string;
   preferred_location?:          string;
+  qualifications_note?:         string;
   resume_drive_link?:           string;
   assignment_submission_link?:  string;
   offer_letter_link?:           string;

@@ -466,9 +466,18 @@ ALTER TABLE candidates
 CREATE INDEX IF NOT EXISTS idx_candidates_yoe ON candidates(years_of_experience);
 CREATE INDEX IF NOT EXISTS idx_candidates_expected_ctc ON candidates(expected_ctc);
 
+-- ── candidates: languages known (Job Application Form, asked once, candidate-level) ──
+ALTER TABLE candidates
+  ADD COLUMN IF NOT EXISTS languages_known TEXT;
+
 -- ── applications: missing updated_at (trigger target) ──────────────────────────
 ALTER TABLE applications
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+-- ── applications: qualifications pitch (Job Application Form, asked per role
+-- branch, so it's a per-application field, not a candidate-level one) ──────────
+ALTER TABLE applications
+  ADD COLUMN IF NOT EXISTS qualifications_note TEXT;
 
 -- ── applications: 8-dimension ResumeIQ scoring rubric ──────────────────────────
 ALTER TABLE applications

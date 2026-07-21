@@ -1,5 +1,6 @@
 import 'express-async-errors';
 import roleIngestRoutes from './routes/roleIngest.js';
+import candidateIngestRoutes from './routes/candidateIngest.js';
 /**
  * Express server entry point.
  *
@@ -38,6 +39,7 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '2mb' }));
 app.use('/api/roles', roleIngestRoutes);
+app.use('/api/candidates', candidateIngestRoutes);
 
 // Rate limiters — disabled outside production so tests run freely
 const skip = () => process.env.NODE_ENV !== 'production';

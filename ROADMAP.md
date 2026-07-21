@@ -97,14 +97,34 @@ live.
 
 ## Phase 4 — Candidate ingestion & scoring fidelity
 
-- [ ] **Candidate ingestion from the Job Application Form.** Same
-      Sheet→AppsScript→webhook pattern as Phase 3's role ingestion, but for
-      candidates — grouped/linked to the correct role based on the
-      applicant's "role applying for" selection. Field mapping already
-      scoped: Email, Name, Phone, Current CTC (fixed+variable+ESOPs),
-      Expected CTC, Notice Period, Current Company, Industry, Designation,
-      Location, YOE, Resume Link — all already exist as real columns on
-      `candidates` (added this project's schema work).
+- [x] **Candidate ingestion from the Job Application Form.** Live. Same
+      Sheet→AppsScript→webhook pattern as Phase 3's role ingestion
+      (`POST /api/candidates/ingest`, `candidateIngest.ts`, shared-secret
+      auth via `CANDIDATE_INGEST_SECRET` — a dedicated secret, not a reuse
+      of `ROLE_INGEST_SECRET`, since this endpoint carries candidate PII).
+      Email (trimmed + lowercased) is the natural dedup key: a new email
+      creates a candidate row, a known email finds it and does a
+      fill-null-only update so a resubmission can never clobber HR's
+      inline-edit corrections (Phase 3). The free-text "role applying for"
+      answer — one shared Google Form serves all roles, so this isn't a
+      role_id already — is matched by normalized exact title against
+      non-closed roles; zero or multiple matches degrade gracefully (the
+      candidate row still gets created/updated, just no application row),
+      logging an `activity_log` entry (`Unmatched Role — Manual
+      Reconciliation`) for HR to resolve by hand rather than failing the
+      whole webhook call. A clean match creates an `applications` row
+      (`stage='Applied'`, source `'Job Application Form'`), reusing the
+      exact insert shape `candidates.ts`'s manual creation route already
+      uses. Verified live against local Docker: fresh candidate + matched
+      role, duplicate resubmit (no-op), same email + second role (reuses
+      candidate, adds a second application), and unmatched role name (degrades
+      gracefully) all behave as designed. Along the way, fixed the
+      `Candidate` TypeScript interface, which was missing all 11 real
+      profile columns (`current_ctc_fixed`, `expected_ctc`,
+      `resume_drive_link`, etc.) — the columns themselves were already live
+      in both Docker and Supabase, just never reflected in the type, which
+      is what was causing several pre-existing `npx tsc --noEmit` errors in
+      `resumeIQ.ts`/`applications.ts`.
 - [x] **ResumeIQ scores against the generated JD document.** Live. The
       structured content `jdContent.ts` generates for the JD PDFs (narrative,
       condensed key responsibilities, must-haves/good-to-haves, tags) was
