@@ -81,6 +81,10 @@ export const dashboardApi = {
   pending: () => api.get('/dashboard/pending'),
 };
 
+export const assignmentRepoApi = {
+  list: () => api.get('/assignment-repo'),
+};
+
 export const agenciesApi = {
   list:   ()                                          => api.get('/agencies'),
   get:    (id: string)                                => api.get(`/agencies/${id}`),

@@ -94,13 +94,19 @@ router.patch('/:id/feedback', async (req: Request, res: Response) => {
     // Would check interviewer_names includes req.user.name — simplified here
   }
 
+  const isAssignment = round.round_type === 'Assignment';
+
   const {
     eval_areas_assessed, scores_per_area, confidence_level,
     overall_assessment, strengths_observed, key_concerns,
     unresolved_questions, suggested_probe_areas, round_recommendation, notes,
   } = req.body;
+  const {
+    assignment_outcome, score_technical_accuracy, score_problem_solving,
+    score_clarity, score_practical_thinking, score_completeness, assignment_notes,
+  } = req.body;
 
-  // Compute weighted average
+  // Compute weighted average (Standard rounds)
   let overall_round_score: number | null = null;
   if (scores_per_area && typeof scores_per_area === 'object') {
     const vals = Object.values(scores_per_area) as number[];
@@ -109,21 +115,49 @@ router.patch('/:id/feedback', async (req: Request, res: Response) => {
       : null;
   }
 
+  // Weighted rubric total (Assignment rounds) — Technical Accuracy 40% /
+  // Problem Solving 25% / Clarity & Structure 15% / Practical Thinking 10%
+  // / Completeness 10%, per PRD §12. Only computed once all 5 are in.
+  let assignment_overall_score: number | null = null;
+  if (isAssignment && [score_technical_accuracy, score_problem_solving, score_clarity,
+      score_practical_thinking, score_completeness].every(v => v != null)) {
+    assignment_overall_score = Math.round((
+      score_technical_accuracy * 0.4 + score_problem_solving * 0.25 +
+      score_clarity * 0.15 + score_practical_thinking * 0.10 + score_completeness * 0.10
+    ) * 10) / 10;
+  }
+
   await transaction(async (client) => {
-    await client.query(
-      `UPDATE interview_rounds SET
-         eval_areas_assessed=$1, scores_per_area=$2, overall_round_score=$3,
-         confidence_level=$4, overall_assessment=$5, strengths_observed=$6,
-         key_concerns=$7, unresolved_questions=$8, suggested_probe_areas=$9,
-         round_recommendation=$10, notes=$11,
-         feedback_status='Submitted', feedback_submitted_at=NOW(),
-         entered_by=$12, updated_at=NOW()
-       WHERE id=$13`,
-      [eval_areas_assessed, JSON.stringify(scores_per_area), overall_round_score,
-       confidence_level, overall_assessment, strengths_observed, key_concerns,
-       unresolved_questions, suggested_probe_areas, round_recommendation, notes,
-       req.user!.userId, req.params.id]
-    );
+    if (isAssignment) {
+      await client.query(
+        `UPDATE interview_rounds SET
+           assignment_outcome=$1, score_technical_accuracy=$2, score_problem_solving=$3,
+           score_clarity=$4, score_practical_thinking=$5, score_completeness=$6,
+           assignment_overall_score=$7, assignment_notes=$8,
+           feedback_status='Submitted', feedback_submitted_at=NOW(),
+           entered_by=$9, updated_at=NOW()
+         WHERE id=$10`,
+        [assignment_outcome, score_technical_accuracy, score_problem_solving,
+         score_clarity, score_practical_thinking, score_completeness,
+         assignment_overall_score, assignment_notes,
+         req.user!.userId, req.params.id]
+      );
+    } else {
+      await client.query(
+        `UPDATE interview_rounds SET
+           eval_areas_assessed=$1, scores_per_area=$2, overall_round_score=$3,
+           confidence_level=$4, overall_assessment=$5, strengths_observed=$6,
+           key_concerns=$7, unresolved_questions=$8, suggested_probe_areas=$9,
+           round_recommendation=$10, notes=$11,
+           feedback_status='Submitted', feedback_submitted_at=NOW(),
+           entered_by=$12, updated_at=NOW()
+         WHERE id=$13`,
+        [eval_areas_assessed, JSON.stringify(scores_per_area), overall_round_score,
+         confidence_level, overall_assessment, strengths_observed, key_concerns,
+         unresolved_questions, suggested_probe_areas, round_recommendation, notes,
+         req.user!.userId, req.params.id]
+      );
+    }
 
     // Resolve feedback-due pending action
     await client.query(
@@ -136,14 +170,26 @@ router.patch('/:id/feedback', async (req: Request, res: Response) => {
       'SELECT candidate_id, role_id FROM applications WHERE id=$1',
       [round.application_id]
     );
-    await client.query(
-      `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [round.application_id, app.rows[0]?.candidate_id, app.rows[0]?.role_id,
-       'Interview Feedback Submitted',
-       `${round.round_name}: ${overall_assessment || ''} (score: ${overall_round_score ?? '—'})`,
-       round_recommendation, req.user!.userId, req.user!.name]
-    );
+
+    if (isAssignment) {
+      await client.query(
+        `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [round.application_id, app.rows[0]?.candidate_id, app.rows[0]?.role_id,
+         'Assignment Evaluated',
+         `${round.round_name}: ${assignment_outcome || ''} (score: ${assignment_overall_score ?? '—'}/5)`,
+         assignment_outcome, req.user!.userId, req.user!.name]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [round.application_id, app.rows[0]?.candidate_id, app.rows[0]?.role_id,
+         'Interview Feedback Submitted',
+         `${round.round_name}: ${overall_assessment || ''} (score: ${overall_round_score ?? '—'})`,
+         round_recommendation, req.user!.userId, req.user!.name]
+      );
+    }
   });
 
   const updated = await queryOne<InterviewRound>(

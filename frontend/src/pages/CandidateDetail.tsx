@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ExternalLink, Star, ChevronDown, ChevronUp, CalendarPlus, MessageSquare, FileText } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Star, ChevronDown, ChevronUp, CalendarPlus, MessageSquare, FileText, Send, Link2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { candidatesApi, applicationsApi, interviewsApi } from '../services/api.ts';
-import { Candidate, Application, InterviewRound, STAGES, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
+import { candidatesApi, applicationsApi, interviewsApi, assignmentRepoApi } from '../services/api.ts';
+import { Candidate, Application, InterviewRound, AssignmentRepoEntry, STAGES, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
 import { StageBadge, StatusBadge, PriorityBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
 import ResumeIQPanel from '../components/ResumeIQPanel.tsx';
 import InterviewFeedbackModal from '../components/InterviewFeedbackModal.tsx';
 import ScheduleRoundModal from '../components/ScheduleRoundModal.tsx';
+import AssignmentOutcomeModal from '../components/AssignmentOutcomeModal.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { formatDistanceToNow, format } from 'date-fns';
 
@@ -17,6 +18,22 @@ function FeedbackBadge({ status }: { status: string }) {
   if (status === 'Submitted') return <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">Submitted</span>;
   if (status === 'Overdue') return <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium animate-pulse">Overdue</span>;
   return <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">Pending</span>;
+}
+
+// Mirrors slaChecker.ts's checkAssignmentDeadlines() 3-condition check so the
+// UI never disagrees with what actually creates the "deadline breached"
+// pending action: sent, not yet submitted, deadline passed.
+function AssignmentStatusPill({ round }: { round: InterviewRound }) {
+  if (!round.assignment_send_date || round.assignment_submission_date) return null;
+  const overdue = !!round.assignment_deadline && new Date(round.assignment_deadline) < new Date();
+  if (overdue) {
+    return <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium animate-pulse">Overdue</span>;
+  }
+  return (
+    <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+      Due {round.assignment_deadline ? format(new Date(round.assignment_deadline), 'MMM d, h:mm a') : '—'}
+    </span>
+  );
 }
 
 export default function CandidateDetail() {
@@ -39,9 +56,17 @@ export default function CandidateDetail() {
   const [founderNote, setFounderNote] = useState('');
 
   const [feedbackRound, setFeedbackRound] = useState<(InterviewRound & { candidate_name?: string; role_title?: string }) | null>(null);
+  const [outcomeRound, setOutcomeRound] = useState<(InterviewRound & { candidate_name?: string; role_title?: string }) | null>(null);
   const [scheduleAppId, setScheduleAppId] = useState<string | null>(null);
   const [scheduleNextNum, setScheduleNextNum] = useState(1);
   const [expandedApps, setExpandedApps] = useState<Set<string>>(new Set());
+
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [sendRoundId, setSendRoundId] = useState('');
+  const [sendRepoId, setSendRepoId] = useState('');
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [submitRoundId, setSubmitRoundId] = useState('');
+  const [submitLink, setSubmitLink] = useState('');
 
   const toggleApp = (appId: string) =>
     setExpandedApps(prev => {
@@ -78,6 +103,13 @@ export default function CandidateDetail() {
     enabled: applications.length > 0,
   });
 
+  const { data: repoData } = useQuery<{ data: { assignments: AssignmentRepoEntry[] } }>({
+    queryKey: ['assignment-repo'],
+    queryFn: () => assignmentRepoApi.list(),
+    enabled: showSendModal,
+  });
+  const repoEntries = repoData?.data?.assignments || [];
+
   const saveCandidateFields = async (changes: Record<string, unknown>) => {
     await candidatesApi.update(id!, changes);
     qc.invalidateQueries({ queryKey: ['candidate', id] });
@@ -96,6 +128,31 @@ export default function CandidateDetail() {
       setShowFounderModal(false);
       qc.invalidateQueries({ queryKey: ['candidate', id] });
     } catch { toast.error('Failed to update Founder Review flag'); }
+    setSaving(false);
+  };
+
+  const handleSendAssignment = async () => {
+    setSaving(true);
+    try {
+      await interviewsApi.sendAssignment(sendRoundId, { assignment_repo_id: sendRepoId || undefined });
+      toast.success('Assignment sent');
+      setShowSendModal(false);
+      qc.invalidateQueries({ queryKey: ['interview-rounds'] });
+      refetchRounds();
+    } catch { toast.error('Failed to send assignment'); }
+    setSaving(false);
+  };
+
+  const handleSubmitAssignment = async () => {
+    if (!submitLink.trim()) { toast.error('Submission link is required'); return; }
+    setSaving(true);
+    try {
+      await interviewsApi.submitAssignment(submitRoundId, submitLink.trim());
+      toast.success('Submission recorded');
+      setShowSubmitModal(false);
+      qc.invalidateQueries({ queryKey: ['interview-rounds'] });
+      refetchRounds();
+    } catch { toast.error('Failed to record submission'); }
     setSaving(false);
   };
 
@@ -318,7 +375,7 @@ export default function CandidateDetail() {
                                   <div>
                                     <div className="flex items-center gap-2">
                                       <span className="text-xs font-medium text-gray-900">Round {round.round_number} — {round.round_name}</span>
-                                      <FeedbackBadge status={round.feedback_status} />
+                                      {round.round_type === 'Assignment' ? <AssignmentStatusPill round={round} /> : <FeedbackBadge status={round.feedback_status} />}
                                       {round.round_type === 'Assignment' && <span className="text-xs px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">Assignment</span>}
                                     </div>
                                     <div className="text-xs text-gray-400 mt-0.5 flex gap-3">
@@ -326,9 +383,42 @@ export default function CandidateDetail() {
                                       {round.scheduled_date && <span>📅 {format(new Date(round.scheduled_date), 'MMM d, h:mm a')}</span>}
                                       {round.overall_assessment && <span className="font-medium text-gray-600">{round.overall_assessment} · {round.round_recommendation}</span>}
                                       {round.overall_round_score != null && <span>Score: {Number(round.overall_round_score).toFixed(1)}/5</span>}
+                                      {round.assignment_outcome && (
+                                        <span className={`font-medium ${
+                                          round.assignment_outcome === 'Approved for Next Round' ? 'text-green-600' :
+                                          round.assignment_outcome === 'Assignment Resent' ? 'text-amber-600' : 'text-red-600'
+                                        }`}>
+                                          {round.assignment_outcome}{round.assignment_overall_score != null && ` · ${Number(round.assignment_overall_score).toFixed(1)}/5`}
+                                        </span>
+                                      )}
                                     </div>
                                   </div>
-                                  {round.feedback_status !== 'Submitted' && (
+                                  {round.round_type === 'Assignment' ? (
+                                    // Send/Record submission are HR-owned lifecycle steps (matches
+                                    // requireHR on the backend routes) — but Record outcome is the
+                                    // actual technical evaluation, done by whichever persona is
+                                    // qualified to judge the submission (HM/Interviewer), same as
+                                    // Standard-round feedback below is open to everyone. HR can still
+                                    // score it themselves (e.g. relaying verbal scores from someone
+                                    // else) since this button isn't persona-gated either.
+                                    !round.assignment_send_date ? (
+                                      canHR && (
+                                        <button onClick={() => { setSendRoundId(round.id); setSendRepoId(''); setShowSendModal(true); }} className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium shrink-0 ml-3">
+                                          <Send className="w-3.5 h-3.5" /> Send assignment
+                                        </button>
+                                      )
+                                    ) : !round.assignment_submission_date ? (
+                                      canHR && (
+                                        <button onClick={() => { setSubmitRoundId(round.id); setSubmitLink(''); setShowSubmitModal(true); }} className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium shrink-0 ml-3">
+                                          <Link2 className="w-3.5 h-3.5" /> Record submission
+                                        </button>
+                                      )
+                                    ) : !round.assignment_outcome ? (
+                                      <button onClick={() => setOutcomeRound({ ...round, candidate_name: candidate.full_name, role_title: app.role_title })} className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium shrink-0 ml-3">
+                                        <MessageSquare className="w-3.5 h-3.5" /> Record outcome
+                                      </button>
+                                    ) : null
+                                  ) : round.feedback_status !== 'Submitted' && (
                                     <button onClick={() => setFeedbackRound({ ...round, candidate_name: candidate.full_name, role_title: app.role_title })} className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium shrink-0 ml-3">
                                       <MessageSquare className="w-3.5 h-3.5" /> Submit feedback
                                     </button>
@@ -428,6 +518,47 @@ export default function CandidateDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {showSendModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+            <h3 className="text-base font-semibold">Send assignment</h3>
+            <select value={sendRepoId} onChange={e => setSendRepoId(e.target.value)} className="select">
+              <option value="">— Ad hoc, no repo entry —</option>
+              {repoEntries.map(a => (
+                <option key={a.id} value={a.id}>{a.name}{a.difficulty_level ? ` (${a.difficulty_level})` : ''}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400">Deadline auto-sets to 60 hours from now.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowSendModal(false)} className="btn-secondary">Cancel</button>
+              <button onClick={handleSendAssignment} disabled={saving} className="btn-primary">{saving ? 'Sending…' : 'Send'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSubmitModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+            <h3 className="text-base font-semibold">Record submission</h3>
+            <input
+              value={submitLink}
+              onChange={e => setSubmitLink(e.target.value)}
+              placeholder="Drive/repo link to the submission"
+              className="input"
+            />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowSubmitModal(false)} className="btn-secondary">Cancel</button>
+              <button onClick={handleSubmitAssignment} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Save'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {outcomeRound && (
+        <AssignmentOutcomeModal round={outcomeRound} onClose={() => setOutcomeRound(null)} onSuccess={() => { qc.invalidateQueries({ queryKey: ['interview-rounds'] }); refetchRounds(); }} />
       )}
 
       {feedbackRound && (

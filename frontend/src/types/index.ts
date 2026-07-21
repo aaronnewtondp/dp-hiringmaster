@@ -189,9 +189,28 @@ export interface InterviewRound {
   overall_round_score?:     number;
   overall_assessment?:      string;
   round_recommendation?:    string;
+  assignment_repo_id?:      string;
+  assignment_send_date?:    string;
   assignment_deadline?:     string;
-  assignment_outcome?:      string;
+  assignment_submission_date?: string;
   assignment_submission_link?: string;
+  assignment_outcome?:      string;
+  assignment_overall_score?: number;
+  score_technical_accuracy?: number;
+  score_problem_solving?:   number;
+  score_clarity?:           number;
+  score_practical_thinking?: number;
+  score_completeness?:      number;
+  assignment_notes?:        string;
+}
+
+export interface AssignmentRepoEntry {
+  id:                string;
+  name:              string;
+  role_category?:    string;
+  experience_level?: string;
+  difficulty_level?: string;
+  drive_link?:       string;
 }
 
 export interface PendingAction {
