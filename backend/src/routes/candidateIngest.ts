@@ -120,9 +120,12 @@ router.post('/ingest', async (req: Request, res: Response) => {
 
     const roleQuery = toStr(role_applied_for);
     if (roleQuery) {
+      // Collapse internal whitespace on both sides, not just leading/trailing —
+      // form dropdown text has been seen with stray double-spaces (e.g.
+      // "Customer  Success Manager") that a plain trim() wouldn't catch.
       const roleMatches = await client.query(
         `SELECT id, title FROM roles
-         WHERE lower(trim(title)) = lower(trim($1))
+         WHERE lower(regexp_replace(trim(title), '\\s+', ' ', 'g')) = lower(regexp_replace(trim($1), '\\s+', ' ', 'g'))
          AND status NOT IN ('Closed – Filled', 'Closed – Cancelled')`,
         [roleQuery]
       );

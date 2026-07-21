@@ -149,6 +149,54 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
   res.status(201).json(result);
 });
 
+// ─── POST /api/candidates/:id/applications — link an existing candidate to a
+// role. Fills the gap the manual POST / above can't: that route is
+// create-only for the candidate (409s on a duplicate email), so it can't be
+// reused for someone who already exists — e.g. a candidate ingested via the
+// Job Application Form whose "role applying for" answer didn't match any
+// open role (candidateIngest.ts's Unmatched Role — Manual Reconciliation
+// path) and needs linking by hand. ────────────────────────────────────────────
+router.post('/:id/applications', requireHR, async (req: Request, res: Response) => {
+  const { role_id, source_channel } = req.body;
+
+  const candidate = await queryOne<Candidate>('SELECT id FROM candidates WHERE id = $1', [req.params.id]);
+  if (!candidate) { res.status(404).json({ error: 'Candidate not found' }); return; }
+
+  if (!role_id) { res.status(400).json({ error: 'role_id is required' }); return; }
+  const role = await queryOne<{ id: string }>('SELECT id FROM roles WHERE id = $1', [role_id]);
+  if (!role) { res.status(400).json({ error: 'Role not found' }); return; }
+
+  const existingApp = await queryOne<{ id: string }>(
+    'SELECT id FROM applications WHERE candidate_id = $1 AND role_id = $2',
+    [req.params.id, role_id]
+  );
+  if (existingApp) {
+    res.status(409).json({ error: 'Already linked to this role', application_id: existingApp.id });
+    return;
+  }
+
+  const application = await transaction(async (client) => {
+    const appResult = await client.query(
+      `INSERT INTO applications (
+         candidate_id, role_id, source_channel,
+         stage, status, recruiter_screening_status, stage_entry_time, sla_hours
+       ) VALUES ($1,$2,$3,'Applied','Active','New',NOW(),48) RETURNING *`,
+      [req.params.id, role_id, source_channel || null]
+    );
+    const app = appResult.rows[0];
+
+    await client.query(
+      `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
+       VALUES ($1,$2,$3,'Application Created','Application manually linked from unmatched-role reconciliation',$4,$5,$6)`,
+      [app.id, req.params.id, role_id, JSON.stringify({ stage: 'Applied', source: source_channel }), req.user!.userId, req.user!.name]
+    );
+
+    return app;
+  });
+
+  res.status(201).json({ application });
+});
+
 // ─── PATCH /api/candidates/:id — update profile fields, with edit log ────────
 router.patch('/:id', requireHR, async (req: Request, res: Response) => {
   const existing = await queryOne<Candidate>('SELECT * FROM candidates WHERE id = $1', [req.params.id]);

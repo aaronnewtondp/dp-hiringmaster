@@ -99,6 +99,18 @@ export interface Candidate {
   current_location?:      string;
   years_of_experience?:   number;
   resume_drive_link?:     string;
+
+  // Present on GET /api/candidates (LEFT JOIN) — null when the candidate has
+  // no applications yet (e.g. an ingested candidate whose "role applying
+  // for" answer didn't match any open role).
+  applications?: Array<{
+    id:            string;
+    role_id:       string;
+    role_title:    string;
+    stage:         string;
+    status:        string;
+    ai_fit_score?: number;
+  }> | null;
 }
 
 export interface Application {

@@ -54,6 +54,7 @@ export const candidatesApi = {
   create:   (data: Record<string, unknown>)    => api.post('/candidates', data),
   update:   (id: string, data: Record<string, unknown>) => api.patch(`/candidates/${id}`, data),
   activity: (id: string)                       => api.get(`/candidates/${id}/activity`),
+  linkRole: (id: string, data: { role_id: string; source_channel?: string }) => api.post(`/candidates/${id}/applications`, data),
 };
 
 export const applicationsApi = {
