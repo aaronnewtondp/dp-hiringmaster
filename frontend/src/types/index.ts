@@ -155,8 +155,12 @@ export interface Application {
   hr_recruiter_summary?:       string;
   hr_key_positives?:           string;
   hr_key_concerns?:            string;
+  hr_comp_alignment?:          string;
+  hr_communication_assessment?: string;
   hr_priority_override?:       string;
+  hr_priority_override_reason?: string;
   hr_tags?:                    string[];
+  internal_risk_notes?:        string;
 
   // Governance
   founder_review_flag:         boolean;

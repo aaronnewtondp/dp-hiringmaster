@@ -33,6 +33,11 @@ export default function CandidateDetail() {
   const [rejectionDetail, setRejectionDetail] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const [showFounderModal, setShowFounderModal] = useState(false);
+  const [founderAppId, setFounderAppId] = useState('');
+  const [founderSetTo, setFounderSetTo] = useState(true);
+  const [founderNote, setFounderNote] = useState('');
+
   const [feedbackRound, setFeedbackRound] = useState<(InterviewRound & { candidate_name?: string; role_title?: string }) | null>(null);
   const [scheduleAppId, setScheduleAppId] = useState<string | null>(null);
   const [scheduleNextNum, setScheduleNextNum] = useState(1);
@@ -76,6 +81,22 @@ export default function CandidateDetail() {
   const saveCandidateFields = async (changes: Record<string, unknown>) => {
     await candidatesApi.update(id!, changes);
     qc.invalidateQueries({ queryKey: ['candidate', id] });
+  };
+
+  const saveApplicationNotes = async (appId: string, changes: Record<string, unknown>) => {
+    await applicationsApi.updateNotes(appId, changes);
+    qc.invalidateQueries({ queryKey: ['candidate', id] });
+  };
+
+  const handleFounderFlag = async () => {
+    setSaving(true);
+    try {
+      await applicationsApi.setFounderFlag(founderAppId, founderSetTo, founderNote || undefined);
+      toast.success(founderSetTo ? 'Flagged for Founder Review' : 'Founder Review flag cleared');
+      setShowFounderModal(false);
+      qc.invalidateQueries({ queryKey: ['candidate', id] });
+    } catch { toast.error('Failed to update Founder Review flag'); }
+    setSaving(false);
   };
 
   const handleStageUpdate = async () => {
@@ -216,7 +237,17 @@ export default function CandidateDetail() {
                             <Link to={`/roles/${app.role_id}`} className="font-medium text-gray-900 hover:text-dp-600 text-sm">{app.role_title}</Link>
                             {app.role_priority && <PriorityBadge priority={app.role_priority} />}
                             {app.sla_breach && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">SLA</span>}
-                            {app.founder_review_flag && <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded"><Star className="w-3 h-3 inline" /> Founder</span>}
+                            {canHR ? (
+                              <button
+                                onClick={() => { setFounderAppId(app.id); setFounderSetTo(!app.founder_review_flag); setFounderNote(''); setShowFounderModal(true); }}
+                                className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 ${app.founder_review_flag ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-400 hover:bg-purple-50 hover:text-purple-600'}`}
+                                title={app.founder_review_flag ? 'Clear Founder Review flag' : 'Flag for Founder Review'}
+                              >
+                                <Star className={`w-3 h-3 ${app.founder_review_flag ? 'fill-current' : ''}`} /> Founder
+                              </button>
+                            ) : app.founder_review_flag && (
+                              <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded"><Star className="w-3 h-3 inline fill-current" /> Founder</span>
+                            )}
                           </div>
                           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                             <StageBadge stage={app.stage} />
@@ -248,7 +279,24 @@ export default function CandidateDetail() {
                       <div className="px-4 pb-4 space-y-4">
                         <ResumeIQPanel app={app} />
 
-                        {app.hr_recruiter_summary && (
+                        {canHR ? (
+                          <EditableSection
+                            title="Screening & Risk Notes"
+                            data={app}
+                            onSave={(changes) => saveApplicationNotes(app.id, changes)}
+                            fields={[
+                              { key: 'hr_recruiter_summary', label: 'Recruiter Summary', type: 'textarea' },
+                              { key: 'hr_key_positives', label: 'Key Positives', type: 'textarea' },
+                              { key: 'hr_key_concerns', label: 'Key Concerns', type: 'textarea' },
+                              { key: 'hr_comp_alignment', label: 'Compensation Alignment', type: 'textarea' },
+                              { key: 'hr_communication_assessment', label: 'Communication Assessment', type: 'textarea' },
+                              { key: 'hr_priority_override', label: 'Priority Override', type: 'select', options: ['Normal', 'High', 'Critical'] },
+                              { key: 'hr_priority_override_reason', label: 'Override Reason', type: 'text' },
+                              { key: 'hr_tags', label: 'Tags', type: 'tags' },
+                              { key: 'internal_risk_notes', label: 'Internal Risk Notes', type: 'textarea' },
+                            ]}
+                          />
+                        ) : app.hr_recruiter_summary && (
                           <div className="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2 italic border-l-2 border-dp-300">"{app.hr_recruiter_summary}"</div>
                         )}
 
@@ -359,6 +407,24 @@ export default function CandidateDetail() {
             <div className="flex gap-2 justify-end">
               <button onClick={() => setShowStatusModal(false)} className="btn-secondary">Cancel</button>
               <button onClick={handleStatusUpdate} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Update'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFounderModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+            <h3 className="text-base font-semibold">{founderSetTo ? 'Flag for Founder Review' : 'Clear Founder Review flag'}</h3>
+            <textarea
+              placeholder="Note (optional)"
+              value={founderNote}
+              onChange={e => setFounderNote(e.target.value)}
+              className="input h-20 resize-none"
+            />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowFounderModal(false)} className="btn-secondary">Cancel</button>
+              <button onClick={handleFounderFlag} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Confirm'}</button>
             </div>
           </div>
         </div>
