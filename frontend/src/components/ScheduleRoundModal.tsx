@@ -16,25 +16,42 @@ interface Props {
   onSuccess:      () => void;
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function ScheduleRoundModal({ applicationId, nextRoundNumber, roundType, defaultRoundName, onClose, onSuccess }: Props) {
   const [roundName,         setRoundName]         = useState(defaultRoundName || '');
-  const [interviewerNames,  setInterviewerNames]  = useState('');
+  const [interviewerEmails, setInterviewerEmails] = useState('');
   const [scheduledDate,     setScheduledDate]     = useState('');
+  const [interviewMode,     setInterviewMode]     = useState<'In-person' | 'Video' | 'Phone'>('Video');
+  const [durationMinutes,   setDurationMinutes]   = useState(60);
   const [saving,            setSaving]            = useState(false);
 
   const handleSubmit = async () => {
     if (!roundName.trim()) { toast.error('Round name is required'); return; }
+
+    const emails = interviewerEmails.split(',').map(e => e.trim()).filter(Boolean);
+    const invalid = emails.find(e => !EMAIL_RE.test(e));
+    if (invalid) { toast.error(`"${invalid}" doesn't look like a valid email address`); return; }
+
     setSaving(true);
     try {
-      await interviewsApi.schedule({
-        application_id:   applicationId,
-        round_name:       roundName.trim(),
-        round_type:       roundType,
-        round_number:     nextRoundNumber,
-        interviewer_names: interviewerNames || null,
-        scheduled_date:   scheduledDate || null,
+      const res = await interviewsApi.schedule({
+        application_id:     applicationId,
+        round_name:          roundName.trim(),
+        round_type:          roundType,
+        round_number:        nextRoundNumber,
+        interviewer_emails:  emails.length ? emails : null,
+        scheduled_date:      scheduledDate || null,
+        ...(roundType === 'Standard' ? {
+          interview_mode:    interviewMode,
+          duration_minutes:  durationMinutes,
+        } : {}),
       });
       toast.success(`${roundName} scheduled`);
+      if (res.data.calendar) {
+        if (res.data.calendar.synced) toast.success('Calendar invite sent to interviewers');
+        else toast.error(res.data.calendar.error);
+      }
       onSuccess();
       onClose();
     } catch (err: unknown) {
@@ -64,11 +81,11 @@ export default function ScheduleRoundModal({ applicationId, nextRoundNumber, rou
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1.5">Interviewers</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">Interviewer emails</label>
             <input
-              value={interviewerNames}
-              onChange={e => setInterviewerNames(e.target.value)}
-              placeholder="e.g. Alex, Satyadev…"
+              value={interviewerEmails}
+              onChange={e => setInterviewerEmails(e.target.value)}
+              placeholder="e.g. alex@digitalpaani.com, satyadev@digitalpaani.com"
               className="input text-sm"
             />
           </div>
@@ -81,6 +98,33 @@ export default function ScheduleRoundModal({ applicationId, nextRoundNumber, rou
               className="input text-sm"
             />
           </div>
+          {roundType === 'Standard' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">Meeting mode</label>
+                <select
+                  value={interviewMode}
+                  onChange={e => setInterviewMode(e.target.value as 'In-person' | 'Video' | 'Phone')}
+                  className="select text-sm"
+                >
+                  <option value="Video">Video</option>
+                  <option value="In-person">In-person</option>
+                  <option value="Phone">Phone</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">Duration (minutes)</label>
+                <input
+                  type="number"
+                  min={5}
+                  step={5}
+                  value={durationMinutes}
+                  onChange={e => setDurationMinutes(Number(e.target.value) || 60)}
+                  className="input text-sm"
+                />
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex gap-3 justify-end px-5 py-4 border-t border-gray-100">
           <button onClick={onClose} className="btn-secondary text-sm">Cancel</button>

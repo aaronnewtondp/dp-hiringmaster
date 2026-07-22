@@ -386,8 +386,19 @@ export default function CandidateDetail() {
                                       {round.round_type === 'Assignment' && <span className="text-xs px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">Assignment</span>}
                                     </div>
                                     <div className="text-xs text-gray-400 mt-0.5 flex gap-3">
-                                      {round.interviewer_names && <span>👤 {round.interviewer_names}</span>}
+                                      {round.interviewer_emails && round.interviewer_emails.length > 0 && (
+                                        <span>👤 {round.interviewer_emails.join(', ')}</span>
+                                      )}
                                       {round.scheduled_date && <span>📅 {format(new Date(round.scheduled_date), 'MMM d, h:mm a')}</span>}
+                                      {round.calendar_event_link && (
+                                        <a href={round.calendar_event_link} target="_blank" rel="noreferrer"
+                                           className="flex items-center gap-1 text-dp-600 hover:underline">
+                                          <ExternalLink className="w-3 h-3" /> Calendar invite
+                                        </a>
+                                      )}
+                                      {round.calendar_sync_error && (
+                                        <span className="text-amber-600" title={round.calendar_sync_error}>⚠ Calendar invite failed</span>
+                                      )}
                                       {round.overall_assessment && <span className="font-medium text-gray-600">{round.overall_assessment} · {round.round_recommendation}</span>}
                                       {round.overall_round_score != null && <span>Score: {Number(round.overall_round_score).toFixed(1)}/5</span>}
                                       {round.assignment_outcome && (

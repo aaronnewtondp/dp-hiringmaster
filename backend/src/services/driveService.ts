@@ -1,29 +1,12 @@
 import { google } from 'googleapis';
-import fs from 'fs';
 import { Readable } from 'stream';
-
-// ─── Service account auth ──────────────────────────────────────────────────────
-// Supports two credential sources:
-//   1. GOOGLE_APPLICATION_CREDENTIALS_JSON — full JSON key as a string (Vercel)
-//   2. GOOGLE_APPLICATION_CREDENTIALS — file path (local Docker, volume mount)
-function getCredentials() {
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
-    return JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
-  }
-  const filePath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  if (filePath && fs.existsSync(filePath)) {
-    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-  }
-  throw new Error(
-    'No Google service account credentials found. Set GOOGLE_APPLICATION_CREDENTIALS_JSON or GOOGLE_APPLICATION_CREDENTIALS.'
-  );
-}
+import { getGoogleCredentials } from './googleAuth.js';
 
 let driveClient: ReturnType<typeof google.drive> | null = null;
 
 function getDriveClient() {
   if (driveClient) return driveClient;
-  const credentials = getCredentials();
+  const credentials = getGoogleCredentials();
   const auth = new google.auth.GoogleAuth({
     credentials,
     scopes: ['https://www.googleapis.com/auth/drive.readonly'],
@@ -50,7 +33,7 @@ let driveWriteClient: ReturnType<typeof google.drive> | null = null;
 
 function getDriveWriteClient() {
   if (driveWriteClient) return driveWriteClient;
-  const credentials = getCredentials();
+  const credentials = getGoogleCredentials();
   const impersonate = process.env.GOOGLE_DRIVE_IMPERSONATE_EMAIL;
   if (!impersonate) {
     throw new Error(

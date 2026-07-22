@@ -542,6 +542,42 @@ ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
 CREATE SEQUENCE IF NOT EXISTS seq_eval_question  START 14 INCREMENT 1;
 CREATE SEQUENCE IF NOT EXISTS seq_comp_benchmark START 13 INCREMENT 1;
 
+-- ── interview_rounds: interviewer_emails (replaces free-text interviewer_names) ──
+-- Google Calendar needs real, validated email addresses as attendees —
+-- free-text names ("Alex, Satyadev") can't be invited. Migrates any existing
+-- comma-separated names into a TEXT[] on a best-effort split+trim basis.
+-- Guarded by an existence check (unlike every other patch above, this one
+-- actually drops a column) so it stays safe to run multiple times and
+-- reproduces correctly on a from-scratch docker-compose down -v rebuild.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'interview_rounds' AND column_name = 'interviewer_names'
+  ) THEN
+    ALTER TABLE interview_rounds ADD COLUMN IF NOT EXISTS interviewer_emails TEXT[];
+
+    UPDATE interview_rounds ir
+    SET interviewer_emails = sub.emails
+    FROM (
+      SELECT id, array_agg(NULLIF(trim(elem), '')) FILTER (WHERE trim(elem) <> '') AS emails
+      FROM interview_rounds, unnest(string_to_array(interviewer_names, ',')) AS elem
+      WHERE interviewer_names IS NOT NULL
+      GROUP BY id
+    ) sub
+    WHERE ir.id = sub.id;
+
+    ALTER TABLE interview_rounds DROP COLUMN interviewer_names;
+  END IF;
+END $$;
+
+-- ── interview_rounds: Calendar-event support ────────────────────────────────
+ALTER TABLE interview_rounds
+  ADD COLUMN IF NOT EXISTS duration_minutes    INTEGER NOT NULL DEFAULT 60,
+  ADD COLUMN IF NOT EXISTS calendar_event_id    TEXT,
+  ADD COLUMN IF NOT EXISTS calendar_event_link  TEXT,
+  ADD COLUMN IF NOT EXISTS calendar_sync_error  TEXT;
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows
 -- ═════════════════════════════════════════════════════════════════════════════

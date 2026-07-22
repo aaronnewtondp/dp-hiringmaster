@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
 import { authenticate, requireHR } from '../middleware/auth.js';
 import { InterviewRound } from '../types/index.js';
+import { createInterviewCalendarEvent } from '../services/calendarService.js';
 
 const router = Router();
 router.use(authenticate);
@@ -29,11 +30,13 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // ─── POST /api/interviews — create / schedule a round ────────────────────────
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 router.post('/', requireHR, async (req: Request, res: Response) => {
   const {
     application_id, round_name, round_type = 'Standard',
-    round_number, interviewer_names, scheduled_date,
-    interview_mode = 'Video', focus_areas,
+    round_number, interviewer_emails, scheduled_date,
+    interview_mode = 'Video', focus_areas, duration_minutes = 60,
   } = req.body;
 
   if (!application_id || !round_name) {
@@ -41,8 +44,22 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     return;
   }
 
-  const app = await queryOne<{ candidate_id: string; role_id: string }>(
-    'SELECT candidate_id, role_id FROM applications WHERE id=$1', [application_id]
+  if (interviewer_emails != null) {
+    if (!Array.isArray(interviewer_emails) || !interviewer_emails.every((e: unknown) => typeof e === 'string')) {
+      res.status(400).json({ error: 'interviewer_emails must be an array of strings' });
+      return;
+    }
+    const invalid = interviewer_emails.find((e: string) => !EMAIL_RE.test(e));
+    if (invalid) { res.status(400).json({ error: `"${invalid}" is not a valid email address` }); return; }
+  }
+
+  const app = await queryOne<{ candidate_id: string; role_id: string; candidate_name: string; role_title: string }>(
+    `SELECT a.candidate_id, a.role_id, c.full_name AS candidate_name, r.title AS role_title
+     FROM applications a
+     JOIN candidates c ON c.id = a.candidate_id
+     JOIN roles r ON r.id = a.role_id
+     WHERE a.id = $1`,
+    [application_id]
   );
   if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
 
@@ -51,11 +68,11 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     const r = await client.query(
       `INSERT INTO interview_rounds
          (id, application_id, round_name, round_type, round_number,
-          interviewer_names, scheduled_date, interview_mode, focus_areas)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+          interviewer_emails, scheduled_date, interview_mode, focus_areas, duration_minutes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [id, application_id, round_name, round_type,
-       round_number || 1, interviewer_names, scheduled_date, interview_mode,
-       focus_areas || []]
+       round_number || 1, interviewer_emails || null, scheduled_date, interview_mode,
+       focus_areas || [], duration_minutes]
     );
 
     // Stage no longer auto-advances here — the application must already be
@@ -69,14 +86,65 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [application_id, app.candidate_id, app.role_id,
        'Interview Round Scheduled', `${round_name} scheduled for ${scheduled_date || 'TBD'}`,
-       JSON.stringify({ round: round_name, interviewer: interviewer_names }),
+       JSON.stringify({ round: round_name, interviewer_emails: interviewer_emails || null }),
        req.user!.userId, req.user!.name]
     );
 
     return r.rows[0] as InterviewRound;
   });
 
-  res.status(201).json({ round });
+  // Synchronous, gracefully-degrading Calendar sync — deliberately not async
+  // fire-and-forget like ResumeIQ. A missing ResumeIQ score still degrades to
+  // a usable profile-only result; a failed calendar invite means the
+  // interviewer never finds out about the meeting at all (the invite email
+  // IS the notification), so HR needs to know immediately, not silently.
+  // Only attempted for Standard rounds with an actual date + attendees —
+  // Assignment rounds have no meeting to put on a calendar.
+  let calendar: { synced: boolean; event_link?: string; error?: string } | undefined;
+
+  if (
+    round.round_type === 'Standard' && round.scheduled_date &&
+    Array.isArray(round.interviewer_emails) && round.interviewer_emails.length > 0
+  ) {
+    try {
+      const event = await createInterviewCalendarEvent({
+        organizerEmail: req.user!.email,
+        attendees: round.interviewer_emails,
+        summary: `${round.round_name} — ${app.candidate_name} (${app.role_title})`,
+        description: `Interview round "${round.round_name}" for ${app.candidate_name}'s application to ${app.role_title}.\nScheduled via DigitalPaani HMS.`,
+        startTime: round.scheduled_date,
+        durationMinutes: round.duration_minutes ?? 60,
+        mode: (round.interview_mode as 'In-person' | 'Video' | 'Phone') || 'Video',
+      });
+      await query(
+        `UPDATE interview_rounds SET calendar_event_id=$1, calendar_event_link=$2, calendar_sync_error=NULL, updated_at=NOW() WHERE id=$3`,
+        [event.eventId, event.eventLink, round.id]
+      );
+      round.calendar_event_id = event.eventId;
+      round.calendar_event_link = event.eventLink;
+      calendar = { synced: true, event_link: event.eventLink };
+    } catch (err) {
+      const message = (err as Error).message;
+      console.error(`[Calendar] Failed to create event for round ${round.id}:`, message);
+      await query(
+        `UPDATE interview_rounds SET calendar_sync_error=$1, updated_at=NOW() WHERE id=$2`,
+        [message.slice(0, 500), round.id]
+      );
+      calendar = { synced: false, error: 'Round scheduled, but the calendar invite failed — you may need to notify interviewers manually.' };
+    }
+
+    await query(
+      `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [application_id, app.candidate_id, app.role_id,
+       calendar.synced ? 'Calendar Invite Created' : 'Calendar Invite Failed',
+       calendar.synced ? `Invite sent to ${round.interviewer_emails!.join(', ')}` : calendar.error,
+       calendar.synced ? round.calendar_event_link! : null,
+       req.user!.userId, req.user!.name]
+    );
+  }
+
+  res.status(201).json({ round, calendar });
 });
 
 // ─── PATCH /api/interviews/:id/feedback — submit feedback ────────────────────
@@ -89,7 +157,7 @@ router.patch('/:id/feedback', async (req: Request, res: Response) => {
   // Check HM/Interviewer can only submit for their own rounds
   const persona = req.user!.persona;
   if (persona === 'interviewer') {
-    // Would check interviewer_names includes req.user.name — simplified here
+    // Would check interviewer_emails includes req.user.email — simplified here
   }
 
   const isAssignment = round.round_type === 'Assignment';

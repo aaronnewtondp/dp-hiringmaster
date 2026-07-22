@@ -184,9 +184,13 @@ export interface InterviewRound {
   round_name:               string;
   round_type:               'Standard' | 'Assignment';
   round_number:             number;
-  interviewer_names?:       string;
+  interviewer_emails?:      string[];
   scheduled_date?:          string;
   interview_mode?:          string;
+  duration_minutes?:        number;
+  calendar_event_id?:       string;
+  calendar_event_link?:     string;
+  calendar_sync_error?:     string;
   focus_areas?:             string[];
   feedback_status:          'Pending' | 'Submitted' | 'Overdue';
   feedback_submitted_at?:   string;
