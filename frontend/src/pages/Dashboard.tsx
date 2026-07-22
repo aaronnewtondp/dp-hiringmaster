@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Briefcase, Users, ListChecks, TrendingUp, Clock } from 'lucide-react';
+import { AlertTriangle, Briefcase, Users, ListChecks, TrendingUp, Clock, Radio, Building2 } from 'lucide-react';
 import { dashboardApi } from '../services/api.ts';
 import { DashboardData, PendingAction, Priority, STAGES } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
@@ -85,7 +85,10 @@ export default function Dashboard() {
   );
 
   const d = data.data;
-  const { metrics, pending_actions_by_owner, aging_roles, hiring_funnel } = d;
+  const { metrics, pending_actions_by_owner, aging_roles, hiring_funnel,
+          source_quality, time_to_fill, agency_performance } = d;
+
+  const PRIORITIES: Priority[] = ['P0', 'P1', 'P2', 'P3'];
 
   const OWNERS = ['HR / Recruiter', 'Hiring Manager', 'Interviewer', 'Leadership / Founders'];
 
@@ -200,6 +203,112 @@ export default function Dashboard() {
             })}
             {hiring_funnel.length === 0 && (
               <EmptyState title="No active candidates" />
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Source Quality + Time to Fill + Agency Performance (PRD §18 Phase 2) */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <h2 className="text-base font-semibold text-gray-900">Source &amp; agency quality</h2>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Source Quality */}
+          <div className="card overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+              <Radio className="w-4 h-4 text-gray-400" />
+              <h2 className="text-sm font-semibold text-gray-900">Source quality</h2>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              {source_quality.length === 0 ? (
+                <EmptyState title="No sourced applications yet" />
+              ) : (
+                source_quality.map(s => (
+                  <div key={s.source_channel}>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-xs font-medium text-gray-700 truncate">{s.source_channel}</span>
+                      <span className="text-xs text-gray-400 shrink-0">n={s.n}</span>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400 w-16 shrink-0">Pass rate</span>
+                        <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-dp-400 rounded-full transition-all" style={{ width: `${s.pass_rate}%` }} />
+                        </div>
+                        <span className="text-xs font-medium text-gray-700 w-10 text-right">{s.pass_rate}%</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400 w-16 shrink-0">Hire rate</span>
+                        <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-green-500 rounded-full transition-all" style={{ width: `${s.hire_rate}%` }} />
+                        </div>
+                        <span className="text-xs font-medium text-gray-700 w-10 text-right">{s.hire_rate}%</span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Time to Fill */}
+          <div className="card overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-gray-400" />
+              <h2 className="text-sm font-semibold text-gray-900">Time to fill</h2>
+            </div>
+            <div className="px-5 py-4">
+              {time_to_fill.overall_days === null ? (
+                <EmptyState title="No filled roles yet" message="Populates once an offer is accepted" />
+              ) : (
+                <>
+                  <div className="text-3xl font-semibold text-gray-900">
+                    {time_to_fill.overall_days}<span className="text-base font-normal text-gray-400 ml-1">days avg</span>
+                  </div>
+                  <div className="text-xs text-gray-400 mt-0.5 mb-4">Open date → offer accepted</div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {PRIORITIES.map(p => (
+                      <div key={p} className="text-center">
+                        <PriorityBadge priority={p} />
+                        <div className="text-sm font-medium text-gray-700 mt-1.5">
+                          {time_to_fill.by_priority[p] != null ? `${time_to_fill.by_priority[p]}d` : '—'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Agency Performance */}
+          <div className="card overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-gray-400" />
+              <h2 className="text-sm font-semibold text-gray-900">Agency performance</h2>
+            </div>
+            {agency_performance.length === 0 ? (
+              <div className="p-5"><EmptyState title="No agency-sourced applications yet" /></div>
+            ) : (
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="table-th">Agency</th>
+                    <th className="table-th">Subs</th>
+                    <th className="table-th">Hire rate</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {agency_performance.map(a => (
+                    <tr key={a.agency_id}>
+                      <td className="table-td font-medium text-gray-900 max-w-[120px] truncate">{a.agency_name}</td>
+                      <td className="table-td text-gray-500">{a.n}</td>
+                      <td className="table-td text-gray-700">{a.hire_rate}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         </div>

@@ -240,6 +240,11 @@ export interface DashboardData {
   pending_actions_by_owner:  Record<string, PendingAction[]>;
   aging_roles:               Array<Role & { active_count: number }>;
   hiring_funnel:             Array<{ stage: string; count: string }>;
+
+  // ── Phase 2 (PRD §18) ──────────────────────────────────────────────────────
+  source_quality:     Array<{ source_channel: string; n: number; pass_rate: number; hire_rate: number }>;
+  time_to_fill:       { overall_days: number | null; by_priority: Record<Priority, number | null> };
+  agency_performance: Array<{ agency_id: string; agency_name: string; n: number; hire_rate: number }>;
 }
 
 // ─── Utility constants ────────────────────────────────────────────────────────

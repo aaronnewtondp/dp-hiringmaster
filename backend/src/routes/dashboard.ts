@@ -37,6 +37,7 @@ router.get('/', async (req: Request, res: Response) => {
   const [
     roleStats, candidateStats, slaBreaches,
     pendingActions, agingRoles, pipeline, joiningRisk,
+    sourceQualityRows, timeToFillRows, agencyPerfRows,
   ] = await Promise.all([
     // Role counts by priority and status
     query<{ priority: string; status: string; count: string }>(`
@@ -111,6 +112,46 @@ router.get('/', async (req: Request, res: Response) => {
              OR a.joining_confidence = 'Low'
              OR (a.last_hr_contact IS NOT NULL AND a.last_hr_contact < NOW() - INTERVAL '5 days'))
     `),
+
+    // Source Quality (Phase 2, PRD §18) — pass rate = advanced past raw
+    // intake (stage <> 'Applied'), hire rate = stage = 'Joined', matching
+    // agencies.ts's existing hire-rate precedent (stage, not status).
+    // Computed over full history, not status='Active' only — a lagging
+    // quality measure, not a live-state snapshot.
+    query<{ source_channel: string; n: string; engaged: string; hired: string }>(`
+      SELECT source_channel,
+             COUNT(*) AS n,
+             COUNT(*) FILTER (WHERE stage <> 'Applied') AS engaged,
+             COUNT(*) FILTER (WHERE stage = 'Joined')  AS hired
+      FROM applications
+      WHERE source_channel IS NOT NULL
+      GROUP BY source_channel ORDER BY n DESC
+    `),
+
+    // Time to Fill (Phase 2, PRD §18) — literally AVG(offer_accepted_date -
+    // start_date), per priority. start_date is role Open Date (same field
+    // aging_roles' days_open already uses), so this is "time from req-open
+    // to offer-accepted." No status filter — an accepted offer is a real
+    // historical fact regardless of what happened after.
+    query<{ priority: string; n: string; avg_days: string | null }>(`
+      SELECT r.priority, COUNT(*) AS n,
+             AVG(a.offer_accepted_date - r.start_date) AS avg_days
+      FROM applications a JOIN roles r ON r.id = a.role_id
+      WHERE a.offer_accepted_date IS NOT NULL AND r.start_date IS NOT NULL
+      GROUP BY r.priority
+    `),
+
+    // Agency Performance (Phase 2, PRD §18) — submissions/hire-rate
+    // definitions match agencies.ts's total_submitted/total_hired exactly
+    // (status NOT IN Rejected/Withdrawn; stage = 'Joined'), so this card's
+    // numbers agree with each agency's own detail page.
+    query<{ agency_id: string; agency_name: string; n: string; hired: string }>(`
+      SELECT ag.id AS agency_id, ag.name AS agency_name,
+             COUNT(*) FILTER (WHERE a.status NOT IN ('Rejected','Withdrawn')) AS n,
+             COUNT(*) FILTER (WHERE a.stage = 'Joined') AS hired
+      FROM applications a JOIN agencies ag ON ag.id = a.agency_id
+      GROUP BY ag.id, ag.name ORDER BY n DESC
+    `),
   ]);
 
   // ── Build metrics ───────────────────────────────────────────────────────────
@@ -156,6 +197,47 @@ router.get('/', async (req: Request, res: Response) => {
     ? pendingActions.filter(pa => pa.owner_type === 'Hiring Manager')
     : pendingActions;
 
+  // ── Source Quality — pass_rate/hire_rate as 0-100, 1 decimal ────────────────
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  const sourceQuality = sourceQualityRows.map(r => {
+    const n = parseInt(r.n);
+    return {
+      source_channel: r.source_channel,
+      n,
+      pass_rate: n > 0 ? round1((parseInt(r.engaged) / n) * 100) : 0,
+      hire_rate: n > 0 ? round1((parseInt(r.hired) / n) * 100) : 0,
+    };
+  });
+
+  // ── Time to Fill — per-priority avg days, overall = weighted mean ──────────
+  const byPriority: Record<string, number | null> = { P0: null, P1: null, P2: null, P3: null };
+  let weightedSum = 0;
+  let totalFilled = 0;
+  for (const row of timeToFillRows) {
+    const n = parseInt(row.n);
+    const avgDays = row.avg_days != null ? Number(row.avg_days) : null;
+    if (avgDays != null) {
+      byPriority[row.priority] = round1(avgDays);
+      weightedSum += avgDays * n;
+      totalFilled += n;
+    }
+  }
+  const timeToFill = {
+    overall_days: totalFilled > 0 ? round1(weightedSum / totalFilled) : null,
+    by_priority: byPriority,
+  };
+
+  // ── Agency Performance — hire_rate as 0-100, 1 decimal ──────────────────────
+  const agencyPerformance = agencyPerfRows.map(r => {
+    const n = parseInt(r.n);
+    return {
+      agency_id:   r.agency_id,
+      agency_name: r.agency_name,
+      n,
+      hire_rate: n > 0 ? round1((parseInt(r.hired) / n) * 100) : 0,
+    };
+  });
+
   res.json({
     metrics: {
       open_roles_count:       openRolesCount,
@@ -171,6 +253,9 @@ router.get('/', async (req: Request, res: Response) => {
     pending_actions_by_owner: pendingByOwner,
     aging_roles:   rolesWithAging.filter(r => r.aging_alert !== 'ok'),
     low_pipeline:  lowPipelineRoles,
+    source_quality:     sourceQuality,
+    time_to_fill:       timeToFill,
+    agency_performance: agencyPerformance,
     hiring_funnel: pipeline,
     joining_risk:  joiningRisk,
   });
