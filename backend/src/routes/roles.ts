@@ -33,8 +33,8 @@ router.get('/', async (req: Request, res: Response) => {
       COUNT(DISTINCT a.id) FILTER (WHERE a.status = 'Active') AS active_candidate_count,
       COUNT(DISTINCT a.id) FILTER (
         WHERE a.status = 'Active'
-        AND a.stage IN ('Shortlisted','Interview – Round 1','Interview – Round 2',
-                         'Interview – Round 3','Interview – Round 4','Final Evaluation')
+        AND a.stage IN ('Shortlisted','Interview Round 1','Interview Round 2',
+                         'Assignment Round','Founders Round')
       ) AS shortlisted_count
     FROM roles r
     LEFT JOIN applications a ON a.role_id = r.id

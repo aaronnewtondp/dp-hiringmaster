@@ -58,13 +58,11 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
        focus_areas || []]
     );
 
-    // Advance application stage
-    const stageName = `Interview – ${round_name}`;
-    await client.query(
-      `UPDATE applications SET stage=$1, stage_entry_time=NOW(), sla_hours=24,
-       sla_breach=false, last_updated=NOW() WHERE id=$2`,
-      [stageName, application_id]
-    );
+    // Stage no longer auto-advances here — the application must already be
+    // sitting in the correct stage (Interview Round 1/2, Founders Round, or
+    // Assignment Round) for this button to have been reachable at all, via
+    // POST /applications/:id/stage, which already owns stage_entry_time and
+    // sla_hours. Scheduling a round is purely additive.
 
     await client.query(
       `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)

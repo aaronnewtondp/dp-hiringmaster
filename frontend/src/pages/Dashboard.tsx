@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, Briefcase, Users, ListChecks, TrendingUp, Clock } from 'lucide-react';
 import { dashboardApi } from '../services/api.ts';
-import { DashboardData, PendingAction, Priority } from '../types/index.ts';
+import { DashboardData, PendingAction, Priority, STAGES } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -89,9 +89,12 @@ export default function Dashboard() {
 
   const OWNERS = ['HR / Recruiter', 'Hiring Manager', 'Interviewer', 'Leadership / Founders'];
 
-  // Funnel stage order
-  const FUNNEL_ORDER = ['Applied','Resume Review','Shortlisted','Interview – Round 1',
-    'Interview – Round 2','Final Evaluation','Reference Check','Offer Released','Offer Accepted'];
+  // Shared canonical order from types/index.ts — this used to be a separately
+  // hand-maintained subset that had already drifted out of sync (different
+  // stage count than RoleDetail.tsx's own copy) before the stage-list rework.
+  // filter(s => funnelMap.has(s)) below already only renders stages with
+  // actual data, so using the full list here doesn't clutter empty funnels.
+  const FUNNEL_ORDER = STAGES;
   const funnelMap = new Map(hiring_funnel.map(f => [f.stage, parseInt(f.count)]));
   const maxFunnelVal = Math.max(...hiring_funnel.map(f => parseInt(f.count)), 1);
 

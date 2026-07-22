@@ -170,11 +170,13 @@ async function checkJoiningRisk(): Promise<void> {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+// 'Founders Round' no longer matches startsWith('Interview') after the
+// rename from 'Interview – Round 3' — each helper below treats it the
+// same as a plain interview round, same as applications.ts's getSlaHours.
 function getSlaForStage(stage: string, fitScore?: number): number {
   if (stage === 'Resume Review') return fitScore && fitScore >= 75 ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL;
   if (stage === 'Shortlisted') return SLA_HOURS.HM_SHORTLIST;
-  if (stage.startsWith('Interview')) return SLA_HOURS.INTERVIEW_FEEDBACK;
-  if (stage === 'Final Evaluation') return SLA_HOURS.FINAL_EVAL;
+  if (stage.startsWith('Interview') || stage === 'Founders Round') return SLA_HOURS.INTERVIEW_FEEDBACK;
   if (stage === 'Reference Check') return SLA_HOURS.REF_INIT;
   if (stage === 'Offer Released') return SLA_HOURS.OFFER_RELEASE;
   return SLA_HOURS.IDLE;
@@ -182,15 +184,14 @@ function getSlaForStage(stage: string, fitScore?: number): number {
 
 function getOwnerForStage(stage: string): string {
   if (stage === 'Shortlisted') return 'Hiring Manager';
-  if (stage.startsWith('Interview')) return 'Hiring Manager';
+  if (stage.startsWith('Interview') || stage === 'Founders Round') return 'Hiring Manager';
   return 'HR / Recruiter';
 }
 
 function getActionTypeForStage(stage: string): string {
   if (stage === 'Resume Review') return 'Resume to triage';
   if (stage === 'Shortlisted') return 'HM shortlist review';
-  if (stage.startsWith('Interview')) return 'Interview feedback due';
-  if (stage === 'Final Evaluation') return 'Final evaluation decision';
+  if (stage.startsWith('Interview') || stage === 'Founders Round') return 'Interview feedback due';
   if (stage === 'Reference Check') return 'Reference check to initiate';
   if (stage === 'Offer Released') return 'Offer follow-up';
   return 'Idle candidate';

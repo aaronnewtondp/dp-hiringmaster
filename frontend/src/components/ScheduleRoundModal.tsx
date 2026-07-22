@@ -7,13 +7,17 @@ import { Spinner } from './shared/Badges.tsx';
 interface Props {
   applicationId:  string;
   nextRoundNumber: number;
+  // The round type is now implied by the application's current stage —
+  // this button is only reachable when stage already matches one type or
+  // the other, so there's no longer a case where it's ambiguous.
+  roundType:      'Standard' | 'Assignment';
+  defaultRoundName?: string;
   onClose:        () => void;
   onSuccess:      () => void;
 }
 
-export default function ScheduleRoundModal({ applicationId, nextRoundNumber, onClose, onSuccess }: Props) {
-  const [roundName,         setRoundName]         = useState('');
-  const [roundType,         setRoundType]         = useState<'Standard' | 'Assignment'>('Standard');
+export default function ScheduleRoundModal({ applicationId, nextRoundNumber, roundType, defaultRoundName, onClose, onSuccess }: Props) {
+  const [roundName,         setRoundName]         = useState(defaultRoundName || '');
   const [interviewerNames,  setInterviewerNames]  = useState('');
   const [scheduledDate,     setScheduledDate]     = useState('');
   const [saving,            setSaving]            = useState(false);
@@ -44,7 +48,9 @@ export default function ScheduleRoundModal({ applicationId, nextRoundNumber, onC
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-900">Schedule interview round</h3>
+          <h3 className="text-sm font-semibold text-gray-900">
+            {roundType === 'Assignment' ? 'Schedule assignment' : 'Schedule interview round'}
+          </h3>
           <button onClick={onClose}><X className="w-4 h-4 text-gray-400" /></button>
         </div>
         <div className="px-5 py-4 space-y-4">
@@ -56,13 +62,6 @@ export default function ScheduleRoundModal({ applicationId, nextRoundNumber, onC
               placeholder="e.g. Technical Deep-Dive, Founder Round…"
               className="input text-sm"
             />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1.5">Round type</label>
-            <select value={roundType} onChange={e => setRoundType(e.target.value as 'Standard' | 'Assignment')} className="select text-sm">
-              <option value="Standard">Standard interview</option>
-              <option value="Assignment">Assignment round</option>
-            </select>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1.5">Interviewers</label>

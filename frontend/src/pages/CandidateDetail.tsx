@@ -36,6 +36,13 @@ function AssignmentStatusPill({ round }: { round: InterviewRound }) {
   );
 }
 
+// Round-scheduling is gated by the application's current stage — Standard
+// interview rounds can only be created while sitting in one of these three
+// stages; Assignment rounds only from 'Assignment Round' (checked inline
+// below). This is what makes the "Schedule round"/"Schedule Assignment"
+// controls appear/disappear as the stage moves, instead of always showing.
+const INTERVIEW_STAGES = ['Interview Round 1', 'Interview Round 2', 'Founders Round'];
+
 export default function CandidateDetail() {
   const { id } = useParams<{ id: string }>();
   const { canHR } = useAuth();
@@ -59,6 +66,8 @@ export default function CandidateDetail() {
   const [outcomeRound, setOutcomeRound] = useState<(InterviewRound & { candidate_name?: string; role_title?: string }) | null>(null);
   const [scheduleAppId, setScheduleAppId] = useState<string | null>(null);
   const [scheduleNextNum, setScheduleNextNum] = useState(1);
+  const [scheduleRoundType, setScheduleRoundType] = useState<'Standard' | 'Assignment'>('Standard');
+  const [scheduleDefaultName, setScheduleDefaultName] = useState('');
   const [expandedApps, setExpandedApps] = useState<Set<string>>(new Set());
 
   const [showSendModal, setShowSendModal] = useState(false);
@@ -334,35 +343,33 @@ export default function CandidateDetail() {
 
                     {expanded && (
                       <div className="px-4 pb-4 space-y-4">
-                        <ResumeIQPanel app={app} />
-
-                        {canHR ? (
-                          <EditableSection
-                            title="Screening & Risk Notes"
-                            data={app}
-                            onSave={(changes) => saveApplicationNotes(app.id, changes)}
-                            fields={[
-                              { key: 'hr_recruiter_summary', label: 'Recruiter Summary', type: 'textarea' },
-                              { key: 'hr_key_positives', label: 'Key Positives', type: 'textarea' },
-                              { key: 'hr_key_concerns', label: 'Key Concerns', type: 'textarea' },
-                              { key: 'hr_comp_alignment', label: 'Compensation Alignment', type: 'textarea' },
-                              { key: 'hr_communication_assessment', label: 'Communication Assessment', type: 'textarea' },
-                              { key: 'hr_priority_override', label: 'Priority Override', type: 'select', options: ['Normal', 'High', 'Critical'] },
-                              { key: 'hr_priority_override_reason', label: 'Override Reason', type: 'text' },
-                              { key: 'hr_tags', label: 'Tags', type: 'tags' },
-                              { key: 'internal_risk_notes', label: 'Internal Risk Notes', type: 'textarea' },
-                            ]}
-                          />
-                        ) : app.hr_recruiter_summary && (
-                          <div className="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2 italic border-l-2 border-dp-300">"{app.hr_recruiter_summary}"</div>
-                        )}
-
                         <div>
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Interview rounds</span>
-                            {canHR && (
-                              <button onClick={() => { setScheduleAppId(app.id); setScheduleNextNum(rounds.length + 1); }} className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium">
+                            {canHR && INTERVIEW_STAGES.includes(app.stage) && (
+                              <button
+                                onClick={() => {
+                                  setScheduleAppId(app.id);
+                                  setScheduleNextNum(rounds.length + 1);
+                                  setScheduleRoundType('Standard');
+                                  setScheduleDefaultName(app.stage);
+                                }}
+                                className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium"
+                              >
                                 <CalendarPlus className="w-3.5 h-3.5" /> Schedule round
+                              </button>
+                            )}
+                            {canHR && app.stage === 'Assignment Round' && (
+                              <button
+                                onClick={() => {
+                                  setScheduleAppId(app.id);
+                                  setScheduleNextNum(rounds.length + 1);
+                                  setScheduleRoundType('Assignment');
+                                  setScheduleDefaultName('');
+                                }}
+                                className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium"
+                              >
+                                <CalendarPlus className="w-3.5 h-3.5" /> Schedule Assignment
                               </button>
                             )}
                           </div>
@@ -428,6 +435,29 @@ export default function CandidateDetail() {
                             </div>
                           )}
                         </div>
+
+                        <ResumeIQPanel app={app} />
+
+                        {canHR ? (
+                          <EditableSection
+                            title="Screening & Risk Notes"
+                            data={app}
+                            onSave={(changes) => saveApplicationNotes(app.id, changes)}
+                            fields={[
+                              { key: 'hr_recruiter_summary', label: 'Recruiter Summary', type: 'textarea' },
+                              { key: 'hr_key_positives', label: 'Key Positives', type: 'textarea' },
+                              { key: 'hr_key_concerns', label: 'Key Concerns', type: 'textarea' },
+                              { key: 'hr_comp_alignment', label: 'Compensation Alignment', type: 'textarea' },
+                              { key: 'hr_communication_assessment', label: 'Communication Assessment', type: 'textarea' },
+                              { key: 'hr_priority_override', label: 'Priority Override', type: 'select', options: ['Normal', 'High', 'Critical'] },
+                              { key: 'hr_priority_override_reason', label: 'Override Reason', type: 'text' },
+                              { key: 'hr_tags', label: 'Tags', type: 'tags' },
+                              { key: 'internal_risk_notes', label: 'Internal Risk Notes', type: 'textarea' },
+                            ]}
+                          />
+                        ) : app.hr_recruiter_summary && (
+                          <div className="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2 italic border-l-2 border-dp-300">"{app.hr_recruiter_summary}"</div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -566,7 +596,14 @@ export default function CandidateDetail() {
       )}
 
       {scheduleAppId && (
-        <ScheduleRoundModal applicationId={scheduleAppId} nextRoundNumber={scheduleNextNum} onClose={() => setScheduleAppId(null)} onSuccess={() => { qc.invalidateQueries({ queryKey: ['interview-rounds'] }); refetchRounds(); }} />
+        <ScheduleRoundModal
+          applicationId={scheduleAppId}
+          nextRoundNumber={scheduleNextNum}
+          roundType={scheduleRoundType}
+          defaultRoundName={scheduleDefaultName}
+          onClose={() => setScheduleAppId(null)}
+          onSuccess={() => { qc.invalidateQueries({ queryKey: ['interview-rounds'] }); refetchRounds(); }}
+        />
       )}
     </div>
   );

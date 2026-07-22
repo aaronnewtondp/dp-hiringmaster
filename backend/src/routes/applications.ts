@@ -14,10 +14,12 @@ function getSlaHours(stage: string, fitScore?: number | null): number {
     return (fitScore && fitScore >= 75) ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL;
   }
   if (stage === 'Shortlisted') return SLA_HOURS.HM_SHORTLIST;
-  if (stage === 'Final Evaluation') return SLA_HOURS.FINAL_EVAL;
   if (stage === 'Reference Check') return SLA_HOURS.REF_INIT;
   if (stage === 'Offer Released') return SLA_HOURS.OFFER_RELEASE;
-  if (stage.startsWith('Interview')) return SLA_HOURS.INTERVIEW_FEEDBACK;
+  // 'Founders Round' no longer matches startsWith('Interview') after the
+  // rename from 'Interview – Round 3' — treated the same as a plain
+  // interview round for SLA purposes.
+  if (stage.startsWith('Interview') || stage === 'Founders Round') return SLA_HOURS.INTERVIEW_FEEDBACK;
   return SLA_HOURS.IDLE;
 }
 

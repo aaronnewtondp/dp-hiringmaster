@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Users, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../services/api.ts';
-import { Role, Application } from '../types/index.ts';
+import { Role, Application, STAGES } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, FitScore, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -58,9 +58,11 @@ export default function RoleDetail() {
   if (roleLoading) return <div className="flex justify-center p-12"><Spinner size="lg" /></div>;
   if (!role) return <EmptyState title="Role not found" />;
 
-  const STAGE_ORDER = ['Applied','Resume Review','Shortlisted','Interview – Round 1',
-    'Interview – Round 2','Interview – Round 3','Assignment Round','Final Evaluation',
-    'Reference Check','Offer Discussion','Offer Released','Offer Accepted'];
+  // Shared canonical order from types/index.ts — this used to be a separately
+  // hand-maintained copy that had already drifted out of sync (missing
+  // Pre-Joining Documents/Joined, still using the old Interview – Round N
+  // naming) before the stage-list rework.
+  const STAGE_ORDER = STAGES;
 
   return (
     <div className="space-y-6">

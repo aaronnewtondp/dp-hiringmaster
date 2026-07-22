@@ -255,7 +255,6 @@ export const SLA_HOURS: Record<string, number> = {
   INTERVIEW_FEEDBACK:    24,
   ASSIGNMENT_SEND:       12,
   ASSIGNMENT_EVALUATE:   48,
-  FINAL_EVAL:            48,
   REF_INIT:              24,
   REF_COMPLETE:          48,
   OFFER_RELEASE:         24,

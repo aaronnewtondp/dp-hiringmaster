@@ -245,10 +245,9 @@ export interface DashboardData {
 // ─── Utility constants ────────────────────────────────────────────────────────
 export const STAGES = [
   'Applied', 'Resume Review', 'Shortlisted',
-  'Interview – Round 1', 'Interview – Round 2', 'Interview – Round 3',
-  'Assignment Round', 'Final Evaluation', 'Reference Check',
-  'Pre-Joining Documents', 'Offer Discussion', 'Offer Released',
-  'Offer Accepted', 'Joined',
+  'Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round',
+  'Reference Check', 'Pre-Joining Documents', 'Offer Discussion',
+  'Offer Released', 'Offer Accepted', 'Joined',
 ];
 
 export const REJECTION_REASONS = [
