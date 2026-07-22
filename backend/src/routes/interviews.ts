@@ -53,8 +53,8 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     if (invalid) { res.status(400).json({ error: `"${invalid}" is not a valid email address` }); return; }
   }
 
-  const app = await queryOne<{ candidate_id: string; role_id: string; candidate_name: string; role_title: string }>(
-    `SELECT a.candidate_id, a.role_id, c.full_name AS candidate_name, r.title AS role_title
+  const app = await queryOne<{ candidate_id: string; role_id: string; candidate_name: string; candidate_email: string | null; role_title: string }>(
+    `SELECT a.candidate_id, a.role_id, c.full_name AS candidate_name, c.email AS candidate_email, r.title AS role_title
      FROM applications a
      JOIN candidates c ON c.id = a.candidate_id
      JOIN roles r ON r.id = a.role_id
@@ -106,10 +106,19 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     round.round_type === 'Standard' && round.scheduled_date &&
     Array.isArray(round.interviewer_emails) && round.interviewer_emails.length > 0
   ) {
+    // The organizer's own calendar is already blocked without being listed
+    // here — the event is inserted directly onto their primary calendar via
+    // impersonation (calendarService.ts's calendarId: 'primary'), so they're
+    // the owner, not just an invitee. Attendees are everyone else who needs
+    // their time held: interviewers plus the candidate being interviewed.
+    const attendees = [
+      ...round.interviewer_emails!,
+      ...(app.candidate_email ? [app.candidate_email] : []),
+    ];
     try {
       const event = await createInterviewCalendarEvent({
         organizerEmail: req.user!.email,
-        attendees: round.interviewer_emails,
+        attendees,
         summary: `${round.round_name} — ${app.candidate_name} (${app.role_title})`,
         description: `Interview round "${round.round_name}" for ${app.candidate_name}'s application to ${app.role_title}.\nScheduled via DigitalPaani HMS.`,
         startTime: round.scheduled_date,
@@ -138,7 +147,7 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [application_id, app.candidate_id, app.role_id,
        calendar.synced ? 'Calendar Invite Created' : 'Calendar Invite Failed',
-       calendar.synced ? `Invite sent to ${round.interviewer_emails!.join(', ')}` : calendar.error,
+       calendar.synced ? `Invite sent to ${attendees.join(', ')}` : calendar.error,
        calendar.synced ? round.calendar_event_link! : null,
        req.user!.userId, req.user!.name]
     );

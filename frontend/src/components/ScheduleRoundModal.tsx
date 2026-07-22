@@ -41,7 +41,11 @@ export default function ScheduleRoundModal({ applicationId, nextRoundNumber, rou
         round_type:          roundType,
         round_number:        nextRoundNumber,
         interviewer_emails:  emails.length ? emails : null,
-        scheduled_date:      scheduledDate || null,
+        // datetime-local gives a naive "YYYY-MM-DDTHH:mm" with no timezone.
+        // Everyone scheduling through this app is working IST, so make that
+        // explicit rather than letting the backend/Calendar API default it
+        // to UTC (which shifted every invite by 5:30 hours).
+        scheduled_date:      scheduledDate ? `${scheduledDate}:00+05:30` : null,
         ...(roundType === 'Standard' ? {
           interview_mode:    interviewMode,
           duration_minutes:  durationMinutes,
