@@ -9,6 +9,7 @@ import NewRole from './pages/NewRole.tsx';
 import Candidates from './pages/Candidates.tsx';
 import CandidateDetail from './pages/CandidateDetail.tsx';
 import NewCandidate from './pages/NewCandidate.tsx';
+import TalentPool from './pages/TalentPool.tsx';
 import Agencies from './pages/Agencies.tsx';
 import AgencyDetail from './pages/AgencyDetail.tsx';
 import HMQueue from './pages/HMQueue.tsx';
@@ -45,6 +46,7 @@ function AppRoutes() {
         <Route path="/candidates"              element={<Candidates />} />
         <Route path="/candidates/new"          element={<NewCandidate />} />
         <Route path="/candidates/:id"          element={<CandidateDetail />} />
+        <Route path="/talent-pool"             element={<TalentPool />} />
         <Route path="/agencies"                element={<Agencies />} />
         <Route path="/agencies/:id"            element={<AgencyDetail />} />
         <Route path="/hm-queue"                element={<HMQueue />} />

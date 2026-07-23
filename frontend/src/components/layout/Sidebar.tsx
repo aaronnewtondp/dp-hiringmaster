@@ -1,14 +1,15 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, Users, Building2, LogOut, Droplets, ListChecks } from 'lucide-react';
+import { LayoutDashboard, Briefcase, Users, Building2, LogOut, Droplets, ListChecks, Archive } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { PERSONAS } from '../../types/index.ts';
 
 const NAV = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard',  hrOnly: false, queueOnly: false },
-  { to: '/roles',     icon: Briefcase,       label: 'Roles',      hrOnly: false, queueOnly: false },
-  { to: '/candidates',icon: Users,           label: 'Candidates', hrOnly: false, queueOnly: false },
-  { to: '/hm-queue',  icon: ListChecks,      label: 'My Queue',   hrOnly: false, queueOnly: true  },
-  { to: '/agencies',  icon: Building2,       label: 'Agencies',   hrOnly: true,  queueOnly: false },
+  { to: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard',   hrOnly: false, queueOnly: false },
+  { to: '/roles',      icon: Briefcase,       label: 'Roles',       hrOnly: false, queueOnly: false },
+  { to: '/candidates', icon: Users,           label: 'Candidates',  hrOnly: false, queueOnly: false },
+  { to: '/talent-pool',icon: Archive,         label: 'Talent Pool', hrOnly: false, queueOnly: false },
+  { to: '/hm-queue',   icon: ListChecks,      label: 'My Queue',    hrOnly: false, queueOnly: true  },
+  { to: '/agencies',   icon: Building2,       label: 'Agencies',    hrOnly: true,  queueOnly: false },
 ];
 
 export default function Sidebar() {

@@ -41,7 +41,7 @@ async function logActivity(
 // ─── GET /api/applications — list with filters ────────────────────────────────
 router.get('/', async (req: Request, res: Response) => {
   const { role_id, stage, status, screening_status, sla_breach, founder_flag,
-          limit = '50', offset = '0' } = req.query;
+          exclude_stale_archived, limit = '50', offset = '0' } = req.query;
 
   let sql = `
     SELECT a.*, c.full_name AS candidate_name, c.email, c.phone,
@@ -66,6 +66,14 @@ router.get('/', async (req: Request, res: Response) => {
   if (screening_status) { sql += ` AND a.recruiter_screening_status = $${i++}`;    params.push(screening_status); }
   if (sla_breach === 'true') { sql += ` AND a.sla_breach = true`; }
   if (founder_flag === 'true') { sql += ` AND a.founder_review_flag = true`; }
+  // Archival (PRD §21) — opt-in only, so every existing caller of this
+  // shared endpoint is unaffected unless it explicitly starts passing this.
+  // Candidates.tsx's default pipeline table always passes it; the excluded
+  // rows remain reachable via the Talent Pool page's Archived mode instead
+  // of being hidden with no way back.
+  if (exclude_stale_archived === 'true') {
+    sql += ` AND NOT (a.status IN ('Rejected','Withdrawn') AND a.last_updated < NOW() - INTERVAL '90 days')`;
+  }
 
   sql += ` ORDER BY a.ai_fit_score DESC NULLS LAST, a.application_date DESC LIMIT $${i++} OFFSET $${i++}`;
   params.push(parseInt(limit as string), parseInt(offset as string));

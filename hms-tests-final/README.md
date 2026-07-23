@@ -71,8 +71,11 @@ This means:
 tests/
 ├── helpers/
 │   ├── global-setup.ts   # pre-auth all users once per run
-│   └── api.ts            # token cache, authed() helper, data factories,
-│                          # ingest secrets, pollUntil() async-condition poller
+│   ├── api.ts            # token cache, authed() helper, data factories,
+│   │                      # ingest secrets, pollUntil() async-condition poller
+│   └── calendar.ts       # real Google Calendar helper (get/delete event, credential
+│                          # detection) — used by the one real-round-trip Calendar test
+│                          # and its e2e counterpart, see below
 ├── api/
 │   ├── 01-auth.spec.ts
 │   ├── 02-roles.spec.ts
@@ -80,16 +83,23 @@ tests/
 │   ├── 04-applications.spec.ts
 │   ├── 05-access-control.spec.ts
 │   ├── 06-dashboard.spec.ts
-│   ├── 07-interviews.spec.ts
+│   ├── 07-interviews.spec.ts                # + Assignment-eval persona rules, interviewer_emails
+│   │                                         # validation, duration_minutes (Calendar integration)
 │   ├── 08-misc.spec.ts                      # agencies, notes, eval-questions, comp-benchmarks
 │   ├── 09-role-ingestion.spec.ts            # Phase 3 — Requisition Form webhook
 │   ├── 10-jd-generation-and-scoring.spec.ts # Phase 3+4 — real Claude/Drive/ResumeIQ calls, see below
 │   ├── 11-candidate-ingestion.spec.ts       # Phase 4 — Job Application Form webhook
 │   ├── 12-candidate-role-linking.spec.ts    # Phase 4 — manual "unlinked candidate" linking
-│   └── 13-inline-editing-regressions.spec.ts# Phase 3 — regression guards for real fixed bugs
+│   ├── 13-inline-editing-regressions.spec.ts# Phase 3 — regression guards for real fixed bugs
+│   ├── 14-stage-scheduling-regressions.spec.ts # stage-driven scheduling rework — regression guards
+│   ├── 15-calendar-integration.spec.ts      # Calendar sync gating + 1 real Calendar API call, see below
+│   └── 16-talent-pool.spec.ts               # PRD §21 — hold_for_future/archived filters, reactivate,
+│                                             # exclude_stale_archived, COUNT(DISTINCT) regression guard
 ├── db/
-│   └── 00-schema-integrity.spec.ts   # Security-Immediate: dedicated sequences, GIN indexes
-│                                      # (direct Postgres via `pg` — LOCAL ONLY, never prod)
+│   ├── 00-schema-integrity.spec.ts   # Security-Immediate: dedicated sequences, GIN indexes
+│   │                                  # (direct Postgres via `pg` — LOCAL ONLY, never prod)
+│   └── 01-talent-pool-archival.spec.ts # PRD §21 — 90-day archival threshold; no API path can set
+│                                        # a past last_updated, so this backdates directly (LOCAL ONLY)
 ├── smoke/
 │   └── production.spec.ts   # safe for live Vercel — read-only + auth-rejection checks only
 └── e2e/
@@ -97,7 +107,9 @@ tests/
     ├── 02-dashboard.spec.ts
     ├── 03-jd-generation.spec.ts      # Phase 3 — slow, real JD generation through the actual UI
     ├── 04-inline-editing.spec.ts     # Phase 3 — EditableSection save/cancel, Role/Candidate/Agency
-    └── 05-unlinked-candidates.spec.ts# Phase 4 — unlinked panel + Link-to-role modal
+    ├── 05-unlinked-candidates.spec.ts# Phase 4 — unlinked panel + Link-to-role modal
+    └── 06-schedule-round.spec.ts     # ScheduleRoundModal — IST timezone regression, email
+                                       # validation, stage-gated button visibility
 ```
 
 ## A note on real external calls (real cost, real time)
@@ -111,6 +123,20 @@ small real cost and ~30-60s runtime per test. Everything else in this suite is
 free and fast. If Anthropic/Drive credentials aren't configured in your local
 `.env`, these two tests will fail/timeout — that's expected in that setup, not a
 suite bug.
+
+`tests/api/15-calendar-integration.spec.ts` and `tests/e2e/06-schedule-round.spec.ts`
+each contain one more real external call: scheduling a Standard interview round with
+a real `scheduled_date` + `interviewer_emails` creates a real Google Calendar event
+via the same service-account + domain-wide-delegation credentials, impersonating
+`aaron.newton@digitalpaani.com` as organizer (the one test persona confirmed to be a
+real Workspace mailbox — `garima@` and the others are real HMS users but not real
+mailboxes, and will fail impersonation with `invalid_grant` if ever used this way).
+Both tests are guarded with `test.skip(!hasCalendarCredentials(), ...)` so they
+degrade gracefully without the key present. Unlike the Drive/Claude tests above —
+which have no delete route to clean up with and just leave their test data in
+place — a stray real Calendar event sits on an actual person's actual calendar, so
+both tests explicitly delete the event they create via `tests/helpers/calendar.ts`'s
+`deleteCalendarEvent()` in a `finally` block.
 
 ## Notes on E2E tests and Google OAuth
 

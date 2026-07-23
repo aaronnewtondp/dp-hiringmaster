@@ -10,13 +10,14 @@ router.use(authenticate);
 
 // ─── GET /api/candidates — search across all candidates ──────────────────────
 router.get('/', async (req: Request, res: Response) => {
-  const { q, skills, industry, status, tag, limit = '50', offset = '0' } = req.query;
+  const { q, skills, industry, tag, hold_for_future, archived, limit = '50', offset = '0' } = req.query;
 
   let sql = `
     SELECT c.*,
       json_agg(json_build_object(
         'id', a.id, 'role_id', a.role_id, 'role_title', r.title,
-        'stage', a.stage, 'status', a.status, 'ai_fit_score', a.ai_fit_score
+        'stage', a.stage, 'status', a.status, 'ai_fit_score', a.ai_fit_score,
+        'last_updated', a.last_updated
       ) ORDER BY a.application_date DESC) FILTER (WHERE a.id IS NOT NULL) AS applications
     FROM candidates c
     LEFT JOIN applications a ON a.candidate_id = c.id
@@ -42,13 +43,42 @@ router.get('/', async (req: Request, res: Response) => {
     sql += ` AND $${i++} = ANY(c.hr_tags)`;
     params.push(tag);
   }
+  // Talent Pool / Archival (PRD §21) — the PRD's own suggested query
+  // (?tag=Hold+for+Future) doesn't actually work: nothing auto-tags hr_tags
+  // when an application's status changes. status lives on applications,
+  // not candidates, so these are EXISTS filters rather than a plain column
+  // match. No $n param needed — nothing user-controlled enters the SQL
+  // fragment itself, only the fixed 'true' string check gates whether the
+  // literal clause (with no interpolated values) gets appended at all.
+  if (hold_for_future === 'true') {
+    sql += ` AND EXISTS (SELECT 1 FROM applications a2 WHERE a2.candidate_id = c.id AND a2.status = 'Hold for Future')`;
+  }
+  if (archived === 'true') {
+    sql += ` AND EXISTS (SELECT 1 FROM applications a2 WHERE a2.candidate_id = c.id AND a2.status IN ('Rejected','Withdrawn') AND a2.last_updated < NOW() - INTERVAL '90 days')`;
+  }
 
-  sql += ` GROUP BY c.id ORDER BY c.updated_at DESC LIMIT $${i++} OFFSET $${i++}`;
+  // c.updated_at only moves on candidate PROFILE edits, not on an
+  // application's status changing — without this, a candidate archived
+  // five minutes ago wouldn't sort anywhere near the top of either pool.
+  let orderBy = 'c.updated_at DESC';
+  if (hold_for_future === 'true') {
+    orderBy = `(SELECT MAX(a2.last_updated) FROM applications a2 WHERE a2.candidate_id = c.id AND a2.status = 'Hold for Future') DESC NULLS LAST`;
+  } else if (archived === 'true') {
+    orderBy = `(SELECT MAX(a2.last_updated) FROM applications a2 WHERE a2.candidate_id = c.id AND a2.status IN ('Rejected','Withdrawn') AND a2.last_updated < NOW() - INTERVAL '90 days') DESC NULLS LAST`;
+  }
+
+  sql += ` GROUP BY c.id ORDER BY ${orderBy} LIMIT $${i++} OFFSET $${i++}`;
   params.push(parseInt(limit as string), parseInt(offset as string));
 
   const candidates = await query<Candidate>(sql, params);
 
-  const countSql = sql.replace(/SELECT c\.\*[\s\S]+?FROM/, 'SELECT COUNT(*) FROM').replace(/GROUP BY[\s\S]+$/, '');
+  // COUNT(DISTINCT c.id), not COUNT(*) — the LEFT JOIN to applications fans
+  // out one row per application, so a plain COUNT(*) over-counts any
+  // candidate with more than one application (exactly the case the Talent
+  // Pool's cross-role-history filters are built around). Pre-existing bug,
+  // caught while verifying the new hold_for_future/archived filters against
+  // a candidate with 2 applications — total was silently wrong before this.
+  const countSql = sql.replace(/SELECT c\.\*[\s\S]+?FROM/, 'SELECT COUNT(DISTINCT c.id) FROM').replace(/GROUP BY[\s\S]+$/, '');
   const countResult = await queryOne<{ count: string }>(countSql.split('LIMIT')[0], params.slice(0, -2));
   const total = parseInt(countResult?.count || '0');
 
@@ -185,10 +215,15 @@ router.post('/:id/applications', requireHR, async (req: Request, res: Response) 
     );
     const app = appResult.rows[0];
 
+    // Distinguishes the Talent Pool's "Reactivate" action from the original
+    // unmatched-role reconciliation flow this route was first built for —
+    // both call this same endpoint, so the activity log needs to say which.
+    const eventDetail = `Application manually linked${source_channel ? ` (${source_channel})` : ' from unmatched-role reconciliation'}`;
+
     await client.query(
       `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
-       VALUES ($1,$2,$3,'Application Created','Application manually linked from unmatched-role reconciliation',$4,$5,$6)`,
-      [app.id, req.params.id, role_id, JSON.stringify({ stage: 'Applied', source: source_channel }), req.user!.userId, req.user!.name]
+       VALUES ($1,$2,$3,'Application Created',$4,$5,$6,$7)`,
+      [app.id, req.params.id, role_id, eventDetail, JSON.stringify({ stage: 'Applied', source: source_channel }), req.user!.userId, req.user!.name]
     );
 
     return app;

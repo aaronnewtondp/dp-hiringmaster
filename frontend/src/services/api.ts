@@ -49,7 +49,9 @@ export const rolesApi = {
 };
 
 export const candidatesApi = {
-  list:     (params?: Record<string, string>)  => api.get('/candidates', { params }),
+  // string[] values (e.g. `skills`) are serialized by axios as repeated
+  // keys and re-assembled into an array by Express's default `qs` parser.
+  list:     (params?: Record<string, string | string[]>)  => api.get('/candidates', { params }),
   get:      (id: string)                       => api.get(`/candidates/${id}`),
   create:   (data: Record<string, unknown>)    => api.post('/candidates', data),
   update:   (id: string, data: Record<string, unknown>) => api.patch(`/candidates/${id}`, data),

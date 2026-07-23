@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Search, Plus, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
-import toast from 'react-hot-toast';
-import { applicationsApi, candidatesApi, rolesApi } from '../services/api.ts';
-import { Application, Candidate, Role, STAGES } from '../types/index.ts';
+import { applicationsApi, candidatesApi } from '../services/api.ts';
+import { Application, Candidate, STAGES } from '../types/index.ts';
 import { StageBadge, StatusBadge, FitScore, SlaBadge, Spinner, EmptyState, PriorityBadge } from '../components/shared/Badges.tsx';
+import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -17,10 +17,11 @@ export default function Candidates() {
   const [filterSla,   setFilterSla]   = useState(false);
   const [showUnlinked, setShowUnlinked] = useState(true);
   const [linkCandidate, setLinkCandidate] = useState<Candidate | null>(null);
-  const [roleId, setRoleId] = useState('');
-  const [linking, setLinking] = useState(false);
 
-  const params: Record<string,string> = { limit: '100' };
+  // Archival (PRD §21) — Rejected/Withdrawn applications untouched for 90+
+  // days are excluded from this default pipeline view; they remain fully
+  // reachable via the Talent Pool page's "Archived" mode instead.
+  const params: Record<string,string> = { limit: '100', exclude_stale_archived: 'true' };
   if (filterStage !== 'all') params.stage  = filterStage;
   if (filterSla)             params.sla_breach = 'true';
 
@@ -39,29 +40,6 @@ export default function Candidates() {
     queryFn:  () => candidatesApi.list({ limit: '100' }),
   });
   const unlinked = (candidatesData?.data?.candidates || []).filter(c => !c.applications || c.applications.length === 0);
-
-  const { data: rolesData } = useQuery<{ data: { roles: Role[] } }>({
-    queryKey: ['roles', 'active'],
-    queryFn:  () => rolesApi.list({ status: 'Live – Sourcing' }),
-  });
-  const roles = rolesData?.data?.roles || [];
-
-  const handleLinkRole = async () => {
-    if (!linkCandidate || !roleId) return;
-    setLinking(true);
-    try {
-      await candidatesApi.linkRole(linkCandidate.id, { role_id: roleId, source_channel: 'Job Application Form' });
-      toast.success('Candidate linked to role');
-      setLinkCandidate(null);
-      setRoleId('');
-      qc.invalidateQueries({ queryKey: ['candidates', 'unlinked'] });
-      qc.invalidateQueries({ queryKey: ['applications'] });
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } } };
-      toast.error(e.response?.data?.error || 'Failed to link candidate');
-    }
-    setLinking(false);
-  };
 
   const all = data?.data?.applications || [];
   const filtered = search
@@ -222,21 +200,15 @@ export default function Candidates() {
       </div>
 
       {linkCandidate && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
-            <h3 className="text-base font-semibold">Link {linkCandidate.full_name} to a role</h3>
-            <select value={roleId} onChange={e => setRoleId(e.target.value)} className="select">
-              <option value="">Select a role…</option>
-              {roles.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
-            </select>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => { setLinkCandidate(null); setRoleId(''); }} className="btn-secondary">Cancel</button>
-              <button onClick={handleLinkRole} disabled={linking || !roleId} className="btn-primary">
-                {linking ? 'Linking…' : 'Link'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <LinkToRoleModal
+          candidate={linkCandidate}
+          sourceChannel="Job Application Form"
+          onClose={() => setLinkCandidate(null)}
+          onLinked={() => {
+            qc.invalidateQueries({ queryKey: ['candidates', 'unlinked'] });
+            qc.invalidateQueries({ queryKey: ['applications'] });
+          }}
+        />
       )}
     </div>
   );

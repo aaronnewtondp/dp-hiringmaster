@@ -110,6 +110,7 @@ export interface Candidate {
     stage:         string;
     status:        string;
     ai_fit_score?: number;
+    last_updated?: string;
   }> | null;
 }
 
