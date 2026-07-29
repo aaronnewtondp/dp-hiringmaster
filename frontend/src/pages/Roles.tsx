@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Plus, ChevronRight } from 'lucide-react';
 import { rolesApi } from '../services/api.ts';
-import { Role, PRIORITIES, ROLE_STATUSES, LOCATIONS } from '../types/index.ts';
+import { Role, PRIORITIES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -19,12 +19,11 @@ export default function Roles() {
   // statuses," so this preselection keeps first-load behavior unchanged.
   const [statuses,    setStatuses]    = useState<string[]>(['Live – Sourcing']);
 
-  const { data: filterOptionsData } = useQuery<{ data: { departments: string[]; recruitment_modes: string[] } }>({
+  const { data: filterOptionsData } = useQuery<{ data: { recruitment_modes: string[] } }>({
     queryKey: ['roles', 'filter-options'],
     queryFn:  () => rolesApi.filterOptions(),
   });
-  const departmentOptions = filterOptionsData?.data?.departments || [];
-  const modeOptions       = filterOptionsData?.data?.recruitment_modes || [];
+  const modeOptions = filterOptionsData?.data?.recruitment_modes || [];
 
   const params: Record<string, string[]> = {};
   if (departments.length) params.department = departments;
@@ -56,7 +55,7 @@ export default function Roles() {
 
       {/* Filters */}
       <div className="flex gap-2 flex-wrap">
-        <MultiSelectFilter label="Department"       options={departmentOptions} selected={departments} onChange={setDepartments} />
+        <MultiSelectFilter label="Department"       options={DEPARTMENTS}       selected={departments} onChange={setDepartments} />
         <MultiSelectFilter label="Location"         options={LOCATIONS}         selected={locations}   onChange={setLocations} />
         <MultiSelectFilter label="Recruitment Mode" options={modeOptions}       selected={modes}        onChange={setModes} />
         <MultiSelectFilter label="Priority"         options={PRIORITIES}        selected={priorities}  onChange={setPriorities} />

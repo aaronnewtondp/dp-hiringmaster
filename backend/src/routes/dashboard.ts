@@ -266,11 +266,19 @@ router.get('/', async (req: Request, res: Response) => {
     ? pendingActions.filter(pa => pa.owner_type === 'Hiring Manager')
     : pendingActions;
 
-  // Pending Actions counter excludes SLA-breach-driven entries — those are
-  // already surfaced by the dedicated SLA breaches metric, so counting them
-  // twice overstates the number of distinct actions HR/HM/Leadership need to
-  // take. Role aging alerts are already excluded upstream (query above).
-  const totalPendingActions = pendingForUser.filter(pa => !pa.sla_breach).length;
+  // Pending Actions counter excludes SLA-breach-driven HR/Recruiter entries
+  // specifically — that's the box the SLA Breaches metric is "directly
+  // linked to" (nearly every HR/Recruiter action — Idle candidate, Resume to
+  // triage — exists *because* an SLA breached, so counting both would double
+  // up the same event). Hiring Manager/Interviewer/Leadership entries always
+  // count even when SLA-breach-driven (e.g. "Interview feedback due" is a
+  // distinct action a different persona owns, not a restatement of the SLA
+  // Breaches KPI) — excluding by sla_breach flag alone, regardless of owner,
+  // previously wiped out nearly every real pending action. Role aging alerts
+  // are already excluded upstream (query above).
+  const totalPendingActions = pendingForUser.filter(
+    pa => !(pa.owner_type === 'HR / Recruiter' && pa.sla_breach)
+  ).length;
 
   // ── Source Quality — pass_rate/hire_rate as 0-100, 1 decimal ────────────────
   const round1 = (n: number) => Math.round(n * 10) / 10;

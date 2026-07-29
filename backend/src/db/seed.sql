@@ -20,7 +20,7 @@ ON CONFLICT (email) DO NOTHING;
 -- ─── Roles (7 active as of May 2026) ─────────────────────────────────────────
 INSERT INTO roles (
   id, title, department, hiring_manager_name, priority, status,
-  new_replacement, num_openings, location, employment_type,
+  new_or_replacement, num_openings, location, employment_type,
   yoe_required, ctc_band, kpi_expectations, must_have_skills, nice_to_have_skills,
   suggested_interviewers, assignment_required, recruitment_mode,
   start_date, target_closure_date, created_by

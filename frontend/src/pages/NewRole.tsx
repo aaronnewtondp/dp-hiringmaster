@@ -3,16 +3,15 @@ import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../services/api.ts';
-import { LOCATIONS, VACANCY_REASONS } from '../types/index.ts';
+import { LOCATIONS, VACANCY_REASONS, DEPARTMENTS } from '../types/index.ts';
 
 const PRIORITIES = ['P0','P1','P2','P3'];
-const DEPTS = ['Tech/Dev','Product/QA','Project Implementation','Domain','Sales','Operations','HR','R&D'];
 const EMP_TYPES = ['Full-Time / Permanent','Contract','Internship'];
 const CHANNELS = ['Naukri','LinkedIn','IIMJobs','Employee Referral','Agency','Direct Outreach'];
 
 type FormState = {
   title: string; department: string; hiring_manager_name: string; priority: string;
-  new_replacement: string; vacancy_reason: string[]; num_openings: number; location: string;
+  new_or_replacement: string; vacancy_reason: string[]; num_openings: number; location: string;
   employment_type: string; yoe_required: string; qualification_required: string;
   ctc_band: string; kpi_expectations: string; job_description: string;
   must_have_skills: string; nice_to_have_skills: string; additional_remarks: string;
@@ -36,7 +35,7 @@ export default function NewRole() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>({
     title: '', department: '', hiring_manager_name: '', priority: 'P1',
-    new_replacement: 'New Position', vacancy_reason: [], num_openings: 1, location: '',
+    new_or_replacement: 'New Position', vacancy_reason: [], num_openings: 1, location: '',
     employment_type: 'Full-Time / Permanent', yoe_required: '', qualification_required: '',
     ctc_band: '', kpi_expectations: '', job_description: '',
     must_have_skills: '', nice_to_have_skills: '', additional_remarks: '',
@@ -88,7 +87,7 @@ export default function NewRole() {
               <label className="label">Department *</label>
               <select className="select" value={form.department} onChange={e => set('department', e.target.value)} required>
                 <option value="">— select —</option>
-                {DEPTS.map(d => <option key={d}>{d}</option>)}
+                {DEPARTMENTS.map(d => <option key={d}>{d}</option>)}
               </select>
             </div>
             <div>
@@ -103,7 +102,7 @@ export default function NewRole() {
             </div>
             <div>
               <label className="label">New / Replacement *</label>
-              <select className="select" value={form.new_replacement} onChange={e => set('new_replacement', e.target.value)}>
+              <select className="select" value={form.new_or_replacement} onChange={e => set('new_or_replacement', e.target.value)}>
                 <option>New Position</option><option>Replacement</option>
               </select>
             </div>

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, Briefcase, Users, ListChecks, TrendingUp, Clock, Radio, Building2, X } from 'lucide-react';
 import { dashboardApi, rolesApi } from '../services/api.ts';
-import { DashboardData, PendingAction, Priority, STAGES, PRIORITIES, ROLE_STATUSES, LOCATIONS } from '../types/index.ts';
+import { DashboardData, PendingAction, Priority, STAGES, PRIORITIES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { formatDistanceToNow } from 'date-fns';
@@ -125,12 +125,11 @@ export default function Dashboard() {
   const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
   const [statuses,     setStatuses]   = useState<string[]>([]);
 
-  const { data: filterOptionsData } = useQuery<{ data: { departments: string[]; recruitment_modes: string[] } }>({
+  const { data: filterOptionsData } = useQuery<{ data: { recruitment_modes: string[] } }>({
     queryKey: ['roles', 'filter-options'],
     queryFn:  () => rolesApi.filterOptions(),
   });
-  const departmentOptions = filterOptionsData?.data?.departments || [];
-  const modeOptions       = filterOptionsData?.data?.recruitment_modes || [];
+  const modeOptions = filterOptionsData?.data?.recruitment_modes || [];
 
   const filterParams: Record<string, string[]> = {};
   if (departments.length)      filterParams.department = departments;
@@ -184,7 +183,7 @@ export default function Dashboard() {
 
       {/* Master filters — every section below reflects these */}
       <div className="flex items-center gap-2 flex-wrap">
-        <MultiSelectFilter label="Department"       options={departmentOptions} selected={departments}      onChange={setDepartments} />
+        <MultiSelectFilter label="Department"       options={DEPARTMENTS}       selected={departments}      onChange={setDepartments} />
         <MultiSelectFilter label="Location"         options={LOCATIONS}         selected={locations}        onChange={setLocations} />
         <MultiSelectFilter label="Recruitment Mode" options={modeOptions}       selected={modes}             onChange={setModes} />
         <MultiSelectFilter label="Priority"         options={PRIORITIES}        selected={filterPriorities} onChange={setFilterPriorities} />

@@ -20,8 +20,7 @@ export interface Role {
   hiring_manager_name?:     string;
   priority:                 Priority;
   status:                   string;
-  new_replacement?:         string;
-  replacement_reason?:      string;
+  new_or_replacement?:      string;
   vacancy_reason?:          string[];
   num_openings:             number;
   location?:                string;
@@ -274,6 +273,15 @@ export const ROLE_STATUSES = [
 // against roles.location, so single-value selections from this list always
 // match exactly.
 export const LOCATIONS = ['Gurgaon', 'Mumbai', 'Pune', 'Gujarat', 'Bangalore', 'Hyderabad', 'Others'];
+
+// Exact Department option set from the live requisition Google Form
+// (confirmed directly by Aaron) — NOT derived from historical roles.department
+// values, which are noisy/inconsistent test data, not a reliable proxy for
+// the form's real dropdown options.
+export const DEPARTMENTS = [
+  'Corporate Functions/Business Operations', 'CSM/Service', 'Project Implementation',
+  'Sales & Growth', 'Product/QA', 'Tech/Devs', 'Domain',
+];
 
 // "Vacancy Caused Due To" — exact option set from the live requisition
 // Google Form (confirmed directly by Aaron, not derived from historical

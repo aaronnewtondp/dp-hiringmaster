@@ -30,12 +30,13 @@ export interface Role {
   hiring_manager_name?:     string;
   priority:                 Priority;
   status:                   RoleStatus;
-  new_replacement?:         string;
-  replacement_reason?:      string;
+  new_or_replacement?:      string;
+  vacancy_reason?:          string[];
   num_openings:             number;
   location?:                string;
   employment_type?:         string;
   yoe_required?:            string;
+  qualification_required?:  string;
   ctc_band?:                string;       // restricted
   kpi_expectations?:        string;
   job_description?:         string;
