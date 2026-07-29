@@ -140,7 +140,7 @@ router.patch('/:id', requireHR, async (req: Request, res: Response) => {
 
   for (const field of allowedFields) {
     if (req.body[field] !== undefined) {
-      const oldVal = String((existing as Record<string, unknown>)[field] ?? '');
+      const oldVal = String((existing as unknown as Record<string, unknown>)[field] ?? '');
       const newVal = String(req.body[field]);
       if (oldVal !== newVal) {
         updates.push(`${field} = $${idx++}`);

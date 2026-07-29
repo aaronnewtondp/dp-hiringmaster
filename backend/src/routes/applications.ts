@@ -81,7 +81,7 @@ router.get('/', async (req: Request, res: Response) => {
   const apps = await query<Application>(sql, params);
   const persona = req.user!.persona;
 
-  const result = apps.map(a => stripRestrictedFields(a as Record<string, unknown>, persona));
+  const result = apps.map(a => stripRestrictedFields(a as unknown as Record<string, unknown>, persona));
   res.json({ applications: result, count: apps.length });
 });
 
@@ -111,7 +111,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   );
 
   const persona = req.user!.persona;
-  const safeApp = stripRestrictedFields(app as Record<string, unknown>, persona);
+  const safeApp = stripRestrictedFields(app as unknown as Record<string, unknown>, persona);
   res.json({ application: safeApp, rounds, activity });
 });
 

@@ -75,8 +75,10 @@ export function stripRestrictedFields<T extends Record<string, unknown>>(
   for (const field of RESTRICTED_FIELDS) {
     delete filtered[field];
   }
-  if (persona !== 'leadership') {
-    for (const field of REF_RESTRICTED) delete filtered[field];
-  }
+  // persona is 'hiring_manager' | 'interviewer' by this point — leadership
+  // already returned above — so this always ran; the old `persona !==
+  // 'leadership'` guard was dead code TypeScript correctly flagged as
+  // comparing types with no overlap.
+  for (const field of REF_RESTRICTED) delete filtered[field];
   return filtered;
 }

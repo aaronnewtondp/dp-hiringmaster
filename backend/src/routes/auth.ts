@@ -18,7 +18,10 @@ function issueToken(user: User & { avatar_url?: string | null }) {
   const token = jwt.sign(
     { userId: user.id, email: user.email, persona: user.persona, name: user.name },
     process.env.JWT_SECRET!,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
+    // @types/jsonwebtoken types expiresIn as number | StringValue (a
+    // branded duration-string type from `ms`), not plain string — the env
+    // var is inherently just `string`, so it needs an explicit cast here.
+    { expiresIn: (process.env.JWT_EXPIRES_IN || '24h') as jwt.SignOptions['expiresIn'] }
   );
   return {
     token,

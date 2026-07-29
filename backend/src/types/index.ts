@@ -106,6 +106,7 @@ export type ScreeningStatus      = 'New' | 'Under Recruiter Review' | 'Awaiting 
 export type AIPriorityBucket     = 'Strong Fit' | 'Review' | 'Low Priority' | 'Reject';
 export type PriorityOverride     = 'Normal' | 'High' | 'Critical';
 export type JoiningConfidence    = 'High' | 'Medium' | 'Low';
+export type Recommendation       = 'Strong Yes' | 'Yes' | 'Maybe' | 'No';
 
 export interface Application {
   id:                           string;
@@ -138,6 +139,34 @@ export interface Application {
   ai_score_summary?:            string;
   ai_score_breakdown?:          { skills: number; experience: number; industry: number; location: number };
   ai_scored_at?:                string;
+  // 8-dimension ResumeIQ scoring (matches digitalpaani-candidate-scoring
+  // skill) — this interface only ever had the legacy ai_* fields; these
+  // were missing entirely despite being read/written throughout
+  // applications.ts and resumeIQ.ts, and already present on the frontend's
+  // own Application type.
+  score_technical?:             number;
+  score_technical_note?:        string;
+  score_experience?:            number;
+  score_experience_note?:       string;
+  score_industry_fit?:          number;
+  score_industry_fit_note?:     string;
+  score_culture_fit?:           number;
+  score_culture_fit_note?:      string;
+  score_role_alignment?:        number;
+  score_role_alignment_note?:   string;
+  score_trajectory?:            number;
+  score_trajectory_note?:       string;
+  score_leadership?:            number;
+  score_leadership_note?:       string;
+  score_communication?:         number;
+  score_communication_note?:    string;
+  score_avg?:                   number;
+  score_strengths?:             string[];
+  score_red_flags?:             string[];
+  score_summary?:               string;
+  score_recommendation?:        Recommendation;
+  score_resume_read?:           boolean;
+  score_computed_at?:           string;
   hr_recruiter_summary?:        string;
   hr_key_positives?:            string;
   hr_key_concerns?:             string;
