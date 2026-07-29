@@ -3,7 +3,7 @@ import { Pencil, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Spinner } from './Badges.tsx';
 
-export type FieldType = 'text' | 'textarea' | 'number' | 'select' | 'boolean' | 'date' | 'tags' | 'json';
+export type FieldType = 'text' | 'textarea' | 'number' | 'select' | 'multiselect' | 'boolean' | 'date' | 'tags' | 'json';
 
 export interface FieldConfig {
   key: string;
@@ -26,12 +26,24 @@ interface EditableSectionProps {
   pendingLabels?: Record<string, string>;
 }
 
-type DraftValue = string | boolean;
+type DraftValue = string | boolean | string[];
+
+// Draft equality that also handles arrays — used so 'save' can skip fields
+// that haven't actually changed (arrays would otherwise be `!==` even when
+// element-equal, and get re-sent every time).
+function draftEquals(a: DraftValue, b: DraftValue): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => v === b[i]);
+  }
+  return a === b;
+}
 
 function formatDisplay(value: unknown, type: FieldType): string {
   if (value === null || value === undefined || value === '') return '—';
   if (type === 'boolean') return value ? 'Yes' : 'No';
-  if (type === 'tags') return Array.isArray(value) ? value.join(', ') : String(value);
+  if (type === 'tags' || type === 'multiselect') {
+    return Array.isArray(value) ? (value.length ? value.join(', ') : '—') : String(value);
+  }
   if (type === 'date') return String(value).slice(0, 10);
   if (type === 'json') return typeof value === 'object' ? JSON.stringify(value) : String(value);
   return String(value);
@@ -39,6 +51,7 @@ function formatDisplay(value: unknown, type: FieldType): string {
 
 function toDraftValue(value: unknown, type: FieldType): DraftValue {
   if (type === 'boolean') return !!value;
+  if (type === 'multiselect') return Array.isArray(value) ? [...value] : [];
   if (type === 'tags') return Array.isArray(value) ? value.join(', ') : (value as string) || '';
   if (type === 'date') return value ? String(value).slice(0, 10) : '';
   if (type === 'json') return value ? JSON.stringify(value, null, 2) : '';
@@ -50,6 +63,7 @@ function toDraftValue(value: unknown, type: FieldType): DraftValue {
 function fromDraftValue(draft: DraftValue, type: FieldType): unknown {
   if (type === 'boolean') return !!draft;
   if (type === 'number') return draft === '' ? null : Number(draft);
+  if (type === 'multiselect') return Array.isArray(draft) ? draft : [];
   if (type === 'tags') return String(draft).split(',').map(s => s.trim()).filter(Boolean);
   if (type === 'json') {
     const text = String(draft).trim();
@@ -91,7 +105,7 @@ export default function EditableSection({ title, data: rawData, fields, onSave, 
     const changes: Record<string, unknown> = {};
     for (const f of visibleFields) {
       const original = toDraftValue(data[f.key], f.type);
-      if (draft[f.key] === original) continue;
+      if (draftEquals(draft[f.key], original)) continue;
       try {
         changes[f.key] = fromDraftValue(draft[f.key], f.type);
       } catch {
@@ -171,6 +185,31 @@ export default function EditableSection({ title, data: rawData, fields, onSave, 
                 >
                   {(f.options || []).map(o => <option key={o} value={o}>{o}</option>)}
                 </select>
+              )}
+              {f.type === 'multiselect' && (
+                <div className="flex gap-2 flex-wrap mt-1">
+                  {(f.options || []).map(o => {
+                    const current = (draft[f.key] as string[] | undefined) || [];
+                    const active = current.includes(o);
+                    return (
+                      <button
+                        key={o}
+                        type="button"
+                        onClick={() => setDraft(d => {
+                          const cur = (d[f.key] as string[] | undefined) || [];
+                          return { ...d, [f.key]: active ? cur.filter(x => x !== o) : [...cur, o] };
+                        })}
+                        className={`px-3 py-1 rounded-lg text-sm border transition-colors ${
+                          active
+                            ? 'bg-dp-600 text-white border-dp-600'
+                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        {o}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
               {f.type === 'boolean' && (
                 <input

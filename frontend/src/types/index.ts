@@ -292,6 +292,12 @@ export const VACANCY_REASONS = [
   'New Project', 'Other',
 ];
 
+export const EMPLOYMENT_TYPES = ['Full-Time / Permanent', 'Contract', 'Internship'];
+
+export const RECRUITMENT_CHANNELS = [
+  'Naukri', 'LinkedIn', 'IIMJobs', 'Employee Referral', 'Agency', 'Direct Outreach',
+];
+
 export const STAGES = [
   'Applied', 'Resume Review', 'Shortlisted',
   'Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round',

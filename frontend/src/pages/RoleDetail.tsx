@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Users, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../services/api.ts';
-import { Role, Application, STAGES, ROLE_STATUSES, LOCATIONS } from '../types/index.ts';
+import { Role, Application, STAGES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS, EMPLOYMENT_TYPES, VACANCY_REASONS, RECRUITMENT_CHANNELS, PRIORITIES } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, FitScore, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -123,13 +123,13 @@ export default function RoleDetail() {
           onSave={saveRoleFields}
           fields={[
             { key: 'title', label: 'Title', type: 'text' },
-            { key: 'department', label: 'Department', type: 'text' },
+            { key: 'department', label: 'Department', type: 'select', options: DEPARTMENTS },
             { key: 'hiring_manager_name', label: 'Hiring Manager', type: 'text' },
-            { key: 'priority', label: 'Priority', type: 'select', options: ['P0', 'P1', 'P2', 'P3'] },
+            { key: 'priority', label: 'Priority', type: 'select', options: PRIORITIES },
             { key: 'new_or_replacement', label: 'New / Replacement', type: 'select', options: ['New Position', 'Replacement'] },
-            { key: 'vacancy_reason', label: 'Vacancy Caused Due To', type: 'tags' },
+            { key: 'vacancy_reason', label: 'Vacancy Caused Due To', type: 'multiselect', options: VACANCY_REASONS },
             { key: 'location', label: 'Location', type: 'select', options: LOCATIONS },
-            { key: 'employment_type', label: 'Employment Type', type: 'text' },
+            { key: 'employment_type', label: 'Employment Type', type: 'select', options: EMPLOYMENT_TYPES },
             { key: 'num_openings', label: 'Openings', type: 'number' },
           ]}
         />
@@ -143,9 +143,7 @@ export default function RoleDetail() {
             { key: 'ctc_band', label: 'CTC Band', type: 'text', hidden: !canHR },
             { key: 'must_have_skills', label: 'Must-have skills', type: 'textarea' },
             { key: 'nice_to_have_skills', label: 'Nice-to-have skills', type: 'textarea' },
-            { key: 'suggested_interviewers', label: 'Suggested Interviewers', type: 'text' },
-            { key: 'assignment_required', label: 'Assignment Required', type: 'boolean' },
-            { key: 'recruitment_mode', label: 'Recruitment Mode', type: 'tags' },
+            { key: 'recruitment_mode', label: 'Recruitment Mode', type: 'multiselect', options: RECRUITMENT_CHANNELS },
           ]}
         />
         <EditableSection
@@ -188,15 +186,12 @@ export default function RoleDetail() {
           fields={[
             { key: 'jd_drive_link', label: 'Long-form JD', type: 'text', linkify: true },
             { key: 'social_jd_drive_link', label: 'Social JD', type: 'text', linkify: true },
-            { key: 'whatsapp_forward_link', label: 'WhatsApp Forward Link', type: 'text', linkify: true },
-            { key: 'referral_message_link', label: 'Referral Message Link', type: 'text', linkify: true },
-            { key: 'approval_summary_link', label: 'Approval Summary Link', type: 'text', linkify: true },
-            { key: 'posting_status', label: 'Posting Status', type: 'json' },
+            { key: 'approval_summary_link', label: 'Assignment Link', type: 'text', linkify: true },
           ]}
         />
       </div>
       <div className="text-xs text-gray-400 -mt-2">
-        Openings: {role.num_openings} · Assignment: {role.assignment_required ? 'Yes' : 'No'}
+        Openings: {role.num_openings}
       </div>
 
       {/* Pipeline */}

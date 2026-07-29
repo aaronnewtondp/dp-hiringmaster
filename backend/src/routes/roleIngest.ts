@@ -10,6 +10,24 @@ function mapPriority(raw?: string): string {
   return 'P1';
 }
 
+// Google Sheets' onFormSubmit trigger sends the submission timestamp in the
+// sheet's own display format — for this workspace's IST locale that's
+// "DD/MM/YYYY HH:MM:SS" (same shape seen in the candidate ingest CSV export).
+// Extract just the date portion for start_date, which is a DATE column.
+// Returns null on unrecognized shapes (also handles ISO fallback).
+function parseFormTimestampToDate(ts: string | undefined): string | null {
+  if (!ts) return null;
+  const s = String(ts).trim();
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (dmy) {
+    const [, d, m, y] = dmy;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  const iso = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1];
+  return null;
+}
+
 // ─── POST /api/roles/ingest ─────────────────────────────────────────────────────
 // Called by a Google Apps Script trigger bound to the Requisition Form's
 // response sheet, firing on every new form submission (onFormSubmit).
@@ -70,7 +88,11 @@ router.post('/ingest', async (req: Request, res: Response) => {
         must_have_skills || null, nice_to_have_skills || null,
         yoe_required || null, ctc_band || null,
         kpi_expectations || null, additional_remarks || null,
-        target_closure_date || null, start_date || null,
+        target_closure_date || null,
+        // Fall back to the requisition submission date when the form itself
+        // doesn't send a start_date — matches how HR would treat "when did
+        // this role become open" (the moment the requisition was filed).
+        start_date || parseFormTimestampToDate(timestamp),
         sourceRowKey,
       ]
     );

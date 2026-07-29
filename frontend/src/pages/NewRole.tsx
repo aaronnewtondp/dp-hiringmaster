@@ -3,11 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../services/api.ts';
-import { LOCATIONS, VACANCY_REASONS, DEPARTMENTS } from '../types/index.ts';
-
-const PRIORITIES = ['P0','P1','P2','P3'];
-const EMP_TYPES = ['Full-Time / Permanent','Contract','Internship'];
-const CHANNELS = ['Naukri','LinkedIn','IIMJobs','Employee Referral','Agency','Direct Outreach'];
+import { LOCATIONS, VACANCY_REASONS, DEPARTMENTS, EMPLOYMENT_TYPES, RECRUITMENT_CHANNELS, PRIORITIES } from '../types/index.ts';
 
 type FormState = {
   title: string; department: string; hiring_manager_name: string; priority: string;
@@ -136,7 +132,7 @@ export default function NewRole() {
             <div>
               <label className="label">Employment Type *</label>
               <select className="select" value={form.employment_type} onChange={e => set('employment_type', e.target.value)}>
-                {EMP_TYPES.map(t => <option key={t}>{t}</option>)}
+                {EMPLOYMENT_TYPES.map(t => <option key={t}>{t}</option>)}
               </select>
             </div>
             <div>
@@ -191,7 +187,7 @@ export default function NewRole() {
           <div>
             <label className="label">Recruitment Channels *</label>
             <div className="flex gap-2 flex-wrap mt-1">
-              {CHANNELS.map(c => (
+              {RECRUITMENT_CHANNELS.map(c => (
                 <button key={c} type="button"
                   onClick={() => toggleIn('recruitment_mode', c)}
                   className={`px-3 py-1 rounded-lg text-sm border transition-colors ${
