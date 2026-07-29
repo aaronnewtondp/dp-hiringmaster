@@ -6,6 +6,7 @@ import { generateJdContent } from '../services/jdContent.js';
 import { renderLongFormJd } from '../services/pdf/longFormJd.js';
 import { renderSocialJd } from '../services/pdf/socialJd.js';
 import { uploadJdPdf } from '../services/driveService.js';
+import { parseRoleFilters, buildRoleFilterSql } from '../utils/roleFilters.js';
 
 const router = Router();
 router.use(authenticate);
@@ -26,9 +27,10 @@ function enrichRole(role: Role) {
 
 // ─── GET /api/roles — list all roles with computed fields ─────────────────────
 router.get('/', async (req: Request, res: Response) => {
-  const { status, priority, department } = req.query;
+  const filters = parseRoleFilters(req.query as Record<string, unknown>);
+  const filterFragment = buildRoleFilterSql(filters, 1);
 
-  let sql = `
+  const sql = `
     SELECT r.*,
       COUNT(DISTINCT a.id) FILTER (WHERE a.status = 'Active') AS active_candidate_count,
       COUNT(DISTINCT a.id) FILTER (
@@ -39,17 +41,11 @@ router.get('/', async (req: Request, res: Response) => {
     FROM roles r
     LEFT JOIN applications a ON a.role_id = r.id
     WHERE 1=1
+    ${filterFragment.sql}
+    GROUP BY r.id ORDER BY r.priority ASC, r.start_date DESC
   `;
-  const params: unknown[] = [];
-  let i = 1;
 
-  if (status) { sql += ` AND r.status = $${i++}`; params.push(status); }
-  if (priority) { sql += ` AND r.priority = $${i++}`; params.push(priority); }
-  if (department) { sql += ` AND r.department = $${i++}`; params.push(department); }
-
-  sql += ' GROUP BY r.id ORDER BY r.priority ASC, r.start_date DESC';
-
-  const roles = await query<Role>(sql, params);
+  const roles = await query<Role>(sql, filterFragment.params);
 
   // Strip ctc_band for non-HR/Leadership personas
   const persona = req.user!.persona;
@@ -63,6 +59,28 @@ router.get('/', async (req: Request, res: Response) => {
   });
 
   res.json({ roles: result });
+});
+
+// ─── GET /api/roles/filter-options — distinct values for the filter dropdowns ──
+// Department + Recruitment Mode are genuinely data-driven (whatever the
+// requisition form has actually sent) — Location/Priority/Status are fixed,
+// known enums the frontend already hardcodes, so they don't need a round trip.
+// Must be registered before GET /:id so "filter-options" isn't swallowed as
+// a role id.
+router.get('/filter-options', async (_req: Request, res: Response) => {
+  const [departments, recruitmentModes] = await Promise.all([
+    query<{ department: string }>(
+      `SELECT DISTINCT department FROM roles WHERE department IS NOT NULL ORDER BY department`
+    ),
+    query<{ mode: string }>(
+      `SELECT DISTINCT unnest(recruitment_mode) AS mode FROM roles WHERE recruitment_mode IS NOT NULL ORDER BY mode`
+    ),
+  ]);
+
+  res.json({
+    departments:       departments.map(d => d.department),
+    recruitment_modes: recruitmentModes.map(r => r.mode),
+  });
 });
 
 // ─── GET /api/roles/:id — single role detail ──────────────────────────────────

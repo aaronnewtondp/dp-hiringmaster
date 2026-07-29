@@ -3,6 +3,7 @@ import { query, queryOne } from '../db/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { AGING_THRESHOLDS, Priority } from '../types/index.js';
 import { runSlaCheck } from '../jobs/slaChecker.js';
+import { parseRoleFilters, buildRoleFilterSql, roleIdsSubquery } from '../utils/roleFilters.js';
 
 // ─── Compute-on-read SLA trigger ──────────────────────────────────────────────
 // Vercel Hobby tier only supports daily cron, not the 15-min interval the SLA
@@ -33,6 +34,17 @@ router.get('/', async (req: Request, res: Response) => {
   const persona = req.user!.persona;
   const userId  = req.user!.userId;
 
+  // Master filters (Department/Location/Recruitment Mode/Priority/Status) —
+  // same shape and SQL semantics as the Roles summary view's own filters.
+  // Every query below is scoped to the matching role set: queries that
+  // already join `roles` apply the fragment directly; queries that only
+  // touch applications/pending_actions filter via a `role_id IN (subquery)`
+  // built from the exact same fragment, so the two can never disagree on
+  // what "Department = X" means. roleIdsSubquery() returns null when no
+  // filters are active, so the unfiltered (common) path skips the subquery
+  // entirely rather than paying for it on every dashboard load.
+  const filters = parseRoleFilters(req.query as Record<string, unknown>);
+
   // Run all aggregate queries in parallel
   const [
     roleStats, candidateStats, slaBreaches,
@@ -40,118 +52,175 @@ router.get('/', async (req: Request, res: Response) => {
     sourceQualityRows, timeToFillRows, agencyPerfRows,
   ] = await Promise.all([
     // Role counts by priority and status
-    query<{ priority: string; status: string; count: string }>(`
-      SELECT priority, status, COUNT(*) as count
-      FROM roles
-      WHERE status NOT IN ('Closed – Filled','Closed – Cancelled')
-      GROUP BY priority, status
-    `),
+    (() => {
+      const f = buildRoleFilterSql(filters, 1);
+      return query<{ priority: string; status: string; count: string }>(`
+        SELECT r.priority, r.status, COUNT(*) as count
+        FROM roles r
+        WHERE r.status NOT IN ('Closed – Filled','Closed – Cancelled')
+        ${f.sql}
+        GROUP BY r.priority, r.status
+      `, f.params);
+    })(),
 
     // Candidate stats
-    query<{ bucket: string; count: string }>(`
-      SELECT
-        CASE
-          WHEN ai_fit_score >= 75 THEN 'strong_fit'
-          WHEN ai_fit_score >= 50 THEN 'review'
-          WHEN ai_fit_score IS NULL THEN 'unscored'
-          ELSE 'low'
-        END AS bucket,
-        COUNT(*) as count
-      FROM applications
-      WHERE status = 'Active'
-      GROUP BY bucket
-    `),
+    (() => {
+      const scoped = roleIdsSubquery(filters, 1);
+      return query<{ bucket: string; count: string }>(`
+        SELECT
+          CASE
+            WHEN ai_fit_score >= 75 THEN 'strong_fit'
+            WHEN ai_fit_score >= 50 THEN 'review'
+            WHEN ai_fit_score IS NULL THEN 'unscored'
+            ELSE 'low'
+          END AS bucket,
+          COUNT(*) as count
+        FROM applications
+        WHERE status = 'Active'
+        ${scoped ? ` AND role_id IN ${scoped.sql}` : ''}
+        GROUP BY bucket
+      `, scoped?.params || []);
+    })(),
 
     // SLA breach count
-    queryOne<{ count: string }>(
-      `SELECT COUNT(*) as count FROM applications WHERE sla_breach=true AND status='Active'`
-    ),
+    (() => {
+      const scoped = roleIdsSubquery(filters, 1);
+      return queryOne<{ count: string }>(
+        `SELECT COUNT(*) as count FROM applications WHERE sla_breach=true AND status='Active'
+         ${scoped ? ` AND role_id IN ${scoped.sql}` : ''}`,
+        scoped?.params || []
+      );
+    })(),
 
-    // Pending actions by owner (unresolved only)
-    query<{ owner_type: string; priority_level: string; action_type: string;
-             description: string; id: number; application_id: string;
-             candidate_name: string; role_title: string; hours_overdue: number }>(`
-      SELECT * FROM pending_actions
-      WHERE resolved=false
-      ORDER BY priority_level DESC, created_at ASC
-    `),
+    // Pending actions by owner (unresolved only) — joined to the linked
+    // application for its live current stage (so the HR/Recruiter card can
+    // show where a breached candidate actually sits) and sla_breach flag
+    // (so the top-line counter can exclude SLA-breach-driven entries without
+    // hardcoding action_type strings — same underlying signal as the
+    // sla_breaches metric below, so the two numbers always reconcile).
+    // 'Role aging alert' is excluded outright: PRD-wise it belongs to the
+    // dedicated Aging Roles box, not Pending Actions — see aging_roles below.
+    // When master filters are active, entries with no linked application
+    // (currently just the CTC-change-trigger's 'Compensation change flag',
+    // which only carries a denormalized role_title snapshot, no role_id) are
+    // excluded too — there's no safe way to know which role they belong to.
+    (() => {
+      const scoped = roleIdsSubquery(filters, 1);
+      return query<{ owner_type: string; priority_level: string; action_type: string;
+               description: string; id: number; application_id: string;
+               candidate_name: string; role_title: string; hours_overdue: number;
+               current_stage: string | null; sla_breach: boolean | null }>(`
+        SELECT pa.*, a.stage AS current_stage, a.sla_breach AS sla_breach
+        FROM pending_actions pa
+        LEFT JOIN applications a ON a.id = pa.application_id
+        WHERE pa.resolved=false
+          AND pa.action_type <> 'Role aging alert'
+          ${scoped ? ` AND a.role_id IN ${scoped.sql}` : ''}
+        ORDER BY pa.priority_level DESC, pa.created_at ASC
+      `, scoped?.params || []);
+    })(),
 
     // Roles with aging alerts (open roles past thresholds)
-    query<{ id: string; title: string; priority: string; hiring_manager_name: string;
-             start_date: string; target_closure_date: string; status: string;
-             active_count: string }>(`
-      SELECT r.id, r.title, r.priority, r.hiring_manager_name,
-             r.start_date, r.target_closure_date, r.status,
-             COUNT(a.id) FILTER (WHERE a.status='Active') AS active_count
-      FROM roles r
-      LEFT JOIN applications a ON a.role_id = r.id
-      WHERE r.status NOT IN ('Closed – Filled','Closed – Cancelled','On Hold','Draft')
-      GROUP BY r.id
-      ORDER BY r.priority, r.start_date
-    `),
+    (() => {
+      const f = buildRoleFilterSql(filters, 1);
+      return query<{ id: string; title: string; priority: string; hiring_manager_name: string;
+               start_date: string; target_closure_date: string; status: string;
+               active_count: string }>(`
+        SELECT r.id, r.title, r.priority, r.hiring_manager_name,
+               r.start_date, r.target_closure_date, r.status,
+               COUNT(a.id) FILTER (WHERE a.status='Active') AS active_count
+        FROM roles r
+        LEFT JOIN applications a ON a.role_id = r.id
+        WHERE r.status NOT IN ('Closed – Filled','Closed – Cancelled','On Hold','Draft')
+        ${f.sql}
+        GROUP BY r.id
+        ORDER BY r.priority, r.start_date
+      `, f.params);
+    })(),
 
     // Hiring funnel — counts by stage across all active applications
-    query<{ stage: string; count: string }>(`
-      SELECT stage, COUNT(*) as count
-      FROM applications
-      WHERE status = 'Active'
-      GROUP BY stage
-      ORDER BY COUNT(*) DESC
-    `),
+    (() => {
+      const scoped = roleIdsSubquery(filters, 1);
+      return query<{ stage: string; count: string }>(`
+        SELECT stage, COUNT(*) as count
+        FROM applications
+        WHERE status = 'Active'
+        ${scoped ? ` AND role_id IN ${scoped.sql}` : ''}
+        GROUP BY stage
+        ORDER BY COUNT(*) DESC
+      `, scoped?.params || []);
+    })(),
 
     // Joining risk — Offer Accepted with auto flag or no contact > 5 days
-    query<{ id: string; candidate_name: string; role_title: string;
-             joining_confidence: string; last_hr_contact: string; offer_joining_date: string }>(`
-      SELECT a.id, c.full_name AS candidate_name, r.title AS role_title,
-             a.joining_confidence, a.last_hr_contact, a.offer_joining_date
-      FROM applications a
-      JOIN candidates c ON c.id = a.candidate_id
-      JOIN roles r ON r.id = a.role_id
-      WHERE a.stage = 'Offer Accepted'
-        AND (a.joining_risk_auto_flag = true
-             OR a.joining_confidence = 'Low'
-             OR (a.last_hr_contact IS NOT NULL AND a.last_hr_contact < NOW() - INTERVAL '5 days'))
-    `),
+    (() => {
+      const f = buildRoleFilterSql(filters, 1);
+      return query<{ id: string; candidate_name: string; role_title: string;
+               joining_confidence: string; last_hr_contact: string; offer_joining_date: string }>(`
+        SELECT a.id, c.full_name AS candidate_name, r.title AS role_title,
+               a.joining_confidence, a.last_hr_contact, a.offer_joining_date
+        FROM applications a
+        JOIN candidates c ON c.id = a.candidate_id
+        JOIN roles r ON r.id = a.role_id
+        WHERE a.stage = 'Offer Accepted'
+          AND (a.joining_risk_auto_flag = true
+               OR a.joining_confidence = 'Low'
+               OR (a.last_hr_contact IS NOT NULL AND a.last_hr_contact < NOW() - INTERVAL '5 days'))
+        ${f.sql}
+      `, f.params);
+    })(),
 
     // Source Quality (Phase 2, PRD §18) — pass rate = advanced past raw
     // intake (stage <> 'Applied'), hire rate = stage = 'Joined', matching
     // agencies.ts's existing hire-rate precedent (stage, not status).
     // Computed over full history, not status='Active' only — a lagging
     // quality measure, not a live-state snapshot.
-    query<{ source_channel: string; n: string; engaged: string; hired: string }>(`
-      SELECT source_channel,
-             COUNT(*) AS n,
-             COUNT(*) FILTER (WHERE stage <> 'Applied') AS engaged,
-             COUNT(*) FILTER (WHERE stage = 'Joined')  AS hired
-      FROM applications
-      WHERE source_channel IS NOT NULL
-      GROUP BY source_channel ORDER BY n DESC
-    `),
+    (() => {
+      const scoped = roleIdsSubquery(filters, 1);
+      return query<{ source_channel: string; n: string; engaged: string; hired: string }>(`
+        SELECT source_channel,
+               COUNT(*) AS n,
+               COUNT(*) FILTER (WHERE stage <> 'Applied') AS engaged,
+               COUNT(*) FILTER (WHERE stage = 'Joined')  AS hired
+        FROM applications
+        WHERE source_channel IS NOT NULL
+        ${scoped ? ` AND role_id IN ${scoped.sql}` : ''}
+        GROUP BY source_channel ORDER BY n DESC
+      `, scoped?.params || []);
+    })(),
 
     // Time to Fill (Phase 2, PRD §18) — literally AVG(offer_accepted_date -
     // start_date), per priority. start_date is role Open Date (same field
     // aging_roles' days_open already uses), so this is "time from req-open
     // to offer-accepted." No status filter — an accepted offer is a real
     // historical fact regardless of what happened after.
-    query<{ priority: string; n: string; avg_days: string | null }>(`
-      SELECT r.priority, COUNT(*) AS n,
-             AVG(a.offer_accepted_date - r.start_date) AS avg_days
-      FROM applications a JOIN roles r ON r.id = a.role_id
-      WHERE a.offer_accepted_date IS NOT NULL AND r.start_date IS NOT NULL
-      GROUP BY r.priority
-    `),
+    (() => {
+      const f = buildRoleFilterSql(filters, 1);
+      return query<{ priority: string; n: string; avg_days: string | null }>(`
+        SELECT r.priority, COUNT(*) AS n,
+               AVG(a.offer_accepted_date - r.start_date) AS avg_days
+        FROM applications a JOIN roles r ON r.id = a.role_id
+        WHERE a.offer_accepted_date IS NOT NULL AND r.start_date IS NOT NULL
+        ${f.sql}
+        GROUP BY r.priority
+      `, f.params);
+    })(),
 
     // Agency Performance (Phase 2, PRD §18) — submissions/hire-rate
     // definitions match agencies.ts's total_submitted/total_hired exactly
     // (status NOT IN Rejected/Withdrawn; stage = 'Joined'), so this card's
     // numbers agree with each agency's own detail page.
-    query<{ agency_id: string; agency_name: string; n: string; hired: string }>(`
-      SELECT ag.id AS agency_id, ag.name AS agency_name,
-             COUNT(*) FILTER (WHERE a.status NOT IN ('Rejected','Withdrawn')) AS n,
-             COUNT(*) FILTER (WHERE a.stage = 'Joined') AS hired
-      FROM applications a JOIN agencies ag ON ag.id = a.agency_id
-      GROUP BY ag.id, ag.name ORDER BY n DESC
-    `),
+    (() => {
+      const scoped = roleIdsSubquery(filters, 1);
+      return query<{ agency_id: string; agency_name: string; n: string; hired: string }>(`
+        SELECT ag.id AS agency_id, ag.name AS agency_name,
+               COUNT(*) FILTER (WHERE a.status NOT IN ('Rejected','Withdrawn')) AS n,
+               COUNT(*) FILTER (WHERE a.stage = 'Joined') AS hired
+        FROM applications a JOIN agencies ag ON ag.id = a.agency_id
+        WHERE 1=1
+        ${scoped ? ` AND a.role_id IN ${scoped.sql}` : ''}
+        GROUP BY ag.id, ag.name ORDER BY n DESC
+      `, scoped?.params || []);
+    })(),
   ]);
 
   // ── Build metrics ───────────────────────────────────────────────────────────
@@ -196,6 +265,12 @@ router.get('/', async (req: Request, res: Response) => {
   const pendingForUser = persona === 'hiring_manager'
     ? pendingActions.filter(pa => pa.owner_type === 'Hiring Manager')
     : pendingActions;
+
+  // Pending Actions counter excludes SLA-breach-driven entries — those are
+  // already surfaced by the dedicated SLA breaches metric, so counting them
+  // twice overstates the number of distinct actions HR/HM/Leadership need to
+  // take. Role aging alerts are already excluded upstream (query above).
+  const totalPendingActions = pendingForUser.filter(pa => !pa.sla_breach).length;
 
   // ── Source Quality — pass_rate/hire_rate as 0-100, 1 decimal ────────────────
   const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -245,7 +320,7 @@ router.get('/', async (req: Request, res: Response) => {
       active_candidates:      activeCandidates,
       strong_fit_candidates:  candBuckets.strong_fit,
       sla_breaches:           parseInt(slaBreaches?.count || '0'),
-      total_pending_actions:  pendingForUser.length,
+      total_pending_actions:  totalPendingActions,
       red_aging_roles:        redAlertRoles,
       founder_review_pending: pendingActions.filter(pa => pa.action_type === 'Founder Review').length,
       joining_risk_count:     joiningRisk.length,

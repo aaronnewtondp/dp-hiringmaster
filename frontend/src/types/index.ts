@@ -230,6 +230,8 @@ export interface PendingAction {
   role_title?:     string;
   hours_overdue:   number;
   created_at:      string;
+  current_stage?:  string | null;
+  sla_breach?:     boolean | null;
 }
 
 export interface DashboardData {
@@ -254,6 +256,21 @@ export interface DashboardData {
 }
 
 // ─── Utility constants ────────────────────────────────────────────────────────
+export const PRIORITIES: Priority[] = ['P0', 'P1', 'P2', 'P3'];
+
+// Matches the roles.status CHECK constraint exactly — shared here (rather
+// than each page keeping its own copy) so Roles/Dashboard filters and
+// RoleDetail's status dropdown can never drift out of sync with each other.
+export const ROLE_STATUSES = [
+  'Draft', 'Under Review', 'Approved', 'Live – Sourcing', 'On Hold',
+  'Closed – Filled', 'Closed – Cancelled',
+];
+
+// Fixed, curated list — not derived from roles.location, which holds messy
+// freeform/compound strings ("Hyderabad, Bangalore"). The backend filter
+// matches each of these as a substring against that field.
+export const LOCATIONS = ['Gurgaon', 'Mumbai/Pune', 'Gujarat', 'Bangalore', 'Hyderabad'];
+
 export const STAGES = [
   'Applied', 'Resume Review', 'Shortlisted',
   'Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round',

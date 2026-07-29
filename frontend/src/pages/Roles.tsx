@@ -3,23 +3,38 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Plus, ChevronRight } from 'lucide-react';
 import { rolesApi } from '../services/api.ts';
-import { Role, Priority } from '../types/index.ts';
+import { Role, PRIORITIES, ROLE_STATUSES, LOCATIONS } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
-
-const PRIORITIES: Priority[] = ['P0','P1','P2','P3'];
 
 export default function Roles() {
   const { canHR } = useAuth();
-  const [filterPriority, setFilterPriority] = useState<string>('all');
-  const [filterStatus,   setFilterStatus]   = useState<string>('active');
+  const [departments, setDepartments] = useState<string[]>([]);
+  const [locations,   setLocations]   = useState<string[]>([]);
+  const [modes,       setModes]       = useState<string[]>([]);
+  const [priorities,  setPriorities]  = useState<string[]>([]);
+  // Defaults to the same "Active" scope the old status toggle defaulted to
+  // (Live – Sourcing only) — an empty Status filter now means "all
+  // statuses," so this preselection keeps first-load behavior unchanged.
+  const [statuses,    setStatuses]    = useState<string[]>(['Live – Sourcing']);
 
-  const params: Record<string,string> = {};
-  if (filterPriority !== 'all') params.priority = filterPriority;
-  if (filterStatus === 'active') params.status = 'Live – Sourcing';
+  const { data: filterOptionsData } = useQuery<{ data: { departments: string[]; recruitment_modes: string[] } }>({
+    queryKey: ['roles', 'filter-options'],
+    queryFn:  () => rolesApi.filterOptions(),
+  });
+  const departmentOptions = filterOptionsData?.data?.departments || [];
+  const modeOptions       = filterOptionsData?.data?.recruitment_modes || [];
+
+  const params: Record<string, string[]> = {};
+  if (departments.length) params.department = departments;
+  if (locations.length)   params.location = locations;
+  if (modes.length)       params.recruitment_mode = modes;
+  if (priorities.length)  params.priority = priorities;
+  if (statuses.length)    params.status = statuses;
 
   const { data, isLoading } = useQuery<{ data: { roles: Role[] } }>({
-    queryKey: ['roles', filterPriority, filterStatus],
+    queryKey: ['roles', departments, locations, modes, priorities, statuses],
     queryFn:  () => rolesApi.list(params),
   });
 
@@ -41,34 +56,11 @@ export default function Roles() {
 
       {/* Filters */}
       <div className="flex gap-2 flex-wrap">
-        <div className="flex items-center gap-1 bg-white rounded-lg border border-gray-200 p-1">
-          {(['all', ...PRIORITIES]).map(p => (
-            <button
-              key={p}
-              onClick={() => setFilterPriority(p)}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                filterPriority === p
-                  ? 'bg-dp-600 text-white'
-                  : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              {p === 'all' ? 'All' : p}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1 bg-white rounded-lg border border-gray-200 p-1">
-          {[{v:'active',l:'Active'},{v:'all',l:'All statuses'}].map(({v,l}) => (
-            <button
-              key={v}
-              onClick={() => setFilterStatus(v)}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                filterStatus === v ? 'bg-dp-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              {l}
-            </button>
-          ))}
-        </div>
+        <MultiSelectFilter label="Department"       options={departmentOptions} selected={departments} onChange={setDepartments} />
+        <MultiSelectFilter label="Location"         options={LOCATIONS}         selected={locations}   onChange={setLocations} />
+        <MultiSelectFilter label="Recruitment Mode" options={modeOptions}       selected={modes}        onChange={setModes} />
+        <MultiSelectFilter label="Priority"         options={PRIORITIES}        selected={priorities}  onChange={setPriorities} />
+        <MultiSelectFilter label="Status"           options={ROLE_STATUSES}     selected={statuses}    onChange={setStatuses} />
       </div>
 
       {/* Table */}
@@ -81,7 +73,10 @@ export default function Roles() {
           <table className="w-full">
             <thead className="border-b border-gray-100 bg-gray-50">
               <tr>
-                {['Role','Dept','Priority','HM','Openings','Age','Alert','Candidates','Shortlisted','Status',''].map(h => (
+                {[
+                  'Role', 'Priority', 'Department', 'Location', 'Openings', 'Age',
+                  'Shortlisted', ...(canHR ? ['Salary Range'] : []), 'Candidates', 'Status', '',
+                ].map(h => (
                   <th key={h} className="table-th">{h}</th>
                 ))}
               </tr>
@@ -98,24 +93,22 @@ export default function Roles() {
                     </Link>
                     <div className="text-xs text-gray-400">{role.id}</div>
                   </td>
-                  <td className="table-td text-gray-500 text-xs">{role.department}</td>
                   <td className="table-td"><PriorityBadge priority={role.priority} /></td>
-                  <td className="table-td text-xs text-gray-500 whitespace-nowrap">{role.hiring_manager_name}</td>
+                  <td className="table-td text-gray-500 text-xs">{role.department}</td>
+                  <td className="table-td text-gray-500 text-xs">{role.location}</td>
                   <td className="table-td text-center">{role.num_openings}</td>
                   <td className="table-td text-center">
                     <AgingBadge alert={role.aging_alert} days={role.days_open} />
                   </td>
-                  <td className="table-td">
-                    {role.aging_alert === 'red' && <span className="text-xs text-red-600">🔴 Red</span>}
-                    {role.aging_alert === 'yellow' && <span className="text-xs text-amber-600">🟡 Yellow</span>}
-                    {role.aging_alert === 'ok' && <span className="text-xs text-green-600">✓</span>}
-                  </td>
+                  <td className="table-td text-center text-gray-500">{role.shortlisted_count ?? 0}</td>
+                  {canHR && (
+                    <td className="table-td text-gray-500 text-xs whitespace-nowrap">{role.ctc_band || '—'}</td>
+                  )}
                   <td className="table-td text-center font-medium">
                     <span className={role.active_candidate_count === 0 ? 'text-red-500' : 'text-gray-900'}>
                       {role.active_candidate_count ?? 0}
                     </span>
                   </td>
-                  <td className="table-td text-center text-gray-500">{role.shortlisted_count ?? 0}</td>
                   <td className="table-td"><StageBadge stage={role.status} /></td>
                   <td className="table-td">
                     <Link to={`/roles/${role.id}`} className="text-gray-400 hover:text-dp-600 transition-colors">

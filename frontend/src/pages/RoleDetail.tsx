@@ -4,12 +4,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Users, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../services/api.ts';
-import { Role, Application, STAGES } from '../types/index.ts';
+import { Role, Application, STAGES, ROLE_STATUSES } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, FitScore, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 
-const ROLE_STATUSES = ['Draft', 'Under Review', 'Approved', 'Live – Sourcing', 'On Hold', 'Closed – Filled', 'Closed – Cancelled'];
 
 export default function RoleDetail() {
   const { id } = useParams<{ id: string }>();

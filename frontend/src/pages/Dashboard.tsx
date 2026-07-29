@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Briefcase, Users, ListChecks, TrendingUp, Clock, Radio, Building2 } from 'lucide-react';
-import { dashboardApi } from '../services/api.ts';
-import { DashboardData, PendingAction, Priority, STAGES } from '../types/index.ts';
+import { AlertTriangle, Briefcase, Users, ListChecks, TrendingUp, Clock, Radio, Building2, X } from 'lucide-react';
+import { dashboardApi, rolesApi } from '../services/api.ts';
+import { DashboardData, PendingAction, Priority, STAGES, PRIORITIES, ROLE_STATUSES, LOCATIONS } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { formatDistanceToNow } from 'date-fns';
 
 // ─── KPI card ─────────────────────────────────────────────────────────────────
@@ -34,46 +36,112 @@ const OWNER_HEADER: Record<string, string> = {
   'Leadership / Founders':'text-purple-700',
 };
 
-function PendingOwnerColumn({ owner, actions }: { owner: string; actions: PendingAction[] }) {
-  const style  = OWNER_STYLES[owner] || 'bg-gray-50 border-gray-200';
-  const header = OWNER_HEADER[owner] || 'text-gray-700';
+// Shared row renderer so the truncated column view and the "show all" modal
+// render identically — current_stage is only meaningful for HR/Recruiter
+// entries (the only owner with an application-level SLA-breach queue where
+// "which stage is this candidate stuck in" is the missing piece of context).
+function PendingActionRow({ action: a, owner }: { action: PendingAction; owner: string }) {
   return (
-    <div className={`rounded-xl border ${style} overflow-hidden`}>
-      <div className="px-4 py-3 flex items-center justify-between">
-        <span className={`text-sm font-semibold ${header}`}>{owner}</span>
-        <span className={`text-xl font-bold ${header}`}>{actions.length}</span>
-      </div>
-      <div className="divide-y divide-white/60">
-        {actions.length === 0 ? (
-          <div className="px-4 py-3 text-xs text-gray-400">No pending actions ✓</div>
-        ) : (
-          actions.slice(0, 5).map(a => (
-            <div key={a.id} className="px-4 py-3">
-              <div className="text-xs font-medium text-gray-800 mb-0.5">{a.action_type}</div>
-              {a.candidate_name && (
-                <div className="text-xs text-gray-500">{a.candidate_name}</div>
-              )}
-              <div className="text-xs text-gray-400">{a.role_title}</div>
-              {a.hours_overdue > 0 && (
-                <span className="inline-flex mt-1 px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">
-                  {Math.floor(a.hours_overdue)}h overdue
-                </span>
-              )}
-            </div>
-          ))
-        )}
-        {actions.length > 5 && (
-          <div className="px-4 py-2 text-xs text-gray-400">+{actions.length - 5} more</div>
-        )}
-      </div>
+    <div className="px-4 py-3">
+      <div className="text-xs font-medium text-gray-800 mb-0.5">{a.action_type}</div>
+      {a.candidate_name && (
+        <div className="text-xs text-gray-500">{a.candidate_name}</div>
+      )}
+      <div className="text-xs text-gray-400">{a.role_title}</div>
+      {owner === 'HR / Recruiter' && a.current_stage && (
+        <div className="text-xs text-gray-400">Stage: {a.current_stage}</div>
+      )}
+      {a.hours_overdue > 0 && (
+        <span className="inline-flex mt-1 px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">
+          {Math.floor(a.hours_overdue)}h overdue
+        </span>
+      )}
     </div>
   );
 }
 
+function PendingOwnerColumn({ owner, actions }: { owner: string; actions: PendingAction[] }) {
+  const style  = OWNER_STYLES[owner] || 'bg-gray-50 border-gray-200';
+  const header = OWNER_HEADER[owner] || 'text-gray-700';
+  const [showAll, setShowAll] = useState(false);
+
+  return (
+    <>
+      <div className={`rounded-xl border ${style} overflow-hidden`}>
+        <div className="px-4 py-3 flex items-center justify-between">
+          <span className={`text-sm font-semibold ${header}`}>{owner}</span>
+          <span className={`text-xl font-bold ${header}`}>{actions.length}</span>
+        </div>
+        <div className="divide-y divide-white/60">
+          {actions.length === 0 ? (
+            <div className="px-4 py-3 text-xs text-gray-400">No pending actions ✓</div>
+          ) : (
+            actions.slice(0, 5).map(a => <PendingActionRow key={a.id} action={a} owner={owner} />)
+          )}
+        </div>
+        {actions.length > 5 && (
+          <button
+            onClick={() => setShowAll(true)}
+            className="w-full px-4 py-2 text-xs text-gray-400 hover:text-gray-700 hover:bg-white/60 transition-colors text-left border-t border-white/60"
+          >
+            +{actions.length - 5} more
+          </button>
+        )}
+      </div>
+
+      {showAll && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onClick={() => setShowAll(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+              <span className={`text-sm font-semibold ${header}`}>{owner} — {actions.length} pending</span>
+              <button onClick={() => setShowAll(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="divide-y divide-gray-100 overflow-y-auto">
+              {actions.map(a => <PendingActionRow key={a.id} action={a} owner={owner} />)}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function Dashboard() {
+  // Master filters — same fields/semantics as the Roles summary view's own
+  // filters (backend/src/utils/roleFilters.ts is the single shared
+  // implementation), just scoped to the whole dashboard instead of one page:
+  // every metric/section below is computed only over roles matching these.
+  const [departments, setDepartments] = useState<string[]>([]);
+  const [locations,   setLocations]   = useState<string[]>([]);
+  const [modes,        setModes]      = useState<string[]>([]);
+  const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
+  const [statuses,     setStatuses]   = useState<string[]>([]);
+
+  const { data: filterOptionsData } = useQuery<{ data: { departments: string[]; recruitment_modes: string[] } }>({
+    queryKey: ['roles', 'filter-options'],
+    queryFn:  () => rolesApi.filterOptions(),
+  });
+  const departmentOptions = filterOptionsData?.data?.departments || [];
+  const modeOptions       = filterOptionsData?.data?.recruitment_modes || [];
+
+  const filterParams: Record<string, string[]> = {};
+  if (departments.length)      filterParams.department = departments;
+  if (locations.length)        filterParams.location = locations;
+  if (modes.length)            filterParams.recruitment_mode = modes;
+  if (filterPriorities.length) filterParams.priority = filterPriorities;
+  if (statuses.length)         filterParams.status = statuses;
+
   const { data, isLoading, error } = useQuery<{ data: DashboardData }>({
-    queryKey: ['dashboard'],
-    queryFn:  () => dashboardApi.get(),
+    queryKey: ['dashboard', departments, locations, modes, filterPriorities, statuses],
+    queryFn:  () => dashboardApi.get(filterParams),
     refetchInterval: 5 * 60 * 1000, // refresh every 5 min
   });
 
@@ -88,8 +156,6 @@ export default function Dashboard() {
   const { metrics, pending_actions_by_owner, aging_roles, hiring_funnel,
           source_quality, time_to_fill, agency_performance } = d;
 
-  const PRIORITIES: Priority[] = ['P0', 'P1', 'P2', 'P3'];
-
   const OWNERS = ['HR / Recruiter', 'Hiring Manager', 'Interviewer', 'Leadership / Founders'];
 
   // Shared canonical order from types/index.ts — this used to be a separately
@@ -101,11 +167,33 @@ export default function Dashboard() {
   const funnelMap = new Map(hiring_funnel.map(f => [f.stage, parseInt(f.count)]));
   const maxFunnelVal = Math.max(...hiring_funnel.map(f => parseInt(f.count)), 1);
 
+  const hasActiveFilters = departments.length + locations.length + modes.length
+    + filterPriorities.length + statuses.length > 0;
+  const clearAllFilters = () => {
+    setDepartments([]); setLocations([]); setModes([]); setFilterPriorities([]); setStatuses([]);
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold text-gray-900">Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Hiring health overview — updated live</p>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">Dashboard</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Hiring health overview — updated live</p>
+        </div>
+      </div>
+
+      {/* Master filters — every section below reflects these */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <MultiSelectFilter label="Department"       options={departmentOptions} selected={departments}      onChange={setDepartments} />
+        <MultiSelectFilter label="Location"         options={LOCATIONS}         selected={locations}        onChange={setLocations} />
+        <MultiSelectFilter label="Recruitment Mode" options={modeOptions}       selected={modes}             onChange={setModes} />
+        <MultiSelectFilter label="Priority"         options={PRIORITIES}        selected={filterPriorities} onChange={setFilterPriorities} />
+        <MultiSelectFilter label="Status"           options={ROLE_STATUSES}     selected={statuses}          onChange={setStatuses} />
+        {hasActiveFilters && (
+          <button onClick={clearAllFilters} className="text-xs text-gray-400 hover:text-gray-600 underline">
+            Clear all
+          </button>
+        )}
       </div>
 
       {/* KPI row */}

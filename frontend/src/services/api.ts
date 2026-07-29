@@ -40,12 +40,16 @@ export const authApi = {
 };
 
 export const rolesApi = {
-  list:      (params?: Record<string, string>) => api.get('/roles', { params }),
-  get:       (id: string)                      => api.get(`/roles/${id}`),
-  create:    (data: Record<string, unknown>)   => api.post('/roles', data),
-  update:    (id: string, data: Record<string, unknown>) => api.patch(`/roles/${id}`, data),
-  editLog:   (id: string)                      => api.get(`/roles/${id}/edit-log`),
-  pipeline:  (id: string)                      => api.get(`/roles/${id}/pipeline`),
+  // string[] values (department/location/recruitment_mode/priority/status)
+  // are serialized by axios as repeated keys and re-assembled into an array
+  // by Express's default `qs` parser — same convention as candidatesApi.list.
+  list:          (params?: Record<string, string | string[]>) => api.get('/roles', { params }),
+  get:           (id: string)                      => api.get(`/roles/${id}`),
+  create:        (data: Record<string, unknown>)   => api.post('/roles', data),
+  update:        (id: string, data: Record<string, unknown>) => api.patch(`/roles/${id}`, data),
+  editLog:       (id: string)                      => api.get(`/roles/${id}/edit-log`),
+  pipeline:      (id: string)                      => api.get(`/roles/${id}/pipeline`),
+  filterOptions: ()                                 => api.get('/roles/filter-options'),
 };
 
 export const candidatesApi = {
@@ -80,7 +84,7 @@ export const interviewsApi = {
 };
 
 export const dashboardApi = {
-  get:     () => api.get('/dashboard'),
+  get:     (params?: Record<string, string | string[]>) => api.get('/dashboard', { params }),
   pending: () => api.get('/dashboard/pending'),
 };
 
