@@ -47,8 +47,19 @@ export default function RoleDetail() {
     if (!statusValue) return;
     setSaving(true);
     try {
-      await rolesApi.update(id!, { status: statusValue });
+      const res = await rolesApi.update(id!, { status: statusValue });
       toast.success(`Status updated to ${statusValue}`);
+      // jdGeneration is only present when this status change was the
+      // Draft/Under-Review → Approved transition (see roles.ts) — the PATCH
+      // now awaits generation inline rather than firing it in the
+      // background, so this is the first point a failure is ever visible
+      // instead of silently leaving jd_drive_link null forever.
+      const jdGeneration = res.data?.jdGeneration;
+      if (jdGeneration?.generated) {
+        toast.success('Long-form and social JDs generated');
+      } else if (jdGeneration && !jdGeneration.generated) {
+        toast.error(`JD generation failed: ${jdGeneration.error}`);
+      }
       setShowStatusModal(false);
       qc.invalidateQueries({ queryKey: ['role', id] });
     } catch { toast.error('Failed to update status'); }
