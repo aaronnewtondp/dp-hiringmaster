@@ -1,0 +1,1 @@
+# Deliberately empty — this backend serves no static assets; every request is routed to api/index.ts via vercel.json's rewrites. This file exists only so Vercel's build has a valid Output Directory to find.
