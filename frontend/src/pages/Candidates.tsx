@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Search, Plus, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { applicationsApi, candidatesApi } from '../services/api.ts';
 import { Application, Candidate, STAGES } from '../types/index.ts';
 import { StageBadge, StatusBadge, FitScore, SlaBadge, Spinner, EmptyState, PriorityBadge } from '../components/shared/Badges.tsx';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { formatDistanceToNow } from 'date-fns';
+
+const UNLINKED_PAGE_SIZE = 50;
 
 export default function Candidates() {
   const { canHR } = useAuth();
@@ -17,6 +20,11 @@ export default function Candidates() {
   const [filterSla,   setFilterSla]   = useState(false);
   const [showUnlinked, setShowUnlinked] = useState(true);
   const [linkCandidate, setLinkCandidate] = useState<Candidate | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<Candidate | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [unlinkedOffset, setUnlinkedOffset] = useState(0);
+  const [unlinkedItems,  setUnlinkedItems]  = useState<Candidate[]>([]);
+  const [unlinkedTotal,  setUnlinkedTotal]  = useState(0);
 
   // Archival (PRD §21) — Rejected/Withdrawn applications untouched for 90+
   // days are excluded from this default pipeline view; they remain fully
@@ -33,13 +41,43 @@ export default function Candidates() {
   // Candidates.tsx's main table is application-row driven, so a candidate
   // with zero applications (e.g. an ingested candidate whose "role applying
   // for" answer didn't match any open role) never shows up there — surfaced
-  // separately here via the same GET /api/candidates the Candidate detail
-  // page already uses.
-  const { data: candidatesData } = useQuery<{ data: { candidates: Candidate[] } }>({
-    queryKey: ['candidates', 'unlinked'],
-    queryFn:  () => candidatesApi.list({ limit: '100' }),
+  // separately here via GET /api/candidates?unlinked=true. Previously this
+  // fetched a flat limit:100 page of ALL candidates and filtered client-side
+  // to applications == null, so a truly-unlinked candidate only showed up if
+  // they happened to fall within the 100 most-recently-updated candidates
+  // overall — the backend now filters this at the query level, with real
+  // pagination, so the full set is reachable.
+  const { data: candidatesData, isLoading: unlinkedLoading } = useQuery<{ data: { candidates: Candidate[]; total: number } }>({
+    queryKey: ['candidates', 'unlinked', unlinkedOffset],
+    queryFn:  () => candidatesApi.list({ unlinked: 'true', limit: String(UNLINKED_PAGE_SIZE), offset: String(unlinkedOffset) }),
   });
-  const unlinked = (candidatesData?.data?.candidates || []).filter(c => !c.applications || c.applications.length === 0);
+
+  useEffect(() => {
+    if (!candidatesData?.data) return;
+    const page = candidatesData.data.candidates || [];
+    setUnlinkedItems(prev => (unlinkedOffset === 0 ? page : [...prev, ...page]));
+    setUnlinkedTotal(candidatesData.data.total || 0);
+  }, [candidatesData]);
+
+  const refreshUnlinked = () => {
+    setUnlinkedOffset(0);
+    qc.invalidateQueries({ queryKey: ['candidates', 'unlinked'] });
+  };
+
+  const handleDelete = async () => {
+    if (!deleteCandidate) return;
+    setDeleting(true);
+    try {
+      await candidatesApi.remove(deleteCandidate.id);
+      toast.success(`${deleteCandidate.full_name} deleted`);
+      setDeleteCandidate(null);
+      refreshUnlinked();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      toast.error(e.response?.data?.error || 'Failed to delete candidate');
+    }
+    setDeleting(false);
+  };
 
   const all = data?.data?.applications || [];
   const filtered = search
@@ -68,35 +106,56 @@ export default function Candidates() {
         )}
       </div>
 
-      {unlinked.length > 0 && (
+      {(unlinkedTotal > 0 || unlinkedLoading) && (
         <div className="card overflow-hidden border-amber-200">
           <button
             onClick={() => setShowUnlinked(v => !v)}
             className="w-full px-5 py-3 flex items-center justify-between hover:bg-amber-50/50 transition-colors"
           >
-            <h2 className="text-sm font-semibold text-amber-800">Unlinked candidates ({unlinked.length})</h2>
+            <h2 className="text-sm font-semibold text-amber-800">Unlinked candidates ({unlinkedTotal})</h2>
             {showUnlinked ? <ChevronUp className="w-4 h-4 text-amber-600" /> : <ChevronDown className="w-4 h-4 text-amber-600" />}
           </button>
           {showUnlinked && (
-            <div className="divide-y divide-gray-50 border-t border-amber-100">
-              {unlinked.map(c => (
-                <div key={c.id} className="px-5 py-3 flex items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <Link to={`/candidates/${c.id}`} className="font-medium text-gray-900 hover:text-dp-600 text-sm">{c.full_name}</Link>
-                    <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400 flex-wrap">
-                      {c.email && <span>{c.email}</span>}
-                      {c.phone && <span>· {c.phone}</span>}
-                      <span>· added {formatDistanceToNow(new Date(c.created_at), { addSuffix: true })}</span>
+            <>
+              <div className="divide-y divide-gray-50 border-t border-amber-100">
+                {unlinkedItems.map(c => (
+                  <div key={c.id} className="px-5 py-3 flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <Link to={`/candidates/${c.id}`} className="font-medium text-gray-900 hover:text-dp-600 text-sm">{c.full_name}</Link>
+                      <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400 flex-wrap">
+                        {c.email && <span>{c.email}</span>}
+                        {c.phone && <span>· {c.phone}</span>}
+                        <span>· added {formatDistanceToNow(new Date(c.created_at), { addSuffix: true })}</span>
+                      </div>
                     </div>
+                    {canHR && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button onClick={() => setLinkCandidate(c)} className="btn-secondary text-xs py-1.5 px-3">
+                          Link to role
+                        </button>
+                        <button
+                          onClick={() => setDeleteCandidate(c)}
+                          title="Delete candidate"
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  {canHR && (
-                    <button onClick={() => setLinkCandidate(c)} className="btn-secondary text-xs py-1.5 px-3 shrink-0">
-                      Link to role
-                    </button>
-                  )}
+                ))}
+              </div>
+              {unlinkedItems.length < unlinkedTotal && (
+                <div className="flex justify-center py-3 border-t border-amber-100">
+                  <button
+                    onClick={() => setUnlinkedOffset(o => o + UNLINKED_PAGE_SIZE)}
+                    className="btn-secondary text-xs py-1.5 px-3"
+                  >
+                    Load more ({unlinkedItems.length} of {unlinkedTotal})
+                  </button>
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -205,10 +264,31 @@ export default function Candidates() {
           sourceChannel="Job Application Form"
           onClose={() => setLinkCandidate(null)}
           onLinked={() => {
-            qc.invalidateQueries({ queryKey: ['candidates', 'unlinked'] });
+            refreshUnlinked();
             qc.invalidateQueries({ queryKey: ['applications'] });
           }}
         />
+      )}
+
+      {deleteCandidate && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+            <h3 className="text-base font-semibold text-gray-900">Delete {deleteCandidate.full_name}?</h3>
+            <p className="text-sm text-gray-500">
+              This permanently deletes this candidate's record. This cannot be undone.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleteCandidate(null)} className="btn-secondary">Cancel</button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

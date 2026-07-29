@@ -138,14 +138,22 @@ router.post('/:id/stage', requireHR, async (req: Request, res: Response) => {
     );
   });
 
-  // Trigger ResumeIQ when entering Resume Review — async, non-blocking
+  // Trigger ResumeIQ when entering Resume Review — synchronous (awaited),
+  // NOT fire-and-forget. Same reasoning as JD generation in roles.ts: a
+  // setImmediate() callback scheduled after the response is sent has no
+  // guarantee of ever completing on Vercel's serverless runtime (execution
+  // can be frozen/terminated as soon as the response goes out) — this was
+  // confirmed to be silently breaking JD generation in production the same
+  // way. Awaiting it here means this request takes as long as scoring
+  // actually takes; see vercel.json's maxDuration, raised to accommodate it.
+  let resumeiq: { scored: boolean; error?: string } | undefined;
   if (new_stage === 'Resume Review' && !app.score_avg) {
-    setImmediate(async () => {
-      try {
-        const candidate = await queryOne<Candidate>('SELECT * FROM candidates WHERE id=$1', [app.candidate_id]);
-        const role      = await queryOne<Role>('SELECT * FROM roles WHERE id=$1', [app.role_id]);
-        if (!candidate || !role) return;
-
+    try {
+      const candidate = await queryOne<Candidate>('SELECT * FROM candidates WHERE id=$1', [app.candidate_id]);
+      const role      = await queryOne<Role>('SELECT * FROM roles WHERE id=$1', [app.role_id]);
+      if (!candidate || !role) {
+        resumeiq = { scored: false, error: 'Candidate or role not found' };
+      } else {
         // Fetch actual resume text from Drive if a link is on file.
         // Falls back gracefully to profile-fields-only scoring on any failure.
         let resumeText: string | null = null;
@@ -205,10 +213,12 @@ router.post('/:id/stage', requireHR, async (req: Request, res: Response) => {
            `Score: ${aiFitScore}/100 (${aiPriorityBucket})`,
            aiPriorityBucket]
         );
-      } catch (err) {
-        console.error('[ResumeIQ] Scoring failed for', app.id, err);
+        resumeiq = { scored: true };
       }
-    });
+    } catch (err) {
+      console.error('[ResumeIQ] Scoring failed for', app.id, err);
+      resumeiq = { scored: false, error: 'Scoring failed — will retry automatically the next time this application enters Resume Review' };
+    }
   }
 
   // If advancing to Shortlisted, create pending action for HM
@@ -230,7 +240,7 @@ router.post('/:id/stage', requireHR, async (req: Request, res: Response) => {
   }
 
   const updated = await queryOne<Application>('SELECT * FROM applications WHERE id = $1', [req.params.id]);
-  res.json({ application: updated });
+  res.json({ application: updated, resumeiq });
 });
 
 // ─── POST /api/applications/:id/status — change status (On Hold/Reject/Withdraw)

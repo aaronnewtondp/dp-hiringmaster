@@ -130,9 +130,11 @@ scoring` skill's rubric exactly: Technical, Experience, Industry Fit, Culture
 Fit, Role Alignment, Trajectory, Leadership, Communication → average score,
 strengths, red flags, executive summary, recommendation.
 
-Triggered automatically (async, non-blocking) when an application's `stage`
-transitions to `Resume Review`, guarded by `!app.score_avg` so it only runs
-once per application.
+Triggered automatically when an application's `stage` transitions to
+`Resume Review`, guarded by `!app.score_avg` so it only runs once per
+application. **Synchronous (awaited), not fire-and-forget** — see the
+Vercel serverless async rule below; this was the exact bug class that rule
+documents, fixed at the same time as JD generation.
 
 **Resume text is fetched live from Google Drive** via a service account
 (`hiring-master-drive-data@dp-hiring-master.iam.gserviceaccount.com`) —
@@ -147,6 +149,34 @@ intentional, never make a failed Drive fetch a hard error.
 rather than the full generated JD document. Once JD generation (Phase 3) is
 built, ResumeIQ should be updated to score against that document instead. See
 `ROADMAP.md`.
+
+### Rule: no fire-and-forget async on Vercel — await it, or it may never run
+**Learned the hard way**: both JD generation (`roles.ts`, on a role's
+`status` transitioning to `Approved`) and ResumeIQ scoring above used to
+fire their real external-API work (Claude calls, PDF
+rendering, Drive uploads) via `setImmediate(async () => {...})` **after**
+the route had already sent its response — "async, non-blocking," the normal
+pattern on a persistent Node server. On Vercel, it isn't safe: serverless
+function execution can be frozen or torn down as soon as the response is
+sent, so a `setImmediate` callback scheduled afterward has no guarantee of
+ever completing. This silently broke JD generation in production for weeks
+with zero error output anywhere — the request itself always succeeded
+(role status really did become `Approved`), the callback just never got to
+run to completion, so `jd_drive_link`/`social_jd_drive_link` stayed `null`
+forever with nothing to point at as broken.
+
+**Fix, and the pattern to follow for any future "background" work on a
+mutating route:** await it inline before responding, and return a
+`{ success, error }`-shaped field alongside the main payload (e.g.
+`jdGeneration`, `resumeiq`, and `calendar` on the Calendar-integration route)
+so the caller knows immediately whether it actually completed — never
+silently swallow a failure the way fire-and-forget did. This does make the
+HTTP request itself take as long as the real work takes (JD generation:
+~15-30s observed for a real Claude call + 2 PDF renders + 2 Drive uploads),
+which is why `backend/vercel.json` sets `functions["api/index.ts"].maxDuration`
+to `60` (the max Vercel allows on the Hobby tier) — without that, awaiting
+inline would just trade "hangs forever" for "always times out at Vercel's
+10s default."
 
 ### Role/candidate ingestion from Google Forms
 Requisition Form → Sheet → Apps Script (`onFormSubmit` trigger) → HTTP POST to

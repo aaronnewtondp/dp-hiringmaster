@@ -12,6 +12,11 @@
       "dest": "/api/index.ts"
     }
   ],
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 60
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/email-digest",
