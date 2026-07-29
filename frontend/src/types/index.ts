@@ -22,10 +22,12 @@ export interface Role {
   status:                   string;
   new_replacement?:         string;
   replacement_reason?:      string;
+  vacancy_reason?:          string[];
   num_openings:             number;
   location?:                string;
   employment_type?:         string;
   yoe_required?:            string;
+  qualification_required?:  string;
   ctc_band?:                string;
   kpi_expectations?:        string;
   job_description?:         string;
@@ -266,10 +268,21 @@ export const ROLE_STATUSES = [
   'Closed – Filled', 'Closed – Cancelled',
 ];
 
-// Fixed, curated list — not derived from roles.location, which holds messy
-// freeform/compound strings ("Hyderabad, Bangalore"). The backend filter
-// matches each of these as a substring against that field.
-export const LOCATIONS = ['Gurgaon', 'Mumbai/Pune', 'Gujarat', 'Bangalore', 'Hyderabad'];
+// Fixed, curated list matching the Create Role form's Location dropdown
+// (and, per the requisition form update, the live Google Form's own
+// dropdown) — the backend filter matches each of these as a substring
+// against roles.location, so single-value selections from this list always
+// match exactly.
+export const LOCATIONS = ['Gurgaon', 'Mumbai', 'Pune', 'Gujarat', 'Bangalore', 'Hyderabad', 'Others'];
+
+// "Vacancy Caused Due To" — exact option set from the live requisition
+// Google Form (confirmed directly by Aaron, not derived from historical
+// data — real submissions are sparse and comma-joined ambiguously enough
+// that reverse-engineering them risked drifting from the actual form).
+export const VACANCY_REASONS = [
+  'Resignation', 'Increased Work Load', 'Additional Assignments / Business Expansion',
+  'New Project', 'Other',
+];
 
 export const STAGES = [
   'Applied', 'Resume Review', 'Shortlisted',

@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Users, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../services/api.ts';
-import { Role, Application, STAGES, ROLE_STATUSES } from '../types/index.ts';
+import { Role, Application, STAGES, ROLE_STATUSES, LOCATIONS } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, FitScore, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -128,7 +128,8 @@ export default function RoleDetail() {
             { key: 'priority', label: 'Priority', type: 'select', options: ['P0', 'P1', 'P2', 'P3'] },
             { key: 'new_replacement', label: 'New / Replacement', type: 'select', options: ['New Position', 'Replacement'] },
             { key: 'replacement_reason', label: 'Replacement Reason', type: 'text' },
-            { key: 'location', label: 'Location', type: 'text' },
+            { key: 'vacancy_reason', label: 'Vacancy Caused Due To', type: 'tags' },
+            { key: 'location', label: 'Location', type: 'select', options: LOCATIONS },
             { key: 'employment_type', label: 'Employment Type', type: 'text' },
             { key: 'num_openings', label: 'Openings', type: 'number' },
           ]}
@@ -139,6 +140,7 @@ export default function RoleDetail() {
           onSave={saveRoleFields}
           fields={[
             { key: 'yoe_required', label: 'Experience', type: 'text' },
+            { key: 'qualification_required', label: 'Educational Qualifications', type: 'text' },
             { key: 'ctc_band', label: 'CTC Band', type: 'text', hidden: !canHR },
             { key: 'must_have_skills', label: 'Must-have skills', type: 'textarea' },
             { key: 'nice_to_have_skills', label: 'Nice-to-have skills', type: 'textarea' },

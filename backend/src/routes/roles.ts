@@ -106,6 +106,7 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     kpi_expectations, job_description, must_have_skills, nice_to_have_skills,
     suggested_interviewers, assignment_required, recruitment_mode,
     additional_remarks, start_date, target_closure_date,
+    vacancy_reason, qualification_required,
   } = req.body;
 
   if (!title || !priority) {
@@ -120,16 +121,17 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
       replacement_reason, num_openings, location, employment_type, yoe_required,
       ctc_band, kpi_expectations, job_description, must_have_skills, nice_to_have_skills,
       suggested_interviewers, assignment_required, recruitment_mode, additional_remarks,
-      start_date, target_closure_date, created_by
+      start_date, target_closure_date, vacancy_reason, qualification_required, created_by
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
     ) RETURNING *`,
     [
       title, department, hiring_manager_name, priority, new_replacement,
       replacement_reason, num_openings || 1, location, employment_type, yoe_required,
       ctc_band, kpi_expectations, job_description, must_have_skills, nice_to_have_skills,
-      suggested_interviewers, assignment_required || false, recruitment_mode || [],
-      additional_remarks, start_date, target_closure_date, req.user!.userId,
+      suggested_interviewers, assignment_required ?? true, recruitment_mode || [],
+      additional_remarks, start_date, target_closure_date,
+      vacancy_reason || [], qualification_required, req.user!.userId,
     ]
   );
 
@@ -148,7 +150,7 @@ router.patch('/:id', requireHR, async (req: Request, res: Response) => {
     'suggested_interviewers','assignment_required','recruitment_mode','additional_remarks',
     'start_date','target_closure_date','approver_name','approval_date','approval_note',
     'jd_drive_link','social_jd_drive_link','whatsapp_forward_link','referral_message_link',
-    'approval_summary_link','posting_status',
+    'approval_summary_link','posting_status','vacancy_reason','qualification_required',
   ];
 
   const updates: string[] = [];

@@ -529,6 +529,16 @@ ALTER TABLE roles
   ADD COLUMN IF NOT EXISTS qualification_required TEXT,
   ADD COLUMN IF NOT EXISTS requisition_source_row TEXT;
 
+-- ── roles.vacancy_reason: widened to TEXT[] — "Vacancy Caused Due To" is a
+-- multi-select field on the Requisition Form (Google Forms joins checkbox
+-- selections with ", " in the response sheet), so the Create Role form's
+-- own multi-select needs the same array shape. USING splits any existing
+-- scalar value back into its real selections rather than wrapping the whole
+-- joined string as one element.
+ALTER TABLE roles
+  ALTER COLUMN vacancy_reason TYPE TEXT[]
+  USING CASE WHEN vacancy_reason IS NULL THEN NULL ELSE string_to_array(vacancy_reason, ', ') END;
+
 -- ── users: OAuth columns (google_id, avatar_url, auth_provider) ────────────────
 -- Only needed if this hasn't already been applied — safe no-op otherwise.
 ALTER TABLE users
