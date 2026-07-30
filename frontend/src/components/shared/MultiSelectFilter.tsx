@@ -44,7 +44,7 @@ export default function MultiSelectFilter({ label, options, selected, onChange }
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(o => !o)}
-        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+        className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap transition-colors ${
           selected.length > 0
             ? 'bg-dp-50 border-dp-200 text-dp-700'
             : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'

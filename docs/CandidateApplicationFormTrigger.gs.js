@@ -63,6 +63,7 @@ function onFormSubmit(e) {
     email: v('Email address'),
     full_name: v('Full Name'),
     phone: v('Phone Number'),
+    linkedin_url: v('LinkedIn URL'),
     current_ctc_fixed: parseCtcLpa(v('Current CTC (Fixed and Variable breakup) in LPA')),
     expected_ctc: parseCtcLpa(v('Expected CTC in LPA')),
     notice_period_days: parseNoticeDays(v('Notice Period in days')),

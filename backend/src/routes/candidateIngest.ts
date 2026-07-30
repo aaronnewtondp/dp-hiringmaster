@@ -8,7 +8,7 @@ const router = Router();
 // applicant — deliberately excludes full_name (always refreshed) and
 // email/id (identity, never rewritten here).
 const PROFILE_FIELDS = [
-  'phone', 'current_ctc_fixed', 'current_ctc_variable', 'current_esops',
+  'phone', 'linkedin_url', 'current_ctc_fixed', 'current_ctc_variable', 'current_esops',
   'expected_ctc', 'notice_period_days', 'current_company', 'current_industry',
   'current_designation', 'current_location', 'years_of_experience', 'resume_drive_link',
   'languages_known',
@@ -40,7 +40,7 @@ router.post('/ingest', async (req: Request, res: Response) => {
   }
 
   const {
-    email, full_name, phone, current_ctc_fixed, current_ctc_variable, current_esops,
+    email, full_name, phone, linkedin_url, current_ctc_fixed, current_ctc_variable, current_esops,
     expected_ctc, notice_period_days, current_company, current_industry,
     current_designation, current_location, years_of_experience, resume_drive_link,
     languages_known, role_applied_for, preferred_location, qualifications_note,
@@ -54,6 +54,7 @@ router.post('/ingest', async (req: Request, res: Response) => {
   const normEmail = String(email).trim().toLowerCase();
   const submitted: Record<string, number | string | null> = {
     phone: toStr(phone),
+    linkedin_url: toStr(linkedin_url),
     current_ctc_fixed: toNum(current_ctc_fixed),
     current_ctc_variable: toNum(current_ctc_variable),
     current_esops: toNum(current_esops),
@@ -97,13 +98,13 @@ router.post('/ingest', async (req: Request, res: Response) => {
     } else {
       const insertResult = await client.query(
         `INSERT INTO candidates (
-           full_name, email, phone,
+           full_name, email, phone, linkedin_url,
            current_ctc_fixed, current_ctc_variable, current_esops, expected_ctc,
            notice_period_days, current_company, current_industry, current_designation,
            current_location, years_of_experience, resume_drive_link, languages_known
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
         [
-          full_name, normEmail, submitted.phone,
+          full_name, normEmail, submitted.phone, submitted.linkedin_url,
           submitted.current_ctc_fixed, submitted.current_ctc_variable, submitted.current_esops,
           submitted.expected_ctc, submitted.notice_period_days, submitted.current_company,
           submitted.current_industry, submitted.current_designation, submitted.current_location,

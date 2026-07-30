@@ -100,6 +100,7 @@ export interface Candidate {
   current_location?:      string;
   years_of_experience?:   number;
   resume_drive_link?:     string;
+  languages_known?:       string;
 
   // Present on GET /api/candidates (LEFT JOIN) — null when the candidate has
   // no applications yet (e.g. an ingested candidate whose "role applying

@@ -122,7 +122,8 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     full_name, email, phone, linkedin_url, role_id, source_channel, agency_id,
     current_ctc_fixed, current_ctc_variable, current_esops, expected_ctc,
     notice_period_days, current_company, current_industry, current_designation,
-    current_location, years_of_experience, resume_drive_link,
+    current_location, years_of_experience, resume_drive_link, languages_known,
+    preferred_location,
   } = req.body;
 
   if (!full_name) { res.status(400).json({ error: 'full_name required' }); return; }
@@ -150,14 +151,14 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
          full_name, email, phone, linkedin_url,
          current_ctc_fixed, current_ctc_variable, current_esops, expected_ctc,
          notice_period_days, current_company, current_industry, current_designation,
-         current_location, years_of_experience, resume_drive_link
+         current_location, years_of_experience, resume_drive_link, languages_known
        )
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
       [
         full_name, email?.toLowerCase(), phone, linkedin_url,
         current_ctc_fixed ?? null, current_ctc_variable ?? null, current_esops ?? null, expected_ctc ?? null,
         notice_period_days ?? null, current_company ?? null, current_industry ?? null, current_designation ?? null,
-        current_location ?? null, years_of_experience ?? null, resume_drive_link ?? null,
+        current_location ?? null, years_of_experience ?? null, resume_drive_link ?? null, languages_known ?? null,
       ]
     );
     const candidate = cand.rows[0] as Candidate;
@@ -165,10 +166,10 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     let application = null;
     if (role_id) {
       const app = await client.query(
-        `INSERT INTO applications (candidate_id, role_id, source_channel, agency_id,
+        `INSERT INTO applications (candidate_id, role_id, source_channel, agency_id, preferred_location,
            stage, status, recruiter_screening_status, stage_entry_time, sla_hours)
-         VALUES ($1,$2,$3,$4,'Applied','Active','New',NOW(),48) RETURNING *`,
-        [candidate.id, role_id, source_channel, agency_id || null]
+         VALUES ($1,$2,$3,$4,$5,'Applied','Active','New',NOW(),48) RETURNING *`,
+        [candidate.id, role_id, source_channel, agency_id || null, preferred_location ?? null]
       );
       application = app.rows[0];
 

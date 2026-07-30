@@ -189,9 +189,10 @@ export default function Candidates() {
         </div>
       )}
 
-      {/* Search + filters */}
-      <div className="flex gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-48">
+      {/* Search + filters — single row; scrolls horizontally rather than
+          wrapping if the viewport is too narrow to fit everything. */}
+      <div className="flex gap-1.5 flex-nowrap overflow-x-auto pb-1">
+        <div className="relative w-40 shrink-0">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             placeholder="Search by name or role…"
@@ -203,20 +204,20 @@ export default function Candidates() {
         <select
           value={filterStage}
           onChange={e => setFilterStage(e.target.value)}
-          className="select w-48"
+          className="select w-32 shrink-0 text-xs"
         >
           <option value="all">All stages</option>
           {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <MultiSelectFilter label="Department"       options={DEPARTMENTS}   selected={departments}  onChange={setDepartments} />
-        <MultiSelectFilter label="Location"         options={LOCATIONS}     selected={locations}    onChange={setLocations} />
-        <MultiSelectFilter label="Recruitment Mode" options={modeOptions}   selected={modes}         onChange={setModes} />
-        <MultiSelectFilter label="Priority"         options={PRIORITIES}    selected={priorities}   onChange={setPriorities} />
-        <MultiSelectFilter label="Status"           options={ROLE_STATUSES} selected={roleStatuses} onChange={setRoleStatuses} />
-        <MultiSelectFilter label="Role" options={roleOptions} selected={roleIds} onChange={setRoleIds} />
+        <div className="shrink-0"><MultiSelectFilter label="Department"       options={DEPARTMENTS}   selected={departments}  onChange={setDepartments} /></div>
+        <div className="shrink-0"><MultiSelectFilter label="Location"         options={LOCATIONS}     selected={locations}    onChange={setLocations} /></div>
+        <div className="shrink-0"><MultiSelectFilter label="Recruitment Mode" options={modeOptions}   selected={modes}         onChange={setModes} /></div>
+        <div className="shrink-0"><MultiSelectFilter label="Priority"         options={PRIORITIES}    selected={priorities}   onChange={setPriorities} /></div>
+        <div className="shrink-0"><MultiSelectFilter label="Status"           options={ROLE_STATUSES} selected={roleStatuses} onChange={setRoleStatuses} /></div>
+        <div className="shrink-0"><MultiSelectFilter label="Role" options={roleOptions} selected={roleIds} onChange={setRoleIds} /></div>
         <button
           onClick={() => setFilterSla(v => !v)}
-          className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+          className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
             filterSla ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
           }`}
         >
@@ -224,69 +225,75 @@ export default function Candidates() {
         </button>
       </div>
 
-      {/* Table */}
-      <div className="card overflow-hidden">
+      {/* Table — table-fixed with explicit per-column widths so the whole
+          thing fits the card's width without clipping; overflow-x-auto is
+          a safety net for narrow viewports rather than the primary fit
+          mechanism. */}
+      <div className="card overflow-x-auto">
         {isLoading ? (
           <div className="flex justify-center p-12"><Spinner size="lg" /></div>
         ) : filtered.length === 0 ? (
           <div className="p-12"><EmptyState title="No candidates match" /></div>
         ) : (
-          <table className="w-full">
+          <table className="w-full table-fixed">
             <thead className="border-b border-gray-100 bg-gray-50">
               <tr>
-                {['Candidate','Role','Stage','Fit','CTC → ECTC','Notice','Preferred Location','Current Company','Resume Link','Last Updated',''].map(h => (
-                  <th key={h} className="table-th">{h}</th>
+                {[
+                  ['Candidate', 'w-[140px]'], ['Role', 'w-[100px]'], ['Stage', 'w-[95px]'],
+                  ['Fit', 'w-[55px]'], ['CTC → ECTC', 'w-[100px]'], ['Notice', 'w-[62px]'],
+                  ['Preferred Location', 'w-[115px]'], ['Current Company', 'w-[120px]'],
+                  ['Resume Link', 'w-[72px]'], ['Last Updated', 'w-[108px]'], ['', 'w-[34px]'],
+                ].map(([h, w]) => (
+                  <th key={h} title={h} className={`table-th px-2 truncate tracking-normal ${w}`}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {filtered.map(app => (
                 <tr key={app.id} className={`hover:bg-gray-50 transition-colors ${app.sla_breach ? 'bg-red-50/30' : ''}`}>
-                  <td className="table-td">
-                    <div className="flex items-center gap-2">
-                      <div>
-                        <Link to={`/candidates/${app.candidate_id}`} className="font-medium text-gray-900 hover:text-dp-600">
-                          {app.candidate_name}
-                        </Link>
-                        <div className="flex items-center gap-1 mt-0.5">
-                          <span className="text-xs text-gray-400">{app.id}</span>
-                          <SlaBadge breached={app.sla_breach} />
-                          {app.founder_review_flag && (
-                            <span className="text-xs bg-purple-100 text-purple-700 px-1 rounded">Founder</span>
-                          )}
-                        </div>
+                  <td className="table-td px-2">
+                    <div className="min-w-0">
+                      <Link to={`/candidates/${app.candidate_id}`} className="font-medium text-gray-900 hover:text-dp-600 block truncate">
+                        {app.candidate_name}
+                      </Link>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <span className="text-xs text-gray-400">{app.id}</span>
+                        <SlaBadge breached={app.sla_breach} />
+                        {app.founder_review_flag && (
+                          <span className="text-xs bg-purple-100 text-purple-700 px-1 rounded">Founder</span>
+                        )}
                       </div>
                     </div>
                   </td>
-                  <td className="table-td">
-                    <Link to={`/roles/${app.role_id}`} className="text-sm text-gray-700 hover:text-dp-600 block max-w-[140px] truncate">
+                  <td className="table-td px-2 truncate">
+                    <Link to={`/roles/${app.role_id}`} className="text-sm text-gray-700 hover:text-dp-600 block truncate">
                       {app.role_title}
                     </Link>
                     {app.role_priority && <PriorityBadge priority={app.role_priority} />}
                   </td>
-                  <td className="table-td"><StageBadge stage={app.stage} /></td>
-                  <td className="table-td"><FitScore score={app.ai_fit_score} /></td>
-                  <td className="table-td text-xs text-gray-500 whitespace-nowrap">
+                  <td className="table-td px-2"><StageBadge stage={app.stage} /></td>
+                  <td className="table-td px-2"><FitScore score={app.ai_fit_score} /></td>
+                  <td className="table-td px-2 text-xs text-gray-500 truncate">
                     {app.candidate_ctc_fixed ? `₹${app.candidate_ctc_fixed}L` : '—'}
                     {' → '}
                     {app.candidate_expected_ctc ? `₹${app.candidate_expected_ctc}L` : '—'}
                   </td>
-                  <td className="table-td text-xs text-gray-500">
+                  <td className="table-td px-2 text-xs text-gray-500 truncate">
                     {app.candidate_notice_period_days != null ? `${app.candidate_notice_period_days}d` : '—'}
                   </td>
-                  <td className="table-td text-xs text-gray-500">{app.preferred_location || '—'}</td>
-                  <td className="table-td text-xs text-gray-500">{app.candidate_company || '—'}</td>
-                  <td className="table-td text-xs">
+                  <td className="table-td px-2 text-xs text-gray-500 truncate" title={app.preferred_location || ''}>{app.preferred_location || '—'}</td>
+                  <td className="table-td px-2 text-xs text-gray-500 truncate" title={app.candidate_company || ''}>{app.candidate_company || '—'}</td>
+                  <td className="table-td px-2 text-xs truncate">
                     {app.candidate_resume_link ? (
                       <a href={app.candidate_resume_link} target="_blank" rel="noreferrer" className="text-dp-600 hover:underline">
                         View
                       </a>
                     ) : '—'}
                   </td>
-                  <td className="table-td text-xs text-gray-400 whitespace-nowrap">
+                  <td className="table-td px-2 text-xs text-gray-400 truncate">
                     {app.last_updated ? formatDistanceToNow(new Date(app.last_updated), { addSuffix: true }) : '—'}
                   </td>
-                  <td className="table-td">
+                  <td className="table-td px-1">
                     <Link to={`/candidates/${app.candidate_id}`} className="text-gray-400 hover:text-dp-600">
                       <ChevronRight className="w-4 h-4" />
                     </Link>
