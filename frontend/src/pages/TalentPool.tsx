@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Search } from 'lucide-react';
-import { candidatesApi } from '../services/api.ts';
-import { Candidate } from '../types/index.ts';
+import { candidatesApi, rolesApi } from '../services/api.ts';
+import { Candidate, DEPARTMENTS, LOCATIONS } from '../types/index.ts';
 import { StageBadge, StatusBadge, FitScore, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
+import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -22,6 +23,9 @@ export default function TalentPool() {
   const [tag,          setTag]          = useState('');
   const [skills,       setSkills]       = useState('');
   const [industry,     setIndustry]     = useState('');
+  const [departments,  setDepartments]  = useState<string[]>([]);
+  const [locations,    setLocations]    = useState<string[]>([]);
+  const [roleIds,      setRoleIds]      = useState<string[]>([]);
   const [offset,       setOffset]       = useState(0);
   const [items,        setItems]        = useState<Candidate[]>([]);
   const [total,        setTotal]        = useState(0);
@@ -43,15 +47,26 @@ export default function TalentPool() {
   const params: Record<string, string | string[]> = {
     limit: String(LIMIT), offset: String(offset), [mode]: 'true',
   };
-  if (search)   params.q = search;
-  if (tag)      params.tag = tag;
-  if (industry) params.industry = industry;
-  if (skills)   params.skills = skills.split(',').map(s => s.trim()).filter(Boolean);
+  if (search)          params.q = search;
+  if (tag)             params.tag = tag;
+  if (industry)        params.industry = industry;
+  if (skills)          params.skills = skills.split(',').map(s => s.trim()).filter(Boolean);
+  if (departments.length) params.department = departments;
+  if (locations.length)   params.location = locations;
+  if (roleIds.length)      params.role_id = roleIds;
 
   const { data, isLoading } = useQuery<{ data: { candidates: Candidate[]; total: number } }>({
-    queryKey: ['talent-pool', mode, search, tag, skills, industry, offset],
+    queryKey: ['talent-pool', mode, search, tag, skills, industry, departments, locations, roleIds, offset],
     queryFn:  () => candidatesApi.list(params),
   });
+
+  // Role master filter — same shared endpoint Dashboard/Roles/Candidates use,
+  // non-Closed roles only, auto-updated whenever a role is created/closed.
+  const { data: roleFilterOptions } = useQuery<{ data: { roles: { id: string; title: string }[] } }>({
+    queryKey: ['roles', 'filter-options'],
+    queryFn:  () => rolesApi.filterOptions(),
+  });
+  const roleOptions = (roleFilterOptions?.data?.roles || []).map(r => ({ value: r.id, label: r.title }));
 
   useEffect(() => {
     if (!data?.data) return;
@@ -117,6 +132,9 @@ export default function TalentPool() {
           onChange={e => resetAndSet<string>(setIndustry)(e.target.value)}
           className="input w-36"
         />
+        <MultiSelectFilter label="Department" options={DEPARTMENTS} selected={departments} onChange={resetAndSet<string[]>(setDepartments)} />
+        <MultiSelectFilter label="Location"   options={LOCATIONS}   selected={locations}   onChange={resetAndSet<string[]>(setLocations)} />
+        <MultiSelectFilter label="Role"       options={roleOptions} selected={roleIds}     onChange={resetAndSet<string[]>(setRoleIds)} />
       </div>
 
       {/* Results */}

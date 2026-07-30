@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
 import { authenticate, requireHR } from '../middleware/auth.js';
 import { Candidate } from '../types/index.js';
+import { parseRoleFilters, buildRoleFilterSql, hasActiveFilters } from '../utils/roleFilters.js';
 
 const router = Router();
 router.use(authenticate);
@@ -64,6 +65,22 @@ router.get('/', async (req: Request, res: Response) => {
   // real, complete set.
   if (unlinked === 'true') {
     sql += ` AND NOT EXISTS (SELECT 1 FROM applications a2 WHERE a2.candidate_id = c.id)`;
+  }
+
+  // Talent Pool's Department/Location/Role master filters — "does this
+  // candidate have at least one application against a role matching these"
+  // rather than a plain join+WHERE, for the same reason as hold_for_future/
+  // archived above: this query's own LEFT JOIN roles r is there to build the
+  // per-candidate applications array via json_agg, and filtering that join
+  // directly would silently drop non-matching applications from the array
+  // instead of excluding non-matching candidates. Reuses roleFilters.ts's
+  // r-aliased SQL fragment as-is inside this subquery's own roles join.
+  const roleFilters = parseRoleFilters(req.query);
+  if (hasActiveFilters(roleFilters)) {
+    const { sql: roleFilterSql, params: roleFilterParams } = buildRoleFilterSql(roleFilters, i);
+    sql += ` AND EXISTS (SELECT 1 FROM applications a2 JOIN roles r ON r.id = a2.role_id WHERE a2.candidate_id = c.id${roleFilterSql})`;
+    params.push(...roleFilterParams);
+    i += roleFilterParams.length;
   }
 
   // c.updated_at only moves on candidate PROFILE edits, not on an
