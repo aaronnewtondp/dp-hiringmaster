@@ -128,6 +128,7 @@ export interface Application {
   current_location?:            string;
   preferred_location?:          string;
   qualifications_note?:         string;
+  screening_answers?:           Array<{ question: string; answer: string }>;
   resume_drive_link?:           string;
   assignment_submission_link?:  string;
   offer_letter_link?:           string;

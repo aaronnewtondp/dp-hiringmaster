@@ -44,6 +44,7 @@ router.post('/ingest', async (req: Request, res: Response) => {
     expected_ctc, notice_period_days, current_company, current_industry,
     current_designation, current_location, years_of_experience, resume_drive_link,
     languages_known, role_applied_for, preferred_location, qualifications_note,
+    screening_answers,
   } = req.body;
 
   if (!email || !full_name) {
@@ -52,6 +53,19 @@ router.post('/ingest', async (req: Request, res: Response) => {
   }
 
   const normEmail = String(email).trim().toLowerCase();
+
+  // Apps Script builds this dynamically from whatever form columns are
+  // non-empty (see docs/CandidateApplicationFormTrigger.gs.js) — it's the
+  // only caller, but this is an unauthenticated-by-JWT webhook, so don't
+  // trust the shape blindly.
+  const screeningAnswers: Array<{ question: string; answer: string }> = Array.isArray(screening_answers)
+    ? screening_answers.filter(
+        (qa: unknown): qa is { question: string; answer: string } =>
+          !!qa && typeof qa === 'object' &&
+          typeof (qa as Record<string, unknown>).question === 'string' &&
+          typeof (qa as Record<string, unknown>).answer === 'string'
+      )
+    : [];
   const submitted: Record<string, number | string | null> = {
     phone: toStr(phone),
     linkedin_url: toStr(linkedin_url),
@@ -146,9 +160,9 @@ router.post('/ingest', async (req: Request, res: Response) => {
           const appResult = await client.query(
             `INSERT INTO applications (
                candidate_id, role_id, source_channel, preferred_location, qualifications_note,
-               stage, status, recruiter_screening_status, stage_entry_time, sla_hours
-             ) VALUES ($1,$2,'Job Application Form',$3,$4,'Applied','Active','New',NOW(),48) RETURNING *`,
-            [candidate.id, roleId, toStr(preferred_location), toStr(qualifications_note)]
+               screening_answers, stage, status, recruiter_screening_status, stage_entry_time, sla_hours
+             ) VALUES ($1,$2,'Job Application Form',$3,$4,$5,'Applied','Active','New',NOW(),48) RETURNING *`,
+            [candidate.id, roleId, toStr(preferred_location), toStr(qualifications_note), JSON.stringify(screeningAnswers)]
           );
           application = appResult.rows[0];
 

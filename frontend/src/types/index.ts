@@ -128,6 +128,7 @@ export interface Application {
   status:                      ApplicationStatus;
   recruiter_screening_status:  ScreeningStatus;
   resume_drive_link?:          string;
+  screening_answers?:          Array<{ question: string; answer: string }>;
 
   // ── ResumeIQ 8-dimension scoring (matches digitalpaani-candidate-scoring skill) ──
   score_technical?:            number;

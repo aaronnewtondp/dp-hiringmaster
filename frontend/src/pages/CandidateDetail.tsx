@@ -461,6 +461,20 @@ export default function CandidateDetail() {
 
                         <ResumeIQPanel app={app} />
 
+                        {app.screening_answers && app.screening_answers.length > 0 && (
+                          <div className="border-t border-gray-100 pt-3 mt-3">
+                            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Screening Answers</span>
+                            <div className="mt-2 space-y-2">
+                              {app.screening_answers.map((qa, i) => (
+                                <div key={i} className="text-xs">
+                                  <p className="text-gray-500 font-medium">{qa.question}</p>
+                                  <p className="text-gray-700 mt-0.5">{qa.answer}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         {canHR ? (
                           <EditableSection
                             title="Screening & Risk Notes"

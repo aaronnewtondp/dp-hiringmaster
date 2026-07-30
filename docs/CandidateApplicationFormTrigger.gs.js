@@ -58,6 +58,29 @@ function onFormSubmit(e) {
     return match ? match[0] : '';
   }
 
+  // Every column not already destructured into `payload` below is, by
+  // construction, a role-specific screening question (Years of Experience
+  // in X, willingness to travel, etc.) — captured dynamically by header
+  // text rather than a fixed per-role column map, so a newly added role's
+  // section is picked up automatically with zero script changes. This is
+  // the direct fix for why YOE/role-specific questions were omitted before
+  // (see file header) and for the class of bug behind the Section 7/Section
+  // 2 mis-route.
+  const HANDLED_ELSEWHERE = {
+    'Timestamp': true, 'Email address': true, 'Full Name': true, 'Phone Number': true,
+    'LinkedIn URL': true, 'Current CTC (Fixed and Variable breakup) in LPA': true,
+    'Expected CTC in LPA': true, 'Notice Period in days': true, 'Current Location': true,
+    'Preferred Location': true, 'Current Company': true, 'Current Industry': true,
+    'Languages Known': true, 'Role Applying For': true, 'Resume': true,
+    'Mention any relevant qualifications, skills, experience to support your application': true,
+  };
+  const screening_answers = [];
+  for (const header in e.namedValues) {
+    if (HANDLED_ELSEWHERE[header]) continue;
+    const answer = firstNonEmpty(header);
+    if (answer) screening_answers.push({ question: header, answer: answer });
+  }
+
   const payload = {
     timestamp: v('Timestamp'),
     email: v('Email address'),
@@ -77,6 +100,8 @@ function onFormSubmit(e) {
     // Asked once per role branch, like "Resume" — take whichever one the
     // respondent's branch actually filled in.
     qualifications_note: firstNonEmpty('Mention any relevant qualifications, skills, experience to support your application'),
+    // Role-specific screening Q&A, captured dynamically above.
+    screening_answers: screening_answers,
     // current_esops, current_designation, years_of_experience: not asked by
     // this form (no ESOPs/designation question; YOE is role-branch-specific
     // — see file header) — omitted rather than guessed.

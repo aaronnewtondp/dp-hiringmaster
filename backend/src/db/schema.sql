@@ -479,6 +479,13 @@ ALTER TABLE applications
 ALTER TABLE applications
   ADD COLUMN IF NOT EXISTS qualifications_note TEXT;
 
+-- ── applications: role-specific screening question answers (Job Application
+-- Form, asked per role branch — captured dynamically by question header
+-- text, not a hardcoded per-role column map, so new roles' sections are
+-- picked up automatically) ─────────────────────────────────────────────────
+ALTER TABLE applications
+  ADD COLUMN IF NOT EXISTS screening_answers JSONB;
+
 -- ── applications: 8-dimension ResumeIQ scoring rubric ──────────────────────────
 ALTER TABLE applications
   ADD COLUMN IF NOT EXISTS score_technical       INTEGER,

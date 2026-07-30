@@ -33,10 +33,17 @@ export async function scoreCandidate(
   candidate: Candidate,
   role: Role,
   resumeText?: string | null,
-  preferredLocation?: string | null
+  preferredLocation?: string | null,
+  screeningAnswers?: Array<{ question: string; answer: string }> | null
 ): Promise<ResumeIQResult> {
 
   const resumeRead = !!resumeText;
+
+  const screeningSection = screeningAnswers && screeningAnswers.length
+    ? `\n\nROLE-SPECIFIC SCREENING ANSWERS:\n${screeningAnswers
+        .map(qa => `Q: ${qa.question}\nA: ${qa.answer}`)
+        .join('\n\n')}`
+    : '';
 
   const prompt = `You are a senior HR analyst for DigitalPaani, a water-tech AI company.
 
@@ -56,7 +63,7 @@ Industry: ${candidate.current_industry || 'Not specified'}
 Years of Experience: ${candidate.years_of_experience != null ? candidate.years_of_experience : 'Not specified'}
 
 RESUME CONTENT:
-${resumeText || '(No resume text available — score based on profile fields only)'}
+${resumeText || '(No resume text available — score based on profile fields only)'}${screeningSection}
 
 Score this candidate. Return ONLY valid JSON, no markdown, no code fences:
 {

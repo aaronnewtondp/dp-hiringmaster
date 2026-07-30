@@ -191,8 +191,14 @@ test.describe('Candidate Ingestion Webhook', () => {
       expect(body2.candidate.full_name).toBe(`Updated Name ${marker}`);
     });
 
-    test('languages_known, preferred_location, qualifications_note and linkedin_url round-trip correctly', async ({ request }) => {
+    test('languages_known, preferred_location, qualifications_note, screening_answers and linkedin_url round-trip correctly', async ({ request }) => {
       const marker = uid();
+      // Mirrors what docs/CandidateApplicationFormTrigger.gs.js now builds
+      // dynamically from whatever role-branch columns are non-empty.
+      const screeningAnswers = [
+        { question: 'Years of Experience in Quality Assurance', answer: '5' },
+        { question: 'Years of Experience in BDD development', answer: '3' },
+      ];
       const res = await request.post(`${BASE}/api/candidates/ingest`, {
         headers: { 'x-ingest-secret': CANDIDATE_INGEST_SECRET },
         data: {
@@ -202,6 +208,7 @@ test.describe('Candidate Ingestion Webhook', () => {
           languages_known:     'English, Hindi, Marathi',
           preferred_location:  'Bengaluru',
           qualifications_note: 'B.Tech CS, 2019 graduate',
+          screening_answers:   screeningAnswers,
           // Job Application Form gained a LinkedIn URL question this
           // session — this must flow through the real ingestion pipeline,
           // not just the manual Create Candidate form, or every future
@@ -216,6 +223,30 @@ test.describe('Candidate Ingestion Webhook', () => {
       expect(body.application).not.toBeNull();
       expect(body.application.preferred_location).toBe('Bengaluru');
       expect(body.application.qualifications_note).toBe('B.Tech CS, 2019 graduate');
+      expect(body.application.screening_answers).toEqual(screeningAnswers);
+    });
+
+    test('malformed screening_answers entries are dropped rather than trusted blindly', async ({ request }) => {
+      const marker = uid();
+      const res = await request.post(`${BASE}/api/candidates/ingest`, {
+        headers: { 'x-ingest-secret': CANDIDATE_INGEST_SECRET },
+        data: {
+          email:            `screeningmalformed+${marker}@example.com`,
+          full_name:        `Screening Malformed ${marker}`,
+          role_applied_for: QA_TITLE,
+          screening_answers: [
+            { question: 'Years of Experience in Quality Assurance', answer: '5' }, // valid
+            { question: 'No answer field' },                                       // missing answer
+            'just a string',                                                       // wrong shape entirely
+            null,
+          ],
+        },
+      });
+      expect(res.status()).toBe(201);
+      const body = await res.json();
+      expect(body.application.screening_answers).toEqual([
+        { question: 'Years of Experience in Quality Assurance', answer: '5' },
+      ]);
     });
 
     test('linkedin_url is fill-null-only on a repeat applicant, same as other profile fields', async ({ request }) => {
