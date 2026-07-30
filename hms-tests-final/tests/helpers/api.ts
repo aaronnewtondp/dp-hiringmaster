@@ -34,13 +34,16 @@ export async function pollUntil<T>(
 
 // ─── Credential map ──────────────────────────────────────────────────────────
 export const USERS = {
-  // aaron.newton@ is genuinely seeded as 'leadership' (Founders Office), not
-  // 'hr_recruiter' — confirmed directly against the DB. Kept as the 'hr' key
-  // since leadership is a superset of hr_recruiter access everywhere in this
-  // app (requireHR allows both), so it still works as the general
-  // HR-privileged test identity; only its own persona field had to be
-  // corrected to match reality.
-  hr:          { email: 'aaron.newton@digitalpaani.com', password: 'password123', persona: 'leadership'      },
+  // seed.sql is the source of truth: aaron.newton@ is seeded as
+  // 'hr_recruiter'. (A prior long-lived, never-reset local DB had drifted
+  // to 'leadership' for this user at some point — that was the actual DB
+  // state, not what seed.sql specifies, and it stopped being true the
+  // moment the DB was reset via `docker-compose down -v`.) Kept as the
+  // 'hr' key regardless, since hr_recruiter and leadership are equivalent
+  // for every currently-implemented gate in this app (requireHR and
+  // requireLeadership both allow both personas — see CLAUDE.md's access
+  // control section).
+  hr:          { email: 'aaron.newton@digitalpaani.com', password: 'password123', persona: 'hr_recruiter'     },
   hr2:         { email: 'garima@digitalpaani.com',       password: 'password123', persona: 'hr_recruiter'    },
   hm_alex:     { email: 'alex@digitalpaani.com',         password: 'password123', persona: 'hiring_manager'  },
   hm_satyadev: { email: 'satyadev@digitalpaani.com',     password: 'password123', persona: 'hiring_manager'  },
