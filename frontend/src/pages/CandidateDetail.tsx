@@ -250,13 +250,26 @@ export default function CandidateDetail() {
           />
           <EditableSection
             title="Current Role"
-            data={candidate}
-            onSave={saveCandidateFields}
+            data={{ ...candidate, preferred_location: applications[0]?.preferred_location }}
+            onSave={async (changes) => {
+              // preferred_location lives on the application, not the
+              // candidate (it can differ per role someone applies to) — so
+              // it has to be split off and saved through the application's
+              // own endpoint, against the candidate's primary (first)
+              // application, while every other field here is a real
+              // candidate-level column saved the normal way.
+              const { preferred_location, ...candidateChanges } = changes;
+              if (Object.keys(candidateChanges).length > 0) await saveCandidateFields(candidateChanges);
+              if (preferred_location !== undefined && applications[0]) {
+                await saveApplicationNotes(applications[0].id, { preferred_location });
+              }
+            }}
             fields={[
               { key: 'current_company', label: 'Company', type: 'text' },
               { key: 'current_designation', label: 'Designation', type: 'text' },
               { key: 'current_industry', label: 'Industry', type: 'text' },
               { key: 'current_location', label: 'Location', type: 'text' },
+              { key: 'preferred_location', label: 'Preferred Location', type: 'text' },
               { key: 'years_of_experience', label: 'Experience (yrs)', type: 'number' },
               { key: 'languages_known', label: 'Languages Known', type: 'text' },
             ]}
@@ -447,19 +460,6 @@ export default function CandidateDetail() {
                         </div>
 
                         <ResumeIQPanel app={app} />
-
-                        {canHR ? (
-                          <EditableSection
-                            title="Application Details"
-                            data={app}
-                            onSave={(changes) => saveApplicationNotes(app.id, changes)}
-                            fields={[
-                              { key: 'preferred_location', label: 'Preferred Location', type: 'text' },
-                            ]}
-                          />
-                        ) : app.preferred_location && (
-                          <div className="text-xs text-gray-500">Preferred location: {app.preferred_location}</div>
-                        )}
 
                         {canHR ? (
                           <EditableSection
