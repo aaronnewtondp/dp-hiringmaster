@@ -179,7 +179,7 @@ router.post('/:id/stage', requireHR, async (req: Request, res: Response) => {
           }
         }
 
-        const result = await scoreCandidate(candidate, role, resumeText);
+        const result = await scoreCandidate(candidate, role, resumeText, app.preferred_location);
         // ai_fit_score/ai_priority_bucket are the legacy 0-100-scale columns
         // still read by the dashboard's fit buckets, the role-pipeline sort,
         // and the SLA-by-fit-score branch above (line ~116) — nothing wrote

@@ -32,7 +32,8 @@ export interface ResumeIQResult {
 export async function scoreCandidate(
   candidate: Candidate,
   role: Role,
-  resumeText?: string | null
+  resumeText?: string | null,
+  preferredLocation?: string | null
 ): Promise<ResumeIQResult> {
 
   const resumeRead = !!resumeText;
@@ -48,7 +49,7 @@ Name: ${candidate.full_name}
 Current CTC: ${formatCtc(candidate)}
 Expected CTC: ${candidate.expected_ctc ? `${candidate.expected_ctc} LPA` : 'Not specified'}
 Notice Period: ${candidate.notice_period_days != null ? `${candidate.notice_period_days} days` : 'Not specified'}
-Location: ${candidate.current_location || 'Not specified'}
+Location: ${candidate.current_location || 'Not specified'}${preferredLocation ? ` (Preferred: ${preferredLocation})` : ''}
 Current Company: ${candidate.current_company || 'Not specified'}
 Current Designation: ${candidate.current_designation || 'Not specified'}
 Industry: ${candidate.current_industry || 'Not specified'}
@@ -81,7 +82,11 @@ strengths = exactly 3 strings, redFlags = array (empty if none).`;
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',
-    max_tokens: 1024,
+    // 1024 was tight enough that a verbose strengths/redFlags/summary could
+    // truncate the JSON mid-response, causing a JSON.parse failure that
+    // silently fell back to an all-zero "Scoring failed" result — 2048
+    // gives real headroom without materially raising cost/latency.
+    max_tokens: 2048,
     messages: [{ role: 'user', content: prompt }],
   });
 
