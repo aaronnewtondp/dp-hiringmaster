@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi, candidatesApi, rolesApi } from '../services/api.ts';
-import { Application, Candidate, STAGES } from '../types/index.ts';
+import { Application, Candidate, STAGES, PRIORITIES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
 import { StageBadge, StatusBadge, FitScore, SlaBadge, Spinner, EmptyState, PriorityBadge } from '../components/shared/Badges.tsx';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
@@ -20,6 +20,11 @@ export default function Candidates() {
   const [filterStage, setFilterStage] = useState('all');
   const [filterSla,   setFilterSla]   = useState(false);
   const [roleIds,     setRoleIds]     = useState<string[]>([]);
+  const [departments, setDepartments] = useState<string[]>([]);
+  const [locations,   setLocations]   = useState<string[]>([]);
+  const [modes,       setModes]       = useState<string[]>([]);
+  const [priorities,  setPriorities]  = useState<string[]>([]);
+  const [roleStatuses, setRoleStatuses] = useState<string[]>([]);
   const [showUnlinked, setShowUnlinked] = useState(true);
   const [linkCandidate, setLinkCandidate] = useState<Candidate | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Candidate | null>(null);
@@ -32,23 +37,32 @@ export default function Candidates() {
   // days are excluded from this default pipeline view; they remain fully
   // reachable via the Talent Pool page's "Archived" mode instead.
   const params: Record<string, string | string[]> = { limit: '100', exclude_stale_archived: 'true' };
-  if (filterStage !== 'all') params.stage  = filterStage;
-  if (filterSla)             params.sla_breach = 'true';
-  if (roleIds.length)        params.role_id = roleIds;
+  if (filterStage !== 'all')   params.stage  = filterStage;
+  if (filterSla)               params.sla_breach = 'true';
+  if (roleIds.length)          params.role_id = roleIds;
+  if (departments.length)      params.department = departments;
+  if (locations.length)        params.location = locations;
+  if (modes.length)            params.recruitment_mode = modes;
+  if (priorities.length)       params.priority = priorities;
+  // Sent as role_status, not status — `status` on this endpoint already
+  // means the APPLICATION's own status (Active/Rejected/etc), a different,
+  // non-overlapping value set from role status (Draft/Approved/etc).
+  if (roleStatuses.length)     params.role_status = roleStatuses;
 
   const { data, isLoading } = useQuery<{ data: { applications: Application[] } }>({
-    queryKey: ['applications', filterStage, filterSla, roleIds],
+    queryKey: ['applications', filterStage, filterSla, roleIds, departments, locations, modes, priorities, roleStatuses],
     queryFn:  () => applicationsApi.list(params),
   });
 
-  // Role master filter — same options as Dashboard.tsx's, only non-Closed
-  // roles, auto-updated whenever a role is created/closed since it's a
-  // live query rather than a hand-maintained list.
-  const { data: roleFilterOptions } = useQuery<{ data: { roles: { id: string; title: string }[] } }>({
+  // Master filters — same fields/options as Dashboard.tsx's/Roles.tsx's own,
+  // via the shared GET /api/roles/filter-options endpoint (non-Closed roles
+  // only, auto-updated whenever a role is created/closed).
+  const { data: filterOptionsData } = useQuery<{ data: { recruitment_modes: string[]; roles: { id: string; title: string }[] } }>({
     queryKey: ['roles', 'filter-options'],
     queryFn:  () => rolesApi.filterOptions(),
   });
-  const roleOptions = (roleFilterOptions?.data?.roles || []).map(r => ({ value: r.id, label: r.title }));
+  const modeOptions = filterOptionsData?.data?.recruitment_modes || [];
+  const roleOptions = (filterOptionsData?.data?.roles || []).map(r => ({ value: r.id, label: r.title }));
 
   // Candidates.tsx's main table is application-row driven, so a candidate
   // with zero applications (e.g. an ingested candidate whose "role applying
@@ -194,6 +208,11 @@ export default function Candidates() {
           <option value="all">All stages</option>
           {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
+        <MultiSelectFilter label="Department"       options={DEPARTMENTS}   selected={departments}  onChange={setDepartments} />
+        <MultiSelectFilter label="Location"         options={LOCATIONS}     selected={locations}    onChange={setLocations} />
+        <MultiSelectFilter label="Recruitment Mode" options={modeOptions}   selected={modes}         onChange={setModes} />
+        <MultiSelectFilter label="Priority"         options={PRIORITIES}    selected={priorities}   onChange={setPriorities} />
+        <MultiSelectFilter label="Status"           options={ROLE_STATUSES} selected={roleStatuses} onChange={setRoleStatuses} />
         <MultiSelectFilter label="Role" options={roleOptions} selected={roleIds} onChange={setRoleIds} />
         <button
           onClick={() => setFilterSla(v => !v)}
@@ -215,7 +234,7 @@ export default function Candidates() {
           <table className="w-full">
             <thead className="border-b border-gray-100 bg-gray-50">
               <tr>
-                {['Candidate','Role','Stage','Screening','Fit','Source','CTC → ECTC','Notice','Updated',''].map(h => (
+                {['Candidate','Role','Stage','Fit','CTC → ECTC','Notice','Preferred Location','Current Company','Resume Link','Last Updated',''].map(h => (
                   <th key={h} className="table-th">{h}</th>
                 ))}
               </tr>
@@ -246,11 +265,7 @@ export default function Candidates() {
                     {app.role_priority && <PriorityBadge priority={app.role_priority} />}
                   </td>
                   <td className="table-td"><StageBadge stage={app.stage} /></td>
-                  <td className="table-td">
-                    <span className="text-xs text-gray-500">{app.recruiter_screening_status}</span>
-                  </td>
                   <td className="table-td"><FitScore score={app.ai_fit_score} /></td>
-                  <td className="table-td text-xs text-gray-500">{app.source_channel || '—'}</td>
                   <td className="table-td text-xs text-gray-500 whitespace-nowrap">
                     {app.candidate_ctc_fixed ? `₹${app.candidate_ctc_fixed}L` : '—'}
                     {' → '}
@@ -258,6 +273,15 @@ export default function Candidates() {
                   </td>
                   <td className="table-td text-xs text-gray-500">
                     {app.candidate_notice_period_days != null ? `${app.candidate_notice_period_days}d` : '—'}
+                  </td>
+                  <td className="table-td text-xs text-gray-500">{app.preferred_location || '—'}</td>
+                  <td className="table-td text-xs text-gray-500">{app.candidate_company || '—'}</td>
+                  <td className="table-td text-xs">
+                    {app.candidate_resume_link ? (
+                      <a href={app.candidate_resume_link} target="_blank" rel="noreferrer" className="text-dp-600 hover:underline">
+                        View
+                      </a>
+                    ) : '—'}
                   </td>
                   <td className="table-td text-xs text-gray-400 whitespace-nowrap">
                     {app.last_updated ? formatDistanceToNow(new Date(app.last_updated), { addSuffix: true }) : '—'}

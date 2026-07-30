@@ -175,6 +175,15 @@ export interface Application {
   candidate_name?:             string;
   role_title?:                 string;
   role_priority?:              Priority;
+  ai_fit_score?:               number;
+  ai_priority_bucket?:         string;
+  preferred_location?:         string;
+  candidate_ctc_fixed?:        number;
+  candidate_ctc_variable?:     number;
+  candidate_expected_ctc?:     number;
+  candidate_notice_period_days?: number;
+  candidate_company?:         string;
+  candidate_resume_link?:     string;
 }
 
 export interface InterviewRound {

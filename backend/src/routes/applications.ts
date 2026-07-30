@@ -4,6 +4,7 @@ import { authenticate, requireHR, stripRestrictedFields } from '../middleware/au
 import { Application, SLA_HOURS, Candidate, Role } from '../types/index.js';
 import { scoreCandidate, priorityBucketFromScore } from '../services/resumeIQ.js';
 import { fetchResumeText } from '../services/driveService.js';
+import { parseRoleFilters, buildRoleFilterSql } from '../utils/roleFilters.js';
 
 const router = Router();
 router.use(authenticate);
@@ -40,7 +41,7 @@ async function logActivity(
 
 // ─── GET /api/applications — list with filters ────────────────────────────────
 router.get('/', async (req: Request, res: Response) => {
-  const { role_id, stage, status, screening_status, sla_breach, founder_flag,
+  const { stage, status, screening_status, sla_breach, founder_flag,
           exclude_stale_archived, limit = '50', offset = '0' } = req.query;
 
   let sql = `
@@ -49,6 +50,8 @@ router.get('/', async (req: Request, res: Response) => {
            c.current_ctc_variable AS candidate_ctc_variable,
            c.expected_ctc AS candidate_expected_ctc,
            c.notice_period_days AS candidate_notice_period_days,
+           c.current_company AS candidate_company,
+           c.resume_drive_link AS candidate_resume_link,
            r.title AS role_title, r.priority AS role_priority,
            ag.name AS agency_name
     FROM applications a
@@ -60,7 +63,6 @@ router.get('/', async (req: Request, res: Response) => {
   const params: unknown[] = [];
   let i = 1;
 
-  if (role_id)          { sql += ` AND a.role_id = ANY($${i++}::text[])`;          params.push(Array.isArray(role_id) ? role_id : [role_id]); }
   if (stage)            { sql += ` AND a.stage = $${i++}`;                         params.push(stage); }
   if (status)           { sql += ` AND a.status = $${i++}`;                        params.push(status); }
   if (screening_status) { sql += ` AND a.recruiter_screening_status = $${i++}`;    params.push(screening_status); }
@@ -74,6 +76,17 @@ router.get('/', async (req: Request, res: Response) => {
   if (exclude_stale_archived === 'true') {
     sql += ` AND NOT (a.status IN ('Rejected','Withdrawn') AND a.last_updated < NOW() - INTERVAL '90 days')`;
   }
+
+  // Master filters (department/location/recruitment_mode/priority/role_id +
+  // role_status) — shared with Dashboard/Roles via roleFilters.ts. `role_id`
+  // and role-level `status` collide with this route's own pre-existing
+  // `status` param (the APPLICATION's status), so the frontend sends the
+  // latter under `role_status` and it's remapped here before parsing.
+  const roleFilters = parseRoleFilters({ ...req.query, status: req.query.role_status });
+  const { sql: roleFilterSql, params: roleFilterParams } = buildRoleFilterSql(roleFilters, i);
+  sql += roleFilterSql;
+  params.push(...roleFilterParams);
+  i += roleFilterParams.length;
 
   sql += ` ORDER BY a.ai_fit_score DESC NULLS LAST, a.application_date DESC LIMIT $${i++} OFFSET $${i++}`;
   params.push(parseInt(limit as string), parseInt(offset as string));
