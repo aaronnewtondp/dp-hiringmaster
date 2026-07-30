@@ -258,6 +258,7 @@ export default function CandidateDetail() {
               { key: 'current_industry', label: 'Industry', type: 'text' },
               { key: 'current_location', label: 'Location', type: 'text' },
               { key: 'years_of_experience', label: 'Experience (yrs)', type: 'number' },
+              { key: 'languages_known', label: 'Languages Known', type: 'text' },
             ]}
           />
           <EditableSection
@@ -265,9 +266,7 @@ export default function CandidateDetail() {
             data={candidate}
             onSave={saveCandidateFields}
             fields={[
-              { key: 'current_ctc_fixed', label: 'Current CTC (Fixed)', type: 'number' },
-              { key: 'current_ctc_variable', label: 'Current CTC (Variable)', type: 'number' },
-              { key: 'current_esops', label: 'Current ESOPs', type: 'number' },
+              { key: 'current_ctc_fixed', label: 'Current CTC (Fixed and Variable breakup) in LPA', type: 'number' },
               { key: 'expected_ctc', label: 'Expected CTC', type: 'number' },
               { key: 'notice_period_days', label: 'Notice Period (days)', type: 'number' },
             ]}
@@ -448,6 +447,19 @@ export default function CandidateDetail() {
                         </div>
 
                         <ResumeIQPanel app={app} />
+
+                        {canHR ? (
+                          <EditableSection
+                            title="Application Details"
+                            data={app}
+                            onSave={(changes) => saveApplicationNotes(app.id, changes)}
+                            fields={[
+                              { key: 'preferred_location', label: 'Preferred Location', type: 'text' },
+                            ]}
+                          />
+                        ) : app.preferred_location && (
+                          <div className="text-xs text-gray-500">Preferred location: {app.preferred_location}</div>
+                        )}
 
                         {canHR ? (
                           <EditableSection

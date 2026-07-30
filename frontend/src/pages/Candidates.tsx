@@ -251,7 +251,7 @@ export default function Candidates() {
             <tbody className="divide-y divide-gray-50">
               {filtered.map(app => (
                 <tr key={app.id} className={`hover:bg-gray-50 transition-colors ${app.sla_breach ? 'bg-red-50/30' : ''}`}>
-                  <td className="table-td px-2">
+                  <td className="table-td px-2 py-4">
                     <div className="min-w-0">
                       <Link to={`/candidates/${app.candidate_id}`} className="font-medium text-gray-900 hover:text-dp-600 block truncate">
                         {app.candidate_name}
@@ -265,35 +265,35 @@ export default function Candidates() {
                       </div>
                     </div>
                   </td>
-                  <td className="table-td px-2 truncate">
+                  <td className="table-td px-2 py-4 truncate">
                     <Link to={`/roles/${app.role_id}`} className="text-sm text-gray-700 hover:text-dp-600 block truncate">
                       {app.role_title}
                     </Link>
                     {app.role_priority && <PriorityBadge priority={app.role_priority} />}
                   </td>
-                  <td className="table-td px-2"><StageBadge stage={app.stage} /></td>
-                  <td className="table-td px-2"><FitScore score={app.ai_fit_score} /></td>
-                  <td className="table-td px-2 text-xs text-gray-500 truncate">
+                  <td className="table-td px-2 py-4"><StageBadge stage={app.stage} /></td>
+                  <td className="table-td px-2 py-4"><FitScore score={app.ai_fit_score} /></td>
+                  <td className="table-td px-2 py-4 text-xs text-gray-500 truncate">
                     {app.candidate_ctc_fixed ? `₹${app.candidate_ctc_fixed}L` : '—'}
                     {' → '}
                     {app.candidate_expected_ctc ? `₹${app.candidate_expected_ctc}L` : '—'}
                   </td>
-                  <td className="table-td px-2 text-xs text-gray-500 truncate">
+                  <td className="table-td px-2 py-4 text-xs text-gray-500 truncate">
                     {app.candidate_notice_period_days != null ? `${app.candidate_notice_period_days}d` : '—'}
                   </td>
-                  <td className="table-td px-2 text-xs text-gray-500 truncate" title={app.preferred_location || ''}>{app.preferred_location || '—'}</td>
-                  <td className="table-td px-2 text-xs text-gray-500 truncate" title={app.candidate_company || ''}>{app.candidate_company || '—'}</td>
-                  <td className="table-td px-2 text-xs truncate">
+                  <td className="table-td px-2 py-4 text-xs text-gray-500 truncate" title={app.preferred_location || ''}>{app.preferred_location || '—'}</td>
+                  <td className="table-td px-2 py-4 text-xs text-gray-500 truncate" title={app.candidate_company || ''}>{app.candidate_company || '—'}</td>
+                  <td className="table-td px-2 py-4 text-xs truncate">
                     {app.candidate_resume_link ? (
                       <a href={app.candidate_resume_link} target="_blank" rel="noreferrer" className="text-dp-600 hover:underline">
                         View
                       </a>
                     ) : '—'}
                   </td>
-                  <td className="table-td px-2 text-xs text-gray-400 truncate">
+                  <td className="table-td px-2 py-4 text-xs text-gray-400 truncate">
                     {app.last_updated ? formatDistanceToNow(new Date(app.last_updated), { addSuffix: true }) : '—'}
                   </td>
-                  <td className="table-td px-1">
+                  <td className="table-td px-1 py-4">
                     <Link to={`/candidates/${app.candidate_id}`} className="text-gray-400 hover:text-dp-600">
                       <ChevronRight className="w-4 h-4" />
                     </Link>

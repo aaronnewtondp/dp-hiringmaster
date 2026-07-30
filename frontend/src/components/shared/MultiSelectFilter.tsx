@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, X } from 'lucide-react';
 
 export interface MultiSelectOption {
@@ -23,17 +24,40 @@ interface MultiSelectFilterProps {
 // Priority/Status/Role).
 export default function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectFilterProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const normalized: MultiSelectOption[] = options.map(o => typeof o === 'string' ? { value: o, label: o } : o);
 
+  // Positions the panel relative to the VIEWPORT (not the button's nearest
+  // positioned ancestor) and renders it via a portal straight onto
+  // document.body. Needed because Candidates.tsx's filter bar scrolls
+  // horizontally (overflow-x-auto) — and per the CSS spec, any axis with a
+  // non-"visible" overflow forces the other axis to behave as "auto" too,
+  // so a plain `absolute` dropdown would get vertically clipped by that
+  // same ancestor even though only horizontal scrolling was intended.
+  const reposition = () => {
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (rect) setCoords({ top: rect.bottom + 4, left: rect.left });
+  };
+
   useEffect(() => {
     if (!open) return;
+    reposition();
     const handleClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (btnRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
   }, [open]);
 
   const toggle = (value: string) => {
@@ -41,8 +65,9 @@ export default function MultiSelectFilter({ label, options, selected, onChange }
   };
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative">
       <button
+        ref={btnRef}
         onClick={() => setOpen(o => !o)}
         className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap transition-colors ${
           selected.length > 0
@@ -59,8 +84,12 @@ export default function MultiSelectFilter({ label, options, selected, onChange }
         <ChevronDown className="w-3.5 h-3.5" />
       </button>
 
-      {open && (
-        <div className="absolute z-40 mt-1 w-56 max-h-72 overflow-y-auto bg-white rounded-lg border border-gray-200 shadow-lg py-1">
+      {open && createPortal(
+        <div
+          ref={panelRef}
+          style={{ top: coords.top, left: coords.left }}
+          className="fixed z-50 w-56 max-h-72 overflow-y-auto bg-white rounded-lg border border-gray-200 shadow-lg py-1"
+        >
           {selected.length > 0 && (
             <button
               onClick={() => onChange([])}
@@ -87,7 +116,8 @@ export default function MultiSelectFilter({ label, options, selected, onChange }
               </label>
             ))
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -253,7 +253,7 @@ router.patch('/:id', requireHR, async (req: Request, res: Response) => {
     'career_progression','parsing_completeness','hr_tags','duplicate_flag',
     'current_ctc_fixed','current_ctc_variable','current_esops','expected_ctc',
     'notice_period_days','current_company','current_industry','current_designation',
-    'current_location','years_of_experience','resume_drive_link',
+    'current_location','years_of_experience','resume_drive_link','languages_known',
   ];
 
   const updates: string[] = [];

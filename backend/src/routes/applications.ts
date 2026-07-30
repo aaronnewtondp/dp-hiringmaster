@@ -347,7 +347,7 @@ router.patch('/:id/notes', requireHR, async (req: Request, res: Response) => {
     'hr_comp_alignment','hr_communication_assessment','internal_risk_notes',
     'hr_priority_override','hr_priority_override_reason','hr_tags',
     'resume_drive_link','joining_confidence','last_hr_contact','joining_risk_notes',
-    'next_action','next_action_owner'];
+    'next_action','next_action_owner','preferred_location'];
 
   const updates: string[] = [];
   const values: unknown[] = [];
