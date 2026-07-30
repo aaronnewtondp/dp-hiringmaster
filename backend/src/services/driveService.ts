@@ -156,7 +156,122 @@ export async function fetchResumeText(driveUrl: string): Promise<string | null> 
   }
 }
 
+// pdf-parse v2 wraps pdfjs-dist, which tries to polyfill the browser globals
+// DOMMatrix/ImageData/Path2D from the optional native package
+// @napi-rs/canvas on startup — and if that polyfill step fails, it only
+// *warns* ("Cannot polyfill `DOMMatrix`..."), not throws. The actual crash
+// comes moments later: a pdfjs-dist submodule has an UNCONDITIONAL,
+// module-level `new DOMMatrix()` (used as a scratch matrix for glyph/
+// pattern-fill transforms) that executes the instant that submodule is
+// evaluated — which happens for plain getText() too, not just rendering.
+//
+// On Vercel this submodule genuinely can't be found ("Cannot find module
+// '@napi-rs/canvas'") — confirmed via production logs — most likely
+// because @napi-rs/canvas ships its native binary as a platform-matched
+// optionalDependency, and Vercel's build-time file tracer doesn't reliably
+// follow pdf-parse's try/catch-wrapped `require('@napi-rs/canvas')` to
+// bundle it. Adding @napi-rs/canvas as an explicit dependency doesn't fix
+// this on its own — it's already resolved locally and still gets dropped
+// in the exact same way in the Vercel bundle.
+//
+// Fix: install dependency-free, pure-JS polyfills for the three globals
+// ourselves, before pdf-parse's module graph ever evaluates. This can't
+// suffer the same "native binary didn't bundle" failure mode again, since
+// there's no package to drop — it's inline TS. DOMMatrix needs REAL 2D
+// affine matrix math (it drives glyph transform/position, which affects
+// the actual characters and order text extraction produces) — implemented
+// per the WHATWG spec's 2D matrix semantics. ImageData/Path2D are only
+// exercised by pdf-parse for actual canvas rendering (mesh/gradient fills,
+// Type3-font glyph outlines) that has nowhere real to draw without a
+// native canvas backing it anyway, so safe, non-throwing stubs are enough
+// — correctness there doesn't affect extracted text, only avoiding a
+// ReferenceError does.
+class DOMMatrixPolyfill {
+  a: number; b: number; c: number; d: number; e: number; f: number;
+  constructor(init?: DOMMatrixPolyfill | number[] | { a: number; b: number; c: number; d: number; e: number; f: number }) {
+    if (Array.isArray(init) && init.length >= 6) {
+      [this.a, this.b, this.c, this.d, this.e, this.f] = init;
+    } else if (init && typeof init === 'object') {
+      ({ a: this.a, b: this.b, c: this.c, d: this.d, e: this.e, f: this.f } = init as DOMMatrixPolyfill);
+    } else {
+      this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0;
+    }
+  }
+  multiply(o: DOMMatrixPolyfill): DOMMatrixPolyfill {
+    return new DOMMatrixPolyfill([
+      this.a * o.a + this.c * o.b, this.b * o.a + this.d * o.b,
+      this.a * o.c + this.c * o.d, this.b * o.c + this.d * o.d,
+      this.a * o.e + this.c * o.f + this.e, this.b * o.e + this.d * o.f + this.f,
+    ]);
+  }
+  multiplySelf(o: DOMMatrixPolyfill): this {
+    ({ a: this.a, b: this.b, c: this.c, d: this.d, e: this.e, f: this.f } = this.multiply(o));
+    return this;
+  }
+  preMultiplySelf(o: DOMMatrixPolyfill): this {
+    ({ a: this.a, b: this.b, c: this.c, d: this.d, e: this.e, f: this.f } = o.multiply(this));
+    return this;
+  }
+  translate(tx: number, ty: number): DOMMatrixPolyfill {
+    return this.multiply(new DOMMatrixPolyfill([1, 0, 0, 1, tx, ty]));
+  }
+  scale(sx: number, sy: number = sx): DOMMatrixPolyfill {
+    return this.multiply(new DOMMatrixPolyfill([sx, 0, 0, sy, 0, 0]));
+  }
+  invertSelf(): this {
+    const det = this.a * this.d - this.b * this.c;
+    const { a, b, c, d, e, f } = this;
+    this.a = d / det; this.b = -b / det; this.c = -c / det; this.d = a / det;
+    this.e = (c * f - d * e) / det; this.f = (b * e - a * f) / det;
+    return this;
+  }
+  setTransform(o: DOMMatrixPolyfill): this {
+    ({ a: this.a, b: this.b, c: this.c, d: this.d, e: this.e, f: this.f } = o);
+    return this;
+  }
+}
+
+class Path2DPolyfill {
+  constructor(_path?: unknown) {}
+  addPath() {} moveTo() {} lineTo() {} closePath() {} rect() {}
+  bezierCurveTo() {} quadraticCurveTo() {} arc() {} arcTo() {} ellipse() {}
+}
+
+class ImageDataPolyfill {
+  data: Uint8ClampedArray; width: number; height: number;
+  constructor(dataOrWidth: Uint8ClampedArray | number, widthOrHeight: number, height?: number) {
+    if (dataOrWidth instanceof Uint8ClampedArray) {
+      this.data = dataOrWidth; this.width = widthOrHeight; this.height = height!;
+    } else {
+      this.width = dataOrWidth; this.height = widthOrHeight;
+      this.data = new Uint8ClampedArray(this.width * this.height * 4);
+    }
+  }
+}
+
+// Prefers the real, native @napi-rs/canvas implementations when that
+// package actually resolves (e.g. local dev, where this whole class of bug
+// doesn't reproduce) — only falls back to the pure-JS polyfills above when
+// it genuinely can't be loaded (Vercel), so this changes nothing about the
+// already-working path and only fixes the broken one.
+async function installCanvasPolyfills(): Promise<void> {
+  const g = globalThis as unknown as Record<string, unknown>;
+  if (g.DOMMatrix && g.Path2D && g.ImageData) return;
+
+  let native: { DOMMatrix?: unknown; Path2D?: unknown; ImageData?: unknown } | null = null;
+  try {
+    native = await import('@napi-rs/canvas');
+  } catch {
+    native = null;
+  }
+
+  if (!g.DOMMatrix) g.DOMMatrix = native?.DOMMatrix || DOMMatrixPolyfill;
+  if (!g.Path2D) g.Path2D = native?.Path2D || Path2DPolyfill;
+  if (!g.ImageData) g.ImageData = native?.ImageData || ImageDataPolyfill;
+}
+
 async function extractPdfText(buffer: Buffer): Promise<string> {
+  await installCanvasPolyfills();
   const { PDFParse } = await import('pdf-parse');
   const parser = new PDFParse({ data: buffer });
   const result = await parser.getText();
