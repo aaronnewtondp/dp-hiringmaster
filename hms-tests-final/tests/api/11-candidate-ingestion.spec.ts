@@ -191,7 +191,7 @@ test.describe('Candidate Ingestion Webhook', () => {
       expect(body2.candidate.full_name).toBe(`Updated Name ${marker}`);
     });
 
-    test('languages_known, preferred_location and qualifications_note round-trip correctly', async ({ request }) => {
+    test('languages_known, preferred_location, qualifications_note and linkedin_url round-trip correctly', async ({ request }) => {
       const marker = uid();
       const res = await request.post(`${BASE}/api/candidates/ingest`, {
         headers: { 'x-ingest-secret': CANDIDATE_INGEST_SECRET },
@@ -202,14 +202,44 @@ test.describe('Candidate Ingestion Webhook', () => {
           languages_known:     'English, Hindi, Marathi',
           preferred_location:  'Bengaluru',
           qualifications_note: 'B.Tech CS, 2019 graduate',
+          // Job Application Form gained a LinkedIn URL question this
+          // session — this must flow through the real ingestion pipeline,
+          // not just the manual Create Candidate form, or every future
+          // form submission would silently drop it.
+          linkedin_url:        `https://linkedin.com/in/roundtrip-${marker}`,
         },
       });
       expect(res.status()).toBe(201);
       const body = await res.json();
       expect(body.candidate.languages_known).toBe('English, Hindi, Marathi');
+      expect(body.candidate.linkedin_url).toBe(`https://linkedin.com/in/roundtrip-${marker}`);
       expect(body.application).not.toBeNull();
       expect(body.application.preferred_location).toBe('Bengaluru');
       expect(body.application.qualifications_note).toBe('B.Tech CS, 2019 graduate');
+    });
+
+    test('linkedin_url is fill-null-only on a repeat applicant, same as other profile fields', async ({ request }) => {
+      const marker = uid();
+      const email = `linkedinfill+${marker}@example.com`;
+
+      const first = await request.post(`${BASE}/api/candidates/ingest`, {
+        headers: { 'x-ingest-secret': CANDIDATE_INGEST_SECRET },
+        data: { email, full_name: `LinkedIn Fill ${marker}`, linkedin_url: 'https://linkedin.com/in/original' },
+      });
+      expect(first.status()).toBe(201);
+
+      // Second submission tries to overwrite — should NOT clobber the
+      // existing value, matching every other PROFILE_FIELDS entry.
+      const second = await request.post(`${BASE}/api/candidates/ingest`, {
+        headers: { 'x-ingest-secret': CANDIDATE_INGEST_SECRET },
+        data: { email, full_name: `LinkedIn Fill ${marker}`, linkedin_url: 'https://linkedin.com/in/should-not-apply' },
+      });
+      // Not a duplicate-APPLICATION short-circuit (no role_applied_for sent
+      // at all here) — the fill-null-only update path still responds 201,
+      // same as every other repeat-email case above.
+      expect(second.status()).toBe(201);
+      const body2 = await second.json();
+      expect(body2.candidate.linkedin_url).toBe('https://linkedin.com/in/original');
     });
 
     test('returns 401 with wrong x-ingest-secret', async ({ request }) => {

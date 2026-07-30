@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getToken, authed, createCandidateWithApp } from '../helpers/api';
+import { getToken, authed, createCandidateWithApp, uid } from '../helpers/api';
 
 async function freshApp(request: Parameters<typeof authed>[0]) {
   const token = await getToken(request, 'hr');
@@ -182,10 +182,18 @@ test.describe('GET /api/applications', () => {
 
   test('filter by role_id returns only that role', async ({ request }) => {
     const token = await getToken(request, 'hr');
-    const { application } = await createCandidateWithApp(request, token, 'R006');
-    const res   = await authed(request, token).get(`/api/applications?role_id=R006`);
+    // A fresh, self-owned role rather than the shared seeded R006 — R006
+    // accumulates applications across every run of this whole suite over
+    // time (700+ by now), so the default limit=50 (ordered by fit score
+    // then date) can cut off before reaching this test's own row. Same
+    // flakiness class already diagnosed and fixed this way elsewhere in
+    // the suite (see 17-role-filters.spec.ts's comments on this exact issue).
+    const roleRes = await authed(request, token).post('/api/roles', { title: `App Filter Role ${uid()}`, priority: 'P2' });
+    const { role } = await roleRes.json();
+    const { application } = await createCandidateWithApp(request, token, role.id);
+    const res   = await authed(request, token).get(`/api/applications?role_id=${role.id}`);
     const { applications } = await res.json();
-    expect(applications.every((a: { role_id: string }) => a.role_id === 'R006')).toBe(true);
+    expect(applications.every((a: { role_id: string }) => a.role_id === role.id)).toBe(true);
     expect(applications.some((a: { id: string }) => a.id === application.id)).toBe(true);
   });
 

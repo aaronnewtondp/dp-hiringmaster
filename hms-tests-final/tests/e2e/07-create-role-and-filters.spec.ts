@@ -222,7 +222,13 @@ test.describe('Create Role form + RoleDetail parity + master filters', () => {
     const departmentFilter = masterFilter(page, 'Department');
     await departmentFilter.locator('button').first().click();
 
-    const panel = departmentFilter.locator('div.absolute');
+    // The dropdown panel renders via a React portal straight onto
+    // document.body (position: fixed) rather than as an absolutely-
+    // positioned child of the filter's own wrapper — needed so it isn't
+    // clipped by any scrollable ancestor (see Candidates.tsx's single-row
+    // filter bar, which scrolls horizontally). Look for it at the body
+    // level, not nested inside departmentFilter.
+    const panel = page.locator('body > div.fixed');
     await expect(panel).toBeVisible({ timeout: 5000 });
     await panel.locator('label').first().click();
 
@@ -257,9 +263,21 @@ test.describe('Create Role form + RoleDetail parity + master filters', () => {
     const roleFilter = masterFilter(page, 'Role');
     await roleFilter.locator('button').first().click();
 
-    const panel = roleFilter.locator('div.absolute');
+    // Portaled to document.body — see the comment on the Department test
+    // above for why this isn't nested inside roleFilter.
+    const panel = page.locator('body > div.fixed');
     await expect(panel).toBeVisible({ timeout: 5000 });
-    await panel.locator('label', { hasText: createdRoleTitle! }).click();
+
+    // The Role filter's option list has accumulated hundreds of entries
+    // across every run of this whole suite over time, so the target
+    // checkbox can land so far outside the viewport that even a forced
+    // click fails — Playwright still needs a real bounding box to dispatch
+    // a synthetic mouse event to, which `force: true` doesn't provide.
+    // The panel itself is already asserted visible above; this is purely a
+    // toggle, not a visual interaction under test, so drive it directly via
+    // the DOM instead of fighting scroll position for an offscreen element.
+    const targetCheckbox = panel.locator('label', { hasText: createdRoleTitle! }).locator('input[type=checkbox]');
+    await targetCheckbox.dispatchEvent('click');
 
     await expect(page.getByRole('heading', { name: /Unlinked candidates/ })).not.toBeVisible();
   });
