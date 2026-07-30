@@ -8,10 +8,15 @@ import { getToken, authed, createCandidateWithApp, pollUntil, uid } from '../hel
 // number of test cases on purpose — this is expensive/slow, not a place for
 // exhaustive edge-case coverage.
 //
-// Both async triggers (JD generation on roles.ts PATCH /:id, ResumeIQ scoring
-// on applications.ts POST /:id/stage) are fire-and-forget (setImmediate), so
-// there is nothing to await from the triggering request itself — state is
-// polled afterward via pollUntil().
+// Both triggers (JD generation on roles.ts PATCH /:id, ResumeIQ scoring on
+// applications.ts POST /:id/stage) are SYNCHRONOUS — awaited inline before
+// the response is sent, per CLAUDE.md's "no fire-and-forget on Vercel" rule
+// (a prior setImmediate version silently broke JD generation in production
+// for weeks). Each triggering response carries a {success,error}-shaped
+// field (jdGeneration / resumeiq) asserted on directly below — polling
+// afterward would still pass even if that contract regressed back to
+// fire-and-forget, so the polling here is belt-and-suspenders state
+// confirmation, not the actual regression guard.
 //
 // The second test depends on state (roleId, jd_drive_link) created by the
 // first — safe because playwright.config.ts runs this suite with
@@ -42,12 +47,21 @@ test.describe('JD Generation + ResumeIQ scoring (real external calls)', () => {
 
     // 2. PATCH it to Approved — this is the trigger site in roles.ts (fires
     // when status transitions into 'Approved' from anything else, guarded by
-    // !existing.jd_drive_link). The PATCH response itself won't have the JD
-    // links yet, since generation runs in setImmediate.
+    // !existing.jd_drive_link). Generation is awaited inline, so the PATCH
+    // response itself already carries the {generated,error} outcome — this
+    // is the actual regression guard against fire-and-forget silently
+    // returning (see file header).
     const approveRes = await api.patch(`/api/roles/${roleId}`, { status: 'Approved' });
     expect(approveRes.status()).toBe(200);
-    const { role: approvedRole } = await approveRes.json();
+    const { role: approvedRole, jdGeneration } = await approveRes.json();
     expect(approvedRole.status).toBe('Approved');
+    expect(jdGeneration).toBeTruthy();
+    expect(jdGeneration.generated).toBe(true);
+    expect(jdGeneration.error).toBeUndefined();
+    // The synchronous response already has the real links — no polling
+    // required to observe them, unlike the pre-fix behavior.
+    expect(approvedRole.jd_drive_link).toMatch(/^https:\/\//);
+    expect(approvedRole.social_jd_drive_link).toMatch(/^https:\/\//);
 
     // 3. Poll GET /api/roles/:id until JD generation has completed
     const roleWithJd = await pollUntil(
@@ -70,11 +84,16 @@ test.describe('JD Generation + ResumeIQ scoring (real external calls)', () => {
     expect(application.role_id).toBe(roleId);
 
     // 5. Advance to Resume Review — the real ResumeIQ trigger point in
-    // applications.ts (guarded by !app.score_avg), also fire-and-forget
+    // applications.ts (guarded by !app.score_avg), also synchronous — the
+    // stage-change response itself carries the {scored,error} outcome.
     const stageRes = await api.post(`/api/applications/${application.id}/stage`, {
       new_stage: 'Resume Review',
     });
     expect(stageRes.status()).toBe(200);
+    const { resumeiq } = await stageRes.json();
+    expect(resumeiq).toBeTruthy();
+    expect(resumeiq.scored).toBe(true);
+    expect(resumeiq.error).toBeUndefined();
 
     // 6. Poll GET /api/applications/:id until scoring has completed
     const scoredApp = await pollUntil(

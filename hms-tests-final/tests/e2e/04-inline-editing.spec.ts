@@ -93,7 +93,20 @@ async function editField(
   const card = sectionCard(page, sectionTitle);
 
   await card.getByRole('button', { name: `Edit ${sectionTitle}` }).click();
-  await card.locator(`label:text-is("${fieldLabel}") + input`).fill(value);
+
+  // A field can render as a plain <input> (type: 'text'/'number'/'date'/
+  // 'tags') or a <select> (type: 'select') depending on the FieldConfig in
+  // the page's own EditableSection usage — e.g. RoleDetail's Department
+  // became a <select> this session. Detect which is actually present rather
+  // than assuming <input>, so this one helper covers both without every
+  // caller needing to know a field's type ahead of time.
+  const selectField = card.locator(`label:text-is("${fieldLabel}") + select`);
+  const inputField  = card.locator(`label:text-is("${fieldLabel}") + input`);
+  if (await selectField.count() > 0) {
+    await selectField.selectOption(value);
+  } else {
+    await inputField.fill(value);
+  }
 
   if (save) {
     await card.getByRole('button', { name: 'Save' }).click();
@@ -115,7 +128,10 @@ test.describe('Inline Editing (EditableSection) E2E', () => {
       await page.goto(`${FRONTEND_BASE}/roles/${role.id}`);
       await expect(page.getByRole('heading', { name: role.title, level: 1 })).toBeVisible({ timeout: 10000 });
 
-      const newDept = `Updated Dept ${uid()}`;
+      // Department is a fixed <select> now (DEPARTMENTS in frontend/src/
+      // types/index.ts) — must pick one of its real option values, not an
+      // arbitrary string, since editField's select path uses selectOption.
+      const newDept = 'Sales & Growth';
       await editField(page, 'Basic Info', 'Department', newDept);
 
       await page.reload();
@@ -167,7 +183,11 @@ test.describe('Inline Editing (EditableSection) E2E', () => {
       await page.goto(`${FRONTEND_BASE}/roles/${role.id}`);
       await expect(page.getByRole('heading', { name: role.title, level: 1 })).toBeVisible({ timeout: 10000 });
 
-      const discardedValue = `Should Not Save ${uid()}`;
+      // Same constraint as the test above — must be a real DEPARTMENTS
+      // option since editField's select path uses selectOption, and
+      // deliberately different from that test's 'Sales & Growth' so the two
+      // tests' edited values are also non-clashing strings within this file.
+      const discardedValue = 'CSM/Service';
       await editField(page, 'Basic Info', 'Department', discardedValue, { save: false });
 
       await page.reload();

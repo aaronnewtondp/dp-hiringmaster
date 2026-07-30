@@ -3,10 +3,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { applicationsApi, candidatesApi } from '../services/api.ts';
+import { applicationsApi, candidatesApi, rolesApi } from '../services/api.ts';
 import { Application, Candidate, STAGES } from '../types/index.ts';
 import { StageBadge, StatusBadge, FitScore, SlaBadge, Spinner, EmptyState, PriorityBadge } from '../components/shared/Badges.tsx';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
+import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -18,6 +19,7 @@ export default function Candidates() {
   const [search,      setSearch]      = useState('');
   const [filterStage, setFilterStage] = useState('all');
   const [filterSla,   setFilterSla]   = useState(false);
+  const [roleIds,     setRoleIds]     = useState<string[]>([]);
   const [showUnlinked, setShowUnlinked] = useState(true);
   const [linkCandidate, setLinkCandidate] = useState<Candidate | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Candidate | null>(null);
@@ -29,14 +31,24 @@ export default function Candidates() {
   // Archival (PRD §21) — Rejected/Withdrawn applications untouched for 90+
   // days are excluded from this default pipeline view; they remain fully
   // reachable via the Talent Pool page's "Archived" mode instead.
-  const params: Record<string,string> = { limit: '100', exclude_stale_archived: 'true' };
+  const params: Record<string, string | string[]> = { limit: '100', exclude_stale_archived: 'true' };
   if (filterStage !== 'all') params.stage  = filterStage;
   if (filterSla)             params.sla_breach = 'true';
+  if (roleIds.length)        params.role_id = roleIds;
 
   const { data, isLoading } = useQuery<{ data: { applications: Application[] } }>({
-    queryKey: ['applications', filterStage, filterSla],
+    queryKey: ['applications', filterStage, filterSla, roleIds],
     queryFn:  () => applicationsApi.list(params),
   });
+
+  // Role master filter — same options as Dashboard.tsx's, only non-Closed
+  // roles, auto-updated whenever a role is created/closed since it's a
+  // live query rather than a hand-maintained list.
+  const { data: roleFilterOptions } = useQuery<{ data: { roles: { id: string; title: string }[] } }>({
+    queryKey: ['roles', 'filter-options'],
+    queryFn:  () => rolesApi.filterOptions(),
+  });
+  const roleOptions = (roleFilterOptions?.data?.roles || []).map(r => ({ value: r.id, label: r.title }));
 
   // Candidates.tsx's main table is application-row driven, so a candidate
   // with zero applications (e.g. an ingested candidate whose "role applying
@@ -106,7 +118,10 @@ export default function Candidates() {
         )}
       </div>
 
-      {(unlinkedTotal > 0 || unlinkedLoading) && (
+      {/* Unlinked candidates have no application, so they never belong to
+          any role — the panel is meaningless (always empty) once a Role
+          filter is active, so hide it rather than show a confusing "0". */}
+      {roleIds.length === 0 && (unlinkedTotal > 0 || unlinkedLoading) && (
         <div className="card overflow-hidden border-amber-200">
           <button
             onClick={() => setShowUnlinked(v => !v)}
@@ -179,6 +194,7 @@ export default function Candidates() {
           <option value="all">All stages</option>
           {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
+        <MultiSelectFilter label="Role" options={roleOptions} selected={roleIds} onChange={setRoleIds} />
         <button
           onClick={() => setFilterSla(v => !v)}
           className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${

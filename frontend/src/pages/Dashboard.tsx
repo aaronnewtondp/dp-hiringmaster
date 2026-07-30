@@ -124,12 +124,14 @@ export default function Dashboard() {
   const [modes,        setModes]      = useState<string[]>([]);
   const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
   const [statuses,     setStatuses]   = useState<string[]>([]);
+  const [roleIds,      setRoleIds]    = useState<string[]>([]);
 
-  const { data: filterOptionsData } = useQuery<{ data: { recruitment_modes: string[] } }>({
+  const { data: filterOptionsData } = useQuery<{ data: { recruitment_modes: string[]; roles: { id: string; title: string }[] } }>({
     queryKey: ['roles', 'filter-options'],
     queryFn:  () => rolesApi.filterOptions(),
   });
   const modeOptions = filterOptionsData?.data?.recruitment_modes || [];
+  const roleOptions = (filterOptionsData?.data?.roles || []).map(r => ({ value: r.id, label: r.title }));
 
   const filterParams: Record<string, string[]> = {};
   if (departments.length)      filterParams.department = departments;
@@ -137,9 +139,10 @@ export default function Dashboard() {
   if (modes.length)            filterParams.recruitment_mode = modes;
   if (filterPriorities.length) filterParams.priority = filterPriorities;
   if (statuses.length)         filterParams.status = statuses;
+  if (roleIds.length)          filterParams.role_id = roleIds;
 
   const { data, isLoading, error } = useQuery<{ data: DashboardData }>({
-    queryKey: ['dashboard', departments, locations, modes, filterPriorities, statuses],
+    queryKey: ['dashboard', departments, locations, modes, filterPriorities, statuses, roleIds],
     queryFn:  () => dashboardApi.get(filterParams),
     refetchInterval: 5 * 60 * 1000, // refresh every 5 min
   });
@@ -167,9 +170,9 @@ export default function Dashboard() {
   const maxFunnelVal = Math.max(...hiring_funnel.map(f => parseInt(f.count)), 1);
 
   const hasActiveFilters = departments.length + locations.length + modes.length
-    + filterPriorities.length + statuses.length > 0;
+    + filterPriorities.length + statuses.length + roleIds.length > 0;
   const clearAllFilters = () => {
-    setDepartments([]); setLocations([]); setModes([]); setFilterPriorities([]); setStatuses([]);
+    setDepartments([]); setLocations([]); setModes([]); setFilterPriorities([]); setStatuses([]); setRoleIds([]);
   };
 
   return (
@@ -188,6 +191,7 @@ export default function Dashboard() {
         <MultiSelectFilter label="Recruitment Mode" options={modeOptions}       selected={modes}             onChange={setModes} />
         <MultiSelectFilter label="Priority"         options={PRIORITIES}        selected={filterPriorities} onChange={setFilterPriorities} />
         <MultiSelectFilter label="Status"           options={ROLE_STATUSES}     selected={statuses}          onChange={setStatuses} />
+        <MultiSelectFilter label="Role"              options={roleOptions}       selected={roleIds}           onChange={setRoleIds} />
         {hasActiveFilters && (
           <button onClick={clearAllFilters} className="text-xs text-gray-400 hover:text-gray-600 underline">
             Clear all

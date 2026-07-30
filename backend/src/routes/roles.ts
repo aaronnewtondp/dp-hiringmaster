@@ -62,20 +62,30 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // ─── GET /api/roles/filter-options — distinct values for the filter dropdowns ──
-// Recruitment Mode is genuinely data-driven (whatever the requisition form
-// has actually sent) — Department/Location/Priority/Status are fixed, known
-// enums the frontend already hardcodes (Department used to be derived from
-// roles.department, but that's noisy test/legacy data, not a reliable proxy
-// for the form's real dropdown options — see frontend's DEPARTMENTS const).
+// Recruitment Mode and the Role list are genuinely data-driven (whatever the
+// requisition form has actually sent, or whichever roles currently exist) —
+// Department/Location/Priority/Status are fixed, known enums the frontend
+// already hardcodes (Department used to be derived from roles.department,
+// but that's noisy test/legacy data, not a reliable proxy for the form's
+// real dropdown options — see frontend's DEPARTMENTS const).
 // Must be registered before GET /:id so "filter-options" isn't swallowed as
 // a role id.
 router.get('/filter-options', async (_req: Request, res: Response) => {
-  const recruitmentModes = await query<{ mode: string }>(
-    `SELECT DISTINCT unnest(recruitment_mode) AS mode FROM roles WHERE recruitment_mode IS NOT NULL ORDER BY mode`
-  );
+  const [recruitmentModes, roles] = await Promise.all([
+    query<{ mode: string }>(
+      `SELECT DISTINCT unnest(recruitment_mode) AS mode FROM roles WHERE recruitment_mode IS NOT NULL ORDER BY mode`
+    ),
+    // Role master filter (Dashboard + Candidates) — every role not in a
+    // Closed state, so it stays current automatically as roles are created
+    // or closed, with no separate list to maintain.
+    query<{ id: string; title: string }>(
+      `SELECT id, title FROM roles WHERE status NOT IN ('Closed – Filled','Closed – Cancelled') ORDER BY title`
+    ),
+  ]);
 
   res.json({
     recruitment_modes: recruitmentModes.map(r => r.mode),
+    roles,
   });
 });
 

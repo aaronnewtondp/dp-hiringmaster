@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Plus, ChevronRight } from 'lucide-react';
+import { Plus, ChevronRight, Search } from 'lucide-react';
 import { rolesApi } from '../services/api.ts';
 import { Role, PRIORITIES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
@@ -10,6 +10,7 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 
 export default function Roles() {
   const { canHR } = useAuth();
+  const [search,      setSearch]      = useState('');
   const [departments, setDepartments] = useState<string[]>([]);
   const [locations,   setLocations]   = useState<string[]>([]);
   const [modes,       setModes]       = useState<string[]>([]);
@@ -38,13 +39,24 @@ export default function Roles() {
   });
 
   const roles = data?.data?.roles || [];
+  const filtered = search
+    ? roles.filter(r => {
+        const q = search.toLowerCase();
+        return r.title?.toLowerCase().includes(q)
+          || r.id?.toLowerCase().includes(q)
+          || r.department?.toLowerCase().includes(q)
+          || r.location?.toLowerCase().includes(q)
+          || r.hiring_manager_name?.toLowerCase().includes(q)
+          || r.status?.toLowerCase().includes(q);
+      })
+    : roles;
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Roles</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{roles.length} roles shown</p>
+          <p className="text-sm text-gray-500 mt-0.5">{filtered.length} roles shown</p>
         </div>
         {canHR && (
           <Link to="/roles/new" className="btn-primary">
@@ -53,8 +65,17 @@ export default function Roles() {
         )}
       </div>
 
-      {/* Filters */}
+      {/* Search + filters */}
       <div className="flex gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-48">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            placeholder="Search by title, department, location, HM, status…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="input pl-9"
+          />
+        </div>
         <MultiSelectFilter label="Department"       options={DEPARTMENTS}       selected={departments} onChange={setDepartments} />
         <MultiSelectFilter label="Location"         options={LOCATIONS}         selected={locations}   onChange={setLocations} />
         <MultiSelectFilter label="Recruitment Mode" options={modeOptions}       selected={modes}        onChange={setModes} />
@@ -66,7 +87,7 @@ export default function Roles() {
       <div className="card overflow-hidden">
         {isLoading ? (
           <div className="flex justify-center p-12"><Spinner size="lg" /></div>
-        ) : roles.length === 0 ? (
+        ) : filtered.length === 0 ? (
           <div className="p-12"><EmptyState title="No roles match this filter" /></div>
         ) : (
           <table className="w-full">
@@ -81,7 +102,7 @@ export default function Roles() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {roles.map(role => (
+              {filtered.map(role => (
                 <tr key={role.id} className={`hover:bg-gray-50 transition-colors ${
                   role.aging_alert === 'red' ? 'bg-red-50/40' :
                   role.aging_alert === 'yellow' ? 'bg-amber-50/40' : ''

@@ -60,7 +60,7 @@ router.get('/', async (req: Request, res: Response) => {
   const params: unknown[] = [];
   let i = 1;
 
-  if (role_id)          { sql += ` AND a.role_id = $${i++}`;                       params.push(role_id); }
+  if (role_id)          { sql += ` AND a.role_id = ANY($${i++}::text[])`;          params.push(Array.isArray(role_id) ? role_id : [role_id]); }
   if (stage)            { sql += ` AND a.stage = $${i++}`;                         params.push(stage); }
   if (status)           { sql += ` AND a.status = $${i++}`;                        params.push(status); }
   if (screening_status) { sql += ` AND a.recruiter_screening_status = $${i++}`;    params.push(screening_status); }

@@ -2,10 +2,13 @@
  * E2E — Phase 3 JD generation flow
  *
  * Role created via API → HR approves it via the UI's "Change status" modal
- * → backend fires an async, non-blocking JD generation job (real Claude call
+ * → backend AWAITS JD generation inline before responding (real Claude call
  * + long-form/social PDF render + Drive upload — see roles.ts's PATCH
- * /api/roles/:id handler) → the role's "Links & Assets" card should
- * eventually show a real Drive link once generation completes.
+ * /api/roles/:id handler; this is intentionally synchronous, not
+ * fire-and-forget — see CLAUDE.md's "no fire-and-forget on Vercel" rule) →
+ * the PATCH request itself takes as long as generation does (~15-30s
+ * observed), and only resolves — closing the modal — once the role's
+ * "Links & Assets" card already has the real Drive link.
  *
  * This is a genuinely slow test (external Claude API + PDF render + Drive
  * upload round trip) — generous timeouts throughout are intentional, not a
@@ -71,16 +74,19 @@ test.describe('JD Generation E2E', () => {
     await page.locator('select').selectOption('Approved');
     await page.getByRole('button', { name: 'Update' }).click();
 
-    // Modal closes once the PATCH resolves and the role query is invalidated
-    await expect(page.getByRole('heading', { name: 'Update status' })).not.toBeVisible({ timeout: 15000 });
+    // Modal closes once the PATCH resolves — and since generation is now
+    // awaited inline, that PATCH doesn't resolve until the real Claude call +
+    // PDF renders + Drive uploads all finish (~15-30s observed), well past
+    // the old fire-and-forget-era 15s timeout this assertion used to use.
+    await expect(page.getByRole('heading', { name: 'Update status' })).not.toBeVisible({ timeout: 45_000 });
     await expect(page.locator('body')).toContainText('Approved', { timeout: 15000 });
 
-    // ─── Poll for the generated JD Drive link to appear ────────────────────
-    // JD generation is fire-and-forget on the backend (setImmediate in
-    // roles.ts) — nothing in the PATCH response to await, so poll the page
-    // instead. The "Links & Assets" card shows a "Generating JD…" spinner
-    // in place of the Long-form JD field until jd_drive_link is set, then
-    // renders it as a real <a> link (EditableSection's `linkify` mode).
+    // ─── Confirm the generated JD Drive link is present ────────────────────
+    // No polling is actually required any more — the PATCH above already
+    // waited for generation, so jd_drive_link is set the moment the modal
+    // closes. pollUntil is kept as a defensive fallback (e.g. a slow client-
+    // side query refetch) rather than the primary wait, which is why the
+    // budget below is much shorter than it used to need to be.
     const jdRow  = page.getByText('Long-form JD', { exact: true }).locator('..');
     const jdLink = jdRow.locator('a');
 

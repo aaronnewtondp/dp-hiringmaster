@@ -65,7 +65,9 @@ export const candidatesApi = {
 };
 
 export const applicationsApi = {
-  list:            (params?: Record<string, string>)  => api.get('/applications', { params }),
+  // role_id is string[]-capable (Candidates page's Role filter) — same
+  // repeated-key convention as rolesApi.list/candidatesApi.list.
+  list:            (params?: Record<string, string | string[]>)  => api.get('/applications', { params }),
   get:             (id: string)                       => api.get(`/applications/${id}`),
   advanceStage:    (id: string, newStage: string, skipReason?: string) =>
     api.post(`/applications/${id}/stage`, { new_stage: newStage, skip_reason: skipReason }),

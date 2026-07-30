@@ -1,8 +1,10 @@
-// Shared role-level filtering — used by both GET /api/roles (the Roles
-// summary view's own filters) and GET /api/dashboard (the same filters
-// promoted to dashboard-wide "master filters"). Keeping the parsing + SQL
-// fragment in one place means the two surfaces can never drift on what
-// "Department = X" actually matches in SQL.
+// Shared role-level filtering — used by GET /api/roles (the Roles summary
+// view's own filters), GET /api/dashboard (the same filters promoted to
+// dashboard-wide "master filters"), and the role_id dimension is additionally
+// consumed directly by GET /api/applications for the Candidates page's Role
+// filter. Keeping the parsing + SQL fragment in one place means these
+// surfaces can never drift on what "Department = X" (or "Role = X") actually
+// matches in SQL.
 
 export interface RoleFilterParams {
   departments:      string[];
@@ -10,6 +12,7 @@ export interface RoleFilterParams {
   recruitmentModes: string[];
   priorities:       string[];
   statuses:         string[];
+  roleIds:          string[];
 }
 
 // Query params arrive as a single string when exactly one value is
@@ -29,12 +32,13 @@ export function parseRoleFilters(query: Record<string, unknown>): RoleFilterPara
     recruitmentModes: toArray(query.recruitment_mode),
     priorities:       toArray(query.priority),
     statuses:         toArray(query.status),
+    roleIds:          toArray(query.role_id),
   };
 }
 
 export function hasActiveFilters(f: RoleFilterParams): boolean {
   return f.departments.length > 0 || f.locations.length > 0 || f.recruitmentModes.length > 0
-    || f.priorities.length > 0 || f.statuses.length > 0;
+    || f.priorities.length > 0 || f.statuses.length > 0 || f.roleIds.length > 0;
 }
 
 // Builds a WHERE-clause fragment (leading " AND ...", ready to append) for a
@@ -46,6 +50,7 @@ export function buildRoleFilterSql(f: RoleFilterParams, paramOffset: number): { 
   const params: unknown[] = [];
   let i = paramOffset;
 
+  if (f.roleIds.length)          { clauses.push(`r.id = ANY($${i++})`); params.push(f.roleIds); }
   if (f.departments.length)      { clauses.push(`r.department = ANY($${i++})`); params.push(f.departments); }
   if (f.priorities.length)       { clauses.push(`r.priority = ANY($${i++})`); params.push(f.priorities); }
   if (f.statuses.length)         { clauses.push(`r.status = ANY($${i++})`); params.push(f.statuses); }

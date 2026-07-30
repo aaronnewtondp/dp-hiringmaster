@@ -1,19 +1,31 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, X } from 'lucide-react';
 
+export interface MultiSelectOption {
+  value: string;
+  label: string;
+}
+
 interface MultiSelectFilterProps {
   label:    string;
-  options:  string[];
+  // Plain strings for options where the displayed text and the filter
+  // value are the same (Department, Location, ...). {value,label} for
+  // options where they differ — the Role filter needs to show a role's
+  // title while filtering by its id, since titles aren't unique.
+  options:  Array<string | MultiSelectOption>;
   selected: string[];
   onChange: (selected: string[]) => void;
 }
 
-// Shared by Roles.tsx's own filters and Dashboard.tsx's master filters, so
-// the two surfaces present identical filter UX for the same underlying
-// role fields (Department/Location/Recruitment Mode/Priority/Status).
+// Shared by Roles.tsx's own filters and Dashboard.tsx/Candidates.tsx's
+// master filters, so every surface presents identical filter UX for the
+// same underlying role fields (Department/Location/Recruitment Mode/
+// Priority/Status/Role).
 export default function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectFilterProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  const normalized: MultiSelectOption[] = options.map(o => typeof o === 'string' ? { value: o, label: o } : o);
 
   useEffect(() => {
     if (!open) return;
@@ -57,21 +69,21 @@ export default function MultiSelectFilter({ label, options, selected, onChange }
               <X className="w-3 h-3" /> Clear {label.toLowerCase()}
             </button>
           )}
-          {options.length === 0 ? (
+          {normalized.length === 0 ? (
             <div className="px-3 py-2 text-xs text-gray-400">No options</div>
           ) : (
-            options.map(opt => (
+            normalized.map(opt => (
               <label
-                key={opt}
+                key={opt.value}
                 className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 cursor-pointer"
               >
                 <input
                   type="checkbox"
-                  checked={selected.includes(opt)}
-                  onChange={() => toggle(opt)}
+                  checked={selected.includes(opt.value)}
+                  onChange={() => toggle(opt.value)}
                   className="rounded border-gray-300 text-dp-600 focus:ring-dp-500"
                 />
-                <span className="truncate">{opt}</span>
+                <span className="truncate">{opt.label}</span>
               </label>
             ))
           )}

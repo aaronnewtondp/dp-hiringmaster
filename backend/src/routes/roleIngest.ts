@@ -28,6 +28,20 @@ function parseFormTimestampToDate(ts: string | undefined): string | null {
   return null;
 }
 
+// "Vacancy Caused Due To" is a checkbox (multi-select) question — Google
+// Forms/Apps Script joins multiple selections into one comma-space-joined
+// string in the sheet ("Increased Work Load, Additional Assignments /
+// Business Expansion"), same shape the historical data migration on
+// roles.vacancy_reason (now TEXT[]) already split on. Mirrors that split
+// exactly so a live submission and the backfilled historical rows parse
+// identically.
+function parseVacancyReason(raw: unknown): string[] | null {
+  if (!raw) return null;
+  if (Array.isArray(raw)) return raw.map(String);
+  const s = String(raw).trim();
+  return s ? s.split(', ') : null;
+}
+
 // ─── POST /api/roles/ingest ─────────────────────────────────────────────────────
 // Called by a Google Apps Script trigger bound to the Requisition Form's
 // response sheet, firing on every new form submission (onFormSubmit).
@@ -83,7 +97,7 @@ router.post('/ingest', async (req: Request, res: Response) => {
         mapPriority(priority_level),
         num_openings ? parseInt(num_openings, 10) : 1,
         location || null,
-        new_or_replacement || null, vacancy_reason || null,
+        new_or_replacement || null, parseVacancyReason(vacancy_reason),
         appointment_type || null, qualification_required || null,
         must_have_skills || null, nice_to_have_skills || null,
         yoe_required || null, ctc_band || null,
