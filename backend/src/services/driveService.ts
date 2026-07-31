@@ -272,6 +272,18 @@ async function installCanvasPolyfills(): Promise<void> {
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
   await installCanvasPolyfills();
+  // pdf-parse (via pdfjs-dist) resolves its worker script from a relative
+  // "./pdf.worker.mjs" default, internal to its own module — that file
+  // doesn't always make it into Vercel's serverless bundle even though it
+  // sits right next to the code that needs it (@vercel/nft's static file
+  // tracer misses it), confirmed in production: "Setting up fake worker
+  // failed: Cannot find module '.../pdf-parse/dist/pdf-parse/cjs/
+  // pdf.worker.mjs'". Can't work around this from here — pdf-parse's own
+  // package.json "exports" map doesn't expose that subpath, so even
+  // require.resolve() on it throws ERR_PACKAGE_PATH_NOT_EXPORTED from
+  // outside the package. Fixed instead via backend/vercel.json's
+  // `includeFiles`, which force-includes the exact file regardless of
+  // whether the tracer's static analysis would have found it.
   const { PDFParse } = await import('pdf-parse');
   const parser = new PDFParse({ data: buffer });
   const result = await parser.getText();
