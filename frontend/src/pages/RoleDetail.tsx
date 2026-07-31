@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Users, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Users, ChevronRight, BarChart3 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../services/api.ts';
 import { Role, Application, STAGES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS, EMPLOYMENT_TYPES, VACANCY_REASONS, RECRUITMENT_CHANNELS, PRIORITIES } from '../types/index.ts';
@@ -196,10 +196,16 @@ export default function RoleDetail() {
 
       {/* Pipeline */}
       <div>
-        <h2 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
-          <Users className="w-4 h-4 text-gray-400" />
-          Pipeline
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+            <Users className="w-4 h-4 text-gray-400" />
+            Pipeline
+          </h2>
+          <Link to={`/scorecard?role_id=${role.id}`} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5">
+            <BarChart3 className="w-3.5 h-3.5" />
+            Scorecard Summary
+          </Link>
+        </div>
         {total === 0 ? (
           <div className="card p-8"><EmptyState title="No active candidates in this pipeline" /></div>
         ) : (

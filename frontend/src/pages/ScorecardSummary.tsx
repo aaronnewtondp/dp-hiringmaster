@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { applicationsApi, rolesApi } from '../services/api.ts';
 import { Application, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
@@ -45,7 +45,15 @@ const DIMENSIONS: Array<{ key: keyof Application; label: string }> = [
 
 export default function ScorecardSummary() {
   const qc = useQueryClient();
-  const [roleIds,     setRoleIds]     = useState<string[]>([]);
+  const [searchParams] = useSearchParams();
+  // Arriving from a role's detail page ("Scorecard Summary" button there)
+  // pre-filters to that role — read once on mount; the Role MultiSelectFilter
+  // below is the single source of truth after that (clearing it un-filters,
+  // same as picking it manually would).
+  const [roleIds,     setRoleIds]     = useState<string[]>(() => {
+    const roleId = searchParams.get('role_id');
+    return roleId ? [roleId] : [];
+  });
   const [departments, setDepartments] = useState<string[]>([]);
   const [locations,   setLocations]   = useState<string[]>([]);
   const [modes,       setModes]       = useState<string[]>([]);
@@ -91,6 +99,12 @@ export default function ScorecardSummary() {
           Every ResumeIQ-scored candidate, ranked and compared side by side — mirrors the
           digitalpaani-candidate-scoring skill's output format.
         </p>
+        {roleIds.length === 1 && roleOptions.some(r => r.value === roleIds[0]) && (
+          <div className="mt-2 inline-flex items-center gap-2 text-sm bg-dp-50 text-dp-800 px-3 py-1.5 rounded-lg">
+            Filtered to <span className="font-medium">{roleOptions.find(r => r.value === roleIds[0])?.label}</span>
+            <button onClick={() => setRoleIds([])} className="text-dp-600 hover:underline text-xs">View all roles</button>
+          </div>
+        )}
       </div>
 
       <div className="flex gap-1.5 flex-nowrap overflow-x-auto pb-1">
