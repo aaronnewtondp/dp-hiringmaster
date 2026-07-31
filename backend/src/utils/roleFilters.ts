@@ -19,7 +19,7 @@ export interface RoleFilterParams {
 // selected, or an array when multiple are (both axios's default array
 // serialization and Express's default `qs` parser round-trip correctly —
 // verified directly against this backend's express instance).
-function toArray(v: unknown): string[] {
+export function toArray(v: unknown): string[] {
   if (Array.isArray(v)) return v.map(String);
   if (v === undefined || v === null || v === '') return [];
   return [String(v)];

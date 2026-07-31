@@ -55,7 +55,7 @@ router.get('/', async (req: Request, res: Response) => {
     sql += ` AND EXISTS (SELECT 1 FROM applications a2 WHERE a2.candidate_id = c.id AND a2.status = 'Hold for Future')`;
   }
   if (archived === 'true') {
-    sql += ` AND EXISTS (SELECT 1 FROM applications a2 WHERE a2.candidate_id = c.id AND a2.status IN ('Rejected','Withdrawn') AND a2.last_updated < NOW() - INTERVAL '90 days')`;
+    sql += ` AND EXISTS (SELECT 1 FROM applications a2 WHERE a2.candidate_id = c.id AND a2.status IN ('Rejected','Withdrawn'))`;
   }
   // Candidates.tsx's "Unlinked candidates" panel used to fetch a flat
   // limit:100 page and filter client-side to applications == null — so a
@@ -90,7 +90,7 @@ router.get('/', async (req: Request, res: Response) => {
   if (hold_for_future === 'true') {
     orderBy = `(SELECT MAX(a2.last_updated) FROM applications a2 WHERE a2.candidate_id = c.id AND a2.status = 'Hold for Future') DESC NULLS LAST`;
   } else if (archived === 'true') {
-    orderBy = `(SELECT MAX(a2.last_updated) FROM applications a2 WHERE a2.candidate_id = c.id AND a2.status IN ('Rejected','Withdrawn') AND a2.last_updated < NOW() - INTERVAL '90 days') DESC NULLS LAST`;
+    orderBy = `(SELECT MAX(a2.last_updated) FROM applications a2 WHERE a2.candidate_id = c.id AND a2.status IN ('Rejected','Withdrawn')) DESC NULLS LAST`;
   }
 
   sql += ` GROUP BY c.id ORDER BY ${orderBy} LIMIT $${i++} OFFSET $${i++}`;
@@ -318,7 +318,7 @@ router.patch('/:id', requireHR, async (req: Request, res: Response) => {
 
 // ─── DELETE /api/candidates/:id — remove a candidate with no applications ────
 // The one hard delete in this app — every other removal path elsewhere
-// (status changes, 90-day archival) is deliberately soft. That's safe to
+// (status changes, archival) is deliberately soft. That's safe to
 // break from here specifically because a candidate with zero applications
 // has no evaluation history or downstream data to lose. Scoped explicitly:
 // refuses (409) if the candidate has any application at all, backed up by

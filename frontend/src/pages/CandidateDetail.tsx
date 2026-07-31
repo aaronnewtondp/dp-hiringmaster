@@ -4,9 +4,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ExternalLink, Star, ChevronDown, ChevronUp, CalendarPlus, MessageSquare, FileText, Send, Link2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { candidatesApi, applicationsApi, interviewsApi, assignmentRepoApi } from '../services/api.ts';
-import { Candidate, Application, InterviewRound, AssignmentRepoEntry, STAGES, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
+import { Candidate, Application, InterviewRound, AssignmentRepoEntry, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
 import { StageBadge, StatusBadge, PriorityBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
+import StageChangeModal from '../components/shared/StageChangeModal.tsx';
 import ResumeIQPanel from '../components/ResumeIQPanel.tsx';
 import InterviewFeedbackModal from '../components/InterviewFeedbackModal.tsx';
 import ScheduleRoundModal from '../components/ScheduleRoundModal.tsx';
@@ -48,10 +49,9 @@ export default function CandidateDetail() {
   const { canHR } = useAuth();
   const qc = useQueryClient();
 
-  const [showStageModal, setShowStageModal] = useState(false);
+  const [stageModalApp, setStageModalApp] = useState<Application | null>(null);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [selectedAppId, setSelectedAppId] = useState('');
-  const [stageValue, setStageValue] = useState('');
   const [statusValue, setStatusValue] = useState('');
   const [rejectionCat, setRejectionCat] = useState('');
   const [rejectionDetail, setRejectionDetail] = useState('');
@@ -165,18 +165,6 @@ export default function CandidateDetail() {
     setSaving(false);
   };
 
-  const handleStageUpdate = async () => {
-    if (!selectedAppId || !stageValue) return;
-    setSaving(true);
-    try {
-      await applicationsApi.advanceStage(selectedAppId, stageValue);
-      toast.success(`Stage updated to ${stageValue}`);
-      setShowStageModal(false);
-      qc.invalidateQueries({ queryKey: ['candidate', id] });
-    } catch { toast.error('Failed to update stage'); }
-    setSaving(false);
-  };
-
   const handleStatusUpdate = async () => {
     if (!selectedAppId || !statusValue) return;
     if ((statusValue === 'Rejected' || statusValue === 'Withdrawn') && !rejectionCat) {
@@ -198,7 +186,6 @@ export default function CandidateDetail() {
 
   if (isLoading) return <div className="flex justify-center p-12"><Spinner size="lg" /></div>;
   if (!candidate) return <EmptyState title="Candidate not found" />;
-  console.log('DEBUG candidate object:', candidate);
 
   return (
     <div className="space-y-6">
@@ -342,7 +329,7 @@ export default function CandidateDetail() {
                         <div className="flex gap-2 shrink-0 items-start">
                           {canHR && (
                             <>
-                              <button onClick={() => { setSelectedAppId(app.id); setStageValue(app.stage); setShowStageModal(true); }} className="btn-secondary text-xs py-1.5 px-3">Stage</button>
+                              <button onClick={() => setStageModalApp(app)} className="btn-secondary text-xs py-1.5 px-3">Stage</button>
                               <button onClick={() => { setSelectedAppId(app.id); setStatusValue(app.status); setShowStatusModal(true); }} className="btn-secondary text-xs py-1.5 px-3">Status</button>
                             </>
                           )}
@@ -530,19 +517,12 @@ export default function CandidateDetail() {
         )}
       </div>
 
-      {showStageModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-            <h3 className="text-base font-semibold mb-4">Update stage</h3>
-            <select value={stageValue} onChange={e => setStageValue(e.target.value)} className="select mb-4">
-              {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setShowStageModal(false)} className="btn-secondary">Cancel</button>
-              <button onClick={handleStageUpdate} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Update'}</button>
-            </div>
-          </div>
-        </div>
+      {stageModalApp && (
+        <StageChangeModal
+          application={stageModalApp}
+          onClose={() => setStageModalApp(null)}
+          onUpdated={() => qc.invalidateQueries({ queryKey: ['candidate', id] })}
+        />
       )}
 
       {showStatusModal && (

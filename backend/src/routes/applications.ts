@@ -4,7 +4,7 @@ import { authenticate, requireHR, stripRestrictedFields } from '../middleware/au
 import { Application, SLA_HOURS, Candidate, Role } from '../types/index.js';
 import { scoreCandidate, priorityBucketFromScore } from '../services/resumeIQ.js';
 import { fetchResumeText } from '../services/driveService.js';
-import { parseRoleFilters, buildRoleFilterSql } from '../utils/roleFilters.js';
+import { parseRoleFilters, buildRoleFilterSql, toArray } from '../utils/roleFilters.js';
 
 const router = Router();
 router.use(authenticate);
@@ -42,7 +42,7 @@ async function logActivity(
 // ─── GET /api/applications — list with filters ────────────────────────────────
 router.get('/', async (req: Request, res: Response) => {
   const { stage, status, screening_status, sla_breach, founder_flag,
-          exclude_stale_archived, limit = '50', offset = '0' } = req.query;
+          exclude_stale_archived, scored_only, limit = '50', offset = '0' } = req.query;
 
   let sql = `
     SELECT a.*, c.full_name AS candidate_name, c.email, c.phone,
@@ -51,6 +51,7 @@ router.get('/', async (req: Request, res: Response) => {
            c.expected_ctc AS candidate_expected_ctc,
            c.notice_period_days AS candidate_notice_period_days,
            c.current_company AS candidate_company,
+           c.current_industry AS candidate_industry,
            c.resume_drive_link AS candidate_resume_link,
            r.title AS role_title, r.priority AS role_priority,
            ag.name AS agency_name
@@ -64,7 +65,8 @@ router.get('/', async (req: Request, res: Response) => {
   let i = 1;
 
   if (stage)            { sql += ` AND a.stage = $${i++}`;                         params.push(stage); }
-  if (status)           { sql += ` AND a.status = $${i++}`;                        params.push(status); }
+  const statuses = toArray(status);
+  if (statuses.length) { sql += ` AND a.status = ANY($${i++})`;                     params.push(statuses); }
   if (screening_status) { sql += ` AND a.recruiter_screening_status = $${i++}`;    params.push(screening_status); }
   if (sla_breach === 'true') { sql += ` AND a.sla_breach = true`; }
   if (founder_flag === 'true') { sql += ` AND a.founder_review_flag = true`; }
@@ -74,7 +76,13 @@ router.get('/', async (req: Request, res: Response) => {
   // rows remain reachable via the Talent Pool page's Archived mode instead
   // of being hidden with no way back.
   if (exclude_stale_archived === 'true') {
-    sql += ` AND NOT (a.status IN ('Rejected','Withdrawn') AND a.last_updated < NOW() - INTERVAL '90 days')`;
+    sql += ` AND a.status NOT IN ('Rejected','Withdrawn')`;
+  }
+  // Scorecard Summary's "only show applications that have actually been
+  // through ResumeIQ" filter — opt-in, so every existing caller is
+  // unaffected.
+  if (scored_only === 'true') {
+    sql += ` AND a.score_avg IS NOT NULL`;
   }
 
   // Master filters (department/location/recruitment_mode/priority/role_id +

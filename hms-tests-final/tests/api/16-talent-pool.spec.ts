@@ -22,7 +22,7 @@ test.describe('Talent Pool & Archival (PRD §21)', () => {
       expect(app.last_updated).toBeTruthy();
     });
 
-    test('a freshly-Rejected application does NOT appear in archived=true (not yet 90 days old)', async ({ request }) => {
+    test('a freshly-Rejected application appears in archived=true immediately — no 90-day wait', async ({ request }) => {
       const token = await getToken(request, 'hr');
       const api   = authed(request, token);
       const { candidate, application } = await createCandidateWithApp(request, token);
@@ -32,7 +32,7 @@ test.describe('Talent Pool & Archival (PRD §21)', () => {
 
       const res  = await api.get(`/api/candidates?archived=true&q=${encodeURIComponent(candidate.full_name)}`);
       const body = await res.json();
-      expect(body.candidates.find((c: { id: string }) => c.id === candidate.id)).toBeUndefined();
+      expect(body.candidates.find((c: { id: string }) => c.id === candidate.id)).toBeDefined();
     });
 
     test('hold_for_future combines with tag — matching tag includes, non-matching tag excludes', async ({ request }) => {
@@ -135,7 +135,7 @@ test.describe('Talent Pool & Archival (PRD §21)', () => {
 
   test.describe('GET /api/applications — exclude_stale_archived', () => {
 
-    test('a freshly-Rejected application still appears with exclude_stale_archived=true (not yet 90 days old)', async ({ request }) => {
+    test('a freshly-Rejected application is excluded immediately with exclude_stale_archived=true — no 90-day wait', async ({ request }) => {
       const token = await getToken(request, 'hr');
       const api   = authed(request, token);
       const { application } = await createCandidateWithApp(request, token);
@@ -145,7 +145,7 @@ test.describe('Talent Pool & Archival (PRD §21)', () => {
 
       const res  = await api.get('/api/applications?exclude_stale_archived=true&limit=500');
       const body = await res.json();
-      expect(body.applications.some((a: { id: string }) => a.id === application.id)).toBe(true);
+      expect(body.applications.some((a: { id: string }) => a.id === application.id)).toBe(false);
     });
 
     test('exclude_stale_archived=true does not affect Active applications', async ({ request }) => {

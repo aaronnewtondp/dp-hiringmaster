@@ -144,20 +144,17 @@ test.describe('GET /api/candidates — Talent Pool Department/Location/Role filt
     await api.post(`/api/applications/${application.id}/status`, {
       new_status: 'Rejected', rejection_reason_cat: 'Below experience threshold',
     });
-    // Backdate past the 90-day archival threshold directly — no API path
-    // can set a past last_updated (matches the precedent already
-    // established for testing this exact archival boundary elsewhere).
-    // Skipped here: DB access isn't available from this Playwright
-    // context, so this test only proves the filter combines correctly with
-    // archived=true's query shape, not the full 90-day boundary itself
-    // (already covered without department/role/location in 16-talent-pool.spec.ts).
+    // Archival is immediate (no age threshold) — this proves the department
+    // filter combines correctly with archived=true's query shape (AND
+    // semantics), not a boundary/timing case.
     const res = await api.get(`/api/candidates?archived=true&department=${encodeURIComponent(dept)}&limit=200`);
     expect(res.status()).toBe(200);
-    // Freshly-rejected, not yet 90 days old — correctly excluded from
-    // archived=true regardless of the department filter, confirming the
-    // two conditions combine with AND rather than the department filter
-    // accidentally bypassing the archival age check.
     const { candidates } = await res.json();
-    expect(candidates.every((c: { id: string }) => c.id !== application.candidate_id)).toBe(true);
+    expect(candidates.some((c: { id: string }) => c.id === application.candidate_id)).toBe(true);
+
+    // ...and correspondingly excluded when the department filter doesn't match.
+    const wrongDeptRes = await api.get(`/api/candidates?archived=true&department=${encodeURIComponent('Corporate Functions/Business Operations')}&limit=200`);
+    const { candidates: wrongDept } = await wrongDeptRes.json();
+    expect(wrongDept.some((c: { id: string }) => c.id === application.candidate_id)).toBe(false);
   });
 });

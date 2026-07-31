@@ -1,10 +1,20 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Talent Pool & Archival (PRD §21) — the 90-day threshold for the "archived"
-// filter/mode can't be exercised through the HTTP API at all: every
-// status-changing route hardcodes last_updated=NOW(), and nothing lets a
-// caller set an arbitrary past timestamp. This directly backdates a row via
-// Postgres, following 00-schema-integrity.spec.ts's exact precedent for when
-// a direct DB connection is genuinely necessary.
+// Talent Pool & Archival (PRD §21) — archival is immediate: the moment an
+// application's status flips to Rejected/Withdrawn, it's excluded from
+// Candidates.tsx's default pipeline view and reachable via Talent Pool's
+// Archived mode, with no age requirement. (This was originally gated behind
+// a 90-day threshold per a literal reading of PRD §21's "90+ days" clause,
+// but real usage showed that's not what's wanted — a candidate rejected
+// moments ago sat in neither view for 90 days, which is exactly the
+// confusion archival was meant to prevent. The 91-day backdating below is
+// kept only to prove old/stale rows are unaffected by the same logic, not
+// because age matters anymore.)
+//
+// The 91-day cases still use a direct Postgres connection to backdate
+// last_updated (every status-changing route hardcodes NOW(), so there's no
+// API path to set an arbitrary past timestamp) — following
+// 00-schema-integrity.spec.ts's exact precedent for when a direct DB
+// connection is genuinely necessary.
 //
 // INTENTIONALLY LOCAL-ONLY: hardcoded local-dev credentials, deliberately
 // excluded from test:prod (which only runs tests/smoke — read-only, API-only,
@@ -16,7 +26,7 @@ import { getToken, authed, createCandidateWithApp } from '../helpers/api';
 
 const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
 
-test.describe('Talent Pool Archival — 90-day threshold (local Postgres, direct connection)', () => {
+test.describe('Talent Pool Archival — immediate, no age threshold (local Postgres, direct connection)', () => {
   let client: Client;
 
   test.beforeAll(async () => {
@@ -79,26 +89,29 @@ test.describe('Talent Pool Archival — 90-day threshold (local Postgres, direct
     expect(body.candidates.some((c: { id: string }) => c.id === candidate.id)).toBe(true);
   });
 
-  test('a Rejected application backdated to exactly 89 days is NOT archived yet (boundary check)', async ({ request }) => {
+  test('a Rejected application archives immediately — no backdating, no 90-day wait', async ({ request }) => {
     const token = await getToken(request, 'hr');
     const api   = authed(request, token);
     const { candidate, application } = await createCandidateWithApp(request, token);
 
+    // Sanity: present in the default pipeline view, absent from Archived, before rejecting.
+    const beforePipeline = await (await api.get('/api/applications?exclude_stale_archived=true&limit=500')).json();
+    expect(beforePipeline.applications.some((a: { id: string }) => a.id === application.id)).toBe(true);
+    const beforeArchived = await (await api.get(`/api/candidates?archived=true&q=${encodeURIComponent(candidate.full_name)}`)).json();
+    expect(beforeArchived.candidates.some((c: { id: string }) => c.id === candidate.id)).toBe(false);
+
     await api.post(`/api/applications/${application.id}/status`, {
       new_status: 'Rejected', rejection_reason_cat: 'Missing mandatory skill',
     });
-    await client.query(
-      `UPDATE applications SET last_updated = NOW() - INTERVAL '89 days' WHERE id = $1`,
-      [application.id]
-    );
 
-    const res  = await api.get(`/api/candidates?archived=true&q=${encodeURIComponent(candidate.full_name)}`);
-    const body = await res.json();
-    expect(body.candidates.some((c: { id: string }) => c.id === candidate.id)).toBe(false);
-
-    // ...and correspondingly still present in the default pipeline view
+    // Immediately excluded from the default pipeline view — no backdating.
     const pipelineRes  = await api.get('/api/applications?exclude_stale_archived=true&limit=500');
     const pipelineBody = await pipelineRes.json();
-    expect(pipelineBody.applications.some((a: { id: string }) => a.id === application.id)).toBe(true);
+    expect(pipelineBody.applications.some((a: { id: string }) => a.id === application.id)).toBe(false);
+
+    // Immediately reachable via Talent Pool's Archived mode — no backdating.
+    const archivedRes  = await api.get(`/api/candidates?archived=true&q=${encodeURIComponent(candidate.full_name)}`);
+    const archivedBody = await archivedRes.json();
+    expect(archivedBody.candidates.some((c: { id: string }) => c.id === candidate.id)).toBe(true);
   });
 });

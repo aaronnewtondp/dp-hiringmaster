@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, Users, Building2, LogOut, Droplets, ListChecks, Archive } from 'lucide-react';
+import { LayoutDashboard, Briefcase, Users, Building2, LogOut, Droplets, ListChecks, Archive, BarChart3 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { PERSONAS } from '../../types/index.ts';
 
@@ -9,6 +9,7 @@ const NAV = [
   { to: '/candidates', icon: Users,           label: 'Candidates',  hrOnly: false, queueOnly: false },
   { to: '/talent-pool',icon: Archive,         label: 'Talent Pool', hrOnly: false, queueOnly: false },
   { to: '/hm-queue',   icon: ListChecks,      label: 'My Queue',    hrOnly: false, queueOnly: true  },
+  { to: '/scorecard',  icon: BarChart3,       label: 'Scorecard Summary', hrOnly: false, queueOnly: false },
   { to: '/agencies',   icon: Building2,       label: 'Agencies',    hrOnly: true,  queueOnly: false },
 ];
 

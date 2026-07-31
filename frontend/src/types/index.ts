@@ -175,6 +175,7 @@ export interface Application {
 
   // Joined from backend
   candidate_name?:             string;
+  email?:                      string;
   role_title?:                 string;
   role_priority?:              Priority;
   ai_fit_score?:               number;
@@ -185,6 +186,7 @@ export interface Application {
   candidate_expected_ctc?:     number;
   candidate_notice_period_days?: number;
   candidate_company?:         string;
+  candidate_industry?:        string;
   candidate_resume_link?:     string;
 }
 
@@ -276,6 +278,14 @@ export const PRIORITIES: Priority[] = ['P0', 'P1', 'P2', 'P3'];
 export const ROLE_STATUSES = [
   'Draft', 'Under Review', 'Approved', 'Live – Sourcing', 'On Hold',
   'Closed – Filled', 'Closed – Cancelled',
+];
+
+// Matches the applications.status CHECK constraint exactly — for the
+// Candidates page's "Status" filter specifically, which is application-
+// centric (unlike Roles/Dashboard, where "Status" correctly means
+// ROLE_STATUSES above).
+export const APPLICATION_STATUSES: ApplicationStatus[] = [
+  'Active', 'On Hold', 'Rejected', 'Withdrawn', 'Hold for Future', 'Joined', 'Closed',
 ];
 
 // Fixed, curated list matching the Create Role form's Location dropdown

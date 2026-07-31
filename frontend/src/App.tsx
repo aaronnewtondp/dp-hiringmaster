@@ -13,6 +13,7 @@ import TalentPool from './pages/TalentPool.tsx';
 import Agencies from './pages/Agencies.tsx';
 import AgencyDetail from './pages/AgencyDetail.tsx';
 import HMQueue from './pages/HMQueue.tsx';
+import ScorecardSummary from './pages/ScorecardSummary.tsx';
 import { Spinner } from './components/shared/Badges.tsx';
 
 function AppRoutes() {
@@ -50,6 +51,7 @@ function AppRoutes() {
         <Route path="/agencies"                element={<Agencies />} />
         <Route path="/agencies/:id"            element={<AgencyDetail />} />
         <Route path="/hm-queue"                element={<HMQueue />} />
+        <Route path="/scorecard"               element={<ScorecardSummary />} />
         <Route path="*"                        element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Layout>

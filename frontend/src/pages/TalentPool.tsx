@@ -82,7 +82,7 @@ export default function TalentPool() {
         <p className="text-sm text-gray-500 mt-0.5">
           {mode === 'hold_for_future'
             ? `${total} on hold for future roles`
-            : `${total} archived candidates (rejected/withdrawn, 90+ days)`}
+            : `${total} archived candidates (rejected/withdrawn)`}
         </p>
       </div>
 

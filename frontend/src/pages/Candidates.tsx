@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi, candidatesApi, rolesApi } from '../services/api.ts';
-import { Application, Candidate, STAGES, PRIORITIES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
+import { Application, Candidate, STAGES, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
 import { StageBadge, StatusBadge, FitScore, SlaBadge, Spinner, EmptyState, PriorityBadge } from '../components/shared/Badges.tsx';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
@@ -24,7 +24,7 @@ export default function Candidates() {
   const [locations,   setLocations]   = useState<string[]>([]);
   const [modes,       setModes]       = useState<string[]>([]);
   const [priorities,  setPriorities]  = useState<string[]>([]);
-  const [roleStatuses, setRoleStatuses] = useState<string[]>([]);
+  const [applicationStatuses, setApplicationStatuses] = useState<string[]>([]);
   const [showUnlinked, setShowUnlinked] = useState(true);
   const [linkCandidate, setLinkCandidate] = useState<Candidate | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Candidate | null>(null);
@@ -32,6 +32,18 @@ export default function Candidates() {
   const [unlinkedOffset, setUnlinkedOffset] = useState(0);
   const [unlinkedItems,  setUnlinkedItems]  = useState<Candidate[]>([]);
   const [unlinkedTotal,  setUnlinkedTotal]  = useState(0);
+
+  // Bulk select + bulk stage/status change — new UI territory for this app
+  // (no prior row-selection pattern existed anywhere), HR-only to match the
+  // backend's requireHR gate on both mutation endpoints.
+  const [selectedIds,       setSelectedIds]       = useState<Set<string>>(new Set());
+  const [showBulkStageModal, setShowBulkStageModal] = useState(false);
+  const [bulkStageValue,    setBulkStageValue]    = useState(STAGES[0]);
+  const [showBulkStatusModal, setShowBulkStatusModal] = useState(false);
+  const [bulkStatusValue,   setBulkStatusValue]   = useState('Active');
+  const [bulkRejectionCat,  setBulkRejectionCat]  = useState('');
+  const [bulkRejectionDetail, setBulkRejectionDetail] = useState('');
+  const [bulkSaving,        setBulkSaving]        = useState(false);
 
   // Archival (PRD §21) — Rejected/Withdrawn applications untouched for 90+
   // days are excluded from this default pipeline view; they remain fully
@@ -44,13 +56,14 @@ export default function Candidates() {
   if (locations.length)        params.location = locations;
   if (modes.length)            params.recruitment_mode = modes;
   if (priorities.length)       params.priority = priorities;
-  // Sent as role_status, not status — `status` on this endpoint already
-  // means the APPLICATION's own status (Active/Rejected/etc), a different,
-  // non-overlapping value set from role status (Draft/Approved/etc).
-  if (roleStatuses.length)     params.role_status = roleStatuses;
+  // This page's "Status" filter means the APPLICATION's own status
+  // (Active/Rejected/etc) — unlike Dashboard/Roles, where "Status" means
+  // role status (Draft/Approved/etc, sent as role_status). Sent as this
+  // endpoint's native `status` param.
+  if (applicationStatuses.length) params.status = applicationStatuses;
 
   const { data, isLoading } = useQuery<{ data: { applications: Application[] } }>({
-    queryKey: ['applications', filterStage, filterSla, roleIds, departments, locations, modes, priorities, roleStatuses],
+    queryKey: ['applications', filterStage, filterSla, roleIds, departments, locations, modes, priorities, applicationStatuses],
     queryFn:  () => applicationsApi.list(params),
   });
 
@@ -114,6 +127,61 @@ export default function Candidates() {
     : all;
 
   const slaCount = all.filter(a => a.sla_breach).length;
+
+  const toggleSelected = (id: string) => setSelectedIds(prev => {
+    const s = new Set(prev);
+    s.has(id) ? s.delete(id) : s.add(id);
+    return s;
+  });
+  const allVisibleSelected  = filtered.length > 0 && filtered.every(a => selectedIds.has(a.id));
+  const someVisibleSelected = filtered.some(a => selectedIds.has(a.id));
+  const toggleSelectAll = () => setSelectedIds(prev => {
+    const s = new Set(prev);
+    filtered.forEach(a => allVisibleSelected ? s.delete(a.id) : s.add(a.id));
+    return s;
+  });
+
+  // Chunked, not all-at-once — only matters when the batch includes a move
+  // into 'Resume Review' (a real, synchronous Drive+Claude call per
+  // application, ~10-16s observed) but applied uniformly for simplicity;
+  // the cost of chunking a handful of cheap DB-only transitions is
+  // negligible. Each single-ID call already exists and is unchanged —
+  // this is a client-side fan-out, not a new backend endpoint.
+  const BULK_CONCURRENCY = 3;
+  const handleBulkStage = async () => {
+    setBulkSaving(true);
+    const ids = Array.from(selectedIds);
+    let succeeded = 0;
+    for (let i = 0; i < ids.length; i += BULK_CONCURRENCY) {
+      const batch = ids.slice(i, i + BULK_CONCURRENCY);
+      const settled = await Promise.allSettled(batch.map(id => applicationsApi.advanceStage(id, bulkStageValue)));
+      succeeded += settled.filter(r => r.status === 'fulfilled').length;
+    }
+    toast[succeeded === ids.length ? 'success' : 'error'](`${succeeded} of ${ids.length} updated to ${bulkStageValue}`);
+    setShowBulkStageModal(false);
+    setSelectedIds(new Set());
+    qc.invalidateQueries({ queryKey: ['applications'] });
+    setBulkSaving(false);
+  };
+
+  const handleBulkStatus = async () => {
+    if ((bulkStatusValue === 'Rejected' || bulkStatusValue === 'Withdrawn') && !bulkRejectionCat) {
+      toast.error('A reason is required'); return;
+    }
+    setBulkSaving(true);
+    const ids = Array.from(selectedIds);
+    const settled = await Promise.allSettled(ids.map(id => applicationsApi.updateStatus(id, {
+      new_status: bulkStatusValue,
+      rejection_reason_cat: bulkRejectionCat || undefined,
+      rejection_reason_detail: bulkRejectionDetail || undefined,
+    })));
+    const succeeded = settled.filter(r => r.status === 'fulfilled').length;
+    toast[succeeded === ids.length ? 'success' : 'error'](`${succeeded} of ${ids.length} updated to ${bulkStatusValue}`);
+    setShowBulkStatusModal(false);
+    setSelectedIds(new Set());
+    qc.invalidateQueries({ queryKey: ['applications'] });
+    setBulkSaving(false);
+  };
 
   return (
     <div className="space-y-5">
@@ -213,7 +281,7 @@ export default function Candidates() {
         <div className="shrink-0"><MultiSelectFilter label="Location"         options={LOCATIONS}     selected={locations}    onChange={setLocations} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Recruitment Mode" options={modeOptions}   selected={modes}         onChange={setModes} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Priority"         options={PRIORITIES}    selected={priorities}   onChange={setPriorities} /></div>
-        <div className="shrink-0"><MultiSelectFilter label="Status"           options={ROLE_STATUSES} selected={roleStatuses} onChange={setRoleStatuses} /></div>
+        <div className="shrink-0"><MultiSelectFilter label="Status"           options={APPLICATION_STATUSES} selected={applicationStatuses} onChange={setApplicationStatuses} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Role" options={roleOptions} selected={roleIds} onChange={setRoleIds} /></div>
         <button
           onClick={() => setFilterSla(v => !v)}
@@ -224,6 +292,15 @@ export default function Candidates() {
           SLA breached only
         </button>
       </div>
+
+      {canHR && selectedIds.size > 0 && (
+        <div className="card px-4 py-2.5 flex items-center gap-3 bg-dp-50 border-dp-200">
+          <span className="text-sm font-medium text-dp-800">{selectedIds.size} selected</span>
+          <button onClick={() => setShowBulkStageModal(true)} className="btn-secondary text-xs py-1.5 px-3">Change Stage</button>
+          <button onClick={() => setShowBulkStatusModal(true)} className="btn-secondary text-xs py-1.5 px-3">Change Status</button>
+          <button onClick={() => setSelectedIds(new Set())} className="text-xs text-gray-500 hover:text-gray-700 ml-auto">Clear</button>
+        </div>
+      )}
 
       {/* Table — table-fixed with explicit per-column widths so the whole
           thing fits the card's width without clipping; overflow-x-auto is
@@ -238,6 +315,16 @@ export default function Candidates() {
           <table className="w-full table-fixed">
             <thead className="border-b border-gray-100 bg-gray-50">
               <tr>
+                {canHR && (
+                  <th className="table-th px-2 w-[28px]">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      ref={el => { if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected; }}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
+                )}
                 {[
                   ['Candidate', 'w-[140px]'], ['Role', 'w-[100px]'], ['Stage', 'w-[95px]'],
                   ['Fit', 'w-[55px]'], ['CTC → ECTC', 'w-[100px]'], ['Notice', 'w-[62px]'],
@@ -251,6 +338,11 @@ export default function Candidates() {
             <tbody className="divide-y divide-gray-50">
               {filtered.map(app => (
                 <tr key={app.id} className={`hover:bg-gray-50 transition-colors ${app.sla_breach ? 'bg-red-50/30' : ''}`}>
+                  {canHR && (
+                    <td className="table-td px-2 py-4">
+                      <input type="checkbox" checked={selectedIds.has(app.id)} onChange={() => toggleSelected(app.id)} />
+                    </td>
+                  )}
                   <td className="table-td px-2 py-4">
                     <div className="min-w-0">
                       <Link to={`/candidates/${app.candidate_id}`} className="font-medium text-gray-900 hover:text-dp-600 block truncate">
@@ -333,6 +425,49 @@ export default function Candidates() {
               >
                 {deleting ? 'Deleting…' : 'Delete'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBulkStageModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+            <h3 className="text-base font-semibold mb-1">Update stage</h3>
+            <p className="text-sm text-gray-500 mb-4">{selectedIds.size} candidates</p>
+            <select value={bulkStageValue} onChange={e => setBulkStageValue(e.target.value)} className="select mb-4">
+              {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowBulkStageModal(false)} className="btn-secondary">Cancel</button>
+              <button onClick={handleBulkStage} disabled={bulkSaving} className="btn-primary">{bulkSaving ? 'Updating…' : 'Update'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBulkStatusModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+            <div>
+              <h3 className="text-base font-semibold">Update status</h3>
+              <p className="text-sm text-gray-500">{selectedIds.size} candidates</p>
+            </div>
+            <select value={bulkStatusValue} onChange={e => setBulkStatusValue(e.target.value)} className="select">
+              {['Active', 'On Hold', 'Rejected', 'Withdrawn', 'Hold for Future'].map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            {(bulkStatusValue === 'Rejected' || bulkStatusValue === 'Withdrawn') && (
+              <>
+                <select value={bulkRejectionCat} onChange={e => setBulkRejectionCat(e.target.value)} className="select">
+                  <option value="">Select reason *</option>
+                  {(bulkStatusValue === 'Rejected' ? REJECTION_REASONS : WITHDRAWAL_REASONS).map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <textarea placeholder="Additional detail (optional)" value={bulkRejectionDetail} onChange={e => setBulkRejectionDetail(e.target.value)} className="input h-20 resize-none" />
+              </>
+            )}
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowBulkStatusModal(false)} className="btn-secondary">Cancel</button>
+              <button onClick={handleBulkStatus} disabled={bulkSaving} className="btn-primary">{bulkSaving ? 'Updating…' : 'Update'}</button>
             </div>
           </div>
         </div>
