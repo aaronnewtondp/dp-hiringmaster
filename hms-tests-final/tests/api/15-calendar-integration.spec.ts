@@ -24,6 +24,17 @@ import { getCalendarEvent, deleteCalendarEvent, hasCalendarCredentials } from '.
 // organizer's actual Google Calendar. Kept to exactly one such test, and
 // cleaned up explicitly afterward (see tests/helpers/calendar.ts's comment on
 // why this one real side effect can't just be left in place like file 10's).
+//
+// That same test now also asserts the resume-link-in-description and
+// hr@digitalpaani.com-in-attendees features. Worth knowing: hr@digitalpaani
+// .com is a real, actively-monitored inbox (candidates email resumes there),
+// and interviews.ts unconditionally adds it as an attendee — so every run of
+// this specific test sends a real calendar-invite notification email to
+// that inbox for a fake "Technical Round" interview (deleting the event
+// afterward removes it from the calendar but can't recall an already-sent
+// notification email). This is an accepted consequence of testing the
+// feature as specified, not a bug in the test — the same real email fires
+// for every actual interview scheduled in production from now on too.
 
 test.describe('Calendar integration on POST /api/interviews', () => {
 
@@ -103,6 +114,12 @@ test.describe('Calendar integration on POST /api/interviews', () => {
     const { candidate, application } = await createCandidateWithApp(request, token);
     await api.post(`/api/applications/${application.id}/stage`, { new_stage: 'Interview Round 1' });
 
+    // Resume link is sourced from the candidate's own resume_drive_link at
+    // send time — set one here so the description assertion below has a
+    // real, known value to check for.
+    const resumeLink = `https://drive.google.com/file/d/calendar-test-${uid()}/view`;
+    await api.patch(`/api/candidates/${candidate.id}`, { resume_drive_link: resumeLink });
+
     const interviewerEmail = `calendar-test-interviewer+${uid()}@example.com`;
     // Far-future, fixed instant with an explicit +05:30 offset — this is the
     // exact shape the frontend now sends (see this session's timezone fix),
@@ -137,6 +154,13 @@ test.describe('Calendar integration on POST /api/interviews', () => {
       const attendeeEmails = (event!.attendees || []).map(a => (a.email || '').toLowerCase());
       expect(attendeeEmails).toContain(interviewerEmail.toLowerCase());
       expect(attendeeEmails).toContain((candidate.email as string).toLowerCase());
+      // hr@digitalpaani.com is always cc'd on every interview invite,
+      // regardless of who scheduled it.
+      expect(attendeeEmails).toContain('hr@digitalpaani.com');
+
+      // Candidate's resume Drive link (set above) is always included in the
+      // event description so interviewers have it on hand.
+      expect(event!.description).toContain(resumeLink);
 
       expect(event!.organizer?.email).toBe('aaron.newton@digitalpaani.com');
     } finally {
