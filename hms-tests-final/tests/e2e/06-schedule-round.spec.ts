@@ -166,12 +166,14 @@ test.describe('Schedule Round Modal E2E', () => {
     expect(rounds.find((r: { round_name: string }) => r.round_name === roundName)).toBeUndefined();
   });
 
-  test('Schedule round vs Schedule Assignment button visibility follows the application\'s stage', async ({ page }) => {
+  test('Schedule round vs Send Assignment button visibility follows the application\'s stage', async ({ page }) => {
     // INTERVIEW_STAGES in CandidateDetail.tsx gates "Schedule round" to
     // 'Interview Round 1' | 'Interview Round 2' | 'Founders Round'; the
-    // "Schedule Assignment" button is gated separately to app.stage ===
-    // 'Assignment Round'. These two conditions are mutually exclusive, so
-    // exactly one of the two buttons should ever be visible at a time.
+    // "Send Assignment" button (formerly "Schedule Assignment" — it now
+    // composes and sends a real email rather than opening a calendar-style
+    // scheduling modal) is gated separately to app.stage === 'Assignment
+    // Round'. These two conditions are mutually exclusive, so exactly one of
+    // the two buttons should ever be visible at a time.
     const { candidate: interviewCandidate } = await createTestApplication(page, 'Interview Round 1');
     const { candidate: assignmentCandidate } = await createTestApplication(page, 'Assignment Round');
 
@@ -179,10 +181,10 @@ test.describe('Schedule Round Modal E2E', () => {
 
     await openCandidateAndExpand(page, interviewCandidate);
     await expect(page.getByRole('button', { name: 'Schedule round' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Schedule Assignment' })).not.toBeVisible();
+    await expect(page.getByRole('button', { name: 'Send Assignment' })).not.toBeVisible();
 
     await openCandidateAndExpand(page, assignmentCandidate);
-    await expect(page.getByRole('button', { name: 'Schedule Assignment' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Send Assignment' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Schedule round' })).not.toBeVisible();
   });
 });

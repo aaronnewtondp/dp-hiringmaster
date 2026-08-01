@@ -616,6 +616,23 @@ ALTER TABLE ref_checks
   ADD COLUMN IF NOT EXISTS feedback TEXT NOT NULL
     CHECK (feedback IN ('Excellent','Good','Average','Below Expectations','Poor'));
 
+-- ── interview_rounds: Assignment email-send support ─────────────────────────
+-- "Schedule Assignment" no longer opens a calendar-style modal (assignments
+-- never had a calendar sync to begin with — see the Calendar-event support
+-- block above, which only ever fires for round_type='Standard'). It now
+-- composes and sends a real email to the candidate from hr@digitalpaani.com.
+-- assignment_link is the PER-SEND value (prefilled from, but independently
+-- editable/overridable relative to, roles.approval_summary_link) — kept
+-- distinct so one send can deviate without mutating the role's default link.
+-- assignment_email_error mirrors calendar_sync_error's graceful-degradation
+-- pattern exactly.
+ALTER TABLE interview_rounds
+  ADD COLUMN IF NOT EXISTS assignment_mail_body       TEXT,
+  ADD COLUMN IF NOT EXISTS assignment_cc               TEXT[],
+  ADD COLUMN IF NOT EXISTS assignment_link             TEXT,
+  ADD COLUMN IF NOT EXISTS assignment_supporting_docs  TEXT,
+  ADD COLUMN IF NOT EXISTS assignment_email_error      TEXT;
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows
 -- ═════════════════════════════════════════════════════════════════════════════

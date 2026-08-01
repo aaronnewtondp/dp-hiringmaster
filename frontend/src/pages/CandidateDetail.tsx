@@ -3,14 +3,15 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ExternalLink, Star, ChevronDown, ChevronUp, CalendarPlus, MessageSquare, FileText, Send, Link2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { candidatesApi, applicationsApi, interviewsApi, assignmentRepoApi, refChecksApi } from '../services/api.ts';
-import { Candidate, Application, InterviewRound, AssignmentRepoEntry, ReferenceCheck, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
+import { candidatesApi, applicationsApi, interviewsApi, refChecksApi } from '../services/api.ts';
+import { Candidate, Application, InterviewRound, ReferenceCheck, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
 import { StageBadge, StatusBadge, PriorityBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
 import ResumeIQPanel from '../components/ResumeIQPanel.tsx';
 import InterviewFeedbackModal from '../components/InterviewFeedbackModal.tsx';
 import ScheduleRoundModal from '../components/ScheduleRoundModal.tsx';
+import SendAssignmentModal from '../components/SendAssignmentModal.tsx';
 import AssignmentOutcomeModal from '../components/AssignmentOutcomeModal.tsx';
 import AddReferenceCheckModal from '../components/AddReferenceCheckModal.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -41,9 +42,27 @@ function AssignmentStatusPill({ round }: { round: InterviewRound }) {
 // Round-scheduling is gated by the application's current stage — Standard
 // interview rounds can only be created while sitting in one of these three
 // stages; Assignment rounds only from 'Assignment Round' (checked inline
-// below). This is what makes the "Schedule round"/"Schedule Assignment"
+// below). This is what makes the "Schedule round"/"Send Assignment"
 // controls appear/disappear as the stage moves, instead of always showing.
 const INTERVIEW_STAGES = ['Interview Round 1', 'Interview Round 2', 'Founders Round'];
+
+// Drives SendAssignmentModal — either freshly creating+sending (mode
+// 'create', no roundId yet) or retrying a round whose send previously
+// failed (mode 'retry', prefilled from that round's own persisted values).
+interface AssignmentModalState {
+  mode:                   'create' | 'retry';
+  applicationId:          string;
+  roundId?:               string;
+  roleId:                 string;
+  nextRoundNumber?:       number;
+  candidateName:          string;
+  roleTitle:              string;
+  candidateEmail?:        string;
+  initialMailBody?:       string;
+  initialCc?:             string;
+  initialAssignmentLink?: string;
+  initialSupportingDocs?: string;
+}
 
 export default function CandidateDetail() {
   const { id } = useParams<{ id: string }>();
@@ -67,13 +86,11 @@ export default function CandidateDetail() {
   const [outcomeRound, setOutcomeRound] = useState<(InterviewRound & { candidate_name?: string; role_title?: string }) | null>(null);
   const [scheduleAppId, setScheduleAppId] = useState<string | null>(null);
   const [scheduleNextNum, setScheduleNextNum] = useState(1);
-  const [scheduleRoundType, setScheduleRoundType] = useState<'Standard' | 'Assignment'>('Standard');
   const [scheduleDefaultName, setScheduleDefaultName] = useState('');
   const [expandedApps, setExpandedApps] = useState<Set<string>>(new Set());
 
-  const [showSendModal, setShowSendModal] = useState(false);
-  const [sendRoundId, setSendRoundId] = useState('');
-  const [sendRepoId, setSendRepoId] = useState('');
+  const [assignmentModal, setAssignmentModal] = useState<AssignmentModalState | null>(null);
+
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [submitRoundId, setSubmitRoundId] = useState('');
   const [submitLink, setSubmitLink] = useState('');
@@ -128,13 +145,6 @@ export default function CandidateDetail() {
     enabled: applications.length > 0,
   });
 
-  const { data: repoData } = useQuery<{ data: { assignments: AssignmentRepoEntry[] } }>({
-    queryKey: ['assignment-repo'],
-    queryFn: () => assignmentRepoApi.list(),
-    enabled: showSendModal,
-  });
-  const repoEntries = repoData?.data?.assignments || [];
-
   const saveCandidateFields = async (changes: Record<string, unknown>) => {
     await candidatesApi.update(id!, changes);
     qc.invalidateQueries({ queryKey: ['candidate', id] });
@@ -153,18 +163,6 @@ export default function CandidateDetail() {
       setShowFounderModal(false);
       qc.invalidateQueries({ queryKey: ['candidate', id] });
     } catch { toast.error('Failed to update Founder Review flag'); }
-    setSaving(false);
-  };
-
-  const handleSendAssignment = async () => {
-    setSaving(true);
-    try {
-      await interviewsApi.sendAssignment(sendRoundId, { assignment_repo_id: sendRepoId || undefined });
-      toast.success('Assignment sent');
-      setShowSendModal(false);
-      qc.invalidateQueries({ queryKey: ['interview-rounds'] });
-      refetchRounds();
-    } catch { toast.error('Failed to send assignment'); }
     setSaving(false);
   };
 
@@ -367,7 +365,6 @@ export default function CandidateDetail() {
                                 onClick={() => {
                                   setScheduleAppId(app.id);
                                   setScheduleNextNum(rounds.length + 1);
-                                  setScheduleRoundType('Standard');
                                   setScheduleDefaultName(app.stage);
                                 }}
                                 className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium"
@@ -377,15 +374,18 @@ export default function CandidateDetail() {
                             )}
                             {canHR && app.stage === 'Assignment Round' && (
                               <button
-                                onClick={() => {
-                                  setScheduleAppId(app.id);
-                                  setScheduleNextNum(rounds.length + 1);
-                                  setScheduleRoundType('Assignment');
-                                  setScheduleDefaultName('');
-                                }}
+                                onClick={() => setAssignmentModal({
+                                  mode: 'create',
+                                  applicationId: app.id,
+                                  roleId: app.role_id,
+                                  nextRoundNumber: rounds.length + 1,
+                                  candidateName: candidate.full_name,
+                                  roleTitle: app.role_title,
+                                  candidateEmail: candidate.email,
+                                })}
                                 className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium"
                               >
-                                <CalendarPlus className="w-3.5 h-3.5" /> Schedule Assignment
+                                <Send className="w-3.5 h-3.5" /> Send Assignment
                               </button>
                             )}
                           </div>
@@ -415,6 +415,15 @@ export default function CandidateDetail() {
                                       {round.calendar_sync_error && (
                                         <span className="text-amber-600" title={round.calendar_sync_error}>⚠ Calendar invite failed</span>
                                       )}
+                                      {round.assignment_link && (
+                                        <a href={round.assignment_link} target="_blank" rel="noreferrer"
+                                           className="flex items-center gap-1 text-dp-600 hover:underline">
+                                          <ExternalLink className="w-3 h-3" /> Assignment link
+                                        </a>
+                                      )}
+                                      {round.assignment_email_error && (
+                                        <span className="text-amber-600" title={round.assignment_email_error}>⚠ Assignment email failed to send</span>
+                                      )}
                                       {round.overall_assessment && <span className="font-medium text-gray-600">{round.overall_assessment} · {round.round_recommendation}</span>}
                                       {round.overall_round_score != null && <span>Score: {Number(round.overall_round_score).toFixed(1)}/5</span>}
                                       {round.assignment_outcome && (
@@ -436,8 +445,23 @@ export default function CandidateDetail() {
                                     // score it themselves (e.g. relaying verbal scores from someone
                                     // else) since this button isn't persona-gated either.
                                     !round.assignment_send_date ? (
+                                      // Only reachable when a send was never successful — see
+                                      // attemptAssignmentEmail (backend/src/routes/interviews.ts).
+                                      // This is the retry path, prefilled from what was last tried.
                                       canHR && (
-                                        <button onClick={() => { setSendRoundId(round.id); setSendRepoId(''); setShowSendModal(true); }} className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium shrink-0 ml-3">
+                                        <button onClick={() => setAssignmentModal({
+                                          mode: 'retry',
+                                          applicationId: app.id,
+                                          roundId: round.id,
+                                          roleId: app.role_id,
+                                          candidateName: candidate.full_name,
+                                          roleTitle: app.role_title,
+                                          candidateEmail: candidate.email,
+                                          initialMailBody: round.assignment_mail_body,
+                                          initialCc: round.assignment_cc?.join(', '),
+                                          initialAssignmentLink: round.assignment_link,
+                                          initialSupportingDocs: round.assignment_supporting_docs,
+                                        })} className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium shrink-0 ml-3">
                                           <Send className="w-3.5 h-3.5" /> Send assignment
                                         </button>
                                       )
@@ -623,25 +647,6 @@ export default function CandidateDetail() {
         </div>
       )}
 
-      {showSendModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
-            <h3 className="text-base font-semibold">Send assignment</h3>
-            <select value={sendRepoId} onChange={e => setSendRepoId(e.target.value)} className="select">
-              <option value="">— Ad hoc, no repo entry —</option>
-              {repoEntries.map(a => (
-                <option key={a.id} value={a.id}>{a.name}{a.difficulty_level ? ` (${a.difficulty_level})` : ''}</option>
-              ))}
-            </select>
-            <p className="text-xs text-gray-400">Deadline auto-sets to 60 hours from now.</p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setShowSendModal(false)} className="btn-secondary">Cancel</button>
-              <button onClick={handleSendAssignment} disabled={saving} className="btn-primary">{saving ? 'Sending…' : 'Send'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {showSubmitModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
@@ -672,9 +677,16 @@ export default function CandidateDetail() {
         <ScheduleRoundModal
           applicationId={scheduleAppId}
           nextRoundNumber={scheduleNextNum}
-          roundType={scheduleRoundType}
           defaultRoundName={scheduleDefaultName}
           onClose={() => setScheduleAppId(null)}
+          onSuccess={() => { qc.invalidateQueries({ queryKey: ['interview-rounds'] }); refetchRounds(); }}
+        />
+      )}
+
+      {assignmentModal && (
+        <SendAssignmentModal
+          {...assignmentModal}
+          onClose={() => setAssignmentModal(null)}
           onSuccess={() => { qc.invalidateQueries({ queryKey: ['interview-rounds'] }); refetchRounds(); }}
         />
       )}

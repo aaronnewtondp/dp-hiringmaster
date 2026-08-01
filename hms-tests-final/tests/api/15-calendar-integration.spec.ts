@@ -48,7 +48,11 @@ test.describe('Calendar integration on POST /api/interviews', () => {
     // scheduled_date AND interviewer_emails both deliberately set here, valid
     // and non-empty — proving round_type alone is what gates the sync.
     // Assignment rounds have no meeting to put on a calendar, so this must
-    // never reach out to Google regardless of what else is in the body.
+    // never reach out to Google's Calendar API regardless of what else is in
+    // the body. mail_body_content/assignment_link are required for Assignment
+    // rounds now (they instead trigger a Gmail send, asserted separately in
+    // 07-interviews.spec.ts) — present here only so this request isn't
+    // rejected before it can prove the calendar-specific assertion below.
     const res = await api.post('/api/interviews', {
       application_id:     application.id,
       round_name:         'Assignment Round',
@@ -56,6 +60,8 @@ test.describe('Calendar integration on POST /api/interviews', () => {
       round_type:         'Assignment',
       scheduled_date:     '2027-02-01T10:00:00+05:30',
       interviewer_emails: [`calendar-test-interviewer+${uid()}@example.com`],
+      mail_body_content:  'Please find your assignment below.',
+      assignment_link:    'https://drive.google.com/test-assignment',
     });
     expect(res.status()).toBe(201);
     const body = await res.json();

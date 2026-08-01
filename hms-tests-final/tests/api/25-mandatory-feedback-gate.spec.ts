@@ -69,6 +69,10 @@ test.describe('Mandatory interview/assignment feedback before stage advance', ()
     const roundRes = await api.post('/api/interviews', {
       application_id: application.id, round_name: 'Assignment Round',
       round_number: 1, round_type: 'Assignment',
+      // Required now that "Schedule Assignment" always sends an email —
+      // see backend/src/routes/interviews.ts's Assignment-round validation.
+      mail_body_content: 'Please find your assignment below.',
+      assignment_link:   'https://drive.google.com/test-assignment',
     });
     const { round } = await roundRes.json();
 

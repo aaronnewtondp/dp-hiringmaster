@@ -33,6 +33,16 @@ async function setupAssignmentRound(request: Parameters<typeof authed>[0]) {
     round_name:     'Assignment Round',
     round_number:   1,
     round_type:     'Assignment',
+    // mail_body_content/assignment_link are required for Assignment rounds
+    // now (the round is created by sending an actual email — see
+    // attemptAssignmentEmail in interviews.ts). The candidate's email is a
+    // fake @example.com address (createCandidateWithApp), so even if the
+    // Gmail send genuinely goes through it reaches no real inbox; if the
+    // gmail.send scope isn't authorized yet it fails gracefully (round
+    // still creates, email.sent: false) — either way these tests, which
+    // only care about round/feedback behavior, are unaffected.
+    mail_body_content: 'Please find your assignment below.',
+    assignment_link:   'https://drive.google.com/test-assignment',
   });
   const { round } = await irRes.json();
   return { token, api, application, round };
@@ -124,7 +134,7 @@ test.describe('Interviews API', () => {
 
   test.describe('Assignment round workflow', () => {
 
-    test('send assignment sets 60-hour deadline', async ({ request }) => {
+    test('assignment-send accepts a retry attempt and always responds 200 (email outcome is environment-dependent)', async ({ request }) => {
       const token = await getToken(request, 'hr');
       const api   = authed(request, token);
       const { application } = await createCandidateWithApp(request, token);
@@ -134,12 +144,23 @@ test.describe('Interviews API', () => {
         round_name:     'Assignment Round',
         round_number:   1,
         round_type:     'Assignment',
+        mail_body_content: 'Please find your assignment below.',
+        assignment_link:   'https://drive.google.com/test-assignment',
       });
       const { round } = await irRes.json();
+      // Repurposed retry endpoint — no longer takes assignment_repo_id, takes
+      // the same 4 fields as creation. Whether the underlying Gmail send
+      // itself succeeds depends on whether gmail.send is authorized in this
+      // environment yet (see CLAUDE.md), but the route itself always
+      // responds 200 either way (a failed send is surfaced via
+      // email.sent/email.error, not an HTTP error).
       const sendRes = await api.post(`/api/interviews/${round.id}/assignment-send`, {
-        // assignment_repo_id omitted — R001 is not a valid ASN id
+        mail_body_content: 'Retrying — please find your assignment below.',
+        assignment_link:   'https://drive.google.com/test-assignment',
       });
-      expect([200, 201, 400, 500]).toContain(sendRes.status());
+      expect(sendRes.status()).toBe(200);
+      const body = await sendRes.json();
+      expect(body.email).toHaveProperty('sent');
     });
 
     test('submit assignment stores the submission link', async ({ request }) => {

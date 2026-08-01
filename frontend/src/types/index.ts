@@ -222,15 +222,11 @@ export interface InterviewRound {
   score_practical_thinking?: number;
   score_completeness?:      number;
   assignment_notes?:        string;
-}
-
-export interface AssignmentRepoEntry {
-  id:                string;
-  name:              string;
-  role_category?:    string;
-  experience_level?: string;
-  difficulty_level?: string;
-  drive_link?:       string;
+  assignment_mail_body?:       string;
+  assignment_cc?:              string[];
+  assignment_link?:            string;
+  assignment_supporting_docs?: string;
+  assignment_email_error?:     string;
 }
 
 export interface PendingAction {

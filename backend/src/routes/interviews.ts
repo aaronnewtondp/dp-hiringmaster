@@ -3,6 +3,7 @@ import { query, queryOne, transaction } from '../db/index.js';
 import { authenticate, requireHR } from '../middleware/auth.js';
 import { InterviewRound } from '../types/index.js';
 import { createInterviewCalendarEvent } from '../services/calendarService.js';
+import { sendAssignmentEmail } from '../services/gmailService.js';
 
 const router = Router();
 router.use(authenticate);
@@ -32,11 +33,72 @@ router.get('/', async (req: Request, res: Response) => {
 // ─── POST /api/interviews — create / schedule a round ────────────────────────
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Shared by both the initial send (POST / on round creation) and the retry
+// path (POST /:id/assignment-send, which now only fires for a round that
+// never sent successfully) — so the send-attempt/state-update/activity-log
+// logic exists exactly once. Never throws; always resolves to a status the
+// caller can surface, same graceful-degradation contract as Calendar sync.
+async function attemptAssignmentEmail(
+  round: InterviewRound,
+  app: { candidate_email: string | null; candidate_name: string; role_title: string },
+  fields: { mail_body_content: string; cc?: string[]; assignment_link: string; supporting_documentation?: string },
+  user: { userId: string; name: string }
+): Promise<{ sent: boolean; error?: string }> {
+  if (!app.candidate_email) {
+    await query(
+      `UPDATE interview_rounds SET assignment_email_error=$1, updated_at=NOW() WHERE id=$2`,
+      ['Candidate has no email on file.', round.id]
+    );
+    return { sent: false, error: 'Candidate has no email on file — cannot send assignment.' };
+  }
+
+  const subject = `DigitalPaani ${app.role_title} Assignment - ${app.candidate_name}`;
+  const text = `${fields.mail_body_content}\n\nAssignment Link: ${fields.assignment_link}` +
+    (fields.supporting_documentation ? `\nSupporting Documentation: ${fields.supporting_documentation}` : '');
+
+  const app2 = await queryOne<{ candidate_id: string; role_id: string }>(
+    'SELECT candidate_id, role_id FROM applications WHERE id=$1', [round.application_id]
+  );
+
+  try {
+    await sendAssignmentEmail({ to: app.candidate_email, cc: fields.cc, subject, text });
+    const deadline = new Date(Date.now() + 60 * 60 * 1000 * 60); // 60 hours, same as before
+    await query(
+      `UPDATE interview_rounds SET assignment_send_date=NOW(), assignment_deadline=$1, assignment_email_error=NULL, updated_at=NOW() WHERE id=$2`,
+      [deadline.toISOString(), round.id]
+    );
+    await query(
+      `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [round.application_id, app2?.candidate_id, app2?.role_id,
+       'Assignment Email Sent',
+       `Sent to ${app.candidate_email}${fields.cc?.length ? ` (cc: ${fields.cc.join(', ')})` : ''}`,
+       deadline.toISOString(), user.userId, user.name]
+    );
+    return { sent: true };
+  } catch (err) {
+    const message = (err as Error).message;
+    console.error(`[Gmail] Failed to send assignment email for round ${round.id}:`, message);
+    await query(
+      `UPDATE interview_rounds SET assignment_email_error=$1, updated_at=NOW() WHERE id=$2`,
+      [message.slice(0, 500), round.id]
+    );
+    await query(
+      `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [round.application_id, app2?.candidate_id, app2?.role_id,
+       'Assignment Email Failed', message.slice(0, 500), null, user.userId, user.name]
+    );
+    return { sent: false, error: 'Assignment round saved, but the email failed to send — you can retry from the round row.' };
+  }
+}
+
 router.post('/', requireHR, async (req: Request, res: Response) => {
   const {
     application_id, round_name, round_type = 'Standard',
     round_number, interviewer_emails, scheduled_date,
     interview_mode = 'Video', focus_areas, duration_minutes = 60,
+    mail_body_content, cc, assignment_link, supporting_documentation,
   } = req.body;
 
   if (!application_id || !round_name) {
@@ -51,6 +113,24 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     }
     const invalid = interviewer_emails.find((e: string) => !EMAIL_RE.test(e));
     if (invalid) { res.status(400).json({ error: `"${invalid}" is not a valid email address` }); return; }
+  }
+
+  // Assignment rounds are created exclusively through the "Send Assignment"
+  // form now — there's no other way to create one, so these are required at
+  // creation time rather than left to a later separate send step.
+  if (round_type === 'Assignment') {
+    if (!mail_body_content || !assignment_link) {
+      res.status(400).json({ error: 'mail_body_content and assignment_link are required for Assignment rounds' });
+      return;
+    }
+    if (cc != null) {
+      if (!Array.isArray(cc) || !cc.every((e: unknown) => typeof e === 'string')) {
+        res.status(400).json({ error: 'cc must be an array of strings' });
+        return;
+      }
+      const invalidCc = cc.find((e: string) => !EMAIL_RE.test(e));
+      if (invalidCc) { res.status(400).json({ error: `"${invalidCc}" is not a valid email address` }); return; }
+    }
   }
 
   const app = await queryOne<{ candidate_id: string; role_id: string; candidate_name: string; candidate_email: string | null; role_title: string; candidate_resume_link: string | null }>(
@@ -69,11 +149,13 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     const r = await client.query(
       `INSERT INTO interview_rounds
          (id, application_id, round_name, round_type, round_number,
-          interviewer_emails, scheduled_date, interview_mode, focus_areas, duration_minutes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+          interviewer_emails, scheduled_date, interview_mode, focus_areas, duration_minutes,
+          assignment_mail_body, assignment_cc, assignment_link, assignment_supporting_docs)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [id, application_id, round_name, round_type,
        round_number || 1, interviewer_emails || null, scheduled_date, interview_mode,
-       focus_areas || [], duration_minutes]
+       focus_areas || [], duration_minutes,
+       mail_body_content || null, cc || null, assignment_link || null, supporting_documentation || null]
     );
 
     // Stage no longer auto-advances here — the application must already be
@@ -157,7 +239,19 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     );
   }
 
-  res.status(201).json({ round, calendar });
+  // Same synchronous, gracefully-degrading pattern as Calendar sync above —
+  // the round is already committed, so a failed send is surfaced via
+  // assignment_email_error rather than failing the whole request.
+  let email: { sent: boolean; error?: string } | undefined;
+  if (round.round_type === 'Assignment') {
+    email = await attemptAssignmentEmail(
+      round, app,
+      { mail_body_content, cc: cc || undefined, assignment_link, supporting_documentation },
+      req.user!
+    );
+  }
+
+  res.status(201).json({ round, calendar, email });
 });
 
 // ─── PATCH /api/interviews/:id/feedback — submit feedback ────────────────────
@@ -277,9 +371,29 @@ router.patch('/:id/feedback', async (req: Request, res: Response) => {
   res.json({ round: updated });
 });
 
-// ─── POST /api/interviews/:id/assignment-send ─────────────────────────────────
+// ─── POST /api/interviews/:id/assignment-send — retry a failed send ──────────
+// The only way this route is reachable from the UI now: the per-round
+// button only shows while assignment_send_date is still null (never sent
+// successfully — see attemptAssignmentEmail). No longer accepts
+// assignment_repo_id / picks from the Assignment Repo library — that's no
+// longer wired into this flow (decision: use roles.approval_summary_link
+// instead). Accepts the same 4 fields as round creation, re-attempts the
+// send, and overwrites the round's persisted values with this attempt's.
 router.post('/:id/assignment-send', requireHR, async (req: Request, res: Response) => {
-  const { assignment_repo_id, submission_link_placeholder } = req.body;
+  const { mail_body_content, cc, assignment_link, supporting_documentation } = req.body;
+
+  if (!mail_body_content || !assignment_link) {
+    res.status(400).json({ error: 'mail_body_content and assignment_link are required' });
+    return;
+  }
+  if (cc != null) {
+    if (!Array.isArray(cc) || !cc.every((e: unknown) => typeof e === 'string')) {
+      res.status(400).json({ error: 'cc must be an array of strings' });
+      return;
+    }
+    const invalidCc = cc.find((e: string) => !EMAIL_RE.test(e));
+    if (invalidCc) { res.status(400).json({ error: `"${invalidCc}" is not a valid email address` }); return; }
+  }
 
   const round = await queryOne<InterviewRound>(
     'SELECT * FROM interview_rounds WHERE id=$1', [req.params.id]
@@ -290,33 +404,29 @@ router.post('/:id/assignment-send', requireHR, async (req: Request, res: Respons
     return;
   }
 
-  const sendTime = new Date();
-  const deadline = new Date(sendTime.getTime() + 60 * 60 * 1000 * 60); // 60 hours
+  const app = await queryOne<{ candidate_name: string; candidate_email: string | null; role_title: string }>(
+    `SELECT c.full_name AS candidate_name, c.email AS candidate_email, r.title AS role_title
+     FROM applications a JOIN candidates c ON c.id = a.candidate_id JOIN roles r ON r.id = a.role_id
+     WHERE a.id = $1`,
+    [round.application_id]
+  );
+  if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
 
-  await transaction(async (client) => {
-    await client.query(
-      `UPDATE interview_rounds SET
-         assignment_repo_id=$1, assignment_send_date=$2, assignment_deadline=$3, updated_at=NOW()
-       WHERE id=$4`,
-      [assignment_repo_id || null, sendTime.toISOString(), deadline.toISOString(), req.params.id]
-    );
-    if (assignment_repo_id) {
-      await client.query(
-        `UPDATE assignment_repo SET times_used=times_used+1, last_used=NOW() WHERE id=$1`,
-        [assignment_repo_id]
-      );
-    }
-    const app = await client.query('SELECT candidate_id, role_id FROM applications WHERE id=$1', [round.application_id]);
-    await client.query(
-      `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [round.application_id, app.rows[0]?.candidate_id, app.rows[0]?.role_id,
-       'Assignment Sent', `Deadline: ${deadline.toISOString()}`,
-       deadline.toISOString(), req.user!.userId, req.user!.name]
-    );
-  });
+  await query(
+    `UPDATE interview_rounds SET
+       assignment_mail_body=$1, assignment_cc=$2, assignment_link=$3, assignment_supporting_docs=$4, updated_at=NOW()
+     WHERE id=$5`,
+    [mail_body_content, cc || null, assignment_link, supporting_documentation || null, req.params.id]
+  );
 
-  res.json({ success: true, deadline: deadline.toISOString() });
+  const email = await attemptAssignmentEmail(
+    round, app,
+    { mail_body_content, cc: cc || undefined, assignment_link, supporting_documentation },
+    req.user!
+  );
+
+  const updated = await queryOne<InterviewRound>('SELECT * FROM interview_rounds WHERE id=$1', [req.params.id]);
+  res.json({ round: updated, email });
 });
 
 // ─── POST /api/interviews/:id/assignment-submit ───────────────────────────────

@@ -150,6 +150,34 @@ rather than the full generated JD document. Once JD generation (Phase 3) is
 built, ResumeIQ should be updated to score against that document instead. See
 `ROADMAP.md`.
 
+### Assignment emails (Gmail API)
+"Send Assignment" (on a candidate's `Assignment Round` stage) composes and
+sends a real email to the candidate from `hr@digitalpaani.com` — mail body,
+CC, an Assignment Link (autofilled from the role's `approval_summary_link`,
+labelled "Assignment Link" under RoleDetail's "Links & Assets"), and optional
+supporting-doc Drive links. One action creates the `interview_rounds` row
+*and* sends the email (`backend/src/routes/interviews.ts`'s `POST /`,
+`round_type='Assignment'` branch) — there's no separate "schedule" step,
+since assignments never had a real calendar sync to begin with.
+
+Sending goes through `backend/src/services/gmailService.ts`, which mirrors
+`calendarService.ts`'s domain-wide-delegation JWT pattern but with a **fixed**
+impersonation subject (`hr@digitalpaani.com`, not the requesting HR user) —
+assignment emails must always appear to come from the shared HR inbox.
+Requires the `https://www.googleapis.com/auth/gmail.send` scope added to the
+service account's OAuth Client ID in Admin Console (additive to the
+`drive.file`/`calendar.events` grants already there) and the Gmail API
+enabled at the GCP project level — same one-time-setup category as the Drive
+API enablement note below. `nodemailer`'s `MailComposer` builds the raw MIME
+message fed to the Gmail API's `raw` field (no attachments — supporting docs
+are Drive links in the body text, not files).
+
+A failed send is graceful, not fatal — the round is still created,
+`interview_rounds.assignment_email_error` is set (mirrors `calendar_sync_
+error`), and the per-round action button becomes a retry (same modal,
+prefilled from that round's last-attempted values, resubmitting via `POST
+/interviews/:id/assignment-send`).
+
 ### Rule: no fire-and-forget async on Vercel — await it, or it may never run
 **Learned the hard way**: both JD generation (`roles.ts`, on a role's
 `status` transitioning to `Approved`) and ResumeIQ scoring above used to
@@ -211,6 +239,10 @@ just call it directly; it doesn't assume it's running on a timer.
 - Google Drive API must be **manually enabled** at the GCP project level
   (separate from any file/folder sharing) — a one-time console setting, easy
   to forget on a new project.
+- Gmail API (for assignment emails) must likewise be **manually enabled** at
+  the GCP project level, and the `gmail.send` scope added to the service
+  account's domain-wide-delegation Client ID in Admin Console — see
+  "Assignment emails (Gmail API)" above.
 
 ### Skills available (SKILL.md format, work in both Claude Code and this chat)
 - `digitalpaani-long-jd` — long-form JD PDF generation from role data

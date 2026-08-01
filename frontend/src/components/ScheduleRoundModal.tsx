@@ -7,10 +7,6 @@ import { Spinner } from './shared/Badges.tsx';
 interface Props {
   applicationId:  string;
   nextRoundNumber: number;
-  // The round type is now implied by the application's current stage —
-  // this button is only reachable when stage already matches one type or
-  // the other, so there's no longer a case where it's ambiguous.
-  roundType:      'Standard' | 'Assignment';
   defaultRoundName?: string;
   onClose:        () => void;
   onSuccess:      () => void;
@@ -18,7 +14,10 @@ interface Props {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export default function ScheduleRoundModal({ applicationId, nextRoundNumber, roundType, defaultRoundName, onClose, onSuccess }: Props) {
+// Standard rounds only — Assignment rounds are created via
+// SendAssignmentModal.tsx instead (they never had a calendar sync to
+// schedule; that button now composes and sends an email).
+export default function ScheduleRoundModal({ applicationId, nextRoundNumber, defaultRoundName, onClose, onSuccess }: Props) {
   const [roundName,         setRoundName]         = useState(defaultRoundName || '');
   const [interviewerEmails, setInterviewerEmails] = useState('');
   const [scheduledDate,     setScheduledDate]     = useState('');
@@ -38,7 +37,7 @@ export default function ScheduleRoundModal({ applicationId, nextRoundNumber, rou
       const res = await interviewsApi.schedule({
         application_id:     applicationId,
         round_name:          roundName.trim(),
-        round_type:          roundType,
+        round_type:          'Standard',
         round_number:        nextRoundNumber,
         interviewer_emails:  emails.length ? emails : null,
         // datetime-local gives a naive "YYYY-MM-DDTHH:mm" with no timezone.
@@ -46,10 +45,8 @@ export default function ScheduleRoundModal({ applicationId, nextRoundNumber, rou
         // explicit rather than letting the backend/Calendar API default it
         // to UTC (which shifted every invite by 5:30 hours).
         scheduled_date:      scheduledDate ? `${scheduledDate}:00+05:30` : null,
-        ...(roundType === 'Standard' ? {
-          interview_mode:    interviewMode,
-          duration_minutes:  durationMinutes,
-        } : {}),
+        interview_mode:      interviewMode,
+        duration_minutes:    durationMinutes,
       });
       toast.success(`${roundName} scheduled`);
       if (res.data.calendar) {
@@ -69,9 +66,7 @@ export default function ScheduleRoundModal({ applicationId, nextRoundNumber, rou
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-900">
-            {roundType === 'Assignment' ? 'Schedule assignment' : 'Schedule interview round'}
-          </h3>
+          <h3 className="text-sm font-semibold text-gray-900">Schedule interview round</h3>
           <button onClick={onClose}><X className="w-4 h-4 text-gray-400" /></button>
         </div>
         <div className="px-5 py-4 space-y-4">
@@ -102,33 +97,31 @@ export default function ScheduleRoundModal({ applicationId, nextRoundNumber, rou
               className="input text-sm"
             />
           </div>
-          {roundType === 'Standard' && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">Meeting mode</label>
-                <select
-                  value={interviewMode}
-                  onChange={e => setInterviewMode(e.target.value as 'In-person' | 'Video' | 'Phone')}
-                  className="select text-sm"
-                >
-                  <option value="Video">Video</option>
-                  <option value="In-person">In-person</option>
-                  <option value="Phone">Phone</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">Duration (minutes)</label>
-                <input
-                  type="number"
-                  min={5}
-                  step={5}
-                  value={durationMinutes}
-                  onChange={e => setDurationMinutes(Number(e.target.value) || 60)}
-                  className="input text-sm"
-                />
-              </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">Meeting mode</label>
+              <select
+                value={interviewMode}
+                onChange={e => setInterviewMode(e.target.value as 'In-person' | 'Video' | 'Phone')}
+                className="select text-sm"
+              >
+                <option value="Video">Video</option>
+                <option value="In-person">In-person</option>
+                <option value="Phone">Phone</option>
+              </select>
             </div>
-          )}
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">Duration (minutes)</label>
+              <input
+                type="number"
+                min={5}
+                step={5}
+                value={durationMinutes}
+                onChange={e => setDurationMinutes(Number(e.target.value) || 60)}
+                className="input text-sm"
+              />
+            </div>
+          </div>
         </div>
         <div className="flex gap-3 justify-end px-5 py-4 border-t border-gray-100">
           <button onClick={onClose} className="btn-secondary text-sm">Cancel</button>
