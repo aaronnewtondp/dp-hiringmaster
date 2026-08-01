@@ -53,8 +53,9 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     if (invalid) { res.status(400).json({ error: `"${invalid}" is not a valid email address` }); return; }
   }
 
-  const app = await queryOne<{ candidate_id: string; role_id: string; candidate_name: string; candidate_email: string | null; role_title: string }>(
-    `SELECT a.candidate_id, a.role_id, c.full_name AS candidate_name, c.email AS candidate_email, r.title AS role_title
+  const app = await queryOne<{ candidate_id: string; role_id: string; candidate_name: string; candidate_email: string | null; role_title: string; candidate_resume_link: string | null }>(
+    `SELECT a.candidate_id, a.role_id, c.full_name AS candidate_name, c.email AS candidate_email,
+            r.title AS role_title, c.resume_drive_link AS candidate_resume_link
      FROM applications a
      JOIN candidates c ON c.id = a.candidate_id
      JOIN roles r ON r.id = a.role_id
@@ -110,17 +111,20 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     // here — the event is inserted directly onto their primary calendar via
     // impersonation (calendarService.ts's calendarId: 'primary'), so they're
     // the owner, not just an invitee. Attendees are everyone else who needs
-    // their time held: interviewers plus the candidate being interviewed.
-    const attendees = [
+    // their time held: interviewers, the candidate, and HR (always cc'd on
+    // every interview invite regardless of who scheduled it). Deduped via
+    // Set in case one of those addresses happens to already be hr@'s own.
+    const attendees = [...new Set([
       ...round.interviewer_emails!,
       ...(app.candidate_email ? [app.candidate_email] : []),
-    ];
+      'hr@digitalpaani.com',
+    ])];
     try {
       const event = await createInterviewCalendarEvent({
         organizerEmail: req.user!.email,
         attendees,
         summary: `${round.round_name} — ${app.candidate_name} (${app.role_title})`,
-        description: `Interview round "${round.round_name}" for ${app.candidate_name}'s application to ${app.role_title}.\nScheduled via DigitalPaani HMS.`,
+        description: `Interview round "${round.round_name}" for ${app.candidate_name}'s application to ${app.role_title}.${app.candidate_resume_link ? `\nCandidate Resume: ${app.candidate_resume_link}` : ''}\nScheduled via DigitalPaani HMS.`,
         startTime: round.scheduled_date,
         durationMinutes: round.duration_minutes ?? 60,
         mode: (round.interview_mode as 'In-person' | 'Video' | 'Phone') || 'Video',

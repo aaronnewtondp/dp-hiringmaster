@@ -595,6 +595,27 @@ ALTER TABLE interview_rounds
   ADD COLUMN IF NOT EXISTS calendar_event_link  TEXT,
   ADD COLUMN IF NOT EXISTS calendar_sync_error  TEXT;
 
+-- ── ref_checks: redesign to the fields actually used by the Add Reference
+-- Check UI — the original columns (reference_contacts, overall_outcome,
+-- positive_comments, concerns_raised, risk_level, ai_summary) were never
+-- wired to any frontend and never used in production (confirmed 0 rows),
+-- so replaced outright rather than left alongside the new structured
+-- fields. ────────────────────────────────────────────────────────────────────
+ALTER TABLE ref_checks
+  DROP COLUMN IF EXISTS reference_contacts,
+  DROP COLUMN IF EXISTS overall_outcome,
+  DROP COLUMN IF EXISTS positive_comments,
+  DROP COLUMN IF EXISTS concerns_raised,
+  DROP COLUMN IF EXISTS risk_level,
+  DROP COLUMN IF EXISTS ai_summary,
+  ADD COLUMN IF NOT EXISTS reference_name TEXT NOT NULL,
+  ADD COLUMN IF NOT EXISTS reference_number TEXT NOT NULL,
+  ADD COLUMN IF NOT EXISTS relationship TEXT NOT NULL
+    CHECK (relationship IN ('Reporting Manager','Direct Reportee','Teammate','Colleague','Founder/Leadership')),
+  ADD COLUMN IF NOT EXISTS reference_call_notes TEXT,
+  ADD COLUMN IF NOT EXISTS feedback TEXT NOT NULL
+    CHECK (feedback IN ('Excellent','Good','Average','Below Expectations','Poor'));
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows
 -- ═════════════════════════════════════════════════════════════════════════════

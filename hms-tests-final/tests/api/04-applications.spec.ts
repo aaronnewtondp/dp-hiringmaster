@@ -34,8 +34,14 @@ test.describe('Applications — 3-field state model', () => {
       'Resume Review', 'Screening Call', 'Interview Round 1',
       'Interview Round 2', 'Final Interview', 'Reference Check', 'Offer',
     ];
+    // This test is about generic stage-field mechanics (accepts arbitrary
+    // sequential values — 'Screening Call'/'Final Interview' aren't even in
+    // the real STAGES enum), not the real business flow, so skip_reason
+    // bypasses the mandatory-feedback and mandatory-reference-check gates
+    // (backend/src/routes/applications.ts) that a real pipeline walk
+    // through Interview Round 1/2 and Reference Check would otherwise hit.
     for (const stage of stages) {
-      const res = await api.post(`/api/applications/${appId}/stage`, { new_stage: stage });
+      const res = await api.post(`/api/applications/${appId}/stage`, { new_stage: stage, skip_reason: 'test sequence walk' });
       expect(res.status(), `Advancing to ${stage}`).toBe(200);
     }
     const body = await (await api.get(`/api/applications/${appId}`)).json();

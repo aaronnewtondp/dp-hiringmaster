@@ -13,48 +13,40 @@ router.get('/', async (req: Request, res: Response) => {
     'SELECT * FROM ref_checks WHERE application_id=$1 ORDER BY conducted_at DESC',
     [application_id]
   );
-  // Strip concerns_raised for non-HR
-  const persona = (req as any).user!.persona;
-  const safe = refs.map((r: Record<string, unknown>) => {
-    if (persona !== 'hr_recruiter' && persona !== 'leadership') {
-      const { concerns_raised: _, ...rest } = r;
-      return rest;
-    }
-    return r;
-  });
-  res.json({ ref_checks: safe });
+  res.json({ ref_checks: refs });
 });
 
-// POST /api/ref-checks — create a new ref check record
+// POST /api/ref-checks — create a new reference check record
 router.post('/', requireHR, async (req: Request, res: Response) => {
-  const { application_id, reference_contacts, overall_outcome,
-          positive_comments, concerns_raised, risk_level } = req.body;
+  const { application_id, reference_name, reference_number, relationship,
+          reference_call_notes, feedback } = req.body;
   if (!application_id) { res.status(400).json({ error: 'application_id required' }); return; }
+  if (!reference_name || !reference_number || !relationship || !feedback) {
+    res.status(400).json({ error: 'reference_name, reference_number, relationship, and feedback are required' });
+    return;
+  }
 
-  // Advance application stage to Reference Check if not already there
-  const app = await queryOne<{ id: string; stage: string; candidate_id: string; role_id: string }>(
-    'SELECT id, stage, candidate_id, role_id FROM applications WHERE id=$1', [application_id]
+  const app = await queryOne<{ id: string; candidate_id: string; role_id: string }>(
+    'SELECT id, candidate_id, role_id FROM applications WHERE id=$1', [application_id]
   );
   if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
 
   const refCheck = await transaction(async (client) => {
     const rc = await client.query(
       `INSERT INTO ref_checks
-         (application_id, reference_contacts, overall_outcome, positive_comments,
-          concerns_raised, risk_level, conducted_by)
+         (application_id, reference_name, reference_number, relationship,
+          reference_call_notes, feedback, conducted_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [application_id, reference_contacts, overall_outcome,
-       positive_comments, concerns_raised, risk_level,
-       (req as any).user!.userId]
+      [application_id, reference_name, reference_number, relationship,
+       reference_call_notes || null, feedback, req.user!.userId]
     );
 
     await client.query(
       `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
-       VALUES ($1,$2,$3,'Reference Check Initiated',$4,$5,$6,$7)`,
+       VALUES ($1,$2,$3,'Reference Check Added',$4,$5,$6,$7)`,
       [application_id, app.candidate_id, app.role_id,
-       `Contacts: ${reference_contacts || '—'}`,
-       overall_outcome || 'In Progress',
-       (req as any).user!.userId, (req as any).user!.name]
+       `${reference_name} (${relationship}) — Feedback: ${feedback}`,
+       feedback, req.user!.userId, req.user!.name]
     );
 
     return rc.rows[0];
@@ -63,10 +55,10 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
   res.status(201).json({ ref_check: refCheck });
 });
 
-// PATCH /api/ref-checks/:id — update/complete a ref check
+// PATCH /api/ref-checks/:id — update a reference check
 router.patch('/:id', requireHR, async (req: Request, res: Response) => {
-  const allowed = ['reference_contacts','overall_outcome','positive_comments',
-    'concerns_raised','risk_level'];
+  const allowed = ['reference_name', 'reference_number', 'relationship',
+    'reference_call_notes', 'feedback'];
   const updates: string[] = []; const values: unknown[] = []; let i = 1;
   for (const f of allowed) {
     if (req.body[f] !== undefined) { updates.push(`${f}=$${i++}`); values.push(req.body[f]); }
@@ -77,16 +69,6 @@ router.patch('/:id', requireHR, async (req: Request, res: Response) => {
     `UPDATE ref_checks SET ${updates.join(',')} WHERE id=$${i} RETURNING *`, values
   );
   if (!rc) { res.status(404).json({ error: 'Not found' }); return; }
-
-  // Log completion
-  if (req.body.overall_outcome) {
-    const rec = rc as Record<string, unknown>;
-    await queryOne(
-      `INSERT INTO activity_log (application_id, event_type, event_detail, new_value, performed_by_name)
-       VALUES ($1,'Reference Check Completed',$2,$3,'System')`,
-      [rec.application_id, `Outcome: ${req.body.overall_outcome}`, req.body.risk_level || '']
-    );
-  }
   res.json({ ref_check: rc });
 });
 

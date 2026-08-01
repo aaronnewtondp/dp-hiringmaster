@@ -144,6 +144,33 @@ router.post('/:id/stage', requireHR, async (req: Request, res: Response) => {
   const app = await queryOne<Application>('SELECT * FROM applications WHERE id = $1', [req.params.id]);
   if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
 
+  // Every scheduled interview/assignment round must have feedback submitted
+  // before advancing further — skip_reason is the existing, deliberate
+  // escape hatch for genuinely bypassing normal flow (already logged below).
+  if (!skip_reason) {
+    const pendingRounds = await query<{ round_name: string }>(
+      `SELECT round_name FROM interview_rounds WHERE application_id=$1 AND feedback_status != 'Submitted'`,
+      [req.params.id]
+    );
+    if (pendingRounds.length > 0) {
+      res.status(400).json({
+        error: `Feedback is still pending for: ${pendingRounds.map(r => r.round_name).join(', ')}. Submit feedback for these rounds before advancing this candidate.`,
+      });
+      return;
+    }
+  }
+
+  // Leaving Reference Check requires at least one reference check on file.
+  if (!skip_reason && app.stage === 'Reference Check' && new_stage !== 'Reference Check') {
+    const refCount = await queryOne<{ count: string }>(
+      'SELECT count(*) FROM ref_checks WHERE application_id=$1', [req.params.id]
+    );
+    if (!refCount || parseInt(refCount.count, 10) === 0) {
+      res.status(400).json({ error: 'Add at least one reference check before advancing this candidate.' });
+      return;
+    }
+  }
+
   const slaHours = getSlaHours(new_stage, app.ai_fit_score);
 
   await transaction(async (client) => {

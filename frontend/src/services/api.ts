@@ -94,6 +94,11 @@ export const assignmentRepoApi = {
   list: () => api.get('/assignment-repo'),
 };
 
+export const refChecksApi = {
+  list:   (applicationId: string)         => api.get('/ref-checks', { params: { application_id: applicationId } }),
+  create: (data: Record<string, unknown>) => api.post('/ref-checks', data),
+};
+
 export const agenciesApi = {
   list:   ()                                          => api.get('/agencies'),
   get:    (id: string)                                => api.get(`/agencies/${id}`),

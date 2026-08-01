@@ -67,18 +67,11 @@ export function stripRestrictedFields<T extends Record<string, unknown>>(
     'ctc_band', 'internal_risk_notes', 'agency_fee_estimate',
     'offer_ctc_fixed', 'offer_ctc_variable', 'hr_comp_alignment',
   ];
-  const REF_RESTRICTED = ['concerns_raised'];
-
   if (persona === 'hr_recruiter' || persona === 'leadership') return obj;
 
   const filtered = { ...obj };
   for (const field of RESTRICTED_FIELDS) {
     delete filtered[field];
   }
-  // persona is 'hiring_manager' | 'interviewer' by this point — leadership
-  // already returned above — so this always ran; the old `persona !==
-  // 'leadership'` guard was dead code TypeScript correctly flagged as
-  // comparing types with no overlap.
-  for (const field of REF_RESTRICTED) delete filtered[field];
   return filtered;
 }

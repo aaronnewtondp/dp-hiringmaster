@@ -340,6 +340,23 @@ export const WITHDRAWAL_REASONS = [
   'Role / company mismatch', 'Personal reasons', 'Unresponsive / no-show',
 ];
 
+export interface ReferenceCheck {
+  id:                    string;
+  application_id:        string;
+  reference_name:        string;
+  reference_number:      string;
+  relationship:          string;
+  reference_call_notes?: string;
+  feedback:              string;
+  conducted_at:          string;
+}
+
+export const REFERENCE_RELATIONSHIPS = [
+  'Reporting Manager', 'Direct Reportee', 'Teammate', 'Colleague', 'Founder/Leadership',
+];
+
+export const REFERENCE_FEEDBACK_OPTIONS = ['Excellent', 'Good', 'Average', 'Below Expectations', 'Poor'];
+
 export const PERSONAS: Record<Persona, string> = {
   hr_recruiter:   'HR / Recruiter',
   hiring_manager: 'Hiring Manager',

@@ -24,8 +24,9 @@ export default function StageChangeModal({ application, onClose, onUpdated }: St
       toast.success(`Stage updated to ${stageValue}`);
       onUpdated();
       onClose();
-    } catch {
-      toast.error('Failed to update stage');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(msg || 'Failed to update stage');
     }
     setSaving(false);
   };

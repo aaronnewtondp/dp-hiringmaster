@@ -3,8 +3,8 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ExternalLink, Star, ChevronDown, ChevronUp, CalendarPlus, MessageSquare, FileText, Send, Link2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { candidatesApi, applicationsApi, interviewsApi, assignmentRepoApi } from '../services/api.ts';
-import { Candidate, Application, InterviewRound, AssignmentRepoEntry, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
+import { candidatesApi, applicationsApi, interviewsApi, assignmentRepoApi, refChecksApi } from '../services/api.ts';
+import { Candidate, Application, InterviewRound, AssignmentRepoEntry, ReferenceCheck, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
 import { StageBadge, StatusBadge, PriorityBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
@@ -12,6 +12,7 @@ import ResumeIQPanel from '../components/ResumeIQPanel.tsx';
 import InterviewFeedbackModal from '../components/InterviewFeedbackModal.tsx';
 import ScheduleRoundModal from '../components/ScheduleRoundModal.tsx';
 import AssignmentOutcomeModal from '../components/AssignmentOutcomeModal.tsx';
+import AddReferenceCheckModal from '../components/AddReferenceCheckModal.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { formatDistanceToNow, format } from 'date-fns';
 
@@ -76,6 +77,7 @@ export default function CandidateDetail() {
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [submitRoundId, setSubmitRoundId] = useState('');
   const [submitLink, setSubmitLink] = useState('');
+  const [addRefCheckAppId, setAddRefCheckAppId] = useState<string | null>(null);
 
   const toggleApp = (appId: string) =>
     setExpandedApps(prev => {
@@ -106,6 +108,20 @@ export default function CandidateDetail() {
       const map: Record<string, InterviewRound[]> = {};
       applications.forEach((a, i) => {
         map[a.id] = (results[i] as { data: { rounds: InterviewRound[] } }).data.rounds || [];
+      });
+      return map;
+    },
+    enabled: applications.length > 0,
+  });
+
+  const { data: refChecksMap, refetch: refetchRefChecks } = useQuery<Record<string, ReferenceCheck[]>>({
+    queryKey: ['ref-checks', applications.map(a => a.id).join(',')],
+    queryFn: async () => {
+      if (!applications.length) return {};
+      const results = await Promise.all(applications.map(a => refChecksApi.list(a.id)));
+      const map: Record<string, ReferenceCheck[]> = {};
+      applications.forEach((a, i) => {
+        map[a.id] = (results[i] as { data: { ref_checks: ReferenceCheck[] } }).data.ref_checks || [];
       });
       return map;
     },
@@ -292,6 +308,7 @@ export default function CandidateDetail() {
             <div className="divide-y divide-gray-50">
               {applications.map(app => {
                 const rounds = roundsMap?.[app.id] || [];
+                const refChecks = refChecksMap?.[app.id] || [];
                 const expanded = expandedApps.has(app.id);
                 return (
                   <div key={app.id} className={`${app.sla_breach ? 'bg-red-50/30' : ''}`}>
@@ -439,6 +456,45 @@ export default function CandidateDetail() {
                                     <button onClick={() => setFeedbackRound({ ...round, candidate_name: candidate.full_name, role_title: app.role_title })} className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium shrink-0 ml-3">
                                       <MessageSquare className="w-3.5 h-3.5" /> Submit feedback
                                     </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="border-t border-gray-100 pt-3 mt-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Reference Checks</span>
+                            {canHR && app.stage === 'Reference Check' && (
+                              <button
+                                onClick={() => setAddRefCheckAppId(app.id)}
+                                className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium"
+                              >
+                                <FileText className="w-3.5 h-3.5" /> Add Reference Check
+                              </button>
+                            )}
+                          </div>
+                          {refChecks.length === 0 ? (
+                            <p className="text-xs text-gray-400">No reference checks added yet.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {refChecks.map(rc => (
+                                <div key={rc.id} className="py-2 px-3 rounded-lg bg-gray-50 border border-gray-100">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-xs font-medium text-gray-900">{rc.reference_name}</span>
+                                    <span className="text-xs px-1.5 py-0.5 rounded bg-gray-200 text-gray-600">{rc.relationship}</span>
+                                    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                                      rc.feedback === 'Excellent' ? 'bg-green-100 text-green-700' :
+                                      rc.feedback === 'Good' ? 'bg-dp-100 text-dp-700' :
+                                      rc.feedback === 'Average' ? 'bg-amber-100 text-amber-700' :
+                                      'bg-red-100 text-red-700'
+                                    }`}>{rc.feedback}</span>
+                                    <span className="text-xs text-gray-400">{formatDistanceToNow(new Date(rc.conducted_at), { addSuffix: true })}</span>
+                                  </div>
+                                  <div className="text-xs text-gray-400 mt-0.5">{rc.reference_number}</div>
+                                  {rc.reference_call_notes && (
+                                    <p className="text-xs text-gray-600 mt-1 italic">{rc.reference_call_notes}</p>
                                   )}
                                 </div>
                               ))}
@@ -620,6 +676,14 @@ export default function CandidateDetail() {
           defaultRoundName={scheduleDefaultName}
           onClose={() => setScheduleAppId(null)}
           onSuccess={() => { qc.invalidateQueries({ queryKey: ['interview-rounds'] }); refetchRounds(); }}
+        />
+      )}
+
+      {addRefCheckAppId && (
+        <AddReferenceCheckModal
+          applicationId={addRefCheckAppId}
+          onClose={() => setAddRefCheckAppId(null)}
+          onSuccess={() => { qc.invalidateQueries({ queryKey: ['ref-checks'] }); refetchRefChecks(); }}
         />
       )}
     </div>
