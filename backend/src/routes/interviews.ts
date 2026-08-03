@@ -67,6 +67,13 @@ async function attemptAssignmentEmail(
       `UPDATE interview_rounds SET assignment_send_date=NOW(), assignment_deadline=$1, assignment_email_error=NULL, updated_at=NOW() WHERE id=$2`,
       [deadline.toISOString(), round.id]
     );
+    // Keep the caller's in-memory round in sync with what was just persisted
+    // — mirrors createInterviewCalendarEvent's callers patching
+    // calendar_event_id/calendar_event_link on success, so the immediate
+    // HTTP response reflects the send rather than the pre-send row.
+    round.assignment_send_date = new Date().toISOString();
+    round.assignment_deadline = deadline.toISOString();
+    round.assignment_email_error = undefined;
     await query(
       `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
@@ -83,6 +90,7 @@ async function attemptAssignmentEmail(
       `UPDATE interview_rounds SET assignment_email_error=$1, updated_at=NOW() WHERE id=$2`,
       [message.slice(0, 500), round.id]
     );
+    round.assignment_email_error = message.slice(0, 500);
     await query(
       `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,

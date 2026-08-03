@@ -250,6 +250,11 @@ export interface InterviewRound {
   score_clarity?:               number;
   score_practical_thinking?:    number;
   score_completeness?:          number;
+  assignment_mail_body?:        string;
+  assignment_cc?:               string[];
+  assignment_link?:             string;
+  assignment_supporting_docs?:  string;
+  assignment_email_error?:      string;
   assignment_notes?:            string;
   created_at:               string;
   updated_at:               string;
