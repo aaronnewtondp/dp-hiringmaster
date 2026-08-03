@@ -95,6 +95,12 @@ export const refChecksApi = {
   create: (data: Record<string, unknown>) => api.post('/ref-checks', data),
 };
 
+export const usersApi = {
+  list:   ()                                            => api.get('/users'),
+  create: (data: Record<string, unknown>)               => api.post('/users', data),
+  update: (id: string, data: Record<string, unknown>)   => api.patch(`/users/${id}`, data),
+};
+
 export const agenciesApi = {
   list:   ()                                          => api.get('/agencies'),
   get:    (id: string)                                => api.get(`/agencies/${id}`),

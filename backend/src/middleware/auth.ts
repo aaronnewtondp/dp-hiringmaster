@@ -33,28 +33,45 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
 }
 
 // ─── Persona guards ───────────────────────────────────────────────────────────
-// Allow HR and Leadership to do anything
+// Canonical "HR-or-above" check — the single extension point for every
+// requireHR/requireLeadership/stripRestrictedFields/inline persona check in
+// the codebase. super_admin is a strict superset of everything hr_recruiter
+// and leadership can do, so it belongs in this set, not a separate tier.
+export function isHRTier(persona: Persona): boolean {
+  return persona === 'hr_recruiter' || persona === 'leadership' || persona === 'super_admin';
+}
+
+// Allow HR, Leadership, and Super-Admin to do anything
 export function requireHR(req: Request, res: Response, next: NextFunction): void {
   if (!req.user) { res.status(401).json({ error: 'Unauthenticated' }); return; }
-  if (req.user.persona === 'hr_recruiter' || req.user.persona === 'leadership') {
-    next(); return;
-  }
+  if (isHRTier(req.user.persona)) { next(); return; }
   res.status(403).json({ error: 'HR access required' });
 }
 
-// Allow any authenticated user (HR, HM, Interviewer, Leadership)
+// Allow any authenticated user (HR, HM, Interviewer, Leadership, Super-Admin)
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   if (!req.user) { res.status(401).json({ error: 'Unauthenticated' }); return; }
   next();
 }
 
-// Leadership-only actions (priority override, comp override, etc.)
+// Leadership-only actions (priority override, comp override, etc.). Identical
+// to requireHR today and intentionally kept that way — Leadership's
+// permissions are frozen at their current (HR-equivalent) level; this stays
+// a separate function so a real future split doesn't require re-threading
+// every call site again.
 export function requireLeadership(req: Request, res: Response, next: NextFunction): void {
   if (!req.user) { res.status(401).json({ error: 'Unauthenticated' }); return; }
-  if (req.user.persona === 'leadership' || req.user.persona === 'hr_recruiter') {
-    next(); return;
-  }
+  if (isHRTier(req.user.persona)) { next(); return; }
   res.status(403).json({ error: 'Leadership access required' });
+}
+
+// Super-Admin-only actions (User Management). Deliberately its own persona
+// check, not part of isHRTier — nothing else should ever fall through to
+// this tier implicitly.
+export function requireSuperAdmin(req: Request, res: Response, next: NextFunction): void {
+  if (!req.user) { res.status(401).json({ error: 'Unauthenticated' }); return; }
+  if (req.user.persona === 'super_admin') { next(); return; }
+  res.status(403).json({ error: 'Super-Admin access required' });
 }
 
 // ─── Field filter: strip restricted fields based on persona ──────────────────
@@ -67,7 +84,7 @@ export function stripRestrictedFields<T extends Record<string, unknown>>(
     'ctc_band', 'internal_risk_notes', 'agency_fee_estimate',
     'offer_ctc_fixed', 'offer_ctc_variable', 'hr_comp_alignment',
   ];
-  if (persona === 'hr_recruiter' || persona === 'leadership') return obj;
+  if (isHRTier(persona)) return obj;
 
   const filtered = { ...obj };
   for (const field of RESTRICTED_FIELDS) {

@@ -92,17 +92,55 @@ order, every time. Skipping the third step means the next `docker-compose down
   folder. TypeScript runs directly.
 
 ### Access control model
-Four personas: `hr_recruiter`, `hiring_manager`, `interviewer`, `leadership`.
+Five personas: `hr_recruiter` (displayed as "HR/Admin" — same DB value, just
+relabeled), `hiring_manager`, `interviewer`, `leadership`, `super_admin`.
 
-- `requireHR` middleware — allows `hr_recruiter` and `leadership`
-- `requireLeadership` middleware — allows `leadership` and `hr_recruiter`
-- `stripRestrictedFields()` in `middleware/auth.ts` — hides `ctc_band`,
-  `internal_risk_notes`, `agency_fee_estimate`, `offer_ctc_fixed`,
-  `offer_ctc_variable`, `hr_comp_alignment`, `concerns_raised` from anyone who
-  isn't `hr_recruiter` or `leadership`. **`leadership` currently sees
-  everything `hr_recruiter` sees** — there is no field or route in the
-  codebase leadership is blocked from. If a genuinely distinct "Admin" tier is
-  ever needed, this is the function and the two middleware functions to extend.
+`isHRTier(persona)` in `middleware/auth.ts` — `persona === 'hr_recruiter' ||
+persona === 'leadership' || persona === 'super_admin'` — is the **single
+canonical check** every HR-tier gate in the codebase calls: `requireHR`,
+`requireLeadership` (identical to `requireHR` today, and intentionally kept
+that way — Leadership's permissions are frozen at their current,
+HR-equivalent level; kept as a separate function only so a real future split
+doesn't require re-threading every call site again), `stripRestrictedFields()`
+(hides `ctc_band`, `internal_risk_notes`, `agency_fee_estimate`,
+`offer_ctc_fixed`, `offer_ctc_variable`, `hr_comp_alignment` from anyone
+outside HR-tier), the Founder Review flag route, and the recruiter-screening-
+status route. **`leadership` sees everything `hr_recruiter` sees** — there is
+no field or route either is blocked from that the other isn't.
+
+`super_admin` is a strict superset of HR-tier (passes `isHRTier` too) plus
+`requireSuperAdmin`-gated routes (`/api/users`, the User Management API) that
+nothing else can reach. **Policy: `super_admin` is assigned to exactly one
+person (aaron.newton@digitalpaani.com) and is never a selectable role
+anywhere in the UI** — `POST/PATCH /api/users` reject it outright, and the
+User Management page's role dropdown only ever offers the other four.
+
+**Hiring Manager's real capability set**: view roles/candidates/applications
+(financial fields stripped), submit interview feedback for rounds they're
+actually listed in (`interview_rounds.interviewer_emails`) — enforced in
+`PATCH /interviews/:id/feedback`, not just a comment — record an Assignment
+outcome, and set `recruiter_screening_status` specifically to `'HM
+Shortlisted'` (every other screening-status value is HR-tier only, per
+`POST /applications/:id/screening`). A round with no `interviewer_emails` set
+at all (e.g. Assignment rounds) has no assignee to check, so feedback on
+those stays open to any persona — this isn't a residual gap, it's the
+correct behavior when nobody was specifically assigned.
+
+**User Management** (`/users`, Super-Admin only — the first page in the app
+with a real route-level guard, `RequireSuperAdmin` in
+`components/shared/`; every other page still relies on hidden nav
+links/buttons only, not a route guard) is how users get added/edited/
+deactivated now — there was previously no way to do this except direct SQL
+(`POST /api/auth/google` has always rejected any @digitalpaani.com account
+not already present in `users`). "Remove access" is `is_active=false`, never
+a hard delete — `interview_rounds.entered_by`, `activity_log.performed_by`,
+etc. all reference `users.id`.
+
+Also worth knowing: `users.auth_provider`'s CHECK constraint is
+`('email','google','both')` — not `'password'`, despite what an older
+version of this file said. That drift had zero behavioral impact (the value
+is descriptive only, never branched on) but is now corrected in
+`schema.sql`/local Docker to match what production actually enforces.
 
 ### Application state model — three independent fields
 Every application has three separately-updatable fields, each with its own

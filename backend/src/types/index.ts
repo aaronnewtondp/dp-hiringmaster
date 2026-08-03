@@ -1,5 +1,5 @@
 // ─── Auth ─────────────────────────────────────────────────────────────────────
-export type Persona = 'hr_recruiter' | 'hiring_manager' | 'interviewer' | 'leadership';
+export type Persona = 'hr_recruiter' | 'hiring_manager' | 'interviewer' | 'leadership' | 'super_admin';
 
 export interface User {
   id:          string;

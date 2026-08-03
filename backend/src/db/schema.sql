@@ -633,6 +633,25 @@ ALTER TABLE interview_rounds
   ADD COLUMN IF NOT EXISTS assignment_supporting_docs  TEXT,
   ADD COLUMN IF NOT EXISTS assignment_email_error      TEXT;
 
+-- ── users: super_admin tier + auth_provider constraint correction ──────────
+-- super_admin is a strict superset of hr_recruiter/leadership (see
+-- middleware/auth.ts's isHRTier()) — assigned to exactly one person by
+-- policy, never exposed as a selectable role in the User Management UI.
+-- The auth_provider correction brings this file in line with production's
+-- actual constraint ('email','google','both') — production had already
+-- drifted from this file's original ('password','google','both') with no
+-- behavioral difference (the value is descriptive only, never branched on).
+ALTER TABLE users
+  DROP CONSTRAINT IF EXISTS users_persona_check,
+  ADD CONSTRAINT users_persona_check
+    CHECK (persona IN ('hr_recruiter','hiring_manager','interviewer','leadership','super_admin'));
+
+ALTER TABLE users
+  DROP CONSTRAINT IF EXISTS users_auth_provider_check,
+  ADD CONSTRAINT users_auth_provider_check
+    CHECK (auth_provider IN ('email','google','both')),
+  ALTER COLUMN auth_provider SET DEFAULT 'email';
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows
 -- ═════════════════════════════════════════════════════════════════════════════

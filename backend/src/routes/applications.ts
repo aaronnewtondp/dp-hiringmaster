@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
-import { authenticate, requireHR, stripRestrictedFields } from '../middleware/auth.js';
+import { authenticate, requireHR, stripRestrictedFields, isHRTier } from '../middleware/auth.js';
 import { Application, SLA_HOURS, Candidate, Role } from '../types/index.js';
 import { scoreCandidate, priorityBucketFromScore } from '../services/resumeIQ.js';
 import { fetchResumeText } from '../services/driveService.js';
@@ -340,10 +340,13 @@ router.post('/:id/screening', async (req: Request, res: Response) => {
   const app = await queryOne<Application>('SELECT * FROM applications WHERE id = $1', [req.params.id]);
   if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
 
-  // Only HMs can set HM Shortlisted; HR can set everything else
-  if (new_screening_status === 'HM Shortlisted' &&
-      req.user!.persona !== 'hiring_manager' && req.user!.persona !== 'hr_recruiter') {
-    res.status(403).json({ error: 'Only a Hiring Manager can set HM Shortlisted' });
+  // HR-tier can set any screening status; a Hiring Manager can set only the
+  // one transition they own (HM Shortlisted); everyone else (interviewer)
+  // can set none. Previously only the HM Shortlisted value was gated at
+  // all — every other value was silently open to any persona.
+  const isHMShortlistByHM = new_screening_status === 'HM Shortlisted' && req.user!.persona === 'hiring_manager';
+  if (!isHRTier(req.user!.persona) && !isHMShortlistByHM) {
+    res.status(403).json({ error: 'Only HR/Leadership can set this screening status.' });
     return;
   }
 
@@ -417,7 +420,7 @@ router.patch('/:id/notes', requireHR, async (req: Request, res: Response) => {
 
 // ─── POST /api/applications/:id/founder-flag — set/clear founder review ──────
 router.post('/:id/founder-flag', async (req: Request, res: Response) => {
-  if (req.user!.persona !== 'leadership' && req.user!.persona !== 'hr_recruiter') {
+  if (!isHRTier(req.user!.persona)) {
     res.status(403).json({ error: 'Only HR or Leadership can set the Founder Review flag' });
     return;
   }

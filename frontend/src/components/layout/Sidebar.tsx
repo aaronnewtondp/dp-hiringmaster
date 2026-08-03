@@ -1,25 +1,27 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, Users, Building2, LogOut, Droplets, ListChecks, Archive, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Briefcase, Users, Building2, LogOut, Droplets, ListChecks, Archive, BarChart3, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { PERSONAS } from '../../types/index.ts';
 
 const NAV = [
-  { to: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard',   hrOnly: false, queueOnly: false },
-  { to: '/roles',      icon: Briefcase,       label: 'Roles',       hrOnly: false, queueOnly: false },
-  { to: '/candidates', icon: Users,           label: 'Candidates',  hrOnly: false, queueOnly: false },
-  { to: '/talent-pool',icon: Archive,         label: 'Talent Pool', hrOnly: false, queueOnly: false },
-  { to: '/hm-queue',   icon: ListChecks,      label: 'My Queue',    hrOnly: false, queueOnly: true  },
-  { to: '/scorecard',  icon: BarChart3,       label: 'Scorecard Summary', hrOnly: false, queueOnly: false },
-  { to: '/agencies',   icon: Building2,       label: 'Agencies',    hrOnly: true,  queueOnly: false },
+  { to: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard',   hrOnly: false, queueOnly: false, superAdminOnly: false },
+  { to: '/roles',      icon: Briefcase,       label: 'Roles',       hrOnly: false, queueOnly: false, superAdminOnly: false },
+  { to: '/candidates', icon: Users,           label: 'Candidates',  hrOnly: false, queueOnly: false, superAdminOnly: false },
+  { to: '/talent-pool',icon: Archive,         label: 'Talent Pool', hrOnly: false, queueOnly: false, superAdminOnly: false },
+  { to: '/hm-queue',   icon: ListChecks,      label: 'My Queue',    hrOnly: false, queueOnly: true,  superAdminOnly: false },
+  { to: '/scorecard',  icon: BarChart3,       label: 'Scorecard Summary', hrOnly: false, queueOnly: false, superAdminOnly: false },
+  { to: '/agencies',   icon: Building2,       label: 'Agencies',    hrOnly: true,  queueOnly: false, superAdminOnly: false },
+  { to: '/users',      icon: ShieldCheck,     label: 'User Management', hrOnly: false, queueOnly: false, superAdminOnly: true },
 ];
 
 export default function Sidebar() {
-  const { user, logout, canHR } = useAuth();
+  const { user, logout, canHR, isSuperAdmin } = useAuth();
   const isHM = user?.persona === 'hiring_manager' || user?.persona === 'interviewer' || user?.persona === 'leadership';
 
   const visible = NAV.filter(n => {
     if (n.hrOnly && !canHR) return false;
     if (n.queueOnly && !isHM) return false;
+    if (n.superAdminOnly && !isSuperAdmin) return false;
     return true;
   });
 

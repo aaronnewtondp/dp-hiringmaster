@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
-import { authenticate, requireHR } from '../middleware/auth.js';
+import { authenticate, requireHR, isHRTier } from '../middleware/auth.js';
 import { Role, AGING_THRESHOLDS, Priority } from '../types/index.js';
 import { generateJdContent } from '../services/jdContent.js';
 import { renderLongFormJd } from '../services/pdf/longFormJd.js';
@@ -51,7 +51,7 @@ router.get('/', async (req: Request, res: Response) => {
   const persona = req.user!.persona;
   const result = roles.map(r => {
     const enriched = enrichRole(r);
-    if (persona !== 'hr_recruiter' && persona !== 'leadership') {
+    if (!isHRTier(persona)) {
       const { ctc_band: _ctc, ...safe } = enriched as Role & { ctc_band: string };
       return safe;
     }
@@ -97,7 +97,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   const persona = req.user!.persona;
   const enriched = enrichRole(role);
 
-  if (persona !== 'hr_recruiter' && persona !== 'leadership') {
+  if (!isHRTier(persona)) {
     const { ctc_band: _ctc, ...safe } = enriched as Role & { ctc_band: string };
     res.json({ role: safe }); return;
   }

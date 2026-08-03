@@ -421,6 +421,12 @@ export default function CandidateDetail() {
                                           <ExternalLink className="w-3 h-3" /> Assignment link
                                         </a>
                                       )}
+                                      {round.assignment_submission_link && (
+                                        <a href={round.assignment_submission_link} target="_blank" rel="noreferrer"
+                                           className="flex items-center gap-1 text-dp-600 hover:underline">
+                                          <ExternalLink className="w-3 h-3" /> Submission link
+                                        </a>
+                                      )}
                                       {round.assignment_email_error && (
                                         <span className="text-amber-600" title={round.assignment_email_error}>⚠ Assignment email failed to send</span>
                                       )}

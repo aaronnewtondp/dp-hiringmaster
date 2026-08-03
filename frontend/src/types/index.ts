@@ -1,4 +1,4 @@
-export type Persona = 'hr_recruiter' | 'hiring_manager' | 'interviewer' | 'leadership';
+export type Persona = 'hr_recruiter' | 'hiring_manager' | 'interviewer' | 'leadership' | 'super_admin';
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3';
 export type AgingAlert = 'ok' | 'yellow' | 'red';
 export type ApplicationStatus = 'Active' | 'On Hold' | 'Rejected' | 'Withdrawn' | 'Hold for Future' | 'Joined' | 'Closed';
@@ -11,6 +11,20 @@ export interface AuthUser {
   email:       string;
   persona:     Persona;
   department?: string;
+}
+
+// Full user record, as returned by /api/users (User Management, Super-Admin
+// only) — distinct from AuthUser, which is only the slice issued in a JWT.
+export interface ManagedUser {
+  id:            string;
+  name:          string;
+  email:         string;
+  persona:       Persona;
+  department?:   string;
+  is_active:     boolean;
+  auth_provider: 'email' | 'google' | 'both';
+  created_at:    string;
+  last_login?:   string;
 }
 
 export interface Role {
@@ -354,10 +368,11 @@ export const REFERENCE_RELATIONSHIPS = [
 export const REFERENCE_FEEDBACK_OPTIONS = ['Excellent', 'Good', 'Average', 'Below Expectations', 'Poor'];
 
 export const PERSONAS: Record<Persona, string> = {
-  hr_recruiter:   'HR / Recruiter',
+  hr_recruiter:   'HR/Admin',
   hiring_manager: 'Hiring Manager',
   interviewer:    'Interviewer',
   leadership:     'Leadership',
+  super_admin:    'Super Admin',
 };
 
 export const PRIORITY_COLORS: Record<Priority, string> = {

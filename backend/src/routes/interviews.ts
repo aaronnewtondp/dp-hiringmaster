@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
-import { authenticate, requireHR } from '../middleware/auth.js';
+import { authenticate, requireHR, isHRTier } from '../middleware/auth.js';
 import { InterviewRound } from '../types/index.js';
 import { createInterviewCalendarEvent } from '../services/calendarService.js';
 import { sendAssignmentEmail } from '../services/gmailService.js';
@@ -269,10 +269,19 @@ router.patch('/:id/feedback', async (req: Request, res: Response) => {
   );
   if (!round) { res.status(404).json({ error: 'Round not found' }); return; }
 
-  // Check HM/Interviewer can only submit for their own rounds
+  // HR-tier can submit feedback for any round (e.g. relaying scores given
+  // verbally by someone else). Everyone else is restricted to rounds they're
+  // actually listed on — but only when someone WAS specifically assigned;
+  // a round with no interviewer_emails at all (Assignment rounds, or a
+  // Standard round nobody was assigned to) has no owner to check against,
+  // so it stays open to any persona.
   const persona = req.user!.persona;
-  if (persona === 'interviewer') {
-    // Would check interviewer_emails includes req.user.email — simplified here
+  if (!isHRTier(persona)) {
+    const assigned = Array.isArray(round.interviewer_emails) && round.interviewer_emails.length > 0;
+    if (assigned && !round.interviewer_emails!.some(e => e.toLowerCase() === req.user!.email.toLowerCase())) {
+      res.status(403).json({ error: 'You are not an assigned interviewer for this round.' });
+      return;
+    }
   }
 
   const isAssignment = round.round_type === 'Assignment';

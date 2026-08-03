@@ -12,6 +12,7 @@ interface AuthContextType {
   is:               (persona: Persona) => boolean;
   canHR:            boolean;
   canLead:          boolean;
+  isSuperAdmin:     boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -58,12 +59,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('hms_user');
   };
 
-  const is      = (p: Persona) => user?.persona === p;
-  const canHR   = user?.persona === 'hr_recruiter' || user?.persona === 'leadership';
-  const canLead = user?.persona === 'leadership';
+  const is           = (p: Persona) => user?.persona === p;
+  const isSuperAdmin = user?.persona === 'super_admin';
+  const canHR        = user?.persona === 'hr_recruiter' || user?.persona === 'leadership' || isSuperAdmin;
+  const canLead      = user?.persona === 'leadership' || isSuperAdmin;
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, loginWithGoogle, logout, is, canHR, canLead }}>
+    <AuthContext.Provider value={{ user, token, loading, login, loginWithGoogle, logout, is, canHR, canLead, isSuperAdmin }}>
       {children}
     </AuthContext.Provider>
   );

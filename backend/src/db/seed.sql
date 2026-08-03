@@ -14,7 +14,13 @@ INSERT INTO users (id, name, email, password_hash, persona, department) VALUES
   ('a0000000-0000-0000-0000-000000000005', 'Deeksha Chaturvedi','deeksha@digitalpaani.com',        '$2a$12$ju95lKBJLSFRbZqxq6Car.Btpyo0aHDsqieUEHRr.AH/xkep6lDBe', 'hiring_manager', 'Domain'),
   ('a0000000-0000-0000-0000-000000000006', 'Mandeep Dagar',     'mandeep@digitalpaani.com',        '$2a$12$ju95lKBJLSFRbZqxq6Car.Btpyo0aHDsqieUEHRr.AH/xkep6lDBe', 'hiring_manager', 'Tech/Dev'),
   ('a0000000-0000-0000-0000-000000000007', 'Nalin',             'nalin@digitalpaani.com',          '$2a$12$ju95lKBJLSFRbZqxq6Car.Btpyo0aHDsqieUEHRr.AH/xkep6lDBe', 'leadership',     'Leadership'),
-  ('a0000000-0000-0000-0000-000000000008', 'Mansi Jain',        'mansi@digitalpaani.com',          '$2a$12$ju95lKBJLSFRbZqxq6Car.Btpyo0aHDsqieUEHRr.AH/xkep6lDBe', 'leadership',     'Leadership')
+  ('a0000000-0000-0000-0000-000000000008', 'Mansi Jain',        'mansi@digitalpaani.com',          '$2a$12$ju95lKBJLSFRbZqxq6Car.Btpyo0aHDsqieUEHRr.AH/xkep6lDBe', 'leadership',     'Leadership'),
+  -- A distinct local test fixture, deliberately NOT aaron.newton@ (that
+  -- fake-local identity is the fixed 'hr' test persona everywhere in the
+  -- Playwright suite — reusing it for super_admin testing would silently
+  -- break every test asserting persona === 'hr_recruiter' for it, exactly
+  -- as happened once during this feature's own verification pass).
+  ('a0000000-0000-0000-0000-000000000009', 'Super Admin Test',  'superadmin@digitalpaani.com',     '$2a$12$ju95lKBJLSFRbZqxq6Car.Btpyo0aHDsqieUEHRr.AH/xkep6lDBe', 'super_admin',    'Operations')
 ON CONFLICT (email) DO NOTHING;
 
 -- ─── Roles (7 active as of May 2026) ─────────────────────────────────────────
