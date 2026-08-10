@@ -66,12 +66,12 @@ test.describe('applications.status filter — array-aware, application status no
     const api   = authed(request, token);
     const { application } = await createCandidateWithApp(request, token, SEEDED.roles.qa_eng);
     await api.post(`/api/applications/${application.id}/status`, {
-      new_status: 'On Hold',
+      new_status: 'Hold for Future',
     });
 
-    const res  = await api.get('/api/applications?status=On Hold&limit=500');
+    const res  = await api.get('/api/applications?status=Hold for Future&limit=500');
     const body = await res.json();
     expect(body.applications.some((a: { id: string }) => a.id === application.id)).toBe(true);
-    expect(body.applications.every((a: { status: string }) => a.status === 'On Hold')).toBe(true);
+    expect(body.applications.every((a: { status: string }) => a.status === 'Hold for Future')).toBe(true);
   });
 });

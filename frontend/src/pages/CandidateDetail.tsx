@@ -618,7 +618,7 @@ export default function CandidateDetail() {
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
             <h3 className="text-base font-semibold">Update status</h3>
             <select value={statusValue} onChange={e => setStatusValue(e.target.value)} className="select">
-              {['Active', 'On Hold', 'Rejected', 'Withdrawn', 'Hold for Future'].map(s => <option key={s} value={s}>{s}</option>)}
+              {['Active', 'Rejected', 'Withdrawn', 'Hold for Future'].map(s => <option key={s} value={s}>{s}</option>)}
             </select>
             {(statusValue === 'Rejected' || statusValue === 'Withdrawn') && (
               <>

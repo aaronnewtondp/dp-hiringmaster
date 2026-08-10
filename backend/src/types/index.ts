@@ -102,7 +102,7 @@ export interface Candidate {
 }
 
 // ─── Applications ─────────────────────────────────────────────────────────────
-export type ApplicationStatus    = 'Active' | 'On Hold' | 'Rejected' | 'Withdrawn' | 'Hold for Future' | 'Joined' | 'Closed';
+export type ApplicationStatus    = 'Active' | 'Rejected' | 'Withdrawn' | 'Hold for Future' | 'Joined' | 'Closed';
 export type ScreeningStatus      = 'New' | 'Under Recruiter Review' | 'Awaiting HM Review' | 'HM Shortlisted' | 'Screening Hold' | 'Screening Rejected';
 export type AIPriorityBucket     = 'Strong Fit' | 'Review' | 'Low Priority' | 'Reject';
 export type PriorityOverride     = 'Normal' | 'High' | 'Critical';

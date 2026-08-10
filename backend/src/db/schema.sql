@@ -652,6 +652,17 @@ ALTER TABLE users
     CHECK (auth_provider IN ('email','google','both')),
   ALTER COLUMN auth_provider SET DEFAULT 'email';
 
+-- ── applications: remove 'On Hold' status, folded into 'Hold for Future' ────
+-- Both meant the same real-world thing per product decision — one value
+-- survives. Run the data migration BEFORE this constraint swap on any
+-- connection: UPDATE applications SET status='Hold for Future' WHERE
+-- status='On Hold'; (done manually on Supabase/local Docker, not repeated
+-- here since this file is schema-only, not a data migration script).
+ALTER TABLE applications
+  DROP CONSTRAINT IF EXISTS applications_status_check,
+  ADD CONSTRAINT applications_status_check
+    CHECK (status IN ('Active','Rejected','Withdrawn','Hold for Future','Joined','Closed'));
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows
 -- ═════════════════════════════════════════════════════════════════════════════

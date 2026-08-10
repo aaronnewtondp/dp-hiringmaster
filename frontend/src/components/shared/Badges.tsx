@@ -36,7 +36,6 @@ export function StageBadge({ stage }: { stage: string }) {
 export function StatusBadge({ status }: { status: string }) {
   const color =
     status === 'Active'          ? 'bg-green-100 text-green-700' :
-    status === 'On Hold'         ? 'bg-amber-100 text-amber-700' :
     status === 'Rejected'        ? 'bg-red-100 text-red-700' :
     status === 'Withdrawn'       ? 'bg-gray-100 text-gray-600' :
     status === 'Joined'          ? 'bg-emerald-100 text-emerald-700' :

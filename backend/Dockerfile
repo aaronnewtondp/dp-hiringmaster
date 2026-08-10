@@ -10,4 +10,4 @@ COPY src ./src
 
 EXPOSE 4000
 
-CMD ["npx", "tsx", "src/server.ts"]
+CMD ["npx", "tsx", "watch", "src/server.ts"]

@@ -474,7 +474,7 @@ export default function Candidates() {
               <p className="text-sm text-gray-500">{selectedIds.size} candidates</p>
             </div>
             <select value={bulkStatusValue} onChange={e => setBulkStatusValue(e.target.value)} className="select">
-              {['Active', 'On Hold', 'Rejected', 'Withdrawn', 'Hold for Future'].map(s => <option key={s} value={s}>{s}</option>)}
+              {['Active', 'Rejected', 'Withdrawn', 'Hold for Future'].map(s => <option key={s} value={s}>{s}</option>)}
             </select>
             {(bulkStatusValue === 'Rejected' || bulkStatusValue === 'Withdrawn') && (
               <>

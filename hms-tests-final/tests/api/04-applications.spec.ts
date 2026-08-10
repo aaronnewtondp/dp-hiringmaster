@@ -22,10 +22,10 @@ test.describe('Applications — 3-field state model', () => {
   test('stage and status are SEPARATE endpoints and do not overwrite each other', async ({ request }) => {
     const { api, appId } = await freshApp(request);
     await api.post(`/api/applications/${appId}/stage`, { new_stage: 'Resume Review' });
-    await api.post(`/api/applications/${appId}/status`, { new_status: 'On Hold' });
+    await api.post(`/api/applications/${appId}/status`, { new_status: 'Hold for Future' });
     const body = await (await api.get(`/api/applications/${appId}`)).json();
     expect(body.application.stage).toBe('Resume Review');
-    expect(body.application.status).toBe('On Hold');
+    expect(body.application.status).toBe('Hold for Future');
   });
 
   test('stage advances correctly through the full pipeline sequence', async ({ request }) => {
@@ -94,9 +94,9 @@ test.describe('Applications — rejection & withdrawal enforcement', () => {
     expect(body.application.rejection_reason_cat).toBe('Skills Mismatch');
   });
 
-  test('On Hold does NOT require a reason', async ({ request }) => {
+  test('Hold for Future does NOT require a reason', async ({ request }) => {
     const { api, appId } = await freshApp(request);
-    const res = await api.post(`/api/applications/${appId}/status`, { new_status: 'On Hold' });
+    const res = await api.post(`/api/applications/${appId}/status`, { new_status: 'Hold for Future' });
     expect(res.status()).toBe(200);
   });
 });

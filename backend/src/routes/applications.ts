@@ -138,12 +138,22 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // ─── POST /api/applications/:id/stage — advance stage (PRD Section 9.3) ──────
-router.post('/:id/stage', requireHR, async (req: Request, res: Response) => {
+router.post('/:id/stage', async (req: Request, res: Response) => {
   const { new_stage, skip_reason } = req.body;
   if (!new_stage) { res.status(400).json({ error: 'new_stage required' }); return; }
 
   const app = await queryOne<Application>('SELECT * FROM applications WHERE id = $1', [req.params.id]);
   if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
+
+  // HR-tier can advance to any stage. Everyone else may only make the one
+  // transition the simplified HM-shortlist workflow depends on — Resume
+  // Review straight to Shortlisted — from Scorecard Summary/My Queue's
+  // "Shortlist" action, which is deliberately open to every persona.
+  const canShortlistFromResumeReview = app.stage === 'Resume Review' && new_stage === 'Shortlisted';
+  if (!isHRTier(req.user!.persona) && !canShortlistFromResumeReview) {
+    res.status(403).json({ error: 'HR access required' });
+    return;
+  }
 
   // Every scheduled interview/assignment round must have feedback submitted
   // before advancing further — skip_reason is the existing, deliberate
@@ -292,22 +302,32 @@ router.post('/:id/stage', requireHR, async (req: Request, res: Response) => {
   res.json({ application: updated, resumeiq });
 });
 
-// ─── POST /api/applications/:id/status — change status (On Hold/Reject/Withdraw)
+// ─── POST /api/applications/:id/status — change status (Reject/Withdraw/Hold)
 // PRD Section 9.1: status changes are SEPARATE from stage
-router.post('/:id/status', requireHR, async (req: Request, res: Response) => {
+router.post('/:id/status', async (req: Request, res: Response) => {
   const { new_status, rejection_reason_cat, rejection_reason_detail,
           withdrawal_reason_cat, withdrawal_reason_detail } = req.body;
 
   if (!new_status) { res.status(400).json({ error: 'new_status required' }); return; }
+
+  const app = await queryOne<Application>('SELECT * FROM applications WHERE id = $1', [req.params.id]);
+  if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
+
+  // HR-tier can set any status. Everyone else may only set the two values
+  // the simplified HM workflow depends on — Hold for Future / Rejected —
+  // and only from Resume Review, matching the Shortlist carve-out above.
+  const canActFromResumeReview = app.stage === 'Resume Review' &&
+    (new_status === 'Hold for Future' || new_status === 'Rejected');
+  if (!isHRTier(req.user!.persona) && !canActFromResumeReview) {
+    res.status(403).json({ error: 'HR access required' });
+    return;
+  }
 
   // Rejection and withdrawal require a reason
   if ((new_status === 'Rejected' || new_status === 'Withdrawn') && !rejection_reason_cat && !withdrawal_reason_cat) {
     res.status(400).json({ error: 'A reason is required when rejecting or withdrawing a candidate' });
     return;
   }
-
-  const app = await queryOne<Application>('SELECT * FROM applications WHERE id = $1', [req.params.id]);
-  if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
 
   await transaction(async (client) => {
     await client.query(

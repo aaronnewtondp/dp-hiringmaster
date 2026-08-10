@@ -1,7 +1,7 @@
 export type Persona = 'hr_recruiter' | 'hiring_manager' | 'interviewer' | 'leadership' | 'super_admin';
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3';
 export type AgingAlert = 'ok' | 'yellow' | 'red';
-export type ApplicationStatus = 'Active' | 'On Hold' | 'Rejected' | 'Withdrawn' | 'Hold for Future' | 'Joined' | 'Closed';
+export type ApplicationStatus = 'Active' | 'Rejected' | 'Withdrawn' | 'Hold for Future' | 'Joined' | 'Closed';
 export type ScreeningStatus = 'New' | 'Under Recruiter Review' | 'Awaiting HM Review' | 'HM Shortlisted' | 'Screening Hold' | 'Screening Rejected';
 export type Recommendation = 'Strong Yes' | 'Yes' | 'Maybe' | 'No';
 
@@ -296,7 +296,7 @@ export const ROLE_STATUSES = [
 // centric (unlike Roles/Dashboard, where "Status" correctly means
 // ROLE_STATUSES above).
 export const APPLICATION_STATUSES: ApplicationStatus[] = [
-  'Active', 'On Hold', 'Rejected', 'Withdrawn', 'Hold for Future', 'Joined', 'Closed',
+  'Active', 'Rejected', 'Withdrawn', 'Hold for Future', 'Joined', 'Closed',
 ];
 
 // Fixed, curated list matching the Create Role form's Location dropdown

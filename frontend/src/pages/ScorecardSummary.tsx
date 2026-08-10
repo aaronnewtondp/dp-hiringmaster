@@ -1,13 +1,19 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, CheckCircle, PauseCircle, XCircle } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { applicationsApi, rolesApi } from '../services/api.ts';
 import { Application, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
 import { Spinner, EmptyState, OverBudgetBadge } from '../components/shared/Badges.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
+import RejectReasonModal from '../components/shared/RejectReasonModal.tsx';
 import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
+import { useAuth } from '../contexts/AuthContext.tsx';
+
+// Same chunked-batching constant as Candidates.tsx / HMQueue.tsx's bulk actions.
+const BULK_CONCURRENCY = 3;
 
 // Compact 0-10 dimension cell — mirrors ResumeIQPanel.tsx's private
 // scoreColor() thresholds (copied, not imported: four lines, not worth a
@@ -46,6 +52,7 @@ const DIMENSIONS: Array<{ key: keyof Application; label: string }> = [
 
 export default function ScorecardSummary() {
   const qc = useQueryClient();
+  const { canLead } = useAuth();
   const [searchParams] = useSearchParams();
   // Arriving from a role's detail page ("Scorecard Summary" button there)
   // pre-filters to that role — read once on mount; the Role MultiSelectFilter
@@ -63,6 +70,9 @@ export default function ScorecardSummary() {
   const [filterInBudget, setFilterInBudget] = useState(false);
   const [expanded,    setExpanded]    = useState<Set<string>>(new Set());
   const [stageModalApp, setStageModalApp] = useState<Application | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [rejectTargetIds, setRejectTargetIds] = useState<string[] | null>(null);
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   const params: Record<string, string | string[]> = { limit: '100', scored_only: 'true' };
   if (roleIds.length)     params.role_id = roleIds;
@@ -98,6 +108,83 @@ export default function ScorecardSummary() {
     return s;
   });
 
+  // Shortlist / Hold for Future / Reject only make sense at Resume Review —
+  // same precondition the backend enforces for the non-HR-tier carve-out.
+  const reviewable = apps.filter(a => a.stage === 'Resume Review');
+  const allReviewableSelected  = reviewable.length > 0 && reviewable.every(a => selectedIds.has(a.id));
+  const someReviewableSelected = reviewable.some(a => selectedIds.has(a.id));
+
+  const toggleSelected = (id: string) => setSelectedIds(prev => {
+    const s = new Set(prev);
+    s.has(id) ? s.delete(id) : s.add(id);
+    return s;
+  });
+  const toggleSelectAll = () => setSelectedIds(prev => {
+    const s = new Set(prev);
+    reviewable.forEach(a => allReviewableSelected ? s.delete(a.id) : s.add(a.id));
+    return s;
+  });
+
+  const refreshApps = () => {
+    qc.invalidateQueries({ queryKey: ['applications'] });
+    setSelectedIds(new Set());
+  };
+
+  const runBulk = async (fn: (id: string) => Promise<unknown>, ids: string[], label: string) => {
+    setBulkSaving(true);
+    let succeeded = 0;
+    for (let i = 0; i < ids.length; i += BULK_CONCURRENCY) {
+      const batch = ids.slice(i, i + BULK_CONCURRENCY);
+      const settled = await Promise.allSettled(batch.map(fn));
+      succeeded += settled.filter(r => r.status === 'fulfilled').length;
+    }
+    toast[succeeded === ids.length ? 'success' : 'error'](`${succeeded} of ${ids.length} ${label}`);
+    setBulkSaving(false);
+    refreshApps();
+  };
+
+  const bulkShortlist     = () => runBulk(id => applicationsApi.advanceStage(id, 'Shortlisted'), Array.from(selectedIds), 'shortlisted');
+  const bulkHoldForFuture = () => runBulk(id => applicationsApi.updateStatus(id, { new_status: 'Hold for Future' }), Array.from(selectedIds), 'put on hold');
+
+  const handleBulkReject = async (reasonCat: string, reasonDetail: string) => {
+    if (!rejectTargetIds) return;
+    setBulkSaving(true);
+    let succeeded = 0;
+    for (let i = 0; i < rejectTargetIds.length; i += BULK_CONCURRENCY) {
+      const batch = rejectTargetIds.slice(i, i + BULK_CONCURRENCY);
+      const settled = await Promise.allSettled(batch.map(id => applicationsApi.updateStatus(id, {
+        new_status: 'Rejected', rejection_reason_cat: reasonCat, rejection_reason_detail: reasonDetail || undefined,
+      })));
+      succeeded += settled.filter(r => r.status === 'fulfilled').length;
+    }
+    toast[succeeded === rejectTargetIds.length ? 'success' : 'error'](`${succeeded} of ${rejectTargetIds.length} rejected`);
+    setBulkSaving(false);
+    setRejectTargetIds(null);
+    refreshApps();
+  };
+
+  const shortlistOne = async (id: string) => {
+    try {
+      await applicationsApi.advanceStage(id, 'Shortlisted');
+      toast.success('Candidate shortlisted');
+      refreshApps();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(msg || 'Action failed');
+    }
+  };
+
+  const holdForFutureOne = async (id: string) => {
+    try {
+      await applicationsApi.updateStatus(id, { new_status: 'Hold for Future' });
+      toast.success('Put on hold for future roles');
+      refreshApps();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(msg || 'Action failed');
+    }
+  };
+
   return (
     <div className="space-y-5">
       <div>
@@ -131,6 +218,36 @@ export default function ScorecardSummary() {
         </button>
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-dp-50 border border-dp-100 rounded-lg">
+          <span className="text-xs font-medium text-dp-700">{selectedIds.size} selected</span>
+          <button
+            onClick={bulkShortlist}
+            disabled={bulkSaving}
+            className="flex items-center gap-1.5 btn-primary text-xs py-1 px-2.5"
+          >
+            {bulkSaving ? <Spinner size="sm" /> : <CheckCircle className="w-3.5 h-3.5" />}
+            Shortlist
+          </button>
+          <button
+            onClick={bulkHoldForFuture}
+            disabled={bulkSaving}
+            className="flex items-center gap-1.5 btn-secondary text-xs py-1 px-2.5"
+          >
+            <PauseCircle className="w-3.5 h-3.5" />
+            Hold for Future
+          </button>
+          <button
+            onClick={() => setRejectTargetIds(Array.from(selectedIds))}
+            disabled={bulkSaving}
+            className="flex items-center gap-1.5 btn-secondary text-xs py-1 px-2.5 text-red-600 hover:bg-red-50"
+          >
+            <XCircle className="w-3.5 h-3.5" />
+            Reject
+          </button>
+        </div>
+      )}
+
       <div className="card overflow-x-auto">
         {isLoading ? (
           <div className="flex justify-center p-12"><Spinner size="lg" /></div>
@@ -144,21 +261,37 @@ export default function ScorecardSummary() {
           <table className="w-full table-fixed">
             <thead className="border-b border-gray-100 bg-gray-50">
               <tr>
+                <th className="table-th px-1.5 w-[28px]">
+                  {reviewable.length > 0 && (
+                    <input
+                      type="checkbox"
+                      checked={allReviewableSelected}
+                      ref={el => { if (el) el.indeterminate = someReviewableSelected && !allReviewableSelected; }}
+                      onChange={toggleSelectAll}
+                      title="Select all (Resume Review only)"
+                    />
+                  )}
+                </th>
                 {[
                   ['#', 'w-[32px]'], ['Candidate', 'w-[150px]'], ['Role', 'w-[120px]'],
                   ['Company / Industry', 'w-[140px]'], ['Notice', 'w-[55px]'], ['CTC → ECTC', 'w-[95px]'],
                   ...DIMENSIONS.map(d => [d.label, 'w-[42px]'] as [string, string]),
                   ['Avg', 'w-[45px]'], ['Verdict', 'w-[80px]'], ['Resume', 'w-[55px]'],
-                  ['Stage', 'w-[110px]'], ['', 'w-[28px]'],
-                ].map(([h, w]) => (
-                  <th key={h} title={h} className={`table-th px-1.5 truncate tracking-normal ${w}`}>{h}</th>
+                  ['Stage', 'w-[110px]'], ['Actions', 'w-[150px]'], ['', 'w-[28px]'],
+                ].map(([h, w], i) => (
+                  <th key={`${h}-${i}`} title={h} className={`table-th px-1.5 truncate tracking-normal ${w}`}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {apps.map((app, idx) => (
-                <>
-                  <tr key={app.id} className="hover:bg-gray-50 transition-colors">
+                <Fragment key={app.id}>
+                  <tr className="hover:bg-gray-50 transition-colors">
+                    <td className="table-td px-1.5 py-3">
+                      {app.stage === 'Resume Review' && (
+                        <input type="checkbox" checked={selectedIds.has(app.id)} onChange={() => toggleSelected(app.id)} />
+                      )}
+                    </td>
                     <td className="table-td px-1.5 py-3 text-xs text-gray-400">{idx + 1}</td>
                     <td className="table-td px-1.5 py-3">
                       <Link to={`/candidates/${app.candidate_id}`} className="text-sm font-medium text-gray-900 hover:text-dp-600 block truncate">
@@ -200,9 +333,41 @@ export default function ScorecardSummary() {
                       ) : '—'}
                     </td>
                     <td className="table-td px-1.5 py-3">
-                      <button onClick={() => setStageModalApp(app)} className="text-xs text-gray-600 hover:text-dp-600 underline truncate block">
-                        {app.stage}
-                      </button>
+                      {canLead ? (
+                        <button onClick={() => setStageModalApp(app)} className="text-xs text-gray-600 hover:text-dp-600 underline truncate block">
+                          {app.stage}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-500 truncate block">{app.stage}</span>
+                      )}
+                    </td>
+                    <td className="table-td px-1.5 py-3">
+                      {app.stage === 'Resume Review' && (
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => setRejectTargetIds([app.id])}
+                            title="Reject"
+                            className="p-1 rounded text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => holdForFutureOne(app.id)}
+                            title="Hold for future roles"
+                            className="p-1 rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                          >
+                            <PauseCircle className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => shortlistOne(app.id)}
+                            title="Shortlist"
+                            className="flex items-center gap-1 btn-primary text-xs py-1 px-2"
+                          >
+                            <CheckCircle className="w-3.5 h-3.5" />
+                            Shortlist
+                          </button>
+                        </div>
+                      )}
                     </td>
                     <td className="table-td px-1.5 py-3">
                       <button onClick={() => toggleExpanded(app.id)} className="text-gray-400 hover:text-dp-600">
@@ -212,7 +377,7 @@ export default function ScorecardSummary() {
                   </tr>
                   {expanded.has(app.id) && (
                     <tr key={`${app.id}-detail`} className="bg-gray-50/60">
-                      <td colSpan={6 + DIMENSIONS.length + 5} className="px-4 py-4">
+                      <td colSpan={7 + DIMENSIONS.length + 6} className="px-4 py-4">
                         <div className="grid grid-cols-3 gap-4">
                           <div>
                             <div className="text-xs text-green-600 font-medium mb-1">✓ Key strengths</div>
@@ -238,7 +403,7 @@ export default function ScorecardSummary() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -250,6 +415,15 @@ export default function ScorecardSummary() {
           application={stageModalApp}
           onClose={() => setStageModalApp(null)}
           onUpdated={() => qc.invalidateQueries({ queryKey: ['applications'] })}
+        />
+      )}
+
+      {rejectTargetIds && (
+        <RejectReasonModal
+          count={rejectTargetIds.length}
+          saving={bulkSaving}
+          onConfirm={handleBulkReject}
+          onClose={() => setRejectTargetIds(null)}
         />
       )}
     </div>
