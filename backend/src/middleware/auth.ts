@@ -81,7 +81,11 @@ export function stripRestrictedFields<T extends Record<string, unknown>>(
   persona: Persona
 ): Partial<T> {
   const RESTRICTED_FIELDS = [
-    'ctc_band', 'internal_risk_notes', 'agency_fee_estimate',
+    // 'ctc_band' is the raw column name on roles; 'role_ctc_band' is the
+    // alias used when it's joined onto an application row (applications.ts,
+    // candidates.ts) — both need stripping since callers use whichever
+    // shape they queried.
+    'ctc_band', 'role_ctc_band', 'internal_risk_notes', 'agency_fee_estimate',
     'offer_ctc_fixed', 'offer_ctc_variable', 'hr_comp_alignment',
   ];
   if (isHRTier(persona)) return obj;

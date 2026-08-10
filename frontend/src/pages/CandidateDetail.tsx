@@ -5,7 +5,8 @@ import { ArrowLeft, ExternalLink, Star, ChevronDown, ChevronUp, CalendarPlus, Me
 import toast from 'react-hot-toast';
 import { candidatesApi, applicationsApi, interviewsApi, refChecksApi } from '../services/api.ts';
 import { Candidate, Application, InterviewRound, ReferenceCheck, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
-import { StageBadge, StatusBadge, PriorityBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import { StageBadge, StatusBadge, PriorityBadge, OverBudgetBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import { isOverBudget } from '../utils/budget.ts';
 import EditableSection from '../components/shared/EditableSection.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
 import ResumeIQPanel from '../components/ResumeIQPanel.tsx';
@@ -334,6 +335,7 @@ export default function CandidateDetail() {
                             <StatusBadge status={app.status} />
                             <span className="text-xs text-gray-400">{app.recruiter_screening_status}</span>
                             {app.score_avg != null && <span className="text-xs font-semibold text-dp-700">ResumeIQ: {Number(app.score_avg).toFixed(1)}/10</span>}
+                            <OverBudgetBadge overBudget={isOverBudget(app.candidate_expected_ctc ?? candidate.expected_ctc, app.role_ctc_band)} />
                           </div>
                           <div className="flex gap-3 mt-2 text-xs text-gray-400">
                             <span>Source: {app.source_channel || '—'}</span>

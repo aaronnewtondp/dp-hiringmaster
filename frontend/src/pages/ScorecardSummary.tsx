@@ -4,9 +4,10 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { applicationsApi, rolesApi } from '../services/api.ts';
 import { Application, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
-import { Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import { Spinner, EmptyState, OverBudgetBadge } from '../components/shared/Badges.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
+import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
 
 // Compact 0-10 dimension cell — mirrors ResumeIQPanel.tsx's private
 // scoreColor() thresholds (copied, not imported: four lines, not worth a
@@ -59,6 +60,7 @@ export default function ScorecardSummary() {
   const [modes,       setModes]       = useState<string[]>([]);
   const [priorities,  setPriorities]  = useState<string[]>([]);
   const [statuses,    setStatuses]    = useState<string[]>([]);
+  const [filterInBudget, setFilterInBudget] = useState(false);
   const [expanded,    setExpanded]    = useState<Set<string>>(new Set());
   const [stageModalApp, setStageModalApp] = useState<Application | null>(null);
 
@@ -74,7 +76,12 @@ export default function ScorecardSummary() {
     queryKey: ['applications', 'scorecard', roleIds, departments, locations, modes, priorities, statuses],
     queryFn:  () => applicationsApi.list(params),
   });
-  const apps = data?.data?.applications || [];
+  const allApps = data?.data?.applications || [];
+  // Client-side, same reasoning as Candidates.tsx's identical toggle —
+  // role_ctc_band is freeform text, best parsed in JS.
+  const apps = filterInBudget
+    ? allApps.filter(a => isWithinBudgetOrNear(a.candidate_expected_ctc, a.role_ctc_band))
+    : allApps;
 
   const { data: filterOptionsData } = useQuery<{ data: { recruitment_modes: string[]; roles: { id: string; title: string }[] } }>({
     queryKey: ['roles', 'filter-options'],
@@ -83,7 +90,7 @@ export default function ScorecardSummary() {
   const modeOptions = filterOptionsData?.data?.recruitment_modes || [];
   const roleOptions = (filterOptionsData?.data?.roles || []).map(r => ({ value: r.id, label: r.title }));
 
-  const hasActiveFilters = roleIds.length || departments.length || locations.length || modes.length || priorities.length || statuses.length;
+  const hasActiveFilters = roleIds.length || departments.length || locations.length || modes.length || priorities.length || statuses.length || filterInBudget;
 
   const toggleExpanded = (id: string) => setExpanded(prev => {
     const s = new Set(prev);
@@ -114,6 +121,14 @@ export default function ScorecardSummary() {
         <div className="shrink-0"><MultiSelectFilter label="Priority"         options={PRIORITIES}           selected={priorities}  onChange={setPriorities} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Status"           options={APPLICATION_STATUSES} selected={statuses}     onChange={setStatuses} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Role"             options={roleOptions}          selected={roleIds}      onChange={setRoleIds} /></div>
+        <button
+          onClick={() => setFilterInBudget(v => !v)}
+          className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+            filterInBudget ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+          }`}
+        >
+          In-budget only
+        </button>
       </div>
 
       <div className="card overflow-x-auto">
@@ -163,9 +178,14 @@ export default function ScorecardSummary() {
                       {app.candidate_notice_period_days != null ? `${app.candidate_notice_period_days}d` : '—'}
                     </td>
                     <td className="table-td px-1.5 py-3 text-xs text-gray-500 truncate">
-                      {app.candidate_ctc_fixed ? `₹${app.candidate_ctc_fixed}L` : '—'}
-                      {' → '}
-                      {app.candidate_expected_ctc ? `₹${app.candidate_expected_ctc}L` : '—'}
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate">
+                          {app.candidate_ctc_fixed ? `₹${app.candidate_ctc_fixed}L` : '—'}
+                          {' → '}
+                          {app.candidate_expected_ctc ? `₹${app.candidate_expected_ctc}L` : '—'}
+                        </span>
+                        <OverBudgetBadge overBudget={isOverBudget(app.candidate_expected_ctc, app.role_ctc_band)} />
+                      </div>
                     </td>
                     {DIMENSIONS.map(d => (
                       <td key={d.key} className="table-td px-1.5 py-3 text-right"><ScoreCell score={app[d.key] as number | undefined} /></td>

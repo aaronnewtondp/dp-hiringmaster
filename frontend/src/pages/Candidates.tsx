@@ -5,7 +5,8 @@ import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, Trash2 } from 'luci
 import toast from 'react-hot-toast';
 import { applicationsApi, candidatesApi, rolesApi } from '../services/api.ts';
 import { Application, Candidate, STAGES, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
-import { StageBadge, StatusBadge, FitScore, SlaBadge, Spinner, EmptyState, PriorityBadge } from '../components/shared/Badges.tsx';
+import { StageBadge, StatusBadge, FitScore, SlaBadge, OverBudgetBadge, Spinner, EmptyState, PriorityBadge } from '../components/shared/Badges.tsx';
+import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -19,6 +20,7 @@ export default function Candidates() {
   const [search,      setSearch]      = useState('');
   const [filterStage, setFilterStage] = useState('all');
   const [filterSla,   setFilterSla]   = useState(false);
+  const [filterInBudget, setFilterInBudget] = useState(false);
   const [roleIds,     setRoleIds]     = useState<string[]>([]);
   const [departments, setDepartments] = useState<string[]>([]);
   const [locations,   setLocations]   = useState<string[]>([]);
@@ -119,12 +121,17 @@ export default function Candidates() {
   };
 
   const all = data?.data?.applications || [];
-  const filtered = search
+  let filtered = search
     ? all.filter(a =>
         a.candidate_name?.toLowerCase().includes(search.toLowerCase()) ||
         a.role_title?.toLowerCase().includes(search.toLowerCase())
       )
     : all;
+  // Client-side, same as the search box above — role_ctc_band is freeform
+  // text, best parsed in JS rather than added as a new SQL filter dimension.
+  if (filterInBudget) {
+    filtered = filtered.filter(a => isWithinBudgetOrNear(a.candidate_expected_ctc, a.role_ctc_band));
+  }
 
   const slaCount = all.filter(a => a.sla_breach).length;
 
@@ -291,6 +298,14 @@ export default function Candidates() {
         >
           SLA breached only
         </button>
+        <button
+          onClick={() => setFilterInBudget(v => !v)}
+          className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+            filterInBudget ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+          }`}
+        >
+          In-budget only
+        </button>
       </div>
 
       {canHR && selectedIds.size > 0 && (
@@ -366,9 +381,14 @@ export default function Candidates() {
                   <td className="table-td px-2 py-4"><StageBadge stage={app.stage} /></td>
                   <td className="table-td px-2 py-4"><FitScore score={app.ai_fit_score} /></td>
                   <td className="table-td px-2 py-4 text-xs text-gray-500 truncate">
-                    {app.candidate_ctc_fixed ? `₹${app.candidate_ctc_fixed}L` : '—'}
-                    {' → '}
-                    {app.candidate_expected_ctc ? `₹${app.candidate_expected_ctc}L` : '—'}
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate">
+                        {app.candidate_ctc_fixed ? `₹${app.candidate_ctc_fixed}L` : '—'}
+                        {' → '}
+                        {app.candidate_expected_ctc ? `₹${app.candidate_expected_ctc}L` : '—'}
+                      </span>
+                      <OverBudgetBadge overBudget={isOverBudget(app.candidate_expected_ctc, app.role_ctc_band)} />
+                    </div>
                   </td>
                   <td className="table-td px-2 py-4 text-xs text-gray-500 truncate">
                     {app.candidate_notice_period_days != null ? `${app.candidate_notice_period_days}d` : '—'}

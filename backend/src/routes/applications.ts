@@ -53,7 +53,7 @@ router.get('/', async (req: Request, res: Response) => {
            c.current_company AS candidate_company,
            c.current_industry AS candidate_industry,
            c.resume_drive_link AS candidate_resume_link,
-           r.title AS role_title, r.priority AS role_priority,
+           r.title AS role_title, r.priority AS role_priority, r.ctc_band AS role_ctc_band,
            ag.name AS agency_name
     FROM applications a
     JOIN candidates c ON c.id = a.candidate_id
@@ -111,7 +111,8 @@ router.get('/:id', async (req: Request, res: Response) => {
   const app = await queryOne<Application>(
     `SELECT a.*, c.full_name AS candidate_name, c.email, c.phone, c.linkedin_url,
             c.parsed_skills, c.parsed_total_yoe, c.parsed_industries,
-            r.title AS role_title, r.priority AS role_priority, r.must_have_skills,
+            c.expected_ctc AS candidate_expected_ctc,
+            r.title AS role_title, r.priority AS role_priority, r.must_have_skills, r.ctc_band AS role_ctc_band,
             ag.name AS agency_name
      FROM applications a
      JOIN candidates c ON c.id = a.candidate_id

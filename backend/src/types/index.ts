@@ -204,7 +204,9 @@ export interface Application {
   next_action_owner?:           string;
   // Joined fields
   candidate_name?:              string;
+  candidate_expected_ctc?:      number;
   role_title?:                  string;
+  role_ctc_band?:               string;
   agency_name?:                 string;
 }
 

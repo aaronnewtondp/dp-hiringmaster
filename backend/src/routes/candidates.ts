@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
-import { authenticate, requireHR } from '../middleware/auth.js';
+import { authenticate, requireHR, stripRestrictedFields } from '../middleware/auth.js';
 import { Candidate } from '../types/index.js';
 import { parseRoleFilters, buildRoleFilterSql, hasActiveFilters } from '../utils/roleFilters.js';
 
@@ -121,7 +121,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
   // Fetch all applications for this candidate
   const applications = await query(
-    `SELECT a.*, r.title AS role_title, ag.name AS agency_name
+    `SELECT a.*, r.title AS role_title, r.ctc_band AS role_ctc_band, ag.name AS agency_name
      FROM applications a
      JOIN roles r ON r.id = a.role_id
      LEFT JOIN agencies ag ON ag.id = a.agency_id
@@ -130,7 +130,15 @@ router.get('/:id', async (req: Request, res: Response) => {
     [req.params.id]
   );
 
-  res.json({ candidate, applications });
+  // This route never stripped restricted fields before — a.* included
+  // internal_risk_notes/offer_ctc_fixed/offer_ctc_variable/hr_comp_alignment/
+  // agency_fee_estimate unfiltered for every persona (the frontend just
+  // never rendered them for non-HR, which isn't a real boundary). Fixed
+  // here as a direct consequence of adding role_ctc_band, itself restricted.
+  const persona = req.user!.persona;
+  const safeApplications = applications.map(a => stripRestrictedFields(a as unknown as Record<string, unknown>, persona));
+
+  res.json({ candidate, applications: safeApplications });
 });
 
 // ─── POST /api/candidates — create candidate + optional application ───────────

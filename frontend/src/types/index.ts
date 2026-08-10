@@ -192,6 +192,7 @@ export interface Application {
   email?:                      string;
   role_title?:                 string;
   role_priority?:              Priority;
+  role_ctc_band?:              string;
   ai_fit_score?:               number;
   ai_priority_bucket?:         string;
   preferred_location?:         string;
