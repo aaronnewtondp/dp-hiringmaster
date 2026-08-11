@@ -17,6 +17,7 @@ const UNLINKED_PAGE_SIZE = 50;
 export default function Candidates() {
   const { canHR } = useAuth();
   const qc = useQueryClient();
+  const [searchInput, setSearchInput] = useState('');
   const [search,      setSearch]      = useState('');
   const [filterStage, setFilterStage] = useState('all');
   const [filterSla,   setFilterSla]   = useState(false);
@@ -47,10 +48,21 @@ export default function Candidates() {
   const [bulkRejectionDetail, setBulkRejectionDetail] = useState('');
   const [bulkSaving,        setBulkSaving]        = useState(false);
 
+  // Debounced free-text search — same reasoning and timing as TalentPool.tsx's
+  // own `q` search: this now hits the server (see `params.q` below) rather
+  // than filtering whatever the flat `limit` below happened to fetch, since
+  // a candidate ranked past that cutoff (new, unscored, sorted last) was
+  // previously unsearchable no matter what you typed.
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 350);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
   // Archival (PRD §21) — Rejected/Withdrawn applications untouched for 90+
   // days are excluded from this default pipeline view; they remain fully
   // reachable via the Talent Pool page's "Archived" mode instead.
   const params: Record<string, string | string[]> = { limit: '100', exclude_stale_archived: 'true' };
+  if (search)                  params.q = search;
   if (filterStage !== 'all')   params.stage  = filterStage;
   if (filterSla)               params.sla_breach = 'true';
   if (roleIds.length)          params.role_id = roleIds;
@@ -65,7 +77,7 @@ export default function Candidates() {
   if (applicationStatuses.length) params.status = applicationStatuses;
 
   const { data, isLoading } = useQuery<{ data: { applications: Application[] } }>({
-    queryKey: ['applications', filterStage, filterSla, roleIds, departments, locations, modes, priorities, applicationStatuses],
+    queryKey: ['applications', search, filterStage, filterSla, roleIds, departments, locations, modes, priorities, applicationStatuses],
     queryFn:  () => applicationsApi.list(params),
   });
 
@@ -121,14 +133,10 @@ export default function Candidates() {
   };
 
   const all = data?.data?.applications || [];
-  let filtered = search
-    ? all.filter(a =>
-        a.candidate_name?.toLowerCase().includes(search.toLowerCase()) ||
-        a.role_title?.toLowerCase().includes(search.toLowerCase())
-      )
-    : all;
-  // Client-side, same as the search box above — role_ctc_band is freeform
-  // text, best parsed in JS rather than added as a new SQL filter dimension.
+  // `q` above already did the name/email/role-title matching server-side.
+  let filtered = all;
+  // Client-side — role_ctc_band is freeform text, best parsed in JS rather
+  // than added as a new SQL filter dimension.
   if (filterInBudget) {
     filtered = filtered.filter(a => isWithinBudgetOrNear(a.candidate_expected_ctc, a.role_ctc_band));
   }
@@ -271,8 +279,8 @@ export default function Candidates() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             placeholder="Search by name or role…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
             className="input pl-9"
           />
         </div>
