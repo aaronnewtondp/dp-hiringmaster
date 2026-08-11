@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ExternalLink, Star, ChevronDown, ChevronUp, CalendarPlus, MessageSquare, FileText, Send, Link2 } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Star, ChevronDown, ChevronUp, CalendarPlus, MessageSquare, FileText, Send, Link2, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { candidatesApi, applicationsApi, interviewsApi, refChecksApi } from '../services/api.ts';
 import { Candidate, Application, InterviewRound, ReferenceCheck, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
@@ -15,6 +15,7 @@ import ScheduleRoundModal from '../components/ScheduleRoundModal.tsx';
 import SendAssignmentModal from '../components/SendAssignmentModal.tsx';
 import AssignmentOutcomeModal from '../components/AssignmentOutcomeModal.tsx';
 import AddReferenceCheckModal from '../components/AddReferenceCheckModal.tsx';
+import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { formatDistanceToNow, format } from 'date-fns';
 
@@ -89,6 +90,7 @@ export default function CandidateDetail() {
   const [scheduleNextNum, setScheduleNextNum] = useState(1);
   const [scheduleDefaultName, setScheduleDefaultName] = useState('');
   const [expandedApps, setExpandedApps] = useState<Set<string>>(new Set());
+  const [showAddApplication, setShowAddApplication] = useState(false);
 
   const [assignmentModal, setAssignmentModal] = useState<AssignmentModalState | null>(null);
 
@@ -301,8 +303,16 @@ export default function CandidateDetail() {
         </div>
 
         <div className="lg:col-span-2 card overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100">
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-900">Applications ({applications.length})</h2>
+            {canHR && (
+              <button
+                onClick={() => setShowAddApplication(true)}
+                className="btn-secondary text-xs py-1.5 px-3"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add Application
+              </button>
+            )}
           </div>
           {applications.length === 0 ? (
             <div className="p-8"><EmptyState title="No applications" /></div>
@@ -713,6 +723,19 @@ export default function CandidateDetail() {
           applicationId={addRefCheckAppId}
           onClose={() => setAddRefCheckAppId(null)}
           onSuccess={() => { qc.invalidateQueries({ queryKey: ['ref-checks'] }); refetchRefChecks(); }}
+        />
+      )}
+
+      {showAddApplication && candidate && (
+        <LinkToRoleModal
+          candidate={candidate}
+          excludeRoleIds={applications.map(a => a.role_id)}
+          sourceChannel="Manual Add"
+          onClose={() => setShowAddApplication(false)}
+          onLinked={() => {
+            qc.invalidateQueries({ queryKey: ['candidate', id] });
+            qc.invalidateQueries({ queryKey: ['applications'] });
+          }}
         />
       )}
     </div>
