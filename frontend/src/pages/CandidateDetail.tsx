@@ -195,6 +195,9 @@ export default function CandidateDetail() {
       toast.success(`Status updated to ${statusValue}`);
       setShowStatusModal(false);
       qc.invalidateQueries({ queryKey: ['candidate', id] });
+      // Status drives inclusion on Scorecard Summary/My Queue/Talent Pool —
+      // those live on the shared 'applications' key, not this page's own.
+      qc.invalidateQueries({ queryKey: ['applications'] });
     } catch { toast.error('Failed to update status'); }
     setSaving(false);
   };
@@ -609,7 +612,13 @@ export default function CandidateDetail() {
         <StageChangeModal
           application={stageModalApp}
           onClose={() => setStageModalApp(null)}
-          onUpdated={() => qc.invalidateQueries({ queryKey: ['candidate', id] })}
+          onUpdated={() => {
+            qc.invalidateQueries({ queryKey: ['candidate', id] });
+            // Stage drives inclusion on Scorecard Summary/My Queue (Resume
+            // Review-gated actions, budget/stage filters) — those live on
+            // the shared 'applications' key, not this page's own.
+            qc.invalidateQueries({ queryKey: ['applications'] });
+          }}
         />
       )}
 

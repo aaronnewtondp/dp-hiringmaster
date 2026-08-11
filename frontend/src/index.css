@@ -9,6 +9,36 @@
   }
 }
 
+/* Auto-hiding scrollbars — invisible at rest, fade in only while actively
+   scrolling (see utils/scrollbarFade.ts, which toggles .is-scrolling on
+   <html>). Chromium/WebKit only (::-webkit-scrollbar has no Firefox
+   equivalent); Firefox falls back to a permanently-thin bar via
+   scrollbar-width below rather than nothing at all. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  transition: background-color 0.25s ease;
+}
+html.is-scrolling ::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 116, 139, 0.5);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+html.is-scrolling * {
+  scrollbar-color: rgba(100, 116, 139, 0.5) transparent;
+}
+
 @layer components {
   .btn-primary {
     @apply inline-flex items-center gap-2 px-4 py-2 bg-dp-600 text-white text-sm font-medium rounded-lg hover:bg-dp-700 active:bg-dp-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;

@@ -80,7 +80,12 @@ export default function ScorecardSummary() {
   if (locations.length)   params.location = locations;
   if (modes.length)       params.recruitment_mode = modes;
   if (priorities.length)  params.priority = priorities;
-  if (statuses.length)    params.status = statuses;
+  // Default to Active only — otherwise a Rejected/Hold-for-Future candidate
+  // (who has already left this queue's whole reason for existing) would
+  // linger here forever. The Status filter still lets anyone deliberately
+  // pick Rejected/Hold for Future/etc. to audit them; this only changes
+  // what shows up with no filter touched.
+  params.status = statuses.length ? statuses : ['Active'];
 
   const { data, isLoading } = useQuery<{ data: { applications: Application[] } }>({
     queryKey: ['applications', 'scorecard', roleIds, departments, locations, modes, priorities, statuses],
@@ -273,11 +278,11 @@ export default function ScorecardSummary() {
                   )}
                 </th>
                 {[
-                  ['#', 'w-[32px]'], ['Candidate', 'w-[150px]'], ['Role', 'w-[120px]'],
+                  ['#', 'w-[32px]'], ['', 'w-[28px]'], ['Candidate', 'w-[150px]'], ['Role', 'w-[120px]'],
                   ['Company / Industry', 'w-[140px]'], ['Notice', 'w-[55px]'], ['CTC → ECTC', 'w-[95px]'],
                   ...DIMENSIONS.map(d => [d.label, 'w-[42px]'] as [string, string]),
                   ['Avg', 'w-[45px]'], ['Verdict', 'w-[80px]'], ['Resume', 'w-[55px]'],
-                  ['Stage', 'w-[110px]'], ['Actions', 'w-[150px]'], ['', 'w-[28px]'],
+                  ['Stage', 'w-[110px]'], ['Actions', 'w-[150px]'],
                 ].map(([h, w], i) => (
                   <th key={`${h}-${i}`} title={h} className={`table-th px-1.5 truncate tracking-normal ${w}`}>{h}</th>
                 ))}
@@ -293,6 +298,11 @@ export default function ScorecardSummary() {
                       )}
                     </td>
                     <td className="table-td px-1.5 py-3 text-xs text-gray-400">{idx + 1}</td>
+                    <td className="table-td px-1.5 py-3">
+                      <button onClick={() => toggleExpanded(app.id)} className="text-gray-400 hover:text-dp-600">
+                        {expanded.has(app.id) ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </button>
+                    </td>
                     <td className="table-td px-1.5 py-3">
                       <Link to={`/candidates/${app.candidate_id}`} className="text-sm font-medium text-gray-900 hover:text-dp-600 block truncate">
                         {app.candidate_name}
@@ -368,11 +378,6 @@ export default function ScorecardSummary() {
                           </button>
                         </div>
                       )}
-                    </td>
-                    <td className="table-td px-1.5 py-3">
-                      <button onClick={() => toggleExpanded(app.id)} className="text-gray-400 hover:text-dp-600">
-                        {expanded.has(app.id) ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                      </button>
                     </td>
                   </tr>
                   {expanded.has(app.id) && (
