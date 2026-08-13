@@ -62,6 +62,7 @@ export const candidatesApi = {
   activity: (id: string)                       => api.get(`/candidates/${id}/activity`),
   linkRole: (id: string, data: { role_id: string; source_channel?: string }) => api.post(`/candidates/${id}/applications`, data),
   remove:   (id: string)                       => api.delete(`/candidates/${id}`),
+  unmatchedRoleSubmissions: (params?: Record<string, string>) => api.get('/candidates/unmatched-role-submissions', { params }),
 };
 
 export const applicationsApi = {

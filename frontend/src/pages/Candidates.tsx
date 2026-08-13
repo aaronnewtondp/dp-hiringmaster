@@ -14,6 +14,16 @@ import { formatDistanceToNow } from 'date-fns';
 
 const UNLINKED_PAGE_SIZE = 50;
 
+interface UnmatchedSubmission {
+  candidate_id:         string;
+  full_name:            string;
+  email:                string | null;
+  submitted_text:       string;
+  created_at:           string;
+  suggested_role_id:    string | null;
+  suggested_role_title: string | null;
+}
+
 export default function Candidates() {
   const { canHR } = useAuth();
   const qc = useQueryClient();
@@ -35,6 +45,17 @@ export default function Candidates() {
   const [unlinkedOffset, setUnlinkedOffset] = useState(0);
   const [unlinkedItems,  setUnlinkedItems]  = useState<Candidate[]>([]);
   const [unlinkedTotal,  setUnlinkedTotal]  = useState(0);
+
+  // Job Application Form submissions whose role text never matched a role —
+  // these never got an application at all, so a candidate with OTHER
+  // existing applications doesn't show up in Unlinked Candidates above
+  // (they're not unlinked) and had no visibility anywhere before this panel.
+  const [showUnmatched,   setShowUnmatched]   = useState(true);
+  const [unmatchedOffset, setUnmatchedOffset] = useState(0);
+  const [unmatchedItems,  setUnmatchedItems]  = useState<UnmatchedSubmission[]>([]);
+  const [unmatchedTotal,  setUnmatchedTotal]  = useState(0);
+  const [reconcileTarget, setReconcileTarget] = useState<UnmatchedSubmission | null>(null);
+  const [resolvingId,     setResolvingId]     = useState<string | null>(null);
 
   // Bulk select + bulk stage/status change — new UI territory for this app
   // (no prior row-selection pattern existed anywhere), HR-only to match the
@@ -115,6 +136,43 @@ export default function Candidates() {
   const refreshUnlinked = () => {
     setUnlinkedOffset(0);
     qc.invalidateQueries({ queryKey: ['candidates', 'unlinked'] });
+  };
+
+  const { data: unmatchedData, isLoading: unmatchedLoading } = useQuery<{ data: { submissions: UnmatchedSubmission[]; total: number } }>({
+    queryKey: ['candidates', 'unmatched-role-submissions', unmatchedOffset],
+    queryFn:  () => candidatesApi.unmatchedRoleSubmissions({ limit: String(UNLINKED_PAGE_SIZE), offset: String(unmatchedOffset) }),
+  });
+
+  useEffect(() => {
+    if (!unmatchedData?.data) return;
+    const page = unmatchedData.data.submissions || [];
+    setUnmatchedItems(prev => (unmatchedOffset === 0 ? page : [...prev, ...page]));
+    setUnmatchedTotal(unmatchedData.data.total || 0);
+  }, [unmatchedData]);
+
+  // Optimistic local removal rather than a full refetch — the backend's own
+  // "still unresolved" check only re-matches by suggested_role_id (see the
+  // route's own comment on why a no-suggestion row can't be detected as
+  // resolved that way), so removing it here client-side is what actually
+  // makes "Choose role" feel instant for that case specifically.
+  const removeResolvedSubmission = (sub: UnmatchedSubmission) => {
+    setUnmatchedItems(prev => prev.filter(s => !(s.candidate_id === sub.candidate_id && s.submitted_text === sub.submitted_text)));
+    setUnmatchedTotal(t => Math.max(0, t - 1));
+    qc.invalidateQueries({ queryKey: ['applications'] });
+  };
+
+  const handleQuickResolve = async (sub: UnmatchedSubmission) => {
+    if (!sub.suggested_role_id) return;
+    setResolvingId(sub.candidate_id);
+    try {
+      await candidatesApi.linkRole(sub.candidate_id, { role_id: sub.suggested_role_id, source_channel: 'Job Application Form' });
+      toast.success(`${sub.full_name} linked to ${sub.suggested_role_title}`);
+      removeResolvedSubmission(sub);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      toast.error(e.response?.data?.error || 'Failed to link candidate');
+    }
+    setResolvingId(null);
   };
 
   const handleDelete = async () => {
@@ -264,6 +322,67 @@ export default function Candidates() {
                     className="btn-secondary text-xs py-1.5 px-3"
                   >
                     Load more ({unlinkedItems.length} of {unlinkedTotal})
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Job Application Form submissions whose role text never matched a
+          role — these never got an application at all, so a candidate with
+          existing applications to OTHER roles doesn't appear in Unlinked
+          Candidates above (they're not unlinked) and had zero visibility
+          anywhere before this panel. */}
+      {roleIds.length === 0 && (unmatchedTotal > 0 || unmatchedLoading) && (
+        <div className="card overflow-hidden border-amber-200">
+          <button
+            onClick={() => setShowUnmatched(v => !v)}
+            className="w-full px-5 py-3 flex items-center justify-between hover:bg-amber-50/50 transition-colors"
+          >
+            <h2 className="text-sm font-semibold text-amber-800">Unmatched role submissions ({unmatchedTotal})</h2>
+            {showUnmatched ? <ChevronUp className="w-4 h-4 text-amber-600" /> : <ChevronDown className="w-4 h-4 text-amber-600" />}
+          </button>
+          {showUnmatched && (
+            <>
+              <div className="divide-y divide-gray-50 border-t border-amber-100">
+                {unmatchedItems.map(sub => (
+                  <div key={`${sub.candidate_id}-${sub.submitted_text}`} className="px-5 py-3 flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <Link to={`/candidates/${sub.candidate_id}`} className="font-medium text-gray-900 hover:text-dp-600 text-sm">{sub.full_name}</Link>
+                      <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400 flex-wrap">
+                        {sub.email && <span>{sub.email}</span>}
+                        <span>· applied for "{sub.submitted_text}"</span>
+                        <span>· {formatDistanceToNow(new Date(sub.created_at), { addSuffix: true })}</span>
+                      </div>
+                    </div>
+                    {canHR && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        {sub.suggested_role_id && (
+                          <button
+                            onClick={() => handleQuickResolve(sub)}
+                            disabled={resolvingId === sub.candidate_id}
+                            className="btn-primary text-xs py-1.5 px-3 whitespace-nowrap"
+                          >
+                            {resolvingId === sub.candidate_id ? <Spinner size="sm" /> : `Link to ${sub.suggested_role_title}`}
+                          </button>
+                        )}
+                        <button onClick={() => setReconcileTarget(sub)} className="btn-secondary text-xs py-1.5 px-3 whitespace-nowrap">
+                          Choose role
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {unmatchedItems.length < unmatchedTotal && (
+                <div className="flex justify-center py-3 border-t border-amber-100">
+                  <button
+                    onClick={() => setUnmatchedOffset(o => o + UNLINKED_PAGE_SIZE)}
+                    className="btn-secondary text-xs py-1.5 px-3"
+                  >
+                    Load more ({unmatchedItems.length} of {unmatchedTotal})
                   </button>
                 </div>
               )}
@@ -434,6 +553,15 @@ export default function Candidates() {
             refreshUnlinked();
             qc.invalidateQueries({ queryKey: ['applications'] });
           }}
+        />
+      )}
+
+      {reconcileTarget && (
+        <LinkToRoleModal
+          candidate={{ id: reconcileTarget.candidate_id, full_name: reconcileTarget.full_name }}
+          sourceChannel="Job Application Form"
+          onClose={() => setReconcileTarget(null)}
+          onLinked={() => removeResolvedSubmission(reconcileTarget)}
         />
       )}
 

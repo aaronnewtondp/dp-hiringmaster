@@ -111,6 +111,61 @@ router.get('/', async (req: Request, res: Response) => {
   res.json({ candidates, total, limit: parseInt(limit as string), offset: parseInt(offset as string) });
 });
 
+// ─── GET /api/candidates/unmatched-role-submissions ────────────────────────────
+// Must be registered before GET /:id (Express would otherwise match this path
+// as an :id value). Surfaces every Job Application Form submission whose
+// role text never matched a role — the only other trace of these today is a
+// buried 'Unmatched Role — Manual Reconciliation' activity_log entry on the
+// candidate's own record, invisible unless you already knew to look (and,
+// for a candidate who already has an application to some OTHER role, they
+// don't even show up in the Unlinked Candidates panel, so this was the one
+// case with no visibility anywhere). Resolved live, with no separate
+// "mark resolved" flag: DISTINCT ON collapses repeat submissions of the same
+// text down to the latest attempt, a live re-match against current role
+// titles powers the one-click "suggested role" (catches cases like a role
+// created after the candidate applied, or a title/dropdown text mismatch
+// that's since been fixed), and the NOT EXISTS clause drops a row the moment
+// a real application exists for that suggested role — whether created from
+// this panel or any other way (e.g. the Add Application button).
+router.get('/unmatched-role-submissions', requireHR, async (req: Request, res: Response) => {
+  const { limit = '50', offset = '0' } = req.query;
+
+  const baseCte = `
+    WITH latest AS (
+      SELECT DISTINCT ON (al.candidate_id, al.event_detail)
+        al.candidate_id, c.full_name, c.email, al.event_detail AS submitted_text, al.created_at,
+        (SELECT r.id FROM roles r
+           WHERE lower(regexp_replace(translate(trim(r.title), '–—', '--'), '\\s+', ' ', 'g'))
+               = lower(regexp_replace(translate(trim(al.event_detail), '–—', '--'), '\\s+', ' ', 'g'))
+             AND r.status NOT IN ('Closed – Filled', 'Closed – Cancelled')
+           LIMIT 1) AS suggested_role_id,
+        (SELECT r.title FROM roles r
+           WHERE lower(regexp_replace(translate(trim(r.title), '–—', '--'), '\\s+', ' ', 'g'))
+               = lower(regexp_replace(translate(trim(al.event_detail), '–—', '--'), '\\s+', ' ', 'g'))
+             AND r.status NOT IN ('Closed – Filled', 'Closed – Cancelled')
+           LIMIT 1) AS suggested_role_title
+      FROM activity_log al
+      JOIN candidates c ON c.id = al.candidate_id
+      WHERE al.event_type = 'Unmatched Role — Manual Reconciliation'
+      ORDER BY al.candidate_id, al.event_detail, al.created_at DESC
+    )
+    SELECT * FROM latest l
+    WHERE NOT EXISTS (
+      SELECT 1 FROM applications a2 WHERE a2.candidate_id = l.candidate_id AND a2.role_id = l.suggested_role_id
+    )
+  `;
+
+  const rows = await query<{
+    candidate_id: string; full_name: string; email: string | null; submitted_text: string;
+    created_at: string; suggested_role_id: string | null; suggested_role_title: string | null;
+  }>(`${baseCte} ORDER BY created_at DESC LIMIT $1 OFFSET $2`, [parseInt(limit as string), parseInt(offset as string)]);
+
+  const countResult = await queryOne<{ count: string }>(`SELECT COUNT(*) FROM (${baseCte}) c`);
+  const total = parseInt(countResult?.count || '0');
+
+  res.json({ submissions: rows, total, limit: parseInt(limit as string), offset: parseInt(offset as string) });
+});
+
 // ─── GET /api/candidates/:id ──────────────────────────────────────────────────
 router.get('/:id', async (req: Request, res: Response) => {
   const candidate = await queryOne<Candidate>(
