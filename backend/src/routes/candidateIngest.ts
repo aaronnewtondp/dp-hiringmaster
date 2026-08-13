@@ -138,9 +138,14 @@ router.post('/ingest', async (req: Request, res: Response) => {
       // Collapse internal whitespace on both sides, not just leading/trailing —
       // form dropdown text has been seen with stray double-spaces (e.g.
       // "Customer  Success Manager") that a plain trim() wouldn't catch.
+      // Also normalize en/em dashes to a plain hyphen on both sides — role
+      // titles like "Manager – Process & Proposals" use an en dash (–), but
+      // the Form's dropdown text has been seen with a plain hyphen (-)
+      // instead, which silently zero-matched every submission for that role
+      // (case+whitespace-insensitive is not dash-insensitive on its own).
       const roleMatches = await client.query(
         `SELECT id, title FROM roles
-         WHERE lower(regexp_replace(trim(title), '\\s+', ' ', 'g')) = lower(regexp_replace(trim($1), '\\s+', ' ', 'g'))
+         WHERE lower(regexp_replace(translate(trim(title), '–—', '--'), '\\s+', ' ', 'g')) = lower(regexp_replace(translate(trim($1), '–—', '--'), '\\s+', ' ', 'g'))
          AND status NOT IN ('Closed – Filled', 'Closed – Cancelled')`,
         [roleQuery]
       );
