@@ -5,6 +5,7 @@ import { Application, SLA_HOURS, Candidate, Role } from '../types/index.js';
 import { scoreCandidate, priorityBucketFromScore } from '../services/resumeIQ.js';
 import { fetchResumeText } from '../services/driveService.js';
 import { parseRoleFilters, buildRoleFilterSql, toArray } from '../utils/roleFilters.js';
+import { STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
 
 const router = Router();
 router.use(authenticate);
@@ -198,6 +199,17 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
       `UPDATE applications SET stage=$1, stage_entry_time=NOW(), sla_hours=$2,
        sla_breach=false, last_updated=NOW() WHERE id=$3`,
       [new_stage, slaHours, req.params.id]
+    );
+    // A stage-SLA pending_action (Resume to triage, Interview feedback due,
+    // etc.) is only ever valid for the stage it was raised against — once the
+    // stage moves on, resolve it here rather than leaving it to slaChecker's
+    // own recovery check, which can't detect this: by the time it next runs,
+    // sla_breach is already false and stage_entry_time already reset, so it
+    // has no "was breached, now isn't" transition left to see.
+    await client.query(
+      `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
+       WHERE application_id=$1 AND resolved=false AND action_type = ANY($2::text[])`,
+      [req.params.id, STAGE_SLA_ACTION_TYPES]
     );
     await logActivity(client, app.id, app.candidate_id, app.role_id,
       'Stage Changed',

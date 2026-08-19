@@ -106,9 +106,9 @@ async function checkAssignmentDeadlines(): Promise<void> {
     await query(
       `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue)
        VALUES ('HR / Recruiter','High','Assignment deadline breached',
-         'Assignment not submitted by deadline for '||$3||' – '||$4, $1, $3, $4, $5)`,
+         'Assignment not submitted by deadline for '||$2||' – '||$3, $1, $2, $3, $4)`,
       [
-        round.application_id, null, cand?.full_name || '', role?.title || '',
+        round.application_id, cand?.full_name || '', role?.title || '',
         Math.floor((Date.now() - new Date(round.assignment_deadline).getTime()) / 3600000),
       ]
     );
@@ -168,6 +168,16 @@ async function checkJoiningRisk(): Promise<void> {
     );
   }
 }
+
+// Every action_type getActionTypeForStage below can produce — applications.ts
+// uses this exact list to resolve a still-open stage-SLA action the moment an
+// application's stage changes, since one of these existing for the OLD stage
+// is stale the instant the application moves on (getSlaForStage/getOwnerForStage
+// only ever apply to the application's *current* stage).
+export const STAGE_SLA_ACTION_TYPES = [
+  'Resume to triage', 'HM shortlist review', 'Interview feedback due',
+  'Reference check to initiate', 'Offer follow-up', 'Idle candidate',
+] as const;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 // 'Founders Round' no longer matches startsWith('Interview') after the

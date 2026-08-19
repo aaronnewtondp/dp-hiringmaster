@@ -29,7 +29,19 @@ router.use(authenticate);
 
 // ─── GET /api/dashboard — all Phase 1 metrics in one call ────────────────────
 router.get('/', async (req: Request, res: Response) => {
-  maybeRunSlaCheck(); // fire-and-forget — don't block the response
+  // Awaited, not fire-and-forget — same rule as JD generation/ResumeIQ (see
+  // CLAUDE.md): Vercel can freeze/tear down the function the instant this
+  // response is sent, so a detached call here could get cut off mid-loop.
+  // That's exactly what was happening: checkApplicationSLAs() sets
+  // sla_breach=true as its first statement per application, then does several
+  // more awaited queries (candidate/role lookups, the pending_actions
+  // insert) — a mid-loop teardown left applications with sla_breach=true and
+  // no pending_actions row at all, a gap that grew every time the throttle
+  // let this run again. maybeRunSlaCheck() already swallows and logs its own
+  // errors, so awaiting it here just guarantees it runs to completion before
+  // the response (and before this) goes out — it doesn't change what happens
+  // on failure.
+  await maybeRunSlaCheck();
 
   const persona = req.user!.persona;
   const userId  = req.user!.userId;
