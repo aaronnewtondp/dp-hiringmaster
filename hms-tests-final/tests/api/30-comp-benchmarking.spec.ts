@@ -1,33 +1,38 @@
 import { test, expect } from '@playwright/test';
-import { getToken, authed, createCandidateWithApp, uid, SEEDED } from '../helpers/api';
+import { getToken, authed, uid, SEEDED } from '../helpers/api';
 
-// GET /api/applications/:id/comp-benchmark — item #26's per-application comp
-// benchmarking. Distinct from the pre-existing GET /api/comp-benchmarks
-// (plural, raw benchmark-table listing, tested elsewhere): this endpoint
-// resolves ONE application's likely comp range by first checking whether
-// DigitalPaani already has an internal comp_benchmarks row grounded to the
-// application's exact role title, and only falling back to a live Claude
-// call for a market estimate when no such row exists. See compBenchmark.ts
-// — the grounding-first ordering there is explicit, confirmed for item #26,
-// not just an implementation detail this suite happens to observe.
-test.describe('GET /api/applications/:id/comp-benchmark', () => {
+// GET /api/roles/:id/comp-benchmark — item #26's internal compensation
+// benchmarking, corrected mid-batch to be per-ROLE, not per-application/
+// candidate (the feature originally lived at
+// GET /api/applications/:id/comp-benchmark; moved here once it became clear
+// the benchmark is a property of the role's own JD requirements, not any
+// specific candidate applying to it). Distinct from the pre-existing
+// GET /api/comp-benchmarks (plural, raw benchmark-table listing, tested
+// elsewhere): this endpoint resolves ONE role's likely comp range by first
+// checking whether DigitalPaani already has an internal comp_benchmarks row
+// grounded to the role's exact title, matched against the role's own
+// yoe_required range (not a candidate's YOE, since there is no candidate in
+// this context), and only falling back to a live Claude call for a market
+// estimate when no such row exists. See compBenchmark.ts — the
+// grounding-first ordering there is explicit, confirmed for item #26, not
+// just an implementation detail this suite happens to observe.
+test.describe('GET /api/roles/:id/comp-benchmark', () => {
 
   // ─── Grounding-first: an internal comp_benchmarks row wins, no AI call ─────
   // seed.sql ships BEN003 with role_category='Senior Product Manager' (an
   // EXACT match against SEEDED.roles.senior_pm/R006's title) and
   // internal_band_min/max of 18/25 LPA. compBenchmark.ts's query is a plain
   // `WHERE role_category = $1` against the role's title — no fuzzy or
-  // partial matching — so any application against R006 must resolve here
-  // without ever reaching the Claude prompt. benchmark_id is asserted as
-  // "truthy string starting with BEN" rather than the literal 'BEN003' so
-  // this doesn't break if seed data is ever renumbered.
+  // partial matching — so R006 itself must resolve here without ever
+  // reaching the Claude prompt. benchmark_id is asserted as "truthy string
+  // starting with BEN" rather than the literal 'BEN003' so this doesn't
+  // break if seed data is ever renumbered.
   test.describe('internal_data path — role title exactly matches a seeded comp_benchmarks row', () => {
 
-    test('R006 (Senior Product Manager) application resolves to BEN003\'s internal band, no AI estimate', async ({ request }) => {
+    test('R006 (Senior Product Manager) resolves to BEN003\'s internal band, no AI estimate', async ({ request }) => {
       const hrToken = await getToken(request, 'hr');
-      const { application } = await createCandidateWithApp(request, hrToken, SEEDED.roles.senior_pm);
 
-      const res = await authed(request, hrToken).get(`/api/applications/${application.id}/comp-benchmark`);
+      const res = await authed(request, hrToken).get(`/api/roles/${SEEDED.roles.senior_pm}/comp-benchmark`);
       expect(res.status()).toBe(200);
       const { benchmark } = await res.json();
 
@@ -61,13 +66,12 @@ test.describe('GET /api/applications/:id/comp-benchmark', () => {
       const roleRes = await authed(request, hrToken).post('/api/roles', {
         title: `Unbenchmarked Role ${uid()}`,
         priority: 'P2',
+        yoe_required: '4-6 years',
       });
       expect(roleRes.status()).toBe(201);
       const { role } = await roleRes.json();
 
-      const { application } = await createCandidateWithApp(request, hrToken, role.id);
-
-      const res = await authed(request, hrToken).get(`/api/applications/${application.id}/comp-benchmark`);
+      const res = await authed(request, hrToken).get(`/api/roles/${role.id}/comp-benchmark`);
       expect(res.status()).toBe(200);
       const { benchmark } = await res.json();
 
@@ -91,21 +95,18 @@ test.describe('GET /api/applications/:id/comp-benchmark', () => {
   test.describe('persona gating', () => {
 
     test('hiring_manager (hm_alex) is rejected with 403', async ({ request }) => {
-      const hrToken = await getToken(request, 'hr');
-      const { application } = await createCandidateWithApp(request, hrToken, SEEDED.roles.senior_pm);
-
       const hmToken = await getToken(request, 'hm_alex');
-      const res = await authed(request, hmToken).get(`/api/applications/${application.id}/comp-benchmark`);
+      const res = await authed(request, hmToken).get(`/api/roles/${SEEDED.roles.senior_pm}/comp-benchmark`);
       expect(res.status()).toBe(403);
     });
   });
 
-  // ─── 404 on a nonexistent application id ───────────────────────────────────
-  test.describe('nonexistent application', () => {
+  // ─── 404 on a nonexistent role id ───────────────────────────────────────────
+  test.describe('nonexistent role', () => {
 
-    test('unknown application id returns 404', async ({ request }) => {
+    test('unknown role id returns 404', async ({ request }) => {
       const hrToken = await getToken(request, 'hr');
-      const res = await authed(request, hrToken).get(`/api/applications/ANONEXISTENT${uid()}/comp-benchmark`);
+      const res = await authed(request, hrToken).get(`/api/roles/RNONEXISTENT${uid()}/comp-benchmark`);
       expect(res.status()).toBe(404);
     });
   });

@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../db/index.js';
-import { Role, Candidate } from '../types/index.js';
+import { Role } from '../types/index.js';
 
 const client = new Anthropic();
 
@@ -31,26 +31,35 @@ function parseRangeBounds(range: string): { min: number | null; max: number | nu
   return { min: Math.min(...nums), max: Math.max(...nums) };
 }
 
-// comp_benchmarks (grounding) first, Claude's general market knowledge only
-// when no usable internal row exists for this role — the explicit ordering
-// confirmed for item #26, not a stylistic choice.
-export async function getCompBenchmark(role: Role, candidate: Candidate): Promise<CompBenchmarkResult> {
+// Item #26, corrected: this is a per-ROLE benchmark, not per-candidate —
+// housed on Role Detail, not Candidate Detail. comp_benchmarks (grounding)
+// is checked first, matched by role.title against role_category and, when
+// multiple experience_range rows exist for that category, by overlap
+// against the ROLE's own yoe_required range (not a specific candidate's
+// YOE, since there is no candidate in this context anymore). Claude's
+// general market knowledge is only used as a fallback when no internal row
+// exists at all for this role — the explicit ordering confirmed for #26,
+// not a stylistic choice.
+export async function getCompBenchmark(role: Role): Promise<CompBenchmarkResult> {
   const rows = await query<CompBenchmarkRow>(
     'SELECT * FROM comp_benchmarks WHERE role_category = $1 ORDER BY experience_range',
     [role.title]
   );
 
-  const yoe = candidate.years_of_experience ?? candidate.parsed_total_yoe ?? null;
+  const roleRange = role.yoe_required ? parseRangeBounds(role.yoe_required) : { min: null, max: null };
 
-  let match = yoe != null
+  let match = (roleRange.min != null && roleRange.max != null)
     ? rows.find(r => {
         const { min, max } = parseRangeBounds(r.experience_range);
-        return min != null && max != null && yoe >= min && yoe <= max;
+        // Overlap, not containment — a role wanting "5-8 years" should
+        // still match a benchmark row scoped to "5-7 years" rather than
+        // falling through to an AI guess over one year of difference.
+        return min != null && max != null && min <= roleRange.max! && max >= roleRange.min!;
       })
     : undefined;
-  // No exact experience-range match — still grounded data, just the closest
-  // row on file for this role, rather than dropping to an AI guess when
-  // DigitalPaani has actually already benchmarked this role category.
+  // No overlapping experience_range — still grounded data, just the
+  // closest row on file for this role, rather than dropping to an AI guess
+  // when DigitalPaani has actually already benchmarked this role category.
   if (!match && rows.length > 0) match = rows[0];
 
   if (match) {
@@ -76,14 +85,9 @@ EXPERIENCE REQUIRED: ${role.yoe_required || 'Not specified'}
 MUST-HAVE SKILLS: ${role.must_have_skills || 'Not specified'}
 KEY RESPONSIBILITIES: ${role.kpi_expectations || 'Not specified'}
 
-CANDIDATE:
-Years of Experience: ${yoe ?? 'Not specified'}
-Current Industry: ${candidate.current_industry || 'Not specified'}
-Current Designation: ${candidate.current_designation || 'Not specified'}
-
 No internal DigitalPaani benchmark exists for this role. Estimate a realistic compensation
-range (INR LPA) for a mid-size, well-funded Indian startup/scaleup hiring for this role and
-candidate profile. Return ONLY valid JSON, no markdown, no code fences:
+range (INR LPA) for a mid-size, well-funded Indian startup/scaleup hiring for this role.
+Return ONLY valid JSON, no markdown, no code fences:
 {"range_min": 0, "range_max": 0, "rationale": ""}
 
 Rules: range_min/range_max are plain numbers in LPA (range_max > range_min). rationale is 1-2

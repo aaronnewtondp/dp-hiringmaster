@@ -7,6 +7,7 @@ import { rolesApi } from '../services/api.ts';
 import { Role, Application, STAGES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS, EMPLOYMENT_TYPES, VACANCY_REASONS, RECRUITMENT_CHANNELS, PRIORITIES } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, FitScore, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
+import CompBenchmarkPanel from '../components/CompBenchmarkPanel.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { format } from 'date-fns';
 
@@ -205,6 +206,7 @@ export default function RoleDetail() {
             { key: 'recruitment_mode', label: 'Recruitment Mode', type: 'multiselect', options: RECRUITMENT_CHANNELS },
           ]}
         />
+        {canHR && <CompBenchmarkPanel roleId={role.id} />}
         <EditableSection
           title="Description"
           data={role}

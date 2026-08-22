@@ -203,6 +203,11 @@ export interface Application {
   candidate_company?:         string;
   candidate_industry?:        string;
   candidate_resume_link?:     string;
+  // Server-computed, never stripped for any persona (unlike role_ctc_band,
+  // which IS stripped for non-HR-tier) — a Hiring Manager needs this yes/no
+  // signal to see the mandatory-reason gate coming before they hit the
+  // 400 from POST /:id/stage, even though they never see the actual band.
+  is_severely_over_budget?:  boolean;
 }
 
 export interface InterviewRound {

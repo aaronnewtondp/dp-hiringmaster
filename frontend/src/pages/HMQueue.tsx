@@ -9,7 +9,6 @@ import { StageBadge, FitScore, PriorityBadge, Spinner, EmptyState } from '../com
 import InterviewFeedbackModal from '../components/InterviewFeedbackModal.tsx';
 import RejectReasonModal from '../components/shared/RejectReasonModal.tsx';
 import BudgetExceptionModal from '../components/shared/BudgetExceptionModal.tsx';
-import { isSeverelyOverBudget } from '../utils/budget.ts';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -293,7 +292,12 @@ export default function HMQueue() {
   };
 
   const requestShortlist = (ids: string[]) => {
-    const anyOverBudget = awaiting.some(a => ids.includes(a.id) && isSeverelyOverBudget(a.candidate_expected_ctc, a.role_ctc_band));
+    // Server-computed (applications.ts), not re-derived from role_ctc_band
+    // client-side — that field is stripped for this exact persona (Hiring
+    // Manager), so a client-side re-derivation always came back false,
+    // meaning the modal never opened and the shortlist attempt hit the
+    // backend's 400 with no way to ever supply a reason.
+    const anyOverBudget = awaiting.some(a => ids.includes(a.id) && a.is_severely_over_budget);
     if (anyOverBudget) { setBudgetExceptionIds(ids); return; }
     shortlistIds(ids);
   };

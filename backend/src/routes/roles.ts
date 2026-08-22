@@ -7,6 +7,7 @@ import { renderLongFormJd } from '../services/pdf/longFormJd.js';
 import { renderSocialJd } from '../services/pdf/socialJd.js';
 import { uploadJdPdf } from '../services/driveService.js';
 import { parseRoleFilters, buildRoleFilterSql } from '../utils/roleFilters.js';
+import { getCompBenchmark } from '../services/compBenchmark.js';
 
 const router = Router();
 router.use(authenticate);
@@ -472,6 +473,25 @@ router.get('/:id/pipeline', async (req: Request, res: Response) => {
   }
 
   res.json({ pipeline: byStage, total: apps.length });
+});
+
+// ─── GET /api/roles/:id/comp-benchmark — internal comp benchmarking ───────────
+// Item #26 (corrected: role-specific, not tied to any one candidate) —
+// HR/Admin only, matches ctc_band's own visibility restriction. comp_benchmarks
+// is checked first as grounding data; Claude's general market knowledge is
+// only used as a fallback when no internal row exists for this role — see
+// compBenchmark.ts for the exact ordering.
+router.get('/:id/comp-benchmark', requireHR, async (req: Request, res: Response) => {
+  const role = await queryOne<Role>('SELECT * FROM roles WHERE id = $1', [req.params.id]);
+  if (!role) { res.status(404).json({ error: 'Role not found' }); return; }
+
+  try {
+    const benchmark = await getCompBenchmark(role);
+    res.json({ benchmark });
+  } catch (err) {
+    console.error('[CompBenchmark] Failed for role', req.params.id, err);
+    res.status(500).json({ error: 'Compensation benchmarking failed — please try again' });
+  }
 });
 
 export default router;

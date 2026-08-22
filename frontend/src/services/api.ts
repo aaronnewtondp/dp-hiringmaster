@@ -51,6 +51,7 @@ export const rolesApi = {
   editLog:       (id: string)                      => api.get(`/roles/${id}/edit-log`),
   activity:      (id: string)                      => api.get(`/roles/${id}/activity`),
   pipeline:      (id: string)                      => api.get(`/roles/${id}/pipeline`),
+  compBenchmark: (id: string)                      => api.get(`/roles/${id}/comp-benchmark`),
   filterOptions: ()                                 => api.get('/roles/filter-options'),
 };
 
@@ -83,7 +84,6 @@ export const applicationsApi = {
   updateScreening: (id: string, status: string)       => api.post(`/applications/${id}/screening`, { new_screening_status: status }),
   updateNotes:     (id: string, data: Record<string, unknown>) => api.patch(`/applications/${id}/notes`, data),
   setFounderFlag:  (id: string, set: boolean, note?: string)   => api.post(`/applications/${id}/founder-flag`, { set, note }),
-  compBenchmark:   (id: string)                       => api.get(`/applications/${id}/comp-benchmark`),
 };
 
 export const interviewsApi = {

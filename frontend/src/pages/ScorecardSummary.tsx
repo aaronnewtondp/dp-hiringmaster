@@ -10,7 +10,7 @@ import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
 import RejectReasonModal from '../components/shared/RejectReasonModal.tsx';
 import BudgetExceptionModal from '../components/shared/BudgetExceptionModal.tsx';
-import { isOverBudget, isWithinBudgetOrNear, isSeverelyOverBudget } from '../utils/budget.ts';
+import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 
@@ -188,7 +188,12 @@ export default function ScorecardSummary() {
   };
 
   const requestShortlist = (ids: string[]) => {
-    const anyOverBudget = apps.some(a => ids.includes(a.id) && isSeverelyOverBudget(a.candidate_expected_ctc, a.role_ctc_band));
+    // Server-computed (applications.ts), not re-derived from role_ctc_band
+    // client-side — that field is stripped for non-HR-tier personas, so a
+    // Hiring Manager's own client-side re-derivation always came back
+    // false, meaning the modal never opened and their shortlist attempt hit
+    // the backend's 400 with no way to ever supply a reason.
+    const anyOverBudget = apps.some(a => ids.includes(a.id) && a.is_severely_over_budget);
     if (anyOverBudget) { setBudgetExceptionIds(ids); return; }
     shortlistIds(ids);
   };

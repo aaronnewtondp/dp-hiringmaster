@@ -7,7 +7,6 @@ import { fetchResumeText } from '../services/driveService.js';
 import { parseRoleFilters, buildRoleFilterSql, toArray } from '../utils/roleFilters.js';
 import { STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
 import { isSeverelyOverBudget } from '../utils/budget.js';
-import { getCompBenchmark } from '../services/compBenchmark.js';
 
 const router = Router();
 router.use(authenticate);
@@ -114,7 +113,21 @@ router.get('/', async (req: Request, res: Response) => {
   const apps = await query<Application>(sql, params);
   const persona = req.user!.persona;
 
-  const result = apps.map(a => stripRestrictedFields(a as unknown as Record<string, unknown>, persona));
+  // is_severely_over_budget is computed here, BEFORE role_ctc_band is
+  // stripped for non-HR-tier personas, and deliberately excluded from
+  // RESTRICTED_FIELDS — a Hiring Manager is explicitly allowed to shortlist
+  // (and is the one who has to resolve the mandatory-reason gate on
+  // POST /:id/stage when it fires), so the frontend needs this yes/no
+  // signal even though the actual compensation figures stay hidden from
+  // them. Without it, an HM's shortlist attempt hit the backend's 400 with
+  // no way to ever open the reason modal, since the frontend's own gate
+  // check depended on role_ctc_band, which is exactly the field stripped
+  // for their persona.
+  const result = apps.map(a => {
+    const row = a as unknown as Record<string, unknown> & { candidate_expected_ctc?: number; role_ctc_band?: string };
+    const isSeverelyOver = isSeverelyOverBudget(row.candidate_expected_ctc, row.role_ctc_band);
+    return { ...stripRestrictedFields(row, persona), is_severely_over_budget: isSeverelyOver };
+  });
   res.json({ applications: result, count: apps.length });
 });
 
@@ -145,7 +158,11 @@ router.get('/:id', async (req: Request, res: Response) => {
   );
 
   const persona = req.user!.persona;
-  const safeApp = stripRestrictedFields(app as unknown as Record<string, unknown>, persona);
+  const rawApp = app as unknown as Record<string, unknown> & { candidate_expected_ctc?: number; role_ctc_band?: string };
+  // Same reasoning as the list route above — computed before stripping,
+  // never itself stripped.
+  const isSeverelyOver = isSeverelyOverBudget(rawApp.candidate_expected_ctc, rawApp.role_ctc_band);
+  const safeApp = { ...stripRestrictedFields(rawApp, persona), is_severely_over_budget: isSeverelyOver };
   res.json({ application: safeApp, rounds, activity });
 });
 
@@ -529,27 +546,6 @@ router.post('/:id/founder-flag', async (req: Request, res: Response) => {
   });
 
   res.json({ success: true });
-});
-
-// ─── GET /api/applications/:id/comp-benchmark — internal comp benchmarking ────
-// Item #26, HR/Admin only (matches ctc_band's own visibility restriction).
-// comp_benchmarks is checked first as grounding data; Claude's general
-// market knowledge is only used as a fallback when no internal row exists
-// for this role — see compBenchmark.ts for the exact ordering.
-router.get('/:id/comp-benchmark', requireHR, async (req: Request, res: Response) => {
-  const app = await queryOne<Application>('SELECT * FROM applications WHERE id = $1', [req.params.id]);
-  if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
-  const role      = await queryOne<Role>('SELECT * FROM roles WHERE id=$1', [app.role_id]);
-  const candidate = await queryOne<Candidate>('SELECT * FROM candidates WHERE id=$1', [app.candidate_id]);
-  if (!role || !candidate) { res.status(404).json({ error: 'Role or candidate not found' }); return; }
-
-  try {
-    const benchmark = await getCompBenchmark(role, candidate);
-    res.json({ benchmark });
-  } catch (err) {
-    console.error('[CompBenchmark] Failed for', req.params.id, err);
-    res.status(500).json({ error: 'Compensation benchmarking failed — please try again' });
-  }
 });
 
 export default router;

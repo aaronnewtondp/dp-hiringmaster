@@ -7,7 +7,6 @@ import { candidatesApi, applicationsApi, interviewsApi, refChecksApi } from '../
 import { Candidate, Application, InterviewRound, ReferenceCheck, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
 import { StageBadge, StatusBadge, PriorityBadge, OverBudgetBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import PipelineProgress from '../components/shared/PipelineProgress.tsx';
-import CompBenchmarkPanel from '../components/CompBenchmarkPanel.tsx';
 import { isOverBudget } from '../utils/budget.ts';
 import EditableSection from '../components/shared/EditableSection.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
@@ -316,7 +315,6 @@ export default function CandidateDetail() {
               { key: 'notice_period_days', label: 'Notice Period (days)', type: 'number' },
             ]}
           />
-          {canHR && <CompBenchmarkPanel applications={applications} />}
           <EditableSection
             title="Resume & Tags"
             data={candidate}
