@@ -45,7 +45,11 @@ async function checkApplicationSLAs(): Promise<void> {
 
       // Look up names for display
       const cand = await queryOne<{ full_name: string }>('SELECT full_name FROM candidates WHERE id=$1', [app.candidate_id]);
-      const role = await queryOne<{ title: string }>('SELECT title FROM roles WHERE id=$1', [app.role_id]);
+      const role = await queryOne<{ title: string; hiring_manager_name: string }>('SELECT title, hiring_manager_name FROM roles WHERE id=$1', [app.role_id]);
+      // Only 'Hiring Manager'-owned actions have a specific named person to
+      // attribute to today (the role's own HM) — 'HR / Recruiter' actions
+      // are a shared team queue, not one person's, so left null there.
+      const responsiblePerson = ownerType === 'Hiring Manager' ? role?.hiring_manager_name || null : null;
 
       // Resolve any previous action of same type for this app (avoid duplicates)
       await query(
@@ -58,13 +62,13 @@ async function checkApplicationSLAs(): Promise<void> {
       await query(
         `INSERT INTO pending_actions
            (owner_type, priority_level, action_type, description, application_id,
-            candidate_name, role_title, hours_overdue)
-         VALUES ($1,'High',$2,$3,$4,$5,$6,$7)`,
+            candidate_name, role_title, hours_overdue, role_id, responsible_person)
+         VALUES ($1,'High',$2,$3,$4,$5,$6,$7,$8,$9)`,
         [
           ownerType, actionType,
           `${actionType} — ${Math.floor(hoursInStage - slaHrs)}h overdue`,
           app.id, cand?.full_name || 'Unknown', role?.title || 'Unknown',
-          Math.max(0, hoursInStage - slaHrs),
+          Math.max(0, hoursInStage - slaHrs), app.role_id, responsiblePerson,
         ]
       );
     } else if (hoursInStage <= slaHrs && app.sla_breach) {
@@ -104,12 +108,13 @@ async function checkAssignmentDeadlines(): Promise<void> {
     const role = await queryOne<{ title: string }>('SELECT title FROM roles WHERE id=$1', [app?.role_id]);
 
     await query(
-      `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue)
+      `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue, role_id)
        VALUES ('HR / Recruiter','High','Assignment deadline breached',
-         'Assignment not submitted by deadline for '||$2||' – '||$3, $1, $2, $3, $4)`,
+         'Assignment not submitted by deadline for '||$2||' – '||$3, $1, $2, $3, $4, $5)`,
       [
         round.application_id, cand?.full_name || '', role?.title || '',
         Math.floor((Date.now() - new Date(round.assignment_deadline).getTime()) / 3600000),
+        app?.role_id || null,
       ]
     );
   }
@@ -135,10 +140,10 @@ async function checkRoleAging(): Promise<void> {
       );
       if (!existing) {
         await query(
-          `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, role_title, hours_overdue)
+          `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, role_title, hours_overdue, role_id)
            VALUES ('Leadership / Founders','High','Role aging alert',
-             $1||' ('||$2||') — '||$3||' days open (Red Alert)', $1, 0)`,
-          [role.title, role.priority, days]
+             $1||' ('||$2||') — '||$3||' days open (Red Alert)', $1, 0, $4)`,
+          [role.title, role.priority, days, role.id]
         );
       }
     }
@@ -161,10 +166,10 @@ async function checkJoiningRisk(): Promise<void> {
     const cand = await queryOne<{ full_name: string }>('SELECT full_name FROM candidates WHERE id=$1', [app.candidate_id]);
     const role = await queryOne<{ title: string }>('SELECT title FROM roles WHERE id=$1', [app.role_id]);
     await query(
-      `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue)
+      `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue, role_id)
        VALUES ('HR / Recruiter','High','Joining risk — no contact',
-         'No HR contact logged in 5+ days for '||$3||' (Offer Accepted)', $1, $3, $4, 120)`,
-      [app.id, null, cand?.full_name || '', role?.title || '']
+         'No HR contact logged in 5+ days for '||$3||' (Offer Accepted)', $1, $3, $4, 120, $5)`,
+      [app.id, null, cand?.full_name || '', role?.title || '', app.role_id]
     );
   }
 }

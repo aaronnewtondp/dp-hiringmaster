@@ -56,8 +56,11 @@ test.describe('Candidate-Role Linking API', () => {
     test('returns 400 for a non-existent role_id', async ({ request }) => {
       const token = await getToken(request, 'hr');
       const { candidate } = await createCandidate(request, token);
+      // A random-suffixed id, not a small fixed number like R999 — this
+      // local dataset accumulates enough test roles over time that a fixed
+      // low id eventually stops being guaranteed-nonexistent.
       const res = await authed(request, token).post(`/api/candidates/${candidate.id}/applications`, {
-        role_id: 'R999',
+        role_id: `RNONEXISTENT${uid()}`,
       });
       expect(res.status()).toBe(400);
     });

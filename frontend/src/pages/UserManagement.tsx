@@ -124,7 +124,7 @@ export default function UserManagement() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">User Management</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{users.length} users</p>
+          <p className="text-sm font-mono text-gray-500 mt-0.5">{users.length} users</p>
         </div>
         <button onClick={() => setEditingUser('new')} className="btn-primary">
           <UserPlus className="w-4 h-4" /> Add user

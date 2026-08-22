@@ -15,6 +15,7 @@ import AgencyDetail from './pages/AgencyDetail.tsx';
 import HMQueue from './pages/HMQueue.tsx';
 import ScorecardSummary from './pages/ScorecardSummary.tsx';
 import UserManagement from './pages/UserManagement.tsx';
+import Help from './pages/Help.tsx';
 import RequireSuperAdmin from './components/shared/RequireSuperAdmin.tsx';
 import { Spinner } from './components/shared/Badges.tsx';
 
@@ -55,6 +56,7 @@ function AppRoutes() {
         <Route path="/hm-queue"                element={<HMQueue />} />
         <Route path="/scorecard"               element={<ScorecardSummary />} />
         <Route path="/users"                   element={<RequireSuperAdmin><UserManagement /></RequireSuperAdmin>} />
+        <Route path="/help"                    element={<Help />} />
         <Route path="*"                        element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Layout>

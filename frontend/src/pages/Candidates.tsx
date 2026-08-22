@@ -10,6 +10,7 @@ import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { formatDistanceToNow } from 'date-fns';
 
 const UNLINKED_PAGE_SIZE = 50;
@@ -27,17 +28,19 @@ interface UnmatchedSubmission {
 export default function Candidates() {
   const { canHR } = useAuth();
   const qc = useQueryClient();
-  const [searchInput, setSearchInput] = useState('');
-  const [search,      setSearch]      = useState('');
-  const [filterStage, setFilterStage] = useState('all');
-  const [filterSla,   setFilterSla]   = useState(false);
-  const [filterInBudget, setFilterInBudget] = useState(false);
-  const [roleIds,     setRoleIds]     = useState<string[]>([]);
-  const [departments, setDepartments] = useState<string[]>([]);
-  const [locations,   setLocations]   = useState<string[]>([]);
-  const [modes,       setModes]       = useState<string[]>([]);
-  const [priorities,  setPriorities]  = useState<string[]>([]);
-  const [applicationStatuses, setApplicationStatuses] = useState<string[]>([]);
+  // Persisted to sessionStorage (not plain useState) so filters survive
+  // navigating away and back within the same browser session — item #13.
+  const [searchInput, setSearchInput] = usePersistedState('candidates.search', '');
+  const [search,      setSearch]      = useState(searchInput);
+  const [filterStage, setFilterStage] = usePersistedState('candidates.stage', 'all');
+  const [filterSla,   setFilterSla]   = usePersistedState('candidates.sla', false);
+  const [filterInBudget, setFilterInBudget] = usePersistedState('candidates.inBudget', false);
+  const [roleIds,     setRoleIds]     = usePersistedState<string[]>('candidates.roleIds', []);
+  const [departments, setDepartments] = usePersistedState<string[]>('candidates.departments', []);
+  const [locations,   setLocations]   = usePersistedState<string[]>('candidates.locations', []);
+  const [modes,       setModes]       = usePersistedState<string[]>('candidates.modes', []);
+  const [priorities,  setPriorities]  = usePersistedState<string[]>('candidates.priorities', []);
+  const [applicationStatuses, setApplicationStatuses] = usePersistedState<string[]>('candidates.statuses', []);
   const [showUnlinked, setShowUnlinked] = useState(true);
   const [linkCandidate, setLinkCandidate] = useState<Candidate | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Candidate | null>(null);
@@ -50,7 +53,7 @@ export default function Candidates() {
   // these never got an application at all, so a candidate with OTHER
   // existing applications doesn't show up in Unlinked Candidates above
   // (they're not unlinked) and had no visibility anywhere before this panel.
-  const [showUnmatched,   setShowUnmatched]   = useState(true);
+  const [showUnmatched,   setShowUnmatched]   = useState(false);
   const [unmatchedOffset, setUnmatchedOffset] = useState(0);
   const [unmatchedItems,  setUnmatchedItems]  = useState<UnmatchedSubmission[]>([]);
   const [unmatchedTotal,  setUnmatchedTotal]  = useState(0);
@@ -261,9 +264,9 @@ export default function Candidates() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Candidates</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <p className="text-sm font-mono text-gray-500 mt-0.5">
             {filtered.length} applications
-            {slaCount > 0 && <span className="ml-2 text-red-500 font-medium">{slaCount} SLA breached</span>}
+            {slaCount > 0 && <span className="ml-2 text-red-500 font-medium font-mono">{slaCount} SLA breached</span>}
           </p>
         </div>
         {canHR && (
@@ -282,7 +285,7 @@ export default function Candidates() {
             onClick={() => setShowUnlinked(v => !v)}
             className="w-full px-5 py-3 flex items-center justify-between hover:bg-amber-50/50 transition-colors"
           >
-            <h2 className="text-sm font-semibold text-amber-800">Unlinked candidates ({unlinkedTotal})</h2>
+            <h2 className="text-sm font-semibold font-mono text-amber-800">Unlinked candidates ({unlinkedTotal})</h2>
             {showUnlinked ? <ChevronUp className="w-4 h-4 text-amber-600" /> : <ChevronDown className="w-4 h-4 text-amber-600" />}
           </button>
           {showUnlinked && (
@@ -341,7 +344,7 @@ export default function Candidates() {
             onClick={() => setShowUnmatched(v => !v)}
             className="w-full px-5 py-3 flex items-center justify-between hover:bg-amber-50/50 transition-colors"
           >
-            <h2 className="text-sm font-semibold text-amber-800">Unmatched role submissions ({unmatchedTotal})</h2>
+            <h2 className="text-sm font-semibold font-mono text-amber-800">Unmatched role submissions ({unmatchedTotal})</h2>
             {showUnmatched ? <ChevronUp className="w-4 h-4 text-amber-600" /> : <ChevronDown className="w-4 h-4 text-amber-600" />}
           </button>
           {showUnmatched && (
@@ -437,7 +440,7 @@ export default function Candidates() {
 
       {canHR && selectedIds.size > 0 && (
         <div className="card px-4 py-2.5 flex items-center gap-3 bg-dp-50 border-dp-200">
-          <span className="text-sm font-medium text-dp-800">{selectedIds.size} selected</span>
+          <span className="text-sm font-medium font-mono text-dp-800">{selectedIds.size} selected</span>
           <button onClick={() => setShowBulkStageModal(true)} className="btn-secondary text-xs py-1.5 px-3">Change Stage</button>
           <button onClick={() => setShowBulkStatusModal(true)} className="btn-secondary text-xs py-1.5 px-3">Change Status</button>
           <button onClick={() => setSelectedIds(new Set())} className="text-xs text-gray-500 hover:text-gray-700 ml-auto">Clear</button>
@@ -509,7 +512,7 @@ export default function Candidates() {
                   <td className="table-td px-2 py-4"><FitScore score={app.ai_fit_score} /></td>
                   <td className="table-td px-2 py-4 text-xs text-gray-500 truncate">
                     <div className="flex items-center gap-1.5">
-                      <span className="truncate">
+                      <span className="truncate font-mono">
                         {app.candidate_ctc_fixed ? `₹${app.candidate_ctc_fixed}L` : '—'}
                         {' → '}
                         {app.candidate_expected_ctc ? `₹${app.candidate_expected_ctc}L` : '—'}
@@ -517,7 +520,7 @@ export default function Candidates() {
                       <OverBudgetBadge overBudget={isOverBudget(app.candidate_expected_ctc, app.role_ctc_band)} />
                     </div>
                   </td>
-                  <td className="table-td px-2 py-4 text-xs text-gray-500 truncate">
+                  <td className="table-td px-2 py-4 text-xs font-mono text-gray-500 truncate">
                     {app.candidate_notice_period_days != null ? `${app.candidate_notice_period_days}d` : '—'}
                   </td>
                   <td className="table-td px-2 py-4 text-xs text-gray-500 truncate" title={app.preferred_location || ''}>{app.preferred_location || '—'}</td>
@@ -590,7 +593,7 @@ export default function Candidates() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
             <h3 className="text-base font-semibold mb-1">Update stage</h3>
-            <p className="text-sm text-gray-500 mb-4">{selectedIds.size} candidates</p>
+            <p className="text-sm font-mono text-gray-500 mb-4">{selectedIds.size} candidates</p>
             <select value={bulkStageValue} onChange={e => setBulkStageValue(e.target.value)} className="select mb-4">
               {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -607,7 +610,7 @@ export default function Candidates() {
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
             <div>
               <h3 className="text-base font-semibold">Update status</h3>
-              <p className="text-sm text-gray-500">{selectedIds.size} candidates</p>
+              <p className="text-sm font-mono text-gray-500">{selectedIds.size} candidates</p>
             </div>
             <select value={bulkStatusValue} onChange={e => setBulkStatusValue(e.target.value)} className="select">
               {['Active', 'Rejected', 'Withdrawn', 'Hold for Future'].map(s => <option key={s} value={s}>{s}</option>)}

@@ -36,12 +36,20 @@ test.describe('Access Control — restricted field enforcement', () => {
       expect(body.application.agency_fee_estimate).toBeUndefined();
     });
 
-    test('cannot create a role — returns 403', async ({ request }) => {
+    // Hiring Manager can now submit a role REQUEST (item #24) — same Draft
+    // result as HR creating one directly, just logged differently on the
+    // activity timeline. See 02-roles.spec.ts's "HM can request a role" for
+    // the positive-path coverage; this restricted-field test asserts the
+    // request's compensation band is silently dropped, not that the whole
+    // action is forbidden.
+    test('can request a role, but ctc_band is dropped', async ({ request }) => {
       const token = await getToken(request, 'hm_alex');
       const res   = await authed(request, token).post('/api/roles', {
-        title: `HM role ${uid()}`, priority: 'P1',
+        title: `HM role ${uid()}`, priority: 'P1', ctc_band: '50-60 LPA',
       });
-      expect(res.status()).toBe(403);
+      expect(res.status()).toBe(201);
+      const { role } = await res.json();
+      expect(role.ctc_band).toBeNull();
     });
 
     test('cannot create a candidate — returns 403', async ({ request }) => {

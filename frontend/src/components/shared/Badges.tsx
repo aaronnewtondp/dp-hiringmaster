@@ -50,16 +50,16 @@ export function StatusBadge({ status }: { status: string }) {
 
 // ─── Aging indicator ─────────────────────────────────────────────────────────
 export function AgingBadge({ alert, days }: { alert: AgingAlert; days: number }) {
-  if (alert === 'red')    return <span className="text-xs font-medium text-red-600">🔴 {days}d</span>;
-  if (alert === 'yellow') return <span className="text-xs font-medium text-amber-600">🟡 {days}d</span>;
-  return <span className="text-xs text-gray-500">{days}d</span>;
+  if (alert === 'red')    return <span className="text-xs font-medium font-mono text-red-600">🔴 {days}d</span>;
+  if (alert === 'yellow') return <span className="text-xs font-medium font-mono text-amber-600">🟡 {days}d</span>;
+  return <span className="text-xs font-mono text-gray-500">{days}d</span>;
 }
 
 // ─── Fit score ────────────────────────────────────────────────────────────────
 export function FitScore({ score }: { score?: number | null }) {
   if (score == null) return <span className="text-xs text-gray-400">—</span>;
   const color = score >= 75 ? 'text-green-700 font-semibold' : score >= 50 ? 'text-amber-700' : 'text-red-600';
-  return <span className={`text-sm ${color}`}>{score}</span>;
+  return <span className={`text-sm font-mono ${color}`}>{score}</span>;
 }
 
 // ─── SLA indicator ────────────────────────────────────────────────────────────

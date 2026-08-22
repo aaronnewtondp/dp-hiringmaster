@@ -43,9 +43,9 @@ export default function AgencyDetail() {
         </div>
         {(agency.total_submitted != null || agency.total_hired != null) && (
           <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
-            <span>{agency.total_submitted ?? 0} submitted</span>
+            <span className="font-mono">{agency.total_submitted ?? 0} submitted</span>
             <span>·</span>
-            <span>{agency.total_hired ?? 0} hired</span>
+            <span className="font-mono">{agency.total_hired ?? 0} hired</span>
           </div>
         )}
       </div>

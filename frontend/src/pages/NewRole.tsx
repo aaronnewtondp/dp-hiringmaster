@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../services/api.ts';
 import { LOCATIONS, VACANCY_REASONS, DEPARTMENTS, EMPLOYMENT_TYPES, RECRUITMENT_CHANNELS, PRIORITIES } from '../types/index.ts';
+import { useAuth } from '../contexts/AuthContext.tsx';
 
 type FormState = {
   title: string; department: string; hiring_manager_name: string; priority: string;
@@ -28,9 +29,18 @@ const REQUIRED_TEXT_FIELDS: Array<[keyof FormState, string]> = [
 
 export default function NewRole() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  // Leadership and Hiring Manager both get "request" framing (item #24) —
+  // Leadership is already HR-tier and its submission creates the role
+  // exactly as before, this only changes the copy. Hiring Manager is the
+  // one persona that's both newly able to submit at all AND never sets the
+  // compensation band (backend silently drops it for them regardless, so
+  // there's no point showing a field that won't be saved).
+  const isRequesting = user?.persona === 'hiring_manager' || user?.persona === 'leadership';
+  const hideCtcBand  = user?.persona === 'hiring_manager';
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>({
-    title: '', department: '', hiring_manager_name: '', priority: 'P1',
+    title: '', department: '', hiring_manager_name: hideCtcBand ? (user?.name || '') : '', priority: 'P1',
     new_or_replacement: 'New Position', vacancy_reason: [], num_openings: 1, location: '',
     employment_type: 'Full-Time / Permanent', yoe_required: '', qualification_required: '',
     ctc_band: '', kpi_expectations: '', job_description: '',
@@ -44,9 +54,13 @@ export default function NewRole() {
     form[k].includes(value) ? form[k].filter(x => x !== value) : [...form[k], value]
   );
 
+  const requiredFields = hideCtcBand
+    ? REQUIRED_TEXT_FIELDS.filter(([key]) => key !== 'ctc_band')
+    : REQUIRED_TEXT_FIELDS;
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    for (const [key, label] of REQUIRED_TEXT_FIELDS) {
+    for (const [key, label] of requiredFields) {
       if (!String(form[key]).trim()) { toast.error(`${label} is required`); return; }
     }
     if (!form.num_openings || form.num_openings < 1) { toast.error('Openings must be at least 1'); return; }
@@ -58,9 +72,12 @@ export default function NewRole() {
       // All roles get an assignment round by default — no per-role toggle.
       const payload = { ...form, assignment_required: true };
       const res = await rolesApi.create(payload as Record<string, unknown>);
-      toast.success('Role created');
+      toast.success(isRequesting ? 'Role requested — HR will review it shortly' : 'Role created');
       navigate(`/roles/${res.data.role.id}`);
-    } catch { toast.error('Failed to create role'); }
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(msg || (isRequesting ? 'Failed to submit request' : 'Failed to create role'));
+    }
     setSaving(false);
   };
 
@@ -69,7 +86,7 @@ export default function NewRole() {
       <Link to="/roles" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-4">
         <ArrowLeft className="w-4 h-4" /> Roles
       </Link>
-      <h1 className="text-xl font-semibold text-gray-900 mb-6">Create new role</h1>
+      <h1 className="text-xl font-semibold text-gray-900 mb-6">{isRequesting ? 'Request new role' : 'Create new role'}</h1>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="card p-6 space-y-4">
@@ -143,10 +160,12 @@ export default function NewRole() {
               <label className="label">Educational Qualifications *</label>
               <input className="input" value={form.qualification_required} onChange={e => set('qualification_required', e.target.value)} required placeholder="e.g. B.Tech / B.E. in Computer Science" />
             </div>
-            <div>
-              <label className="label">CTC Band (₹ LPA) *</label>
-              <input className="input" value={form.ctc_band} onChange={e => set('ctc_band', e.target.value)} required placeholder="e.g. 18–24 LPA" />
-            </div>
+            {!hideCtcBand && (
+              <div>
+                <label className="label">CTC Band (₹ LPA) *</label>
+                <input className="input" value={form.ctc_band} onChange={e => set('ctc_band', e.target.value)} required placeholder="e.g. 18–24 LPA" />
+              </div>
+            )}
             <div>
               <label className="label">Open Date *</label>
               <input className="input" type="date" value={form.start_date} onChange={e => set('start_date', e.target.value)} required />
@@ -205,7 +224,9 @@ export default function NewRole() {
         <div className="flex gap-3 justify-end">
           <Link to="/roles" className="btn-secondary">Cancel</Link>
           <button type="submit" disabled={saving} className="btn-primary">
-            {saving ? 'Creating…' : 'Create role'}
+            {isRequesting
+              ? (saving ? 'Submitting…' : 'Submit request')
+              : (saving ? 'Creating…' : 'Create role')}
           </button>
         </div>
       </form>

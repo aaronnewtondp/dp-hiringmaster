@@ -7,18 +7,25 @@ import { Role, PRIORITIES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS } from '../type
 import { PriorityBadge, AgingBadge, StageBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { usePersistedState } from '../hooks/usePersistedState.ts';
 
 export default function Roles() {
-  const { canHR } = useAuth();
-  const [search,      setSearch]      = useState('');
-  const [departments, setDepartments] = useState<string[]>([]);
-  const [locations,   setLocations]   = useState<string[]>([]);
-  const [modes,       setModes]       = useState<string[]>([]);
-  const [priorities,  setPriorities]  = useState<string[]>([]);
+  const { canHR, user } = useAuth();
+  // Leadership is already HR-tier (canHR) but still gets "Request Role"
+  // wording, not "New Role" — the underlying action is identical (creates a
+  // Draft role), only the framing differs per item #24. Hiring Manager gets
+  // the same button newly, where previously they had none at all.
+  const canCreateOrRequestRole = canHR || user?.persona === 'hiring_manager';
+  const isRequestFraming = user?.persona === 'hiring_manager' || user?.persona === 'leadership';
+  const [search,      setSearch]      = usePersistedState('roles.search', '');
+  const [departments, setDepartments] = usePersistedState<string[]>('roles.departments', []);
+  const [locations,   setLocations]   = usePersistedState<string[]>('roles.locations', []);
+  const [modes,       setModes]       = usePersistedState<string[]>('roles.modes', []);
+  const [priorities,  setPriorities]  = usePersistedState<string[]>('roles.priorities', []);
   // Defaults to the same "Active" scope the old status toggle defaulted to
   // (Live – Sourcing only) — an empty Status filter now means "all
   // statuses," so this preselection keeps first-load behavior unchanged.
-  const [statuses,    setStatuses]    = useState<string[]>(['Live – Sourcing']);
+  const [statuses,    setStatuses]    = usePersistedState<string[]>('roles.statuses', ['Live – Sourcing']);
 
   const { data: filterOptionsData } = useQuery<{ data: { recruitment_modes: string[] } }>({
     queryKey: ['roles', 'filter-options'],
@@ -58,9 +65,9 @@ export default function Roles() {
           <h1 className="text-xl font-semibold text-gray-900">Roles</h1>
           <p className="text-sm text-gray-500 mt-0.5">{filtered.length} roles shown</p>
         </div>
-        {canHR && (
+        {canCreateOrRequestRole && (
           <Link to="/roles/new" className="btn-primary">
-            <Plus className="w-4 h-4" /> New role
+            <Plus className="w-4 h-4" /> {isRequestFraming ? 'Request role' : 'New role'}
           </Link>
         )}
       </div>

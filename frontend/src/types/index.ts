@@ -224,6 +224,14 @@ export interface InterviewRound {
   overall_round_score?:     number;
   overall_assessment?:      string;
   round_recommendation?:    string;
+  eval_areas_assessed?:     string[];
+  scores_per_area?:         Record<string, number>;
+  confidence_level?:        string;
+  strengths_observed?:      string;
+  key_concerns?:            string;
+  unresolved_questions?:    string;
+  suggested_probe_areas?:   string;
+  notes?:                   string;
   assignment_repo_id?:      string;
   assignment_send_date?:    string;
   assignment_deadline?:     string;
@@ -245,18 +253,22 @@ export interface InterviewRound {
 }
 
 export interface PendingAction {
-  id:              number;
-  owner_type:      string;
-  priority_level:  string;
-  action_type:     string;
-  description:     string;
-  application_id?: string;
-  candidate_name?: string;
-  role_title?:     string;
-  hours_overdue:   number;
-  created_at:      string;
-  current_stage?:  string | null;
-  sla_breach?:     boolean | null;
+  id:                  number;
+  owner_type:          string;
+  priority_level:      string;
+  action_type:         string;
+  description?:        string;
+  application_id?:     string;
+  candidate_name?:     string;
+  role_title?:         string;
+  hours_overdue:       number;
+  created_at:          string;
+  current_stage?:      string | null;
+  sla_breach?:         boolean | null;
+  candidate_id?:       string | null;
+  role_id?:            string | null;
+  responsible_person?: string | null;
+  ai_fit_score?:       number | null;
 }
 
 export interface DashboardData {
@@ -272,12 +284,23 @@ export interface DashboardData {
   };
   pending_actions_by_owner:  Record<string, PendingAction[]>;
   aging_roles:               Array<Role & { active_count: number }>;
+  low_pipeline:              Array<Role & { active_count: number }>;
+  roles_by_status:           Record<string, number>;
   hiring_funnel:             Array<{ stage: string; count: string }>;
+  rejected_by_stage:         Record<string, number>;
 
   // ── Phase 2 (PRD §18) ──────────────────────────────────────────────────────
   source_quality:     Array<{ source_channel: string; n: number; pass_rate: number; hire_rate: number }>;
   time_to_fill:       { overall_days: number | null; by_priority: Record<Priority, number | null> };
-  agency_performance: Array<{ agency_id: string; agency_name: string; n: number; hire_rate: number }>;
+
+  // ── Operational Velocity (items #10/#29) ────────────────────────────────────
+  velocity: {
+    interview_to_offer_ratio: number | null;
+    interviewed_count:  number;
+    offered_count:      number;
+    tat_by_stage:       Array<{ stage: string; avg_hours: number; n: number }>;
+    biggest_drop_off:   { stage: string; count: number } | null;
+  };
 }
 
 // ─── Utility constants ────────────────────────────────────────────────────────
@@ -349,6 +372,15 @@ export const WITHDRAWAL_REASONS = [
   'Accepted another offer', 'Counter-offer accepted',
   'Compensation below expectation', 'Process too slow',
   'Role / company mismatch', 'Personal reasons', 'Unresponsive / no-show',
+];
+
+// Shown when shortlisting a candidate whose expected CTC is 15%+ over the
+// role's stated band (utils/budget.ts's isSeverelyOverBudget) — mirrors
+// REJECTION_REASONS/WITHDRAWAL_REASONS' pattern, backend enforces the gate.
+export const OVER_BUDGET_SHORTLIST_REASONS = [
+  'Exceptional / rare skillset', 'Business-critical urgency to fill role',
+  'Candidate open to negotiate at offer stage', 'Leadership-approved exception',
+  'Other',
 ];
 
 export interface ReferenceCheck {

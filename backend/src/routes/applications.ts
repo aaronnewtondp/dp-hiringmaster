@@ -6,6 +6,8 @@ import { scoreCandidate, priorityBucketFromScore } from '../services/resumeIQ.js
 import { fetchResumeText } from '../services/driveService.js';
 import { parseRoleFilters, buildRoleFilterSql, toArray } from '../utils/roleFilters.js';
 import { STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
+import { isSeverelyOverBudget } from '../utils/budget.js';
+import { getCompBenchmark } from '../services/compBenchmark.js';
 
 const router = Router();
 router.use(authenticate);
@@ -149,11 +151,24 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 // ─── POST /api/applications/:id/stage — advance stage (PRD Section 9.3) ──────
 router.post('/:id/stage', async (req: Request, res: Response) => {
-  const { new_stage, skip_reason } = req.body;
+  const { new_stage, skip_reason, budget_exception_reason_cat, budget_exception_reason_detail } = req.body;
   if (!new_stage) { res.status(400).json({ error: 'new_stage required' }); return; }
 
   const app = await queryOne<Application>('SELECT * FROM applications WHERE id = $1', [req.params.id]);
   if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
+
+  // A candidate 15%+ over the role's stated CTC band needs an explicit,
+  // on-record reason before they can be shortlisted — enforced here (not
+  // just the frontend gate) since this is the only place every shortlist
+  // path (single-row, bulk, either page) actually goes through.
+  if (new_stage === 'Shortlisted') {
+    const candidate = await queryOne<{ expected_ctc: number }>('SELECT expected_ctc FROM candidates WHERE id=$1', [app.candidate_id]);
+    const role      = await queryOne<{ ctc_band: string }>('SELECT ctc_band FROM roles WHERE id=$1', [app.role_id]);
+    if (isSeverelyOverBudget(candidate?.expected_ctc, role?.ctc_band) && !budget_exception_reason_cat) {
+      res.status(400).json({ error: "This candidate's expected CTC is 15%+ over the role's band — select a reason before shortlisting." });
+      return;
+    }
+  }
 
   // HR-tier can advance to any stage. Everyone else may only make the one
   // transition the simplified HM-shortlist workflow depends on — Resume
@@ -194,11 +209,23 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
 
   const slaHours = getSlaHours(new_stage, app.ai_fit_score);
 
+  // Dashboard's Time to Fill is a literal AVG(offer_accepted_date -
+  // role.start_date) — nothing ever stamped this column on the stage
+  // transition itself, so every accepted offer silently had a NULL date and
+  // never contributed to the metric despite the stage genuinely being
+  // 'Offer Accepted'. Same gap existed for 'Offer Released' → offer_sent_date.
+  let offerDateSql = '';
+  if (new_stage === 'Offer Released') offerDateSql = ', offer_sent_date=NOW()';
+  if (new_stage === 'Offer Accepted') offerDateSql = ', offer_accepted_date=NOW()';
+
   await transaction(async (client) => {
     await client.query(
       `UPDATE applications SET stage=$1, stage_entry_time=NOW(), sla_hours=$2,
-       sla_breach=false, last_updated=NOW() WHERE id=$3`,
-      [new_stage, slaHours, req.params.id]
+       sla_breach=false, last_updated=NOW()${offerDateSql},
+       budget_exception_reason_cat=COALESCE($4, budget_exception_reason_cat),
+       budget_exception_reason_detail=COALESCE($5, budget_exception_reason_detail)
+       WHERE id=$3`,
+      [new_stage, slaHours, req.params.id, budget_exception_reason_cat || null, budget_exception_reason_detail || null]
     );
     // A stage-SLA pending_action (Resume to triage, Interview feedback due,
     // etc.) is only ever valid for the stage it was raised against — once the
@@ -213,7 +240,9 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
     );
     await logActivity(client, app.id, app.candidate_id, app.role_id,
       'Stage Changed',
-      skip_reason ? `Stage skipped to ${new_stage}. Reason: ${skip_reason}` : `Stage → ${new_stage}`,
+      skip_reason ? `Stage skipped to ${new_stage}. Reason: ${skip_reason}`
+        : budget_exception_reason_cat ? `Stage → ${new_stage} (over-budget exception: ${budget_exception_reason_cat})`
+        : `Stage → ${new_stage}`,
       app.stage, new_stage, req.user!.userId, req.user!.name
     );
   });
@@ -310,11 +339,11 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
       'SELECT full_name FROM candidates WHERE id = $1', [app.candidate_id]
     );
     await queryOne(
-      `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue)
-       VALUES ('Hiring Manager', 'High', 'HM shortlist review', $1, $2, $3, $4, 0)`,
+      `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue, role_id, responsible_person)
+       VALUES ('Hiring Manager', 'High', 'HM shortlist review', $1, $2, $3, $4, 0, $5, $6)`,
       [
         `Review ${cand?.full_name} for ${role?.title} — HM shortlist decision needed`,
-        app.id, cand?.full_name, role?.title
+        app.id, cand?.full_name, role?.title, app.role_id, role?.hiring_manager_name,
       ]
     );
   }
@@ -500,6 +529,27 @@ router.post('/:id/founder-flag', async (req: Request, res: Response) => {
   });
 
   res.json({ success: true });
+});
+
+// ─── GET /api/applications/:id/comp-benchmark — internal comp benchmarking ────
+// Item #26, HR/Admin only (matches ctc_band's own visibility restriction).
+// comp_benchmarks is checked first as grounding data; Claude's general
+// market knowledge is only used as a fallback when no internal row exists
+// for this role — see compBenchmark.ts for the exact ordering.
+router.get('/:id/comp-benchmark', requireHR, async (req: Request, res: Response) => {
+  const app = await queryOne<Application>('SELECT * FROM applications WHERE id = $1', [req.params.id]);
+  if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
+  const role      = await queryOne<Role>('SELECT * FROM roles WHERE id=$1', [app.role_id]);
+  const candidate = await queryOne<Candidate>('SELECT * FROM candidates WHERE id=$1', [app.candidate_id]);
+  if (!role || !candidate) { res.status(404).json({ error: 'Role or candidate not found' }); return; }
+
+  try {
+    const benchmark = await getCompBenchmark(role, candidate);
+    res.json({ benchmark });
+  } catch (err) {
+    console.error('[CompBenchmark] Failed for', req.params.id, err);
+    res.status(500).json({ error: 'Compensation benchmarking failed — please try again' });
+  }
 });
 
 export default router;

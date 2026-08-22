@@ -6,6 +6,8 @@ import toast from 'react-hot-toast';
 import { candidatesApi, applicationsApi, interviewsApi, refChecksApi } from '../services/api.ts';
 import { Candidate, Application, InterviewRound, ReferenceCheck, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
 import { StageBadge, StatusBadge, PriorityBadge, OverBudgetBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import PipelineProgress from '../components/shared/PipelineProgress.tsx';
+import CompBenchmarkPanel from '../components/CompBenchmarkPanel.tsx';
 import { isOverBudget } from '../utils/budget.ts';
 import EditableSection from '../components/shared/EditableSection.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
@@ -90,6 +92,11 @@ export default function CandidateDetail() {
   const [scheduleNextNum, setScheduleNextNum] = useState(1);
   const [scheduleDefaultName, setScheduleDefaultName] = useState('');
   const [expandedApps, setExpandedApps] = useState<Set<string>>(new Set());
+  // Full submitted feedback (strengths/concerns/notes/per-area scores) is
+  // otherwise only ever visible inside the submission modal — this expands
+  // a round's row in place to show it read-only, mirroring expandedApps'
+  // toggle pattern one level down.
+  const [expandedRounds, setExpandedRounds] = useState<Set<string>>(new Set());
   const [showAddApplication, setShowAddApplication] = useState(false);
 
   const [assignmentModal, setAssignmentModal] = useState<AssignmentModalState | null>(null);
@@ -103,6 +110,13 @@ export default function CandidateDetail() {
     setExpandedApps(prev => {
       const s = new Set(prev);
       s.has(appId) ? s.delete(appId) : s.add(appId);
+      return s;
+    });
+
+  const toggleRound = (roundId: string) =>
+    setExpandedRounds(prev => {
+      const s = new Set(prev);
+      s.has(roundId) ? s.delete(roundId) : s.add(roundId);
       return s;
     });
 
@@ -238,6 +252,17 @@ export default function CandidateDetail() {
                 <span key={tag} className="px-2 py-0.5 rounded-full text-xs bg-dp-50 text-dp-700 font-medium">{tag}</span>
               ))}
             </div>
+            {applications.length > 0 && (
+              <div className="mt-3 space-y-2.5 max-w-xl">
+                {applications.map(app => (
+                  <PipelineProgress
+                    key={app.id}
+                    stage={app.stage}
+                    label={applications.length > 1 ? app.role_title : undefined}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -291,6 +316,7 @@ export default function CandidateDetail() {
               { key: 'notice_period_days', label: 'Notice Period (days)', type: 'number' },
             ]}
           />
+          {canHR && <CompBenchmarkPanel applications={applications} />}
           <EditableSection
             title="Resume & Tags"
             data={candidate}
@@ -408,8 +434,14 @@ export default function CandidateDetail() {
                             <p className="text-xs text-gray-400">No rounds scheduled yet.</p>
                           ) : (
                             <div className="space-y-2">
-                              {rounds.map(round => (
-                                <div key={round.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 border border-gray-100">
+                              {rounds.map(round => {
+                                // Only rounds with actual submitted feedback have anything to
+                                // expand — Pending/Overdue Standard rounds or Assignment rounds
+                                // with no outcome recorded yet show no chevron at all.
+                                const hasDetail = round.round_type === 'Assignment' ? !!round.assignment_outcome : round.feedback_status === 'Submitted';
+                                return (
+                                <div key={round.id} className="rounded-lg bg-gray-50 border border-gray-100">
+                                <div className="flex items-center justify-between py-2 px-3">
                                   <div>
                                     <div className="flex items-center gap-2">
                                       <span className="text-xs font-medium text-gray-900">Round {round.round_number} — {round.round_name}</span>
@@ -502,8 +534,79 @@ export default function CandidateDetail() {
                                       <MessageSquare className="w-3.5 h-3.5" /> Submit feedback
                                     </button>
                                   )}
+                                  {hasDetail && (
+                                    <button onClick={() => toggleRound(round.id)} title="Show full feedback" className="text-gray-400 hover:text-dp-600 shrink-0 ml-2">
+                                      {expandedRounds.has(round.id) ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                    </button>
+                                  )}
                                 </div>
-                              ))}
+                                {hasDetail && expandedRounds.has(round.id) && (
+                                  <div className="px-3 pb-3 pt-1 border-t border-gray-100 space-y-2 text-xs">
+                                    {round.round_type === 'Assignment' ? (
+                                      <>
+                                        {[
+                                          ['Technical accuracy', round.score_technical_accuracy],
+                                          ['Problem solving',    round.score_problem_solving],
+                                          ['Clarity',            round.score_clarity],
+                                          ['Practical thinking', round.score_practical_thinking],
+                                          ['Completeness',       round.score_completeness],
+                                        ].some(([, v]) => v != null) && (
+                                          <div className="flex flex-wrap gap-3 text-gray-600">
+                                            {[
+                                              ['Technical accuracy', round.score_technical_accuracy],
+                                              ['Problem solving',    round.score_problem_solving],
+                                              ['Clarity',            round.score_clarity],
+                                              ['Practical thinking', round.score_practical_thinking],
+                                              ['Completeness',       round.score_completeness],
+                                            ].filter(([, v]) => v != null).map(([label, v]) => (
+                                              <span key={label as string}>{label}: <span className="font-medium">{Number(v)}/5</span></span>
+                                            ))}
+                                          </div>
+                                        )}
+                                        {round.assignment_notes && (
+                                          <p className="text-gray-600 whitespace-pre-wrap">{round.assignment_notes}</p>
+                                        )}
+                                        {!round.assignment_notes && ![round.score_technical_accuracy, round.score_problem_solving, round.score_clarity, round.score_practical_thinking, round.score_completeness].some(v => v != null) && (
+                                          <p className="text-gray-400">No further detail recorded.</p>
+                                        )}
+                                      </>
+                                    ) : (
+                                      <>
+                                        {round.scores_per_area && Object.keys(round.scores_per_area).length > 0 && (
+                                          <div className="flex flex-wrap gap-3 text-gray-600">
+                                            {Object.entries(round.scores_per_area).map(([area, score]) => (
+                                              <span key={area}>{area}: <span className="font-medium">{score}/5</span></span>
+                                            ))}
+                                          </div>
+                                        )}
+                                        {round.confidence_level && (
+                                          <p className="text-gray-500">Confidence: <span className="font-medium text-gray-700">{round.confidence_level}</span></p>
+                                        )}
+                                        {round.strengths_observed && (
+                                          <div><span className="font-semibold text-gray-500">Strengths: </span><span className="text-gray-600 whitespace-pre-wrap">{round.strengths_observed}</span></div>
+                                        )}
+                                        {round.key_concerns && (
+                                          <div><span className="font-semibold text-gray-500">Concerns: </span><span className="text-gray-600 whitespace-pre-wrap">{round.key_concerns}</span></div>
+                                        )}
+                                        {round.unresolved_questions && (
+                                          <div><span className="font-semibold text-gray-500">Unresolved questions: </span><span className="text-gray-600 whitespace-pre-wrap">{round.unresolved_questions}</span></div>
+                                        )}
+                                        {round.suggested_probe_areas && (
+                                          <div><span className="font-semibold text-gray-500">Suggested probe areas: </span><span className="text-gray-600 whitespace-pre-wrap">{round.suggested_probe_areas}</span></div>
+                                        )}
+                                        {round.notes && (
+                                          <div><span className="font-semibold text-gray-500">Notes: </span><span className="text-gray-600 whitespace-pre-wrap">{round.notes}</span></div>
+                                        )}
+                                        {!round.strengths_observed && !round.key_concerns && !round.unresolved_questions && !round.suggested_probe_areas && !round.notes && (!round.scores_per_area || Object.keys(round.scores_per_area).length === 0) && (
+                                          <p className="text-gray-400">No further detail recorded.</p>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                                </div>
+                                );
+                              })}
                             </div>
                           )}
                         </div>

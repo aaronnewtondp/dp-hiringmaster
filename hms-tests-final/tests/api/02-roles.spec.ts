@@ -63,7 +63,10 @@ test.describe('Roles API', () => {
 
     test('returns 404 for non-existent role', async ({ request }) => {
       const token = await getToken(request, 'hr');
-      const res   = await authed(request, token).get('/api/roles/R999');
+      // A random-suffixed id, not a small fixed number like R999 — this
+      // local dataset accumulates enough test roles over time that a fixed
+      // low id eventually stops being guaranteed-nonexistent.
+      const res   = await authed(request, token).get(`/api/roles/RNONEXISTENT${uid()}`);
       expect(res.status()).toBe(404);
     });
   });
@@ -77,7 +80,11 @@ test.describe('Roles API', () => {
       });
       expect(res.status()).toBe(201);
       const { role } = await res.json();
-      expect(role.id).toMatch(/^R\d{3}$/);
+      // Widened from a fixed 3 digits to 3+ — the seq_role-backed id used to
+      // truncate (not error) once the sequence passed 999, silently
+      // colliding with an existing low id; fixed to pad to 4 digits, so
+      // ids can legitimately be either width now.
+      expect(role.id).toMatch(/^R\d{3,}$/);
       expect(role.status).toBe('Draft');
     });
 
@@ -87,12 +94,18 @@ test.describe('Roles API', () => {
       expect(res.status()).toBe(400);
     });
 
-    test('HM cannot create a role (403)', async ({ request }) => {
+    // Hiring Manager submitting a role is now a "role request" (item #24) —
+    // same Draft-status result as HR creating one directly, just logged as
+    // 'Role Requested' instead of 'Role Created' on the activity timeline.
+    test('HM can request a role (creates a Draft role, ctc_band ignored)', async ({ request }) => {
       const token = await getToken(request, 'hm_alex');
       const res   = await authed(request, token).post('/api/roles', {
-        title: `HM attempt ${uid()}`, priority: 'P1',
+        title: `HM request ${uid()}`, priority: 'P1', ctc_band: '999-999 LPA',
       });
-      expect(res.status()).toBe(403);
+      expect(res.status()).toBe(201);
+      const { role } = await res.json();
+      expect(role.status).toBe('Draft');
+      expect(role.ctc_band).toBeNull();
     });
   });
 

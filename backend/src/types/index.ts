@@ -184,6 +184,8 @@ export interface Application {
   rejection_reason_detail?:     string;
   withdrawal_reason_cat?:       string;
   withdrawal_reason_detail?:    string;
+  budget_exception_reason_cat?:    string;
+  budget_exception_reason_detail?: string;
   offer_stage?:                 string;
   offer_approved_by?:           string;
   offer_approval_date?:         string;
@@ -292,14 +294,14 @@ export interface PendingActionGroup {
 // ─── SLA definitions ─────────────────────────────────────────────────────────
 export const SLA_HOURS: Record<string, number> = {
   RESUME_REVIEW_NORMAL:  48,
-  RESUME_REVIEW_HIGH_FIT: 24,
+  RESUME_REVIEW_HIGH_FIT: 48,  // was 24 — every 24h SLA threshold moved to 48h
   HM_SHORTLIST:          48,
-  INTERVIEW_FEEDBACK:    24,
+  INTERVIEW_FEEDBACK:    48,   // was 24
   ASSIGNMENT_SEND:       12,
   ASSIGNMENT_EVALUATE:   48,
-  REF_INIT:              24,
+  REF_INIT:              48,   // was 24
   REF_COMPLETE:          48,
-  OFFER_RELEASE:         24,
+  OFFER_RELEASE:         48,   // was 24
   IDLE:                  72,   // 3 days
   JOINING_CONTACT:       120,  // 5 days
 };

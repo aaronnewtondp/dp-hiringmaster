@@ -110,6 +110,12 @@ router.post('/ingest', async (req: Request, res: Response) => {
         sourceRowKey,
       ]
     );
+    await client.query(
+      `INSERT INTO activity_log (role_id, event_type, event_detail, performed_by_name)
+       VALUES ($1, 'Role Created', $2, 'System')`,
+      [result.rows[0].id, `${result.rows[0].title} auto-created from Requisition Form submission`]
+    );
+
     return result.rows[0] as Role;
   });
 

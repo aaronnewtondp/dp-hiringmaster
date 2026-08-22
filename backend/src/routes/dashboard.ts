@@ -27,6 +27,18 @@ async function maybeRunSlaCheck(): Promise<void> {
 const router = Router();
 router.use(authenticate);
 
+// Mirrors frontend/src/types/index.ts's STAGES exactly — backend has no
+// shared copy of this list, so it's duplicated here for the Operational
+// Velocity metrics' "reached interview"/"reached offer" threshold checks.
+const STAGE_ORDER = [
+  'Applied', 'Resume Review', 'Shortlisted',
+  'Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round',
+  'Reference Check', 'Pre-Joining Documents', 'Offer Discussion',
+  'Offer Released', 'Offer Accepted', 'Joined',
+];
+const FIRST_INTERVIEW_IDX = STAGE_ORDER.indexOf('Interview Round 1');
+const FIRST_OFFER_IDX     = STAGE_ORDER.indexOf('Offer Released');
+
 // ─── GET /api/dashboard — all Phase 1 metrics in one call ────────────────────
 router.get('/', async (req: Request, res: Response) => {
   // Awaited, not fire-and-forget — same rule as JD generation/ResumeIQ (see
@@ -61,7 +73,8 @@ router.get('/', async (req: Request, res: Response) => {
   const [
     roleStats, candidateStats, slaBreaches,
     pendingActions, agingRoles, pipeline, joiningRisk,
-    sourceQualityRows, timeToFillRows, agencyPerfRows,
+    sourceQualityRows, timeToFillRows, rejectedByStageRows,
+    allStageRows, tatByStageRows,
   ] = await Promise.all([
     // Role counts by priority and status
     (() => {
@@ -81,7 +94,7 @@ router.get('/', async (req: Request, res: Response) => {
       return query<{ bucket: string; count: string }>(`
         SELECT
           CASE
-            WHEN ai_fit_score >= 75 THEN 'strong_fit'
+            WHEN ai_fit_score >= 70 THEN 'strong_fit'
             WHEN ai_fit_score >= 50 THEN 'review'
             WHEN ai_fit_score IS NULL THEN 'unscored'
             ELSE 'low'
@@ -121,13 +134,16 @@ router.get('/', async (req: Request, res: Response) => {
       return query<{ owner_type: string; priority_level: string; action_type: string;
                description: string; id: number; application_id: string;
                candidate_name: string; role_title: string; hours_overdue: number;
-               current_stage: string | null; sla_breach: boolean | null }>(`
-        SELECT pa.*, a.stage AS current_stage, a.sla_breach AS sla_breach
+               current_stage: string | null; sla_breach: boolean | null;
+               candidate_id: string | null; role_id: string | null; responsible_person: string | null;
+               ai_fit_score: number | null }>(`
+        SELECT pa.*, a.stage AS current_stage, a.sla_breach AS sla_breach,
+               a.candidate_id AS candidate_id, a.ai_fit_score AS ai_fit_score
         FROM pending_actions pa
         LEFT JOIN applications a ON a.id = pa.application_id
         WHERE pa.resolved=false
           AND pa.action_type <> 'Role aging alert'
-          ${scoped ? ` AND a.role_id IN ${scoped.sql}` : ''}
+          ${scoped ? ` AND COALESCE(a.role_id, pa.role_id) IN ${scoped.sql}` : ''}
         ORDER BY pa.priority_level DESC, pa.created_at ASC
       `, scoped?.params || []);
     })(),
@@ -217,20 +233,76 @@ router.get('/', async (req: Request, res: Response) => {
       `, f.params);
     })(),
 
-    // Agency Performance (Phase 2, PRD §18) — submissions/hire-rate
-    // definitions match agencies.ts's total_submitted/total_hired exactly
-    // (status NOT IN Rejected/Withdrawn; stage = 'Joined'), so this card's
-    // numbers agree with each agency's own detail page.
+    // Rejected-per-stage (hiring funnel subtext) — the stage column freezes
+    // at whatever it was when status became Rejected (stage/status are
+    // independent fields, nothing moves stage on rejection), so this is
+    // literally "how many were rejected while sitting at each stage."
     (() => {
       const scoped = roleIdsSubquery(filters, 1);
-      return query<{ agency_id: string; agency_name: string; n: string; hired: string }>(`
-        SELECT ag.id AS agency_id, ag.name AS agency_name,
-               COUNT(*) FILTER (WHERE a.status NOT IN ('Rejected','Withdrawn')) AS n,
-               COUNT(*) FILTER (WHERE a.stage = 'Joined') AS hired
-        FROM applications a JOIN agencies ag ON ag.id = a.agency_id
+      return query<{ stage: string; count: string }>(`
+        SELECT stage, COUNT(*) as count
+        FROM applications
+        WHERE status = 'Rejected'
+        ${scoped ? ` AND role_id IN ${scoped.sql}` : ''}
+        GROUP BY stage
+      `, scoped?.params || []);
+    })(),
+
+    // Operational Velocity (items #10/#29) — every application's current
+    // (frozen-on-rejection) stage, regardless of status, for the
+    // interview-to-offer ratio: unlike the Hiring Funnel/rejected-by-stage
+    // queries above, this deliberately does NOT filter by status, since a
+    // candidate who interviewed and was later rejected still "reached
+    // interview" for this ratio's purpose.
+    (() => {
+      const scoped = roleIdsSubquery(filters, 1);
+      return query<{ stage: string; count: string }>(`
+        SELECT stage, COUNT(*) as count
+        FROM applications
         WHERE 1=1
-        ${scoped ? ` AND a.role_id IN ${scoped.sql}` : ''}
-        GROUP BY ag.id, ag.name ORDER BY n DESC
+        ${scoped ? ` AND role_id IN ${scoped.sql}` : ''}
+        GROUP BY stage
+      `, scoped?.params || []);
+    })(),
+
+    // Turnaround time per stage, in hours — derived entirely from existing
+    // 'Stage Changed' activity_log rows (applications.ts's logActivity),
+    // no new schema needed. Each Stage-Changed event's new_value is the
+    // stage being entered at created_at; LEAD gives the timestamp of the
+    // NEXT stage change for the same application, i.e. when that stage was
+    // left. The 'Applied' segment (entered at application_date, left at the
+    // application's first-ever Stage Changed event) is unioned in
+    // separately since nothing ever logs "entering Applied" as an event.
+    // Rows with no left_at yet (still sitting in that stage) are excluded —
+    // an open-ended stay isn't a turnaround time yet.
+    (() => {
+      const scoped = roleIdsSubquery(filters, 1);
+      const roleJoin = scoped ? `JOIN applications ra ON ra.id = al.application_id AND ra.role_id IN ${scoped.sql}` : '';
+      const appliedRoleJoin = scoped ? `AND a.role_id IN ${scoped.sql}` : '';
+      return query<{ stage: string; avg_hours: string; n: string }>(`
+        WITH events AS (
+          SELECT al.application_id, al.new_value AS stage, al.created_at AS entered_at,
+                 LEAD(al.created_at) OVER (PARTITION BY al.application_id ORDER BY al.created_at) AS left_at
+          FROM activity_log al
+          ${roleJoin}
+          WHERE al.event_type = 'Stage Changed' AND al.application_id IS NOT NULL
+        ),
+        applied_segment AS (
+          SELECT a.id AS application_id, 'Applied' AS stage, a.application_date AS entered_at,
+                 MIN(al.created_at) AS left_at
+          FROM applications a
+          JOIN activity_log al ON al.application_id = a.id AND al.event_type = 'Stage Changed'
+          WHERE 1=1 ${appliedRoleJoin}
+          GROUP BY a.id, a.application_date
+        ),
+        segments AS (
+          SELECT stage, entered_at, left_at FROM events WHERE left_at IS NOT NULL
+          UNION ALL
+          SELECT stage, entered_at, left_at FROM applied_segment WHERE left_at IS NOT NULL
+        )
+        SELECT stage, AVG(EXTRACT(EPOCH FROM (left_at - entered_at)) / 3600) AS avg_hours, COUNT(*) AS n
+        FROM segments
+        GROUP BY stage
       `, scoped?.params || []);
     })(),
   ]);
@@ -238,7 +310,12 @@ router.get('/', async (req: Request, res: Response) => {
   // ── Build metrics ───────────────────────────────────────────────────────────
   const openRolesByPriority: Record<string, number> = { P0: 0, P1: 0, P2: 0, P3: 0 };
   let openRolesCount = 0;
+  // Roles by status — every status roleStats saw, not just the "open" subset
+  // above (which only counts Live – Sourcing/Approved/Under Review). Replaces
+  // the dashboard's old free-form role-Status filter with a direct count.
+  const rolesByStatus: Record<string, number> = {};
   for (const row of roleStats) {
+    rolesByStatus[row.status] = (rolesByStatus[row.status] || 0) + parseInt(row.count);
     if (['Live – Sourcing','Approved','Under Review'].includes(row.status)) {
       openRolesByPriority[row.priority] = (openRolesByPriority[row.priority] || 0) + parseInt(row.count);
       openRolesCount += parseInt(row.count);
@@ -271,6 +348,16 @@ router.get('/', async (req: Request, res: Response) => {
   for (const pa of pendingActions) {
     if (!pendingByOwner[pa.owner_type]) pendingByOwner[pa.owner_type] = [];
     pendingByOwner[pa.owner_type].push(pa);
+  }
+  // Hiring Manager column specifically: highest fit score first, so the HM
+  // sees their best candidates at the top of an overdue list rather than
+  // whatever order SLA breaches happened to fire in. Rows with no score
+  // (e.g. the Compensation change flag, which isn't tied to an application)
+  // sort last, not first.
+  if (pendingByOwner['Hiring Manager']) {
+    pendingByOwner['Hiring Manager'] = [...pendingByOwner['Hiring Manager']].sort(
+      (a, b) => (b.ai_fit_score ?? -1) - (a.ai_fit_score ?? -1)
+    );
   }
 
   // For HMs — filter to their own pending actions only
@@ -322,16 +409,43 @@ router.get('/', async (req: Request, res: Response) => {
     by_priority: byPriority,
   };
 
-  // ── Agency Performance — hire_rate as 0-100, 1 decimal ──────────────────────
-  const agencyPerformance = agencyPerfRows.map(r => {
-    const n = parseInt(r.n);
-    return {
-      agency_id:   r.agency_id,
-      agency_name: r.agency_name,
-      n,
-      hire_rate: n > 0 ? round1((parseInt(r.hired) / n) * 100) : 0,
-    };
-  });
+  // ── Rejected-per-stage — subtext under each hiring-funnel bar ───────────────
+  const rejectedByStage: Record<string, number> = {};
+  for (const row of rejectedByStageRows) {
+    rejectedByStage[row.stage] = parseInt(row.count);
+  }
+
+  // ── Operational Velocity (items #10/#29) ────────────────────────────────────
+  // Interview-to-offer ratio: of everyone who ever reached an interview
+  // round (regardless of what happened after — rejected, withdrawn, hired),
+  // what fraction reached Offer Released or beyond. stage never resets on
+  // rejection (see rejected-by-stage above), so a stage index comparison on
+  // the current, possibly-frozen stage correctly captures "furthest reached."
+  let interviewedCount = 0;
+  let offeredCount = 0;
+  for (const row of allStageRows) {
+    const idx = STAGE_ORDER.indexOf(row.stage);
+    if (idx < 0) continue;
+    const count = parseInt(row.count);
+    if (idx >= FIRST_INTERVIEW_IDX) interviewedCount += count;
+    if (idx >= FIRST_OFFER_IDX) offeredCount += count;
+  }
+  const interviewToOfferRatio = interviewedCount > 0 ? round1((offeredCount / interviewedCount) * 100) : null;
+
+  // Turnaround time per stage, sorted slowest-first — "where is time being
+  // wasted" is directly the top of this list. Filtered to the current
+  // canonical stage list — activity_log can carry 'Stage Changed' rows
+  // naming stages retired in an earlier rework (e.g. 'Screening Call'),
+  // which would otherwise show up as a stage nobody can currently be in.
+  const tatByStage = tatByStageRows
+    .filter(r => STAGE_ORDER.includes(r.stage))
+    .map(r => ({ stage: r.stage, avg_hours: round1(Number(r.avg_hours)), n: parseInt(r.n) }))
+    .sort((a, b) => b.avg_hours - a.avg_hours);
+
+  // Biggest drop-off — the single stage with the most rejections, already
+  // computed above for the funnel subtext; surfaced here as one clear
+  // callout rather than making the caller scan the whole map.
+  const biggestDropOff = Object.entries(rejectedByStage).sort((a, b) => b[1] - a[1])[0];
 
   res.json({
     metrics: {
@@ -348,10 +462,18 @@ router.get('/', async (req: Request, res: Response) => {
     pending_actions_by_owner: pendingByOwner,
     aging_roles:   rolesWithAging.filter(r => r.aging_alert !== 'ok'),
     low_pipeline:  lowPipelineRoles,
+    roles_by_status: rolesByStatus,
     source_quality:     sourceQuality,
     time_to_fill:       timeToFill,
-    agency_performance: agencyPerformance,
     hiring_funnel: pipeline,
+    rejected_by_stage: rejectedByStage,
+    velocity: {
+      interview_to_offer_ratio: interviewToOfferRatio,
+      interviewed_count: interviewedCount,
+      offered_count: offeredCount,
+      tat_by_stage: tatByStage,
+      biggest_drop_off: biggestDropOff ? { stage: biggestDropOff[0], count: biggestDropOff[1] } : null,
+    },
     joining_risk:  joiningRisk,
   });
 });

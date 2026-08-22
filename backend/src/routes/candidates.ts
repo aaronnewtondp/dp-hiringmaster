@@ -430,7 +430,14 @@ router.get('/:id/edit-log', async (req: Request, res: Response) => {
 // ─── GET /api/candidates/:id/activity — full activity timeline ────────────────
 router.get('/:id/activity', async (req: Request, res: Response) => {
   const log = await query(
-    `SELECT al.*, u.name AS performed_by_name, r.title AS role_title
+    // COALESCE, not a bare override — see roles.ts's identical GET
+    // /:id/activity for the full explanation: al.* already carries the
+    // row's own performed_by_name (set at insert time for system-attributed
+    // events, e.g. 'System' for ResumeIQ scoring, where performed_by itself
+    // is NULL). A bare "u.name AS performed_by_name" let the LEFT JOIN's
+    // NULL silently clobber that stored value instead of only filling in
+    // the live name for rows that do have a real performed_by.
+    `SELECT al.*, COALESCE(u.name, al.performed_by_name) AS performed_by_name, r.title AS role_title
      FROM activity_log al
      LEFT JOIN users u ON u.id = al.performed_by
      LEFT JOIN roles r ON r.id = al.role_id

@@ -12,6 +12,8 @@ export interface FieldConfig {
   options?: string[];
   /** Excluded entirely (not rendered, not sent) — used for persona-gated fields like ctc_band. */
   hidden?: boolean;
+  /** Shown in both read and edit mode, but never as an input — for fields the server sets automatically (e.g. a role's approver_name/approval_date/start_date, only ever written by the approve action). */
+  readOnly?: boolean;
   /** Read-mode only: render the value as a clickable external link instead of plain text (e.g. Drive links). Editing still shows a plain text input. */
   linkify?: boolean;
 }
@@ -170,6 +172,12 @@ export default function EditableSection({ title, data: rawData, fields, onSave, 
           {visibleFields.map(f => (
             <div key={f.key}>
               <label className="label">{f.label}</label>
+              {f.readOnly ? (
+                <div className="text-sm text-gray-500 whitespace-pre-wrap break-words">
+                  {formatDisplay(data[f.key], f.type)}
+                </div>
+              ) : (
+                <>
               {(f.type === 'textarea' || f.type === 'json') && (
                 <textarea
                   className="input h-20 resize-none font-mono text-xs"
@@ -226,6 +234,8 @@ export default function EditableSection({ title, data: rawData, fields, onSave, 
                   value={draft[f.key] as string}
                   onChange={e => setDraft(d => ({ ...d, [f.key]: e.target.value }))}
                 />
+              )}
+                </>
               )}
             </div>
           ))}

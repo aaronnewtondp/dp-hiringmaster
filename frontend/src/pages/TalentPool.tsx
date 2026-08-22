@@ -8,6 +8,7 @@ import { StageBadge, StatusBadge, FitScore, Spinner, EmptyState } from '../compo
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { formatDistanceToNow } from 'date-fns';
 
 type Mode = 'hold_for_future' | 'archived';
@@ -17,15 +18,15 @@ export default function TalentPool() {
   const { canHR } = useAuth();
   const qc = useQueryClient();
 
-  const [mode,         setMode]         = useState<Mode>('hold_for_future');
-  const [searchInput,  setSearchInput]  = useState('');
-  const [search,       setSearch]       = useState('');
-  const [tag,          setTag]          = useState('');
-  const [skills,       setSkills]       = useState('');
-  const [industry,     setIndustry]     = useState('');
-  const [departments,  setDepartments]  = useState<string[]>([]);
-  const [locations,    setLocations]    = useState<string[]>([]);
-  const [roleIds,      setRoleIds]      = useState<string[]>([]);
+  const [mode,         setMode]         = usePersistedState<Mode>('talentpool.mode', 'hold_for_future');
+  const [searchInput,  setSearchInput]  = usePersistedState('talentpool.search', '');
+  const [search,       setSearch]       = useState(searchInput);
+  const [tag,          setTag]          = usePersistedState('talentpool.tag', '');
+  const [skills,       setSkills]       = usePersistedState('talentpool.skills', '');
+  const [industry,     setIndustry]     = usePersistedState('talentpool.industry', '');
+  const [departments,  setDepartments]  = usePersistedState<string[]>('talentpool.departments', []);
+  const [locations,    setLocations]    = usePersistedState<string[]>('talentpool.locations', []);
+  const [roleIds,      setRoleIds]      = usePersistedState<string[]>('talentpool.roleIds', []);
   const [offset,       setOffset]       = useState(0);
   const [items,        setItems]        = useState<Candidate[]>([]);
   const [total,        setTotal]        = useState(0);
@@ -79,7 +80,7 @@ export default function TalentPool() {
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Talent Pool</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
+        <p className="text-sm font-mono text-gray-500 mt-0.5">
           {mode === 'hold_for_future'
             ? `${total} on hold for future roles`
             : `${total} archived candidates (rejected/withdrawn)`}

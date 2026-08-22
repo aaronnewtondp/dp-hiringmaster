@@ -20,3 +20,13 @@ export function isWithinBudgetOrNear(expectedCtc?: number | null, ctcBand?: stri
   if (max == null || expectedCtc == null) return true; // can't evaluate — don't hide
   return expectedCtc <= max * OVER_BUDGET_TOLERANCE;
 }
+
+// Stricter than isOverBudget() (which flags any amount over) — this is the
+// specific 15%+ threshold past which shortlisting requires an explicit,
+// on-record reason (backend/src/utils/budget.ts mirrors this exactly and
+// enforces it server-side too).
+export function isSeverelyOverBudget(expectedCtc?: number | null, ctcBand?: string | null): boolean {
+  const max = parseCtcBandMax(ctcBand);
+  if (max == null || expectedCtc == null) return false;
+  return expectedCtc >= max * OVER_BUDGET_TOLERANCE;
+}

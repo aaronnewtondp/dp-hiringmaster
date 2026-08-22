@@ -1,11 +1,19 @@
 import { test, expect } from '@playwright/test';
-import { getToken, authed } from '../helpers/api';
+import { getToken, authed, SEEDED, uid } from '../helpers/api';
 
 // Shape of one row in pending_actions_by_owner[...] as returned by
 // GET /api/dashboard — current_stage/sla_breach come from the LEFT JOIN onto
 // applications, so both are nullable (entries with no application_id, e.g.
 // 'Role aging alert' historically, or the CTC-change trigger's action, have
 // no linked application at all).
+//
+// role_id/responsible_person are real columns on pending_actions itself
+// (pa.* — role_id lets a row with no application_id, like the CTC-change
+// flag, still link back to a real role; responsible_person is a plain
+// denormalized name). candidate_id/ai_fit_score are not pending_actions
+// columns at all — they ride in on the same LEFT JOIN onto applications that
+// current_stage/sla_breach already used, so they're nullable for exactly the
+// same reason: no application_id, no join match, null across the board.
 type PendingActionEntry = {
   id: number;
   owner_type: string;
@@ -18,6 +26,10 @@ type PendingActionEntry = {
   hours_overdue: number | null;
   current_stage: string | null;
   sla_breach: boolean | null;
+  role_id: string | null;
+  responsible_person: string | null;
+  candidate_id: string | null;
+  ai_fit_score: number | null;
 };
 
 // Replicates dashboard.ts's totalPendingActions formula exactly:
@@ -155,6 +167,118 @@ test.describe('Pending Actions by Owner — regressions', () => {
 
       const expectedTotal = computeExpectedTotal(hmEntries);
       expect(metrics.total_pending_actions).toBe(expectedTotal);
+    });
+  });
+
+  // ─── role_id / responsible_person / candidate_id / ai_fit_score must be present on every row ──
+  // Same shape of gap as current_stage/sla_breach above, hit again this batch:
+  // role_id and responsible_person were just added as real columns on
+  // pending_actions itself (role_id specifically so a row with no
+  // application_id — the CTC-change trigger's 'Compensation change flag' —
+  // can still be linked back to a real role instead of only carrying a
+  // denormalized role_title string nobody can join on). candidate_id and
+  // ai_fit_score ride in on the pre-existing LEFT JOIN onto applications
+  // (the same join current_stage/sla_breach already used), added so the
+  // frontend can deep-link a Pending Action row straight to the candidate
+  // and show their fit score without a second round-trip. hasOwnProperty is
+  // used deliberately, not a truthy check — all four are legitimately null
+  // for entries with no application_id (e.g. Compensation change flag has
+  // no candidate_id/ai_fit_score since it isn't tied to an application at
+  // all, and role_id/responsible_person can independently be null on other
+  // action types that never populate them) — a truthy check would pass even
+  // if the columns/join were dropped entirely.
+  test.describe('pending_actions rows carry role_id, responsible_person, candidate_id, and ai_fit_score', () => {
+
+    test('every entry across pending_actions_by_owner has all four keys, even when their value is null', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const res   = await authed(request, token).get('/api/dashboard');
+      expect(res.status()).toBe(200);
+      const { pending_actions_by_owner } = await res.json();
+
+      const allEntries: PendingActionEntry[] = Object.values(pending_actions_by_owner).flat() as PendingActionEntry[];
+      expect(allEntries.length).toBeGreaterThan(0);
+
+      for (const entry of allEntries) {
+        expect(Object.prototype.hasOwnProperty.call(entry, 'role_id')).toBe(true);
+        expect(Object.prototype.hasOwnProperty.call(entry, 'responsible_person')).toBe(true);
+        expect(Object.prototype.hasOwnProperty.call(entry, 'candidate_id')).toBe(true);
+        expect(Object.prototype.hasOwnProperty.call(entry, 'ai_fit_score')).toBe(true);
+      }
+    });
+  });
+
+  // ─── Hiring Manager column is sorted by ai_fit_score, highest first ───────
+  // dashboard.ts re-sorts pending_actions_by_owner['Hiring Manager']
+  // specifically (every other owner column keeps the query's default
+  // priority_level DESC, created_at ASC order) so an HM sees their
+  // strongest candidates at the top of an overdue list, not whatever order
+  // SLA breaches happened to fire in. The comparator is
+  // `(b.ai_fit_score ?? -1) - (a.ai_fit_score ?? -1)` — an entry with no
+  // score at all (e.g. Compensation change flag, which isn't tied to an
+  // application) is treated as -1 so it sorts to the bottom rather than
+  // floating to the top ahead of every real scored candidate.
+  test.describe("pending_actions_by_owner['Hiring Manager'] is sorted by ai_fit_score descending", () => {
+
+    test("entries are non-increasing by ai_fit_score, with null/missing scores treated as -1 and sorted last", async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const res   = await authed(request, token).get('/api/dashboard');
+      expect(res.status()).toBe(200);
+      const { pending_actions_by_owner } = await res.json();
+
+      const hmEntries: PendingActionEntry[] = pending_actions_by_owner['Hiring Manager'] || [];
+      // Needs real data to actually exercise the ordering — an empty or
+      // single-element array would make the pairwise check below pass
+      // trivially without proving anything.
+      expect(hmEntries.length).toBeGreaterThan(0);
+
+      const effectiveScore = (e: PendingActionEntry) =>
+        e.ai_fit_score === null || e.ai_fit_score === undefined ? -1 : e.ai_fit_score;
+
+      for (let i = 0; i < hmEntries.length - 1; i++) {
+        expect(effectiveScore(hmEntries[i])).toBeGreaterThanOrEqual(effectiveScore(hmEntries[i + 1]));
+      }
+    });
+  });
+
+  // ─── Compensation change flag now links back to the actual role ──────────
+  // flag_ctc_change()'s pending_actions INSERT used to write only
+  // role_title — a denormalized text snapshot with no FK, so there was no
+  // way to deep-link the Leadership card's row back to the role it actually
+  // describes (and nothing to join on if the role were later renamed).
+  // The trigger now also writes role_id. This test fires the trigger for
+  // real (PATCH a seeded role's ctc_band, which the trigger's
+  // `OLD.ctc_band IS DISTINCT FROM NEW.ctc_band` guard is watching) and
+  // confirms the resulting row carries both the new role_id column and the
+  // expected old→new description text. Matches on the uid()-suffixed
+  // ctc_band value baked into the description rather than on role_title
+  // alone, since a role this old realistically has several historical
+  // Compensation change flag rows already sitting unresolved in local data.
+  test.describe('Compensation change flag pending_actions row carries role_id', () => {
+
+    test("PATCHing a seeded role's ctc_band fires flag_ctc_change() and the resulting entry has role_id set to that role's id", async ({ request }) => {
+      const token = await getToken(request, 'hr');
+
+      const roleId = SEEDED.roles.backend_dev;
+      const roleRes = await authed(request, token).get(`/api/roles/${roleId}`);
+      expect(roleRes.status()).toBe(200);
+      const { role } = await roleRes.json();
+
+      const newCtcBand = `${uid()}-99 LPA`;
+      const patchRes = await authed(request, token).patch(`/api/roles/${roleId}`, { ctc_band: newCtcBand });
+      expect(patchRes.status()).toBe(200);
+
+      const dashRes = await authed(request, token).get('/api/dashboard');
+      expect(dashRes.status()).toBe(200);
+      const { pending_actions_by_owner } = await dashRes.json();
+
+      const leadershipEntries: PendingActionEntry[] = pending_actions_by_owner['Leadership / Founders'] || [];
+      const flagEntry = leadershipEntries.find(
+        e => e.action_type === 'Compensation change flag' && e.description.includes(newCtcBand)
+      );
+
+      expect(flagEntry).toBeTruthy();
+      expect(flagEntry!.role_id).toBe(role.id);
+      expect(flagEntry!.role_title).toBe(role.title);
     });
   });
 });

@@ -1,7 +1,7 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ChevronDown, ChevronUp, CheckCircle, PauseCircle, XCircle } from 'lucide-react';
+import { ChevronDown, ChevronUp, CheckCircle, PauseCircle, XCircle, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi, rolesApi } from '../services/api.ts';
 import { Application, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
@@ -9,8 +9,10 @@ import { Spinner, EmptyState, OverBudgetBadge } from '../components/shared/Badge
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
 import RejectReasonModal from '../components/shared/RejectReasonModal.tsx';
-import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
+import BudgetExceptionModal from '../components/shared/BudgetExceptionModal.tsx';
+import { isOverBudget, isWithinBudgetOrNear, isSeverelyOverBudget } from '../utils/budget.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { usePersistedState } from '../hooks/usePersistedState.ts';
 
 // Same chunked-batching constant as Candidates.tsx / HMQueue.tsx's bulk actions.
 const BULK_CONCURRENCY = 3;
@@ -54,27 +56,44 @@ export default function ScorecardSummary() {
   const qc = useQueryClient();
   const { canLead } = useAuth();
   const [searchParams] = useSearchParams();
-  // Arriving from a role's detail page ("Scorecard Summary" button there)
-  // pre-filters to that role — read once on mount; the Role MultiSelectFilter
-  // below is the single source of truth after that (clearing it un-filters,
-  // same as picking it manually would).
-  const [roleIds,     setRoleIds]     = useState<string[]>(() => {
+  // Filters persisted to sessionStorage (item #13) so they survive
+  // navigating away and back. roleIds is the one exception on initial
+  // mount: arriving from a role's detail page ("Scorecard Summary" button
+  // there) is an explicit, deliberate filter intent that should override
+  // whatever was left over from a previous visit — handled in the effect
+  // below, after the persisted value has already loaded.
+  const [roleIds,     setRoleIds]     = usePersistedState<string[]>('scorecard.roleIds', []);
+  const [searchInput, setSearchInput] = usePersistedState('scorecard.search', '');
+  const [search,      setSearch]      = useState(searchInput);
+  const [departments, setDepartments] = usePersistedState<string[]>('scorecard.departments', []);
+  const [locations,   setLocations]   = usePersistedState<string[]>('scorecard.locations', []);
+  const [modes,       setModes]       = usePersistedState<string[]>('scorecard.modes', []);
+  const [priorities,  setPriorities]  = usePersistedState<string[]>('scorecard.priorities', []);
+  const [statuses,    setStatuses]    = usePersistedState<string[]>('scorecard.statuses', []);
+  const [filterInBudget, setFilterInBudget] = usePersistedState('scorecard.inBudget', false);
+
+  useEffect(() => {
     const roleId = searchParams.get('role_id');
-    return roleId ? [roleId] : [];
-  });
-  const [departments, setDepartments] = useState<string[]>([]);
-  const [locations,   setLocations]   = useState<string[]>([]);
-  const [modes,       setModes]       = useState<string[]>([]);
-  const [priorities,  setPriorities]  = useState<string[]>([]);
-  const [statuses,    setStatuses]    = useState<string[]>([]);
-  const [filterInBudget, setFilterInBudget] = useState(false);
+    if (roleId) setRoleIds([roleId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [expanded,    setExpanded]    = useState<Set<string>>(new Set());
   const [stageModalApp, setStageModalApp] = useState<Application | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [rejectTargetIds, setRejectTargetIds] = useState<string[] | null>(null);
+  const [budgetExceptionIds, setBudgetExceptionIds] = useState<string[] | null>(null);
   const [bulkSaving, setBulkSaving] = useState(false);
 
+  // Debounced free-text search — same pattern/timing as Candidates.tsx's own
+  // `q` search, hitting the shared /applications route's server-side match
+  // over candidate name/email/role title.
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 350);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
   const params: Record<string, string | string[]> = { limit: '100', scored_only: 'true' };
+  if (search)              params.q = search;
   if (roleIds.length)     params.role_id = roleIds;
   if (departments.length) params.department = departments;
   if (locations.length)   params.location = locations;
@@ -88,7 +107,7 @@ export default function ScorecardSummary() {
   params.status = statuses.length ? statuses : ['Active'];
 
   const { data, isLoading } = useQuery<{ data: { applications: Application[] } }>({
-    queryKey: ['applications', 'scorecard', roleIds, departments, locations, modes, priorities, statuses],
+    queryKey: ['applications', 'scorecard', search, roleIds, departments, locations, modes, priorities, statuses],
     queryFn:  () => applicationsApi.list(params),
   });
   const allApps = data?.data?.applications || [];
@@ -105,7 +124,7 @@ export default function ScorecardSummary() {
   const modeOptions = filterOptionsData?.data?.recruitment_modes || [];
   const roleOptions = (filterOptionsData?.data?.roles || []).map(r => ({ value: r.id, label: r.title }));
 
-  const hasActiveFilters = roleIds.length || departments.length || locations.length || modes.length || priorities.length || statuses.length || filterInBudget;
+  const hasActiveFilters = !!search || roleIds.length || departments.length || locations.length || modes.length || priorities.length || statuses.length || filterInBudget;
 
   const toggleExpanded = (id: string) => setExpanded(prev => {
     const s = new Set(prev);
@@ -148,7 +167,41 @@ export default function ScorecardSummary() {
     refreshApps();
   };
 
-  const bulkShortlist     = () => runBulk(id => applicationsApi.advanceStage(id, 'Shortlisted'), Array.from(selectedIds), 'shortlisted');
+  // 15%+ over-budget candidates need an explicit reason before shortlisting
+  // (backend enforces this too — this is just so the user isn't surprised by
+  // a 400). One shared reason applies to the whole batch when bulk-acting,
+  // same as bulk Reject's single reason-for-the-batch pattern.
+  const shortlistIds = async (ids: string[], reasonCat?: string, reasonDetail?: string) => {
+    const opts = { budgetExceptionReasonCat: reasonCat, budgetExceptionReasonDetail: reasonDetail };
+    if (ids.length === 1) {
+      try {
+        await applicationsApi.advanceStage(ids[0], 'Shortlisted', opts);
+        toast.success('Candidate shortlisted');
+        refreshApps();
+      } catch (err: unknown) {
+        const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+        toast.error(msg || 'Action failed');
+      }
+    } else {
+      await runBulk(id => applicationsApi.advanceStage(id, 'Shortlisted', opts), ids, 'shortlisted');
+    }
+  };
+
+  const requestShortlist = (ids: string[]) => {
+    const anyOverBudget = apps.some(a => ids.includes(a.id) && isSeverelyOverBudget(a.candidate_expected_ctc, a.role_ctc_band));
+    if (anyOverBudget) { setBudgetExceptionIds(ids); return; }
+    shortlistIds(ids);
+  };
+
+  const handleBudgetExceptionConfirm = async (reasonCat: string, reasonDetail: string) => {
+    if (!budgetExceptionIds) return;
+    setBulkSaving(true);
+    await shortlistIds(budgetExceptionIds, reasonCat, reasonDetail);
+    setBulkSaving(false);
+    setBudgetExceptionIds(null);
+  };
+
+  const bulkShortlist     = () => requestShortlist(Array.from(selectedIds));
   const bulkHoldForFuture = () => runBulk(id => applicationsApi.updateStatus(id, { new_status: 'Hold for Future' }), Array.from(selectedIds), 'put on hold');
 
   const handleBulkReject = async (reasonCat: string, reasonDetail: string) => {
@@ -166,17 +219,6 @@ export default function ScorecardSummary() {
     setBulkSaving(false);
     setRejectTargetIds(null);
     refreshApps();
-  };
-
-  const shortlistOne = async (id: string) => {
-    try {
-      await applicationsApi.advanceStage(id, 'Shortlisted');
-      toast.success('Candidate shortlisted');
-      refreshApps();
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      toast.error(msg || 'Action failed');
-    }
   };
 
   const holdForFutureOne = async (id: string) => {
@@ -207,6 +249,16 @@ export default function ScorecardSummary() {
       </div>
 
       <div className="flex gap-1.5 flex-nowrap overflow-x-auto pb-1">
+        <div className="relative shrink-0">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search candidate or role…"
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
+            className="input text-xs pl-8 py-1.5 w-52"
+          />
+        </div>
         <div className="shrink-0"><MultiSelectFilter label="Department"       options={DEPARTMENTS}          selected={departments} onChange={setDepartments} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Location"         options={LOCATIONS}            selected={locations}   onChange={setLocations} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Recruitment Mode" options={modeOptions}          selected={modes}        onChange={setModes} /></div>
@@ -279,7 +331,7 @@ export default function ScorecardSummary() {
                 </th>
                 {[
                   ['#', 'w-[32px]'], ['', 'w-[28px]'], ['Candidate', 'w-[150px]'], ['Role', 'w-[120px]'],
-                  ['Company / Industry', 'w-[140px]'], ['Notice', 'w-[55px]'], ['CTC → ECTC', 'w-[95px]'],
+                  ['Company / Industry', 'w-[140px]'], ['App. Age', 'w-[55px]'], ['Notice', 'w-[55px]'], ['CTC → ECTC', 'w-[95px]'],
                   ...DIMENSIONS.map(d => [d.label, 'w-[42px]'] as [string, string]),
                   ['Avg', 'w-[45px]'], ['Verdict', 'w-[80px]'], ['Resume', 'w-[55px]'],
                   ['Stage', 'w-[110px]'], ['Actions', 'w-[150px]'],
@@ -316,6 +368,9 @@ export default function ScorecardSummary() {
                     </td>
                     <td className="table-td px-1.5 py-3 text-xs text-gray-500 truncate" title={`${app.candidate_company || '—'} / ${app.candidate_industry || '—'}`}>
                       {app.candidate_company || '—'} / {app.candidate_industry || '—'}
+                    </td>
+                    <td className="table-td px-1.5 py-3 text-xs font-mono text-gray-500 truncate">
+                      {app.application_date ? `${Math.floor((Date.now() - new Date(app.application_date).getTime()) / 86400000)}d` : '—'}
                     </td>
                     <td className="table-td px-1.5 py-3 text-xs text-gray-500 truncate">
                       {app.candidate_notice_period_days != null ? `${app.candidate_notice_period_days}d` : '—'}
@@ -369,7 +424,7 @@ export default function ScorecardSummary() {
                             <PauseCircle className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => shortlistOne(app.id)}
+                            onClick={() => requestShortlist([app.id])}
                             title="Shortlist"
                             className="flex items-center gap-1 btn-primary text-xs py-1 px-2"
                           >
@@ -382,7 +437,7 @@ export default function ScorecardSummary() {
                   </tr>
                   {expanded.has(app.id) && (
                     <tr key={`${app.id}-detail`} className="bg-gray-50/60">
-                      <td colSpan={7 + DIMENSIONS.length + 6} className="px-4 py-4">
+                      <td colSpan={8 + DIMENSIONS.length + 6} className="px-4 py-4">
                         <div className="grid grid-cols-3 gap-4">
                           <div>
                             <div className="text-xs text-green-600 font-medium mb-1">✓ Key strengths</div>
@@ -429,6 +484,15 @@ export default function ScorecardSummary() {
           saving={bulkSaving}
           onConfirm={handleBulkReject}
           onClose={() => setRejectTargetIds(null)}
+        />
+      )}
+
+      {budgetExceptionIds && (
+        <BudgetExceptionModal
+          count={budgetExceptionIds.length}
+          saving={bulkSaving}
+          onConfirm={handleBudgetExceptionConfirm}
+          onClose={() => setBudgetExceptionIds(null)}
         />
       )}
     </div>

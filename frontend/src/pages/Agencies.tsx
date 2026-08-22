@@ -17,7 +17,7 @@ export default function Agencies() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Agency Repository</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{agencies.length} agencies</p>
+          <p className="text-sm font-mono text-gray-500 mt-0.5">{agencies.length} agencies</p>
         </div>
         <button className="btn-primary">
           <Plus className="w-4 h-4" /> Add agency
@@ -56,14 +56,14 @@ export default function Agencies() {
                       {ag.contract_status}
                     </span>
                   </td>
-                  <td className="table-td text-xs text-gray-600">
+                  <td className="table-td text-xs font-mono text-gray-600">
                     {ag.tier1_rate && <div>{ag.tier1_band || 'All'}: {ag.tier1_rate}</div>}
                     {ag.tier2_rate && <div>{ag.tier2_band}: {ag.tier2_rate}</div>}
                     {ag.tier3_rate && <div>{ag.tier3_band}: {ag.tier3_rate}</div>}
                   </td>
-                  <td className="table-td text-center font-medium">{ag.total_submitted ?? 0}</td>
-                  <td className="table-td text-center text-green-700 font-medium">{ag.total_hired ?? 0}</td>
-                  <td className="table-td text-xs text-gray-500">{ag.replacement_guarantee_days ?? 60}d</td>
+                  <td className="table-td text-center font-medium font-mono">{ag.total_submitted ?? 0}</td>
+                  <td className="table-td text-center text-green-700 font-medium font-mono">{ag.total_hired ?? 0}</td>
+                  <td className="table-td text-xs font-mono text-gray-500">{ag.replacement_guarantee_days ?? 60}d</td>
                 </tr>
               ))}
             </tbody>

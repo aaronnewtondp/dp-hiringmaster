@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle, PauseCircle, XCircle, MessageSquare, Clock, AlertCircle } from 'lucide-react';
+import { CheckCircle, PauseCircle, XCircle, MessageSquare, Clock, AlertCircle, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi, dashboardApi } from '../services/api.ts';
 import { Application, PendingAction, InterviewRound } from '../types/index.ts';
 import { StageBadge, FitScore, PriorityBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import InterviewFeedbackModal from '../components/InterviewFeedbackModal.tsx';
 import RejectReasonModal from '../components/shared/RejectReasonModal.tsx';
+import BudgetExceptionModal from '../components/shared/BudgetExceptionModal.tsx';
+import { isSeverelyOverBudget } from '../utils/budget.ts';
+import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { formatDistanceToNow } from 'date-fns';
 
 // Same chunked-batching constant/reasoning as Candidates.tsx's bulk actions.
@@ -25,27 +28,16 @@ function ShortlistRow({
   onToggleSelect,
   onAction,
   onReject,
+  onShortlist,
 }: {
   app: Application & { candidate_name?: string; role_title?: string };
   selected: boolean;
   onToggleSelect: () => void;
   onAction: () => void;
   onReject: () => void;
+  onShortlist: () => void;
 }) {
   const [acting, setActing] = useState(false);
-
-  const shortlist = async () => {
-    setActing(true);
-    try {
-      await applicationsApi.advanceStage(app.id, 'Shortlisted');
-      toast.success('Candidate shortlisted');
-      onAction();
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      toast.error(msg || 'Action failed');
-    }
-    setActing(false);
-  };
 
   const holdForFuture = async () => {
     setActing(true);
@@ -103,10 +95,13 @@ function ShortlistRow({
         </div>
         <div className="text-xs text-gray-400 mt-0.5 flex gap-2 flex-wrap">
           <span>{app.role_title}</span>
-          {app.candidate_expected_ctc && <span>· ECTC ₹{app.candidate_expected_ctc}L</span>}
-          {app.candidate_notice_period_days != null && <span>· {app.candidate_notice_period_days}d notice</span>}
+          {app.application_date && (
+            <span className="font-mono">· Applied {Math.floor((Date.now() - new Date(app.application_date).getTime()) / 86400000)}d ago</span>
+          )}
+          {app.candidate_expected_ctc && <span className="font-mono">· ECTC ₹{app.candidate_expected_ctc}L</span>}
+          {app.candidate_notice_period_days != null && <span className="font-mono">· {app.candidate_notice_period_days}d notice</span>}
           {waitingHours != null && (
-            <span className={waitingHours > 48 ? 'text-red-500 font-medium' : ''}>
+            <span className={waitingHours > 48 ? 'text-red-500 font-medium font-mono' : 'font-mono'}>
               · Waiting {waitingHours}h
               {waitingHours > 48 && ' ⚠️'}
             </span>
@@ -136,11 +131,11 @@ function ShortlistRow({
           <PauseCircle className="w-4 h-4" />
         </button>
         <button
-          onClick={shortlist}
+          onClick={onShortlist}
           disabled={acting}
           className="flex items-center gap-1.5 btn-primary text-xs py-1.5 px-3"
         >
-          {acting ? <Spinner size="sm" /> : <CheckCircle className="w-3.5 h-3.5" />}
+          <CheckCircle className="w-3.5 h-3.5" />
           Shortlist
         </button>
       </div>
@@ -173,7 +168,7 @@ function FeedbackRow({
         <div className="text-xs text-gray-400 mt-0.5 flex gap-2">
           <span>{action.role_title}</span>
           {isOverdue && (
-            <span className="text-red-500 font-medium">
+            <span className="text-red-500 font-medium font-mono">
               · {Math.round(action.hours_overdue)}h overdue
             </span>
           )}
@@ -198,8 +193,11 @@ function FeedbackRow({
 export default function HMQueue() {
   const qc = useQueryClient();
   const [feedbackRound, setFeedbackRound] = useState<(InterviewRound & { candidate_name?: string; role_title?: string }) | null>(null);
+  const [searchInput, setSearchInput] = usePersistedState('hmqueue.search', '');
+  const [search,      setSearch]      = useState(searchInput);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [rejectTargetIds, setRejectTargetIds] = useState<string[] | null>(null);
+  const [budgetExceptionIds, setBudgetExceptionIds] = useState<string[] | null>(null);
   const [bulkSaving, setBulkSaving] = useState(false);
 
   // Candidates HR has advanced to Resume Review — this IS the "ready for HM
@@ -227,6 +225,18 @@ export default function HMQueue() {
     a.action_type.toLowerCase().includes('interview')
   );
 
+  // Debounced client-side search over the (already-fetched) Ready-for-review
+  // list — same 350ms feel as Candidates.tsx/ScorecardSummary.tsx's search,
+  // just filtered in JS since this list isn't paginated server-side.
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 350);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+  const searchLower = search.trim().toLowerCase();
+  const awaitingFiltered = searchLower
+    ? awaiting.filter(a => `${a.candidate_name || ''} ${a.role_title || ''}`.toLowerCase().includes(searchLower))
+    : awaiting;
+
   const isLoading = loadingAwaiting || loadingPending;
 
   const refreshQueue = () => {
@@ -240,10 +250,10 @@ export default function HMQueue() {
     s.has(id) ? s.delete(id) : s.add(id);
     return s;
   });
-  const allSelected  = awaiting.length > 0 && awaiting.every(a => selectedIds.has(a.id));
+  const allSelected  = awaitingFiltered.length > 0 && awaitingFiltered.every(a => selectedIds.has(a.id));
   const toggleSelectAll = () => setSelectedIds(prev => {
     const s = new Set(prev);
-    awaiting.forEach(a => allSelected ? s.delete(a.id) : s.add(a.id));
+    awaitingFiltered.forEach(a => allSelected ? s.delete(a.id) : s.add(a.id));
     return s;
   });
 
@@ -262,7 +272,41 @@ export default function HMQueue() {
     refreshQueue();
   };
 
-  const bulkShortlist    = () => runBulk(id => applicationsApi.advanceStage(id, 'Shortlisted'), Array.from(selectedIds), 'shortlisted');
+  // 15%+ over-budget candidates need an explicit reason before shortlisting
+  // (backend enforces this too). One shared reason applies to the whole
+  // batch when bulk-acting, same as bulk Reject's single reason-for-the-batch
+  // pattern.
+  const shortlistIds = async (ids: string[], reasonCat?: string, reasonDetail?: string) => {
+    const opts = { budgetExceptionReasonCat: reasonCat, budgetExceptionReasonDetail: reasonDetail };
+    if (ids.length === 1) {
+      try {
+        await applicationsApi.advanceStage(ids[0], 'Shortlisted', opts);
+        toast.success('Candidate shortlisted');
+        refreshQueue();
+      } catch (err: unknown) {
+        const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+        toast.error(msg || 'Action failed');
+      }
+    } else {
+      await runBulk(id => applicationsApi.advanceStage(id, 'Shortlisted', opts), ids, 'shortlisted');
+    }
+  };
+
+  const requestShortlist = (ids: string[]) => {
+    const anyOverBudget = awaiting.some(a => ids.includes(a.id) && isSeverelyOverBudget(a.candidate_expected_ctc, a.role_ctc_band));
+    if (anyOverBudget) { setBudgetExceptionIds(ids); return; }
+    shortlistIds(ids);
+  };
+
+  const handleBudgetExceptionConfirm = async (reasonCat: string, reasonDetail: string) => {
+    if (!budgetExceptionIds) return;
+    setBulkSaving(true);
+    await shortlistIds(budgetExceptionIds, reasonCat, reasonDetail);
+    setBulkSaving(false);
+    setBudgetExceptionIds(null);
+  };
+
+  const bulkShortlist    = () => requestShortlist(Array.from(selectedIds));
   const bulkHoldForFuture = () => runBulk(id => applicationsApi.updateStatus(id, { new_status: 'Hold for Future' }), Array.from(selectedIds), 'put on hold');
 
   const handleBulkReject = async (reasonCat: string, reasonDetail: string) => {
@@ -307,9 +351,9 @@ export default function HMQueue() {
         <div className="space-y-6">
           {/* ── Section 1: Ready for review ─────────────────────────────────── */}
           <div className="card overflow-hidden">
-            <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+            <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-3">
-                {awaiting.length > 0 && (
+                {awaitingFiltered.length > 0 && (
                   <input
                     type="checkbox"
                     checked={allSelected}
@@ -322,18 +366,30 @@ export default function HMQueue() {
                   <p className="text-xs text-gray-400 mt-0.5">Candidates at Resume Review — shortlist, hold for future, or reject</p>
                 </div>
               </div>
-              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-                awaiting.length === 0
-                  ? 'bg-gray-100 text-gray-500'
-                  : 'bg-amber-100 text-amber-700'
-              }`}>
-                {awaiting.length} pending
-              </span>
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search candidate or role…"
+                    value={searchInput}
+                    onChange={e => setSearchInput(e.target.value)}
+                    className="input text-xs pl-8 py-1.5 w-48"
+                  />
+                </div>
+                <span className={`text-xs font-semibold font-mono px-2.5 py-1 rounded-full whitespace-nowrap ${
+                  awaiting.length === 0
+                    ? 'bg-gray-100 text-gray-500'
+                    : 'bg-amber-100 text-amber-700'
+                }`}>
+                  {awaiting.length} pending
+                </span>
+              </div>
             </div>
 
             {selectedIds.size > 0 && (
               <div className="px-5 py-2.5 bg-dp-50 border-b border-dp-100 flex items-center gap-3">
-                <span className="text-xs font-medium text-dp-700">{selectedIds.size} selected</span>
+                <span className="text-xs font-medium font-mono text-dp-700">{selectedIds.size} selected</span>
                 <button
                   onClick={bulkShortlist}
                   disabled={bulkSaving}
@@ -361,16 +417,16 @@ export default function HMQueue() {
               </div>
             )}
 
-            {awaiting.length === 0 ? (
+            {awaitingFiltered.length === 0 ? (
               <div className="p-8">
                 <EmptyState
-                  title="All caught up"
-                  message="No candidates awaiting your shortlist decision."
+                  title={awaiting.length === 0 ? 'All caught up' : 'No matches'}
+                  message={awaiting.length === 0 ? 'No candidates awaiting your shortlist decision.' : 'No candidates match this search.'}
                 />
               </div>
             ) : (
               <div className="divide-y divide-gray-50">
-                {awaiting.map(app => (
+                {awaitingFiltered.map(app => (
                   <ShortlistRow
                     key={app.id}
                     app={app as Application & { candidate_name?: string; role_title?: string }}
@@ -378,6 +434,7 @@ export default function HMQueue() {
                     onToggleSelect={() => toggleSelected(app.id)}
                     onReject={() => setRejectTargetIds([app.id])}
                     onAction={refreshQueue}
+                    onShortlist={() => requestShortlist([app.id])}
                   />
                 ))}
               </div>
@@ -391,7 +448,7 @@ export default function HMQueue() {
                 <h2 className="text-sm font-semibold text-gray-900">Feedback due</h2>
                 <p className="text-xs text-gray-400 mt-0.5">Interview rounds awaiting your feedback</p>
               </div>
-              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+              <span className={`text-xs font-semibold font-mono px-2.5 py-1 rounded-full ${
                 feedbackDue.length === 0
                   ? 'bg-gray-100 text-gray-500'
                   : feedbackDue.some(a => a.hours_overdue > 0)
@@ -466,6 +523,15 @@ export default function HMQueue() {
           saving={bulkSaving}
           onConfirm={handleBulkReject}
           onClose={() => setRejectTargetIds(null)}
+        />
+      )}
+
+      {budgetExceptionIds && (
+        <BudgetExceptionModal
+          count={budgetExceptionIds.length}
+          saving={bulkSaving}
+          onConfirm={handleBudgetExceptionConfirm}
+          onClose={() => setBudgetExceptionIds(null)}
         />
       )}
     </div>

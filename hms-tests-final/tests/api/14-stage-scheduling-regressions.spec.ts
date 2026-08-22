@@ -53,10 +53,11 @@ test.describe('Stage-Driven Round Scheduling — Regression Guards', () => {
   // the 13-stage pipeline rework silently breaks that startsWith match unless
   // 'Founders Round' gets its own explicit branch — without it, this stage
   // would quietly fall through to the 72-hour IDLE default instead of the
-  // 24-hour interview-feedback SLA every other interview stage gets.
-  test.describe('Founders Round gets the 24-hour interview-feedback SLA', () => {
+  // interview-feedback SLA every other interview stage gets (48h — every
+  // 24h SLA threshold was widened to 48h; see SLA_HOURS in types/index.ts).
+  test.describe('Founders Round gets the interview-feedback SLA', () => {
 
-    test('sla_hours is 24, not the 72-hour idle default', async ({ request }) => {
+    test('sla_hours is 48, not the 72-hour idle default', async ({ request }) => {
       const token = await getToken(request, 'hr');
       const { application } = await createCandidateWithApp(request, token);
 
@@ -69,7 +70,7 @@ test.describe('Stage-Driven Round Scheduling — Regression Guards', () => {
       expect(getRes.status()).toBe(200);
       const { application: fetched } = await getRes.json();
       expect(fetched.stage).toBe('Founders Round');
-      expect(fetched.sla_hours).toBe(24);
+      expect(fetched.sla_hours).toBe(48);
     });
   });
 
@@ -109,6 +110,134 @@ test.describe('Stage-Driven Round Scheduling — Regression Guards', () => {
       const countAfter = Number(roleAfter.shortlisted_count);
 
       expect(countAfter).toBe(countBefore + 1);
+    });
+  });
+
+  // ─── SLA_HOURS widening (24h → 48h) ─────────────────────────────────────────
+  // Every getSlaHours() branch that used to return 24 was widened to 48 in one
+  // batch change to SLA_HOURS (types/index.ts): RESUME_REVIEW_HIGH_FIT,
+  // RESUME_REVIEW_NORMAL, REF_INIT, OFFER_RELEASE, and INTERVIEW_FEEDBACK.
+  // HM_SHORTLIST (stage === 'Shortlisted') was already 48 before this batch —
+  // not a regression guard for anything that changed, so it's deliberately
+  // not covered here. 'Founders Round' is already covered by the dedicated
+  // describe block above (it needed its own explicit branch after a rename
+  // broke its startsWith('Interview') match). These three cover the
+  // remaining branches that would otherwise silently stay at 24h — or fall
+  // through to the 72h IDLE default — if the widening were ever reverted for
+  // just one stage.
+  test.describe('SLA thresholds widened from 24h to 48h', () => {
+
+    test('Reference Check: sla_hours is 48', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const { application } = await createCandidateWithApp(request, token);
+
+      const stageRes = await authed(request, token).post(`/api/applications/${application.id}/stage`, {
+        new_stage: 'Reference Check',
+      });
+      expect(stageRes.status()).toBe(200);
+
+      const getRes = await authed(request, token).get(`/api/applications/${application.id}`);
+      expect(getRes.status()).toBe(200);
+      const { application: fetched } = await getRes.json();
+      expect(fetched.stage).toBe('Reference Check');
+      expect(fetched.sla_hours).toBe(48);
+    });
+
+    test('Offer Released: sla_hours is 48', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const { application } = await createCandidateWithApp(request, token);
+
+      const stageRes = await authed(request, token).post(`/api/applications/${application.id}/stage`, {
+        new_stage: 'Offer Released',
+      });
+      expect(stageRes.status()).toBe(200);
+
+      const getRes = await authed(request, token).get(`/api/applications/${application.id}`);
+      expect(getRes.status()).toBe(200);
+      const { application: fetched } = await getRes.json();
+      expect(fetched.stage).toBe('Offer Released');
+      expect(fetched.sla_hours).toBe(48);
+    });
+
+    test("Interview Round 1 (representative startsWith('Interview') case): sla_hours is 48", async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const { application } = await createCandidateWithApp(request, token);
+
+      const stageRes = await authed(request, token).post(`/api/applications/${application.id}/stage`, {
+        new_stage: 'Interview Round 1',
+      });
+      expect(stageRes.status()).toBe(200);
+
+      const getRes = await authed(request, token).get(`/api/applications/${application.id}`);
+      expect(getRes.status()).toBe(200);
+      const { application: fetched } = await getRes.json();
+      expect(fetched.stage).toBe('Interview Round 1');
+      expect(fetched.sla_hours).toBe(48);
+    });
+  });
+
+  // ─── offer_sent_date / offer_accepted_date stamping ─────────────────────────
+  // Historical bug: neither column was ever written by the stage-transition
+  // route, despite the dashboard's Time to Fill metric being a literal
+  // AVG(offer_accepted_date - role.start_date) — every accepted offer had a
+  // NULL offer_accepted_date (and every released offer a NULL
+  // offer_sent_date) no matter how far the application had actually
+  // progressed. Fixed by conditionally appending ', offer_sent_date=NOW()' /
+  // ', offer_accepted_date=NOW()' onto the same stage-transition UPDATE,
+  // keyed off new_stage. The fix is additive per-transition — each date is
+  // only written on the one transition that matches it, never COALESCE'd or
+  // reapplied on other transitions — so advancing an application further
+  // afterward must never clobber a date a previous transition already set.
+  // That's the actual regression this guards: not just "the column gets
+  // stamped", but "stamping one date doesn't touch the other."
+  //
+  // Both columns are `DATE`, not `TIMESTAMP` (schema.sql, matches
+  // role.start_date — also DATE, since Time to Fill is a plain
+  // DATE-minus-DATE day count), so NOW() is implicitly cast down to the
+  // current UTC calendar day on write; time-of-day is not preserved. The
+  // "recency" check below is asserted at day granularity for that reason,
+  // not to the minute/second.
+  test.describe('Stage transitions stamp offer_sent_date / offer_accepted_date', () => {
+
+    test('Offer Released stamps offer_sent_date; a later Offer Accepted stamps offer_accepted_date without disturbing offer_sent_date', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const { application } = await createCandidateWithApp(request, token);
+
+      const todayUtc = new Date().toISOString().slice(0, 10);
+
+      const releaseRes = await authed(request, token).post(`/api/applications/${application.id}/stage`, {
+        new_stage: 'Offer Released',
+      });
+      expect(releaseRes.status()).toBe(200);
+
+      const afterReleaseRes = await authed(request, token).get(`/api/applications/${application.id}`);
+      expect(afterReleaseRes.status()).toBe(200);
+      const { application: afterRelease } = await afterReleaseRes.json();
+
+      expect(afterRelease.stage).toBe('Offer Released');
+      expect(afterRelease.offer_sent_date).toBeTruthy();
+      expect(afterRelease.offer_accepted_date).toBeFalsy();
+      expect(new Date(afterRelease.offer_sent_date).toISOString().slice(0, 10)).toBe(todayUtc);
+
+      const acceptRes = await authed(request, token).post(`/api/applications/${application.id}/stage`, {
+        new_stage: 'Offer Accepted',
+      });
+      expect(acceptRes.status()).toBe(200);
+
+      const afterAcceptRes = await authed(request, token).get(`/api/applications/${application.id}`);
+      expect(afterAcceptRes.status()).toBe(200);
+      const { application: afterAccept } = await afterAcceptRes.json();
+
+      expect(afterAccept.stage).toBe('Offer Accepted');
+      expect(afterAccept.offer_accepted_date).toBeTruthy();
+      expect(new Date(afterAccept.offer_accepted_date).toISOString().slice(0, 10)).toBe(todayUtc);
+
+      // The actual regression guard: offer_sent_date stamped by the FIRST
+      // transition must be unchanged by the SECOND transition. A naive fix
+      // (e.g. unconditionally stamping both columns on every stage change, or
+      // COALESCE-ing in a way that still re-evaluates NOW()) would silently
+      // overwrite it here instead of leaving the earlier value alone.
+      expect(afterAccept.offer_sent_date).toBe(afterRelease.offer_sent_date);
     });
   });
 });

@@ -663,6 +663,51 @@ ALTER TABLE applications
   ADD CONSTRAINT applications_status_check
     CHECK (status IN ('Active','Rejected','Withdrawn','Hold for Future','Joined','Closed'));
 
+-- ── pending_actions: role_id (clickable rows with no application_id, e.g.
+-- the CTC-change trigger) + responsible_person (the specific HM name /
+-- interviewer email an owner-type-grouped action is actually assigned to,
+-- distinct from owner_type itself which is just the broad category) ────────
+ALTER TABLE pending_actions
+  ADD COLUMN IF NOT EXISTS role_id TEXT REFERENCES roles(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS responsible_person TEXT;
+
+CREATE OR REPLACE FUNCTION flag_ctc_change()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF OLD.ctc_band IS DISTINCT FROM NEW.ctc_band THEN
+    INSERT INTO pending_actions (owner_type, priority_level, action_type, description, role_title, role_id)
+    VALUES ('Leadership / Founders','High','Compensation change flag',
+      'CTC band changed on ' || NEW.title || ': "' || COALESCE(OLD.ctc_band,'—') || '" → "' || COALESCE(NEW.ctc_band,'—') || '"',
+      NEW.title, NEW.id);
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Mandatory justification for shortlisting a candidate 15%+ over the role's
+-- CTC band (backend/src/utils/budget.ts's isSeverelyOverBudget) — enforced
+-- in POST /applications/:id/stage, not just the frontend gate.
+ALTER TABLE applications
+  ADD COLUMN IF NOT EXISTS budget_exception_reason_cat TEXT,
+  ADD COLUMN IF NOT EXISTS budget_exception_reason_detail TEXT;
+
+-- Role activity timeline (item #25) now writes activity_log rows keyed
+-- purely on role_id (Role Created/Updated/Approved, JD Generated) — the
+-- table already had the column, it just had no dedicated index the way
+-- application_id/candidate_id do.
+CREATE INDEX IF NOT EXISTS idx_activity_log_role ON activity_log(role_id);
+
+-- roles.id's default used LPAD(..., 3, '0') — Postgres's lpad TRUNCATES
+-- (from the right) once the sequence value itself is already longer than
+-- the target width, so once seq_role passed 999 every new role silently
+-- collided with an existing low-numbered id (nextval 1039 → 'R103', already
+-- taken) instead of erroring clearly or producing a new id. Widened to 4
+-- digits, matching candidates'/applications' own C####/A#### width — plenty
+-- of headroom for real usage, existing 3-digit ids (R001-R999) are
+-- untouched and coexist fine since role ids are opaque TEXT, not
+-- fixed-width-parsed anywhere.
+ALTER TABLE roles ALTER COLUMN id SET DEFAULT 'R' || LPAD(nextval('seq_role')::TEXT, 4, '0');
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows
 -- ═════════════════════════════════════════════════════════════════════════════

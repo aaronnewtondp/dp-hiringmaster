@@ -38,7 +38,10 @@ test.describe('Role Ingestion Webhook', () => {
       });
       expect(res.status()).toBe(201);
       const { role } = await res.json();
-      expect(role.id).toMatch(/^R\d{3}$/);
+      // 3+ digits — the seq_role-backed id used to truncate (not error) once
+      // the sequence passed 999, silently colliding with an existing low id;
+      // fixed to pad to 4 digits going forward, so either width is valid.
+      expect(role.id).toMatch(/^R\d{3,}$/);
       expect(role.status).toBe('Draft');
       expect(role.title).toBe(`Ingested Test Role ${marker}`);
       expect(role.department).toBe('Engineering');

@@ -47,7 +47,9 @@ export const rolesApi = {
   get:           (id: string)                      => api.get(`/roles/${id}`),
   create:        (data: Record<string, unknown>)   => api.post('/roles', data),
   update:        (id: string, data: Record<string, unknown>) => api.patch(`/roles/${id}`, data),
+  remove:        (id: string)                      => api.delete(`/roles/${id}`),
   editLog:       (id: string)                      => api.get(`/roles/${id}/edit-log`),
+  activity:      (id: string)                      => api.get(`/roles/${id}/activity`),
   pipeline:      (id: string)                      => api.get(`/roles/${id}/pipeline`),
   filterOptions: ()                                 => api.get('/roles/filter-options'),
 };
@@ -70,12 +72,18 @@ export const applicationsApi = {
   // repeated-key convention as rolesApi.list/candidatesApi.list.
   list:            (params?: Record<string, string | string[]>)  => api.get('/applications', { params }),
   get:             (id: string)                       => api.get(`/applications/${id}`),
-  advanceStage:    (id: string, newStage: string, skipReason?: string) =>
-    api.post(`/applications/${id}/stage`, { new_stage: newStage, skip_reason: skipReason }),
+  advanceStage:    (id: string, newStage: string, opts?: { skipReason?: string; budgetExceptionReasonCat?: string; budgetExceptionReasonDetail?: string }) =>
+    api.post(`/applications/${id}/stage`, {
+      new_stage: newStage,
+      skip_reason: opts?.skipReason,
+      budget_exception_reason_cat: opts?.budgetExceptionReasonCat,
+      budget_exception_reason_detail: opts?.budgetExceptionReasonDetail,
+    }),
   updateStatus:    (id: string, data: Record<string, unknown>) => api.post(`/applications/${id}/status`, data),
   updateScreening: (id: string, status: string)       => api.post(`/applications/${id}/screening`, { new_screening_status: status }),
   updateNotes:     (id: string, data: Record<string, unknown>) => api.patch(`/applications/${id}/notes`, data),
   setFounderFlag:  (id: string, set: boolean, note?: string)   => api.post(`/applications/${id}/founder-flag`, { set, note }),
+  compBenchmark:   (id: string)                       => api.get(`/applications/${id}/comp-benchmark`),
 };
 
 export const interviewsApi = {

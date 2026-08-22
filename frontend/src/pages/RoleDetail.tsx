@@ -1,23 +1,31 @@
 import { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Users, ChevronRight, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Users, ChevronRight, BarChart3, Pencil } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../services/api.ts';
 import { Role, Application, STAGES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS, EMPLOYMENT_TYPES, VACANCY_REASONS, RECRUITMENT_CHANNELS, PRIORITIES } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, FitScore, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { format } from 'date-fns';
 
 
 export default function RoleDetail() {
   const { id } = useParams<{ id: string }>();
-  const { canHR } = useAuth();
+  const { canHR, user } = useAuth();
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [statusValue, setStatusValue] = useState('');
   const [saving, setSaving] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [editingNote, setEditingNote] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+  const [showDiscardModal, setShowDiscardModal] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
 
   const { data: roleData, isLoading: roleLoading } = useQuery<{ data: { role: Role } }>({
     queryKey: ['role', id],
@@ -33,9 +41,60 @@ export default function RoleDetail() {
     queryFn:  () => rolesApi.pipeline(id!),
   });
 
+  const { data: activityData } = useQuery<{ data: { activity: unknown[] } }>({
+    queryKey: ['role-activity', id],
+    queryFn:  () => rolesApi.activity(id!),
+  });
+
   const role     = roleData?.data?.role;
   const pipeline = pipelineData?.data?.pipeline || {};
   const total    = pipelineData?.data?.total || 0;
+  const activity = activityData?.data?.activity || [];
+
+  // Approving (Draft/Under Review → Approved) is open to HR-tier (via
+  // canHR) or specifically the Hiring Manager named on THIS role — matched
+  // by name since roles.hiring_manager_name has no user_id to compare
+  // against instead. Mirrors the backend's own check in roles.ts exactly.
+  const isHmForThisRole = user?.persona === 'hiring_manager' &&
+    !!role?.hiring_manager_name &&
+    role.hiring_manager_name.trim().toLowerCase() === user.name.trim().toLowerCase();
+  const canApproveThisRole = canHR || isHmForThisRole;
+
+  const handleApprove = async () => {
+    setApproving(true);
+    try {
+      await rolesApi.update(id!, { status: 'Approved' });
+      toast.success('Role approved');
+      qc.invalidateQueries({ queryKey: ['role', id] });
+      qc.invalidateQueries({ queryKey: ['role-activity', id] });
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(msg || 'Failed to approve role');
+    }
+    setApproving(false);
+  };
+
+  const handleSaveNote = async () => {
+    setSavingNote(true);
+    try {
+      await saveRoleFields({ approval_note: noteDraft });
+      setEditingNote(false);
+    } catch { toast.error('Failed to save note'); }
+    setSavingNote(false);
+  };
+
+  const handleDiscard = async () => {
+    setDiscarding(true);
+    try {
+      await rolesApi.remove(id!);
+      toast.success('Role discarded');
+      navigate('/roles');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(msg || 'Failed to discard role');
+      setDiscarding(false);
+    }
+  };
 
   const saveRoleFields = async (changes: Record<string, unknown>) => {
     await rolesApi.update(id!, changes);
@@ -161,20 +220,67 @@ export default function RoleDetail() {
           data={role}
           onSave={saveRoleFields}
           fields={[
-            { key: 'start_date', label: 'Open Date', type: 'date' },
+            { key: 'start_date', label: 'Open Date', type: 'date', readOnly: true },
             { key: 'target_closure_date', label: 'Close Target', type: 'date' },
           ]}
         />
-        <EditableSection
-          title="Approval"
-          data={role}
-          onSave={saveRoleFields}
-          fields={[
-            { key: 'approver_name', label: 'Approver', type: 'text' },
-            { key: 'approval_date', label: 'Approval Date', type: 'date' },
-            { key: 'approval_note', label: 'Approval Note', type: 'textarea' },
-          ]}
-        />
+        <div className="card p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-gray-900">Approval</h2>
+            {!editingNote && (
+              <button onClick={() => { setNoteDraft(role.approval_note || ''); setEditingNote(true); }} className="text-gray-400 hover:text-dp-600 p-1" title="Edit Approval Note">
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <div className="space-y-2">
+            <div>
+              <div className="text-xs text-gray-400 mb-0.5">Approver</div>
+              <div className="text-sm text-gray-700">{role.approver_name || '—'}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400 mb-0.5">Approval Date</div>
+              <div className="text-sm text-gray-700">{role.approval_date ? String(role.approval_date).slice(0, 10) : '—'}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400 mb-0.5">Approval Note</div>
+              {editingNote ? (
+                <>
+                  <textarea
+                    className="input h-20 resize-none"
+                    value={noteDraft}
+                    onChange={e => setNoteDraft(e.target.value)}
+                  />
+                  <div className="flex gap-2 justify-end pt-1.5">
+                    <button onClick={() => setEditingNote(false)} className="btn-secondary text-xs py-1.5 px-3">Cancel</button>
+                    <button onClick={handleSaveNote} disabled={savingNote} className="btn-primary text-xs py-1.5 px-3">
+                      {savingNote ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="text-sm text-gray-700 whitespace-pre-wrap break-words">{role.approval_note || '—'}</div>
+              )}
+            </div>
+          </div>
+          {canApproveThisRole && (role.status === 'Draft' || role.status === 'Under Review') && (
+            <button
+              onClick={handleApprove}
+              disabled={approving}
+              className="btn-primary text-xs py-1.5 px-3 w-full"
+            >
+              {approving ? 'Approving…' : 'Approve Role'}
+            </button>
+          )}
+          {canHR && role.status === 'Draft' && (
+            <button
+              onClick={() => setShowDiscardModal(true)}
+              className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg py-1.5 px-3 w-full transition-colors"
+            >
+              Discard role
+            </button>
+          )}
+        </div>
         <EditableSection
           title="Links & Assets"
           data={role}
@@ -250,6 +356,32 @@ export default function RoleDetail() {
         )}
       </div>
 
+      {/* Activity timeline — mirrors CandidateDetail.tsx's own (item #25) */}
+      <div className="card overflow-hidden">
+        <div className="px-5 py-3 border-b border-gray-100">
+          <h2 className="text-sm font-semibold text-gray-900">Activity timeline</h2>
+        </div>
+        {activity.length === 0 ? (
+          <div className="p-8"><EmptyState title="No activity logged yet" /></div>
+        ) : (
+          <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
+            {(activity as Array<Record<string, unknown>>).map((evt, i) => (
+              <div key={i} className="px-5 py-3 flex items-start gap-3">
+                <div className="w-2 h-2 rounded-full bg-dp-400 mt-1.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-gray-900">{String(evt.event_type)}</span>
+                    <span className="text-xs text-gray-400">by {String(evt.performed_by_name || 'System')}</span>
+                  </div>
+                  {evt.event_detail && <p className="text-xs text-gray-500 mt-0.5">{String(evt.event_detail)}</p>}
+                </div>
+                <span className="text-xs text-gray-400 whitespace-nowrap shrink-0">{evt.created_at ? format(new Date(String(evt.created_at)), 'MMM d, h:mm a') : ''}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {showStatusModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
@@ -260,6 +392,27 @@ export default function RoleDetail() {
             <div className="flex gap-2 justify-end">
               <button onClick={() => setShowStatusModal(false)} className="btn-secondary">Cancel</button>
               <button onClick={handleStatusUpdate} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Update'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDiscardModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+            <h3 className="text-base font-semibold text-gray-900">Discard {role.title}?</h3>
+            <p className="text-sm text-gray-500">
+              This permanently deletes this Draft role. This cannot be undone.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowDiscardModal(false)} className="btn-secondary">Cancel</button>
+              <button
+                onClick={handleDiscard}
+                disabled={discarding}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {discarding ? 'Discarding…' : 'Discard'}
+              </button>
             </div>
           </div>
         </div>
