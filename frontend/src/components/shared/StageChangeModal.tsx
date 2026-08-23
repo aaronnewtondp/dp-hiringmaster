@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { applicationsApi } from '../../services/api.ts';
-import { Application, STAGES } from '../../types/index.ts';
+import { Application, STAGES, OVER_BUDGET_SHORTLIST_REASONS } from '../../types/index.ts';
 
 // Single-application stage change — shared by CandidateDetail.tsx and
 // ScorecardSummary.tsx's inline per-row stage edit. Candidates.tsx's bulk
 // stage-change is a distinct batch concept (chunked, multi-ID) and owns its
-// own modal rather than reusing this one.
+// own modal rather than reusing this one, with the identical inline
+// budget-reason handling duplicated there for the same reason.
 interface StageChangeModalProps {
   application: Application;
   onClose: () => void;
@@ -16,11 +17,29 @@ interface StageChangeModalProps {
 export default function StageChangeModal({ application, onClose, onUpdated }: StageChangeModalProps) {
   const [stageValue, setStageValue] = useState(application.stage);
   const [saving, setSaving] = useState(false);
+  const [reasonCat, setReasonCat] = useState('');
+  const [reasonDetail, setReasonDetail] = useState('');
+
+  // This is a generic "jump to any stage" control — the dedicated Shortlist
+  // buttons on ScorecardSummary/HMQueue aren't the only way to move an
+  // application to Shortlisted, so the mandatory over-budget reason (item
+  // #1) has to be handled here too, not just there. is_severely_over_budget
+  // is server-computed and never stripped for any persona (unlike the raw
+  // ctc_band figures), so this check works the same regardless of who's
+  // driving this modal.
+  const needsBudgetReason = stageValue === 'Shortlisted' && application.is_severely_over_budget;
 
   const handleUpdate = async () => {
+    if (needsBudgetReason && !reasonCat) {
+      toast.error('Select a reason before shortlisting this candidate');
+      return;
+    }
     setSaving(true);
     try {
-      await applicationsApi.advanceStage(application.id, stageValue);
+      await applicationsApi.advanceStage(application.id, stageValue, {
+        budgetExceptionReasonCat: needsBudgetReason ? reasonCat : undefined,
+        budgetExceptionReasonDetail: needsBudgetReason ? reasonDetail.trim() || undefined : undefined,
+      });
       toast.success(`Stage updated to ${stageValue}`);
       onUpdated();
       onClose();
@@ -38,9 +57,32 @@ export default function StageChangeModal({ application, onClose, onUpdated }: St
         <select value={stageValue} onChange={e => setStageValue(e.target.value)} className="select mb-4">
           {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
+        {needsBudgetReason && (
+          <div className="mb-4 space-y-3 p-3 bg-amber-50 border border-amber-100 rounded-lg">
+            <p className="text-xs text-amber-800">
+              This candidate is 15%+ over the role's compensation band — select a reason to proceed.
+            </p>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">Reason <span className="text-red-500">*</span></label>
+              <select value={reasonCat} onChange={e => setReasonCat(e.target.value)} className="select text-sm">
+                <option value="">Select reason</option>
+                {OVER_BUDGET_SHORTLIST_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">Additional detail <span className="text-gray-400">(optional)</span></label>
+              <textarea
+                value={reasonDetail}
+                onChange={e => setReasonDetail(e.target.value)}
+                placeholder="Optional context…"
+                className="input text-sm h-16 resize-none"
+              />
+            </div>
+          </div>
+        )}
         <div className="flex gap-2 justify-end">
           <button onClick={onClose} className="btn-secondary">Cancel</button>
-          <button onClick={handleUpdate} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Update'}</button>
+          <button onClick={handleUpdate} disabled={saving || (needsBudgetReason && !reasonCat)} className="btn-primary">{saving ? 'Saving…' : 'Update'}</button>
         </div>
       </div>
     </div>

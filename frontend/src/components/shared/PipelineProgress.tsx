@@ -1,13 +1,14 @@
 import { STAGES } from '../../types/index.ts';
 
-// Chevron/arrow-block pipeline tracker (item #27, redesigned per reference)
-// — each canonical stage (STAGES, types/index.ts) is rendered as an
-// interlocking right-pointing arrow via clip-path, filled up to and
-// including the current stage, with the current one in a more saturated
-// shade. Only the current stage's name is shown as a label below the whole
-// bar rather than inside any one arrow — 13 stages are too many to fit
-// readable text inside each individual segment — hover any segment for its
-// name via the native title tooltip.
+// Chevron/arrow-block pipeline tracker (item #27) — bold interlocking
+// right-pointing arrows (clip-path), matching the reference image's design
+// philosophy: solid color blocks, current step called out with a real
+// label inside its own chevron rather than a caption floating below the
+// bar. Adapted for a 13-stage pipeline (too many to label every block
+// individually and stay legible) by growing only the CURRENT stage's arrow
+// to carry its name — every other stage stays a compact, unlabeled block
+// whose fill color alone shows reached/current/upcoming; hover any of them
+// for the stage name via the native title tooltip.
 export default function PipelineProgress({ stage, label }: { stage: string; label?: string }) {
   const currentIdx = STAGES.indexOf(stage);
 
@@ -22,20 +23,27 @@ export default function PipelineProgress({ stage, label }: { stage: string; labe
             <div
               key={s}
               title={s}
-              className={`h-5 flex-1 transition-colors ${
+              className={`h-9 flex items-center justify-center transition-colors ${
                 isCurrent ? 'bg-dp-600' : reached ? 'bg-dp-400' : 'bg-gray-200'
               }`}
               style={{
+                flex: isCurrent ? '3 1 0%' : '1 1 0%',
+                minWidth: isCurrent ? '96px' : undefined,
                 clipPath: i === 0
-                  ? 'polygon(0% 0%, 88% 0%, 100% 50%, 88% 100%, 0% 100%)'
-                  : 'polygon(0% 0%, 88% 0%, 100% 50%, 88% 100%, 0% 100%, 12% 50%)',
-                marginLeft: i === 0 ? 0 : '-8px',
+                  ? 'polygon(0% 0%, 82% 0%, 100% 50%, 82% 100%, 0% 100%)'
+                  : 'polygon(0% 0%, 82% 0%, 100% 50%, 82% 100%, 0% 100%, 15% 50%)',
+                marginLeft: i === 0 ? 0 : '-10px',
               }}
-            />
+            >
+              {isCurrent && (
+                <span className="text-white text-[11px] font-bold uppercase tracking-wide truncate px-2">
+                  {s}
+                </span>
+              )}
+            </div>
           );
         })}
       </div>
-      {currentIdx >= 0 && <div className="text-[11px] text-dp-700 font-medium mt-1.5">{stage}</div>}
     </div>
   );
 }

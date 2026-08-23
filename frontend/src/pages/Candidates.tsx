@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi, candidatesApi, rolesApi } from '../services/api.ts';
-import { Application, Candidate, STAGES, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
+import { Application, Candidate, STAGES, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS, REJECTION_REASONS, WITHDRAWAL_REASONS, OVER_BUDGET_SHORTLIST_REASONS } from '../types/index.ts';
 import { StageBadge, StatusBadge, FitScore, SlaBadge, OverBudgetBadge, Spinner, EmptyState, PriorityBadge } from '../components/shared/Badges.tsx';
 import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
@@ -70,6 +70,8 @@ export default function Candidates() {
   const [bulkStatusValue,   setBulkStatusValue]   = useState('Active');
   const [bulkRejectionCat,  setBulkRejectionCat]  = useState('');
   const [bulkRejectionDetail, setBulkRejectionDetail] = useState('');
+  const [bulkBudgetReasonCat,    setBulkBudgetReasonCat]    = useState('');
+  const [bulkBudgetReasonDetail, setBulkBudgetReasonDetail] = useState('');
   const [bulkSaving,        setBulkSaving]        = useState(false);
 
   // Debounced free-text search — same reasoning and timing as TalentPool.tsx's
@@ -224,17 +226,35 @@ export default function Candidates() {
   // negligible. Each single-ID call already exists and is unchanged —
   // this is a client-side fan-out, not a new backend endpoint.
   const BULK_CONCURRENCY = 3;
+  // Bulk stage-change is a generic "jump to any stage" tool too, same gap as
+  // StageChangeModal.tsx — item #1's mandatory over-budget reason has to be
+  // handled here as well, not just on ScorecardSummary/HMQueue's dedicated
+  // Shortlist buttons. is_severely_over_budget is server-computed and never
+  // stripped for any persona, so this check is safe regardless of who's
+  // driving this modal.
+  const bulkNeedsBudgetReason = bulkStageValue === 'Shortlisted' &&
+    all.some(a => selectedIds.has(a.id) && a.is_severely_over_budget);
+
   const handleBulkStage = async () => {
+    if (bulkNeedsBudgetReason && !bulkBudgetReasonCat) {
+      toast.error('Select a reason before shortlisting — at least one selected candidate is 15%+ over budget');
+      return;
+    }
     setBulkSaving(true);
     const ids = Array.from(selectedIds);
     let succeeded = 0;
     for (let i = 0; i < ids.length; i += BULK_CONCURRENCY) {
       const batch = ids.slice(i, i + BULK_CONCURRENCY);
-      const settled = await Promise.allSettled(batch.map(id => applicationsApi.advanceStage(id, bulkStageValue)));
+      const settled = await Promise.allSettled(batch.map(id => applicationsApi.advanceStage(id, bulkStageValue, {
+        budgetExceptionReasonCat: bulkNeedsBudgetReason ? bulkBudgetReasonCat : undefined,
+        budgetExceptionReasonDetail: bulkNeedsBudgetReason ? bulkBudgetReasonDetail.trim() || undefined : undefined,
+      })));
       succeeded += settled.filter(r => r.status === 'fulfilled').length;
     }
     toast[succeeded === ids.length ? 'success' : 'error'](`${succeeded} of ${ids.length} updated to ${bulkStageValue}`);
     setShowBulkStageModal(false);
+    setBulkBudgetReasonCat('');
+    setBulkBudgetReasonDetail('');
     setSelectedIds(new Set());
     qc.invalidateQueries({ queryKey: ['applications'] });
     setBulkSaving(false);
@@ -597,9 +617,32 @@ export default function Candidates() {
             <select value={bulkStageValue} onChange={e => setBulkStageValue(e.target.value)} className="select mb-4">
               {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
+            {bulkNeedsBudgetReason && (
+              <div className="mb-4 space-y-3 p-3 bg-amber-50 border border-amber-100 rounded-lg">
+                <p className="text-xs text-amber-800">
+                  At least one selected candidate is 15%+ over the role's compensation band — select a reason to proceed.
+                </p>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">Reason <span className="text-red-500">*</span></label>
+                  <select value={bulkBudgetReasonCat} onChange={e => setBulkBudgetReasonCat(e.target.value)} className="select text-sm">
+                    <option value="">Select reason</option>
+                    {OVER_BUDGET_SHORTLIST_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">Additional detail <span className="text-gray-400">(optional)</span></label>
+                  <textarea
+                    value={bulkBudgetReasonDetail}
+                    onChange={e => setBulkBudgetReasonDetail(e.target.value)}
+                    placeholder="Optional context…"
+                    className="input text-sm h-16 resize-none"
+                  />
+                </div>
+              </div>
+            )}
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setShowBulkStageModal(false)} className="btn-secondary">Cancel</button>
-              <button onClick={handleBulkStage} disabled={bulkSaving} className="btn-primary">{bulkSaving ? 'Updating…' : 'Update'}</button>
+              <button onClick={() => { setShowBulkStageModal(false); setBulkBudgetReasonCat(''); setBulkBudgetReasonDetail(''); }} className="btn-secondary">Cancel</button>
+              <button onClick={handleBulkStage} disabled={bulkSaving || (bulkNeedsBudgetReason && !bulkBudgetReasonCat)} className="btn-primary">{bulkSaving ? 'Updating…' : 'Update'}</button>
             </div>
           </div>
         </div>

@@ -3,6 +3,7 @@ import { query, queryOne, transaction } from '../db/index.js';
 import { authenticate, requireHR, stripRestrictedFields } from '../middleware/auth.js';
 import { Candidate } from '../types/index.js';
 import { parseRoleFilters, buildRoleFilterSql, hasActiveFilters } from '../utils/roleFilters.js';
+import { isSeverelyOverBudget } from '../utils/budget.js';
 
 const router = Router();
 router.use(authenticate);
@@ -191,7 +192,18 @@ router.get('/:id', async (req: Request, res: Response) => {
   // never rendered them for non-HR, which isn't a real boundary). Fixed
   // here as a direct consequence of adding role_ctc_band, itself restricted.
   const persona = req.user!.persona;
-  const safeApplications = applications.map(a => stripRestrictedFields(a as unknown as Record<string, unknown>, persona));
+  // is_severely_over_budget computed here too — this route has its own
+  // separate applications query (distinct from GET /api/applications and
+  // GET /api/applications/:id, which already do this), so it needed the
+  // exact same fix independently: CandidateDetail.tsx's Stage-change modal
+  // reads applications from THIS endpoint, and without this field present
+  // here the mandatory over-budget reason gate silently never triggered for
+  // any persona using this page's Stage control specifically.
+  const safeApplications = applications.map(a => {
+    const row = a as unknown as Record<string, unknown> & { role_ctc_band?: string };
+    const isSeverelyOver = isSeverelyOverBudget(candidate.expected_ctc, row.role_ctc_band);
+    return { ...stripRestrictedFields(row, persona), is_severely_over_budget: isSeverelyOver };
+  });
 
   res.json({ candidate, applications: safeApplications });
 });

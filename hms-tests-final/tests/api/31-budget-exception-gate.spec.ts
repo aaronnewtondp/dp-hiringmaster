@@ -103,4 +103,31 @@ test.describe('Budget exception gate — POST /api/applications/:id/stage to Sho
       expect(application.budget_exception_reason_cat).toBeFalsy();
     });
   });
+
+  // ─── is_severely_over_budget must be present on every data source that ────
+  // feeds a "shortlist this application" control. This is a regression guard
+  // for a real bug: GET /api/candidates/:id has its own, separate
+  // applications query (distinct from GET /api/applications and
+  // GET /api/applications/:id) — it was missed on the first pass, so
+  // CandidateDetail.tsx's Stage-change modal never saw the flag and the
+  // mandatory-reason gate silently never triggered from that page.
+  test.describe('is_severely_over_budget is present on every application data source', () => {
+
+    test('GET /api/candidates/:id exposes is_severely_over_budget on its applications array', async ({ request }) => {
+      const hrToken = await getToken(request, 'hr');
+
+      const { res: createRes } = await createCandidate(request, hrToken, {
+        role_id: SEEDED.roles.senior_pm,
+        expected_ctc: 35,
+      });
+      const { application, candidate } = await createRes.json();
+
+      const getRes = await authed(request, hrToken).get(`/api/candidates/${candidate.id}`);
+      expect(getRes.status()).toBe(200);
+      const body = await getRes.json();
+      const app = body.applications.find((a: { id: string }) => a.id === application.id);
+      expect(app).toBeTruthy();
+      expect(app.is_severely_over_budget).toBe(true);
+    });
+  });
 });
