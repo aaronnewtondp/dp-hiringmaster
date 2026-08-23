@@ -251,20 +251,21 @@ export default function CandidateDetail() {
                 <span key={tag} className="px-2 py-0.5 rounded-full text-xs bg-dp-50 text-dp-700 font-medium">{tag}</span>
               ))}
             </div>
-            {applications.length > 0 && (
-              <div className="mt-3 space-y-2.5 max-w-xl">
-                {applications.map(app => (
-                  <PipelineProgress
-                    key={app.id}
-                    stage={app.stage}
-                    label={applications.length > 1 ? app.role_title : undefined}
-                  />
-                ))}
-              </div>
-            )}
           </div>
         </div>
       </div>
+
+      {applications.length > 0 && (
+        <div className="space-y-3">
+          {applications.map(app => (
+            <PipelineProgress
+              key={app.id}
+              stage={app.stage}
+              label={applications.length > 1 ? app.role_title : undefined}
+            />
+          ))}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="space-y-4">
