@@ -3,13 +3,17 @@ import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useQuery } from '@tanstack/react-query';
-import { candidatesApi, rolesApi } from '../services/api.ts';
-import { Role } from '../types/index.ts';
+import { candidatesApi, rolesApi, agenciesApi } from '../services/api.ts';
+import { Role, Agency, RECRUITMENT_CHANNELS } from '../types/index.ts';
+import { useAuth } from '../contexts/AuthContext.tsx';
 
 const CHANNELS = ['Naukri', 'LinkedIn', 'IIMJobs', 'Employee Referral', 'Agency', 'Direct Outreach', 'WhatsApp Forward', 'Google Form'];
 
 type FormState = {
   full_name: string; email: string; phone: string; linkedin_url: string;
+  // Where this candidate was originally sourced (candidate-level) — distinct
+  // from source_channel below, which is this specific APPLICATION's channel.
+  source: string; sourced_by_agency_id: string;
   role_id: string; source_channel: string; agency_id: string;
   current_ctc_fixed: string; expected_ctc: string; notice_period_days: string;
   current_company: string; current_industry: string; current_designation: string;
@@ -35,10 +39,12 @@ const REQUIRED_FIELDS: Array<[keyof FormState, string]> = [
 
 export default function NewCandidate() {
   const navigate = useNavigate();
+  const { canHR } = useAuth();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>({
     // Identity
     full_name: '', email: '', phone: '', linkedin_url: '',
+    source: '', sourced_by_agency_id: '',
     // Application
     role_id: '', source_channel: '', agency_id: '',
     // Compensation
@@ -57,12 +63,27 @@ export default function NewCandidate() {
   });
   const roles = rolesData?.data?.roles || [];
 
-  const set = (k: keyof FormState, v: string) => setForm(f => ({ ...f, [k]: v }));
+  const { data: agenciesData } = useQuery<{ data: { agencies: Agency[] } }>({
+    queryKey: ['agencies'],
+    queryFn: () => agenciesApi.list(),
+    enabled: canHR,
+  });
+  const agencies = agenciesData?.data?.agencies || [];
+
+  const set = (k: keyof FormState, v: string) => setForm(f => (
+    // Changing Source away from 'Agency' clears the now-inapplicable
+    // sourcing agency, same as the dependsOn behavior on the detail page.
+    k === 'source' && v !== 'Agency' ? { ...f, source: v, sourced_by_agency_id: '' } : { ...f, [k]: v }
+  ));
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     for (const [key, label] of REQUIRED_FIELDS) {
       if (!String(form[key]).trim()) { toast.error(`${label} is required`); return; }
+    }
+    if (form.source === 'Agency' && !form.sourced_by_agency_id) {
+      toast.error('Select which agency sourced this candidate');
+      return;
     }
     setSaving(true);
     try {
@@ -72,7 +93,7 @@ export default function NewCandidate() {
         const val = form[numField as keyof FormState];
         payload[numField] = val === '' ? null : Number(val);
       }
-      for (const strField of ['linkedin_url', 'agency_id', 'current_company', 'current_industry',
+      for (const strField of ['linkedin_url', 'agency_id', 'source', 'sourced_by_agency_id', 'current_company', 'current_industry',
         'current_designation', 'current_location', 'preferred_location', 'languages_known',
         'resume_drive_link', 'email', 'phone']) {
         if (payload[strField] === '') payload[strField] = null;
@@ -121,6 +142,22 @@ export default function NewCandidate() {
               <label className="label">LinkedIn URL</label>
               <input className="input" value={form.linkedin_url} onChange={e => set('linkedin_url', e.target.value)} placeholder="linkedin.com/in/…" />
             </div>
+            <div>
+              <label className="label">Source</label>
+              <select className="select" value={form.source} onChange={e => set('source', e.target.value)}>
+                <option value="">Not specified</option>
+                {RECRUITMENT_CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            {form.source === 'Agency' && (
+              <div>
+                <label className="label">Sourcing Agency *</label>
+                <select className="select" value={form.sourced_by_agency_id} onChange={e => set('sourced_by_agency_id', e.target.value)} required>
+                  <option value="">Select agency…</option>
+                  {agencies.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+            )}
           </div>
         </div>
 

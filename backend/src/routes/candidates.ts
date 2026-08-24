@@ -169,8 +169,11 @@ router.get('/unmatched-role-submissions', requireHR, async (req: Request, res: R
 
 // ─── GET /api/candidates/:id ──────────────────────────────────────────────────
 router.get('/:id', async (req: Request, res: Response) => {
-  const candidate = await queryOne<Candidate>(
-    'SELECT * FROM candidates WHERE id = $1',
+  const candidate = await queryOne<Candidate & { sourced_by_agency_name?: string }>(
+    `SELECT c.*, sa.name AS sourced_by_agency_name
+     FROM candidates c
+     LEFT JOIN agencies sa ON sa.id = c.sourced_by_agency_id
+     WHERE c.id = $1`,
     [req.params.id]
   );
   if (!candidate) { res.status(404).json({ error: 'Candidate not found' }); return; }
@@ -215,10 +218,17 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     current_ctc_fixed, current_ctc_variable, current_esops, expected_ctc,
     notice_period_days, current_company, current_industry, current_designation,
     current_location, years_of_experience, resume_drive_link, languages_known,
-    preferred_location,
+    preferred_location, source, sourced_by_agency_id,
   } = req.body;
 
   if (!full_name) { res.status(400).json({ error: 'full_name required' }); return; }
+
+  // Same gate as PATCH /:id — 'source' is optional, but 'Agency' requires
+  // naming which agency sourced this candidate.
+  if (source === 'Agency' && !sourced_by_agency_id) {
+    res.status(400).json({ error: 'Select which agency sourced this candidate' });
+    return;
+  }
 
   // Duplicate check: email
   if (email) {
@@ -243,14 +253,16 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
          full_name, email, phone, linkedin_url,
          current_ctc_fixed, current_ctc_variable, current_esops, expected_ctc,
          notice_period_days, current_company, current_industry, current_designation,
-         current_location, years_of_experience, resume_drive_link, languages_known
+         current_location, years_of_experience, resume_drive_link, languages_known,
+         source, sourced_by_agency_id
        )
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
       [
         full_name, email?.toLowerCase(), phone, linkedin_url,
         current_ctc_fixed ?? null, current_ctc_variable ?? null, current_esops ?? null, expected_ctc ?? null,
         notice_period_days ?? null, current_company ?? null, current_industry ?? null, current_designation ?? null,
         current_location ?? null, years_of_experience ?? null, resume_drive_link ?? null, languages_known ?? null,
+        source || null, source === 'Agency' ? sourced_by_agency_id : null,
       ]
     );
     const candidate = cand.rows[0] as Candidate;
@@ -339,6 +351,22 @@ router.patch('/:id', requireHR, async (req: Request, res: Response) => {
   const existing = await queryOne<Candidate>('SELECT * FROM candidates WHERE id = $1', [req.params.id]);
   if (!existing) { res.status(404).json({ error: 'Candidate not found' }); return; }
 
+  // 'source' is optional overall, but once it's 'Agency' a specific agency
+  // must be on record — enforced here, not just as a frontend dropdown gate,
+  // mirroring the over-budget-shortlist-reason pattern elsewhere in this app.
+  const effectiveSource = req.body.source !== undefined ? req.body.source : existing.source;
+  const effectiveAgencyId = req.body.sourced_by_agency_id !== undefined ? req.body.sourced_by_agency_id : existing.sourced_by_agency_id;
+  if (effectiveSource === 'Agency' && !effectiveAgencyId) {
+    res.status(400).json({ error: 'Select which agency sourced this candidate' });
+    return;
+  }
+  // Moving source away from 'Agency' clears any stale agency reference, even
+  // if the caller didn't explicitly send sourced_by_agency_id — the frontend
+  // already does this, but the server shouldn't rely on that alone.
+  if (req.body.source !== undefined && req.body.source !== 'Agency' && req.body.sourced_by_agency_id === undefined) {
+    req.body.sourced_by_agency_id = null;
+  }
+
   const allowedFields = [
     'full_name','email','phone','linkedin_url','parsed_total_yoe',
     'parsed_skills','parsed_industries','parsed_education','job_stability_months',
@@ -346,6 +374,7 @@ router.patch('/:id', requireHR, async (req: Request, res: Response) => {
     'current_ctc_fixed','current_ctc_variable','current_esops','expected_ctc',
     'notice_period_days','current_company','current_industry','current_designation',
     'current_location','years_of_experience','resume_drive_link','languages_known',
+    'source','sourced_by_agency_id',
   ];
 
   const updates: string[] = [];

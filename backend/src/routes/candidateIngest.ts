@@ -103,6 +103,13 @@ router.post('/ingest', async (req: Request, res: Response) => {
           }
         }
       }
+      // 'source' isn't a form field — it's an inferred default for this
+      // ingestion channel — so it's handled separately from PROFILE_FIELDS,
+      // fill-null-only same as everything else here.
+      if ((existing as unknown as { source?: string }).source == null) {
+        setClauses.push(`source = $${idx++}`);
+        values.push('Linkedin');
+      }
       values.push(existing.id);
       const updateResult = await client.query(
         `UPDATE candidates SET ${setClauses.join(', ')} WHERE id = $${idx} RETURNING *`,
@@ -115,8 +122,8 @@ router.post('/ingest', async (req: Request, res: Response) => {
            full_name, email, phone, linkedin_url,
            current_ctc_fixed, current_ctc_variable, current_esops, expected_ctc,
            notice_period_days, current_company, current_industry, current_designation,
-           current_location, years_of_experience, resume_drive_link, languages_known
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+           current_location, years_of_experience, resume_drive_link, languages_known, source
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'Linkedin') RETURNING *`,
         [
           full_name, normEmail, submitted.phone, submitted.linkedin_url,
           submitted.current_ctc_fixed, submitted.current_ctc_variable, submitted.current_esops,

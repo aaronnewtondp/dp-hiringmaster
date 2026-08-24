@@ -130,6 +130,16 @@ export interface Candidate {
   resume_drive_link?:     string;
   languages_known?:       string;
 
+  // Where this candidate was originally sourced — distinct from
+  // Application.source_channel (how one specific application arrived).
+  // Not mandatory; sourced_by_agency_id only applies (and is only
+  // mandatory, enforced server-side) when source === 'Agency'.
+  source?:                string;
+  sourced_by_agency_id?:  string;
+  // GET /api/candidates/:id only (LEFT JOIN) — the agency's name, for
+  // read-mode display since sourced_by_agency_id is just the id.
+  sourced_by_agency_name?: string;
+
   // Present on GET /api/candidates (LEFT JOIN) — null when the candidate has
   // no applications yet (e.g. an ingested candidate whose "role applying
   // for" answer didn't match any open role).
@@ -368,8 +378,11 @@ export const VACANCY_REASONS = [
 
 export const EMPLOYMENT_TYPES = ['Full-Time / Permanent', 'Contract', 'Internship'];
 
+// Also reused as-is for the candidate-level "Source" field (Identity
+// section, CandidateDetail.tsx/NewCandidate.tsx) — same vocabulary, kept
+// as one shared list rather than two near-duplicate ones.
 export const RECRUITMENT_CHANNELS = [
-  'Naukri', 'LinkedIn', 'IIMJobs', 'Employee Referral', 'Agency', 'Direct Outreach',
+  'Naukri/IIMjobs', 'Linkedin', 'Internal Referral', 'Agency', 'Direct Outreach',
 ];
 
 export const STAGES = [

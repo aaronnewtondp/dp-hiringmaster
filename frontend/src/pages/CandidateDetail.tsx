@@ -3,8 +3,8 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ExternalLink, Star, ChevronDown, ChevronUp, CalendarPlus, MessageSquare, FileText, Send, Link2, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { candidatesApi, applicationsApi, interviewsApi, refChecksApi } from '../services/api.ts';
-import { Candidate, Application, InterviewRound, ReferenceCheck, REJECTION_REASONS, WITHDRAWAL_REASONS } from '../types/index.ts';
+import { candidatesApi, applicationsApi, interviewsApi, refChecksApi, agenciesApi } from '../services/api.ts';
+import { Candidate, Application, InterviewRound, ReferenceCheck, Agency, REJECTION_REASONS, WITHDRAWAL_REASONS, RECRUITMENT_CHANNELS } from '../types/index.ts';
 import { StageBadge, StatusBadge, PriorityBadge, OverBudgetBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import PipelineProgress from '../components/shared/PipelineProgress.tsx';
 import { isOverBudget } from '../utils/budget.ts';
@@ -132,6 +132,16 @@ export default function CandidateDetail() {
   const candidate = data?.data?.candidate;
   const applications = data?.data?.applications || [];
   const activity = actData?.data?.activity || [];
+
+  // Agency list is HR-tier only server-side — only fetched for personas
+  // that can actually use it, so a Hiring Manager viewing this page never
+  // fires a request that's guaranteed to 403.
+  const { data: agenciesData } = useQuery<{ data: { agencies: Agency[] } }>({
+    queryKey: ['agencies'],
+    queryFn: () => agenciesApi.list(),
+    enabled: canHR,
+  });
+  const agencies = agenciesData?.data?.agencies || [];
 
   const { data: roundsMap, refetch: refetchRounds } = useQuery<Record<string, InterviewRound[]>>({
     queryKey: ['interview-rounds', applications.map(a => a.id).join(',')],
@@ -278,6 +288,19 @@ export default function CandidateDetail() {
               { key: 'email', label: 'Email', type: 'text' },
               { key: 'phone', label: 'Phone', type: 'text' },
               { key: 'linkedin_url', label: 'LinkedIn', type: 'text', linkify: true },
+              {
+                key: 'source', label: 'Source', type: 'select',
+                options: ['', ...RECRUITMENT_CHANNELS],
+                optionLabels: { '': 'Not specified' },
+              },
+              {
+                key: 'sourced_by_agency_id', label: 'Sourcing Agency', type: 'select',
+                options: ['', ...agencies.map(a => a.id)],
+                optionLabels: { '': 'Select agency…', ...Object.fromEntries(agencies.map(a => [a.id, a.name])) },
+                dependsOn: { key: 'source', value: 'Agency' },
+                requiredWhenVisible: true,
+                displayKey: 'sourced_by_agency_name',
+              },
             ]}
           />
           <EditableSection

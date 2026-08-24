@@ -728,6 +728,15 @@ ALTER TABLE agencies
   ADD COLUMN IF NOT EXISTS billing_effective_window TEXT,
   ADD COLUMN IF NOT EXISTS billing_late_penalty    TEXT;
 
+-- Candidate sourcing — where a candidate was originally found, distinct
+-- from applications.source_channel (which tracks how one SPECIFIC
+-- application arrived, e.g. "Job Application Form"). Not mandatory.
+-- sourced_by_agency_id is only meaningful (and only required, enforced at
+-- the API layer, not here) when source = 'Agency'.
+ALTER TABLE candidates
+  ADD COLUMN IF NOT EXISTS source TEXT CHECK (source IN ('Naukri/IIMjobs','Linkedin','Internal Referral','Agency','Direct Outreach')),
+  ADD COLUMN IF NOT EXISTS sourced_by_agency_id TEXT REFERENCES agencies(id);
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows
 -- ═════════════════════════════════════════════════════════════════════════════
