@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, Download, HelpCircle } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink, HelpCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { PERSONAS } from '../types/index.ts';
 
@@ -14,7 +14,7 @@ interface Section {
 // workflow/logic, AI automation, and where to find things.
 const GROUPS: Array<{ title: string; sections: Section[] }> = [
   {
-    title: 'What each section of HMS is for',
+    title: 'What each section of the Hiring Master System is for',
     sections: [
       {
         id: 'dashboard',
@@ -151,7 +151,7 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
         question: 'Why was I asked for a reason before shortlisting a candidate?',
         answer: (
           <p>If a candidate's expected CTC is 15% or more above the role's stated compensation
-          band, HMS requires an explicit, on-record reason before they can be moved to
+          band, the Hiring Master System requires an explicit, on-record reason before they can be moved to
           Shortlisted — so an over-budget hire is always a documented decision, not an
           accident.</p>
         ),
@@ -159,7 +159,7 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
     ],
   },
   {
-    title: 'AI automation in HMS',
+    title: 'AI automation in the Hiring Master System',
     sections: [
       {
         id: 'resumeiq',
@@ -179,7 +179,7 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
         id: 'jd-gen',
         question: 'Where do generated job descriptions come from?',
         answer: (
-          <p>Once a role is approved, HMS can generate both a long-form JD (2-page PDF) and a
+          <p>Once a role is approved, the Hiring Master System can generate both a long-form JD (2-page PDF) and a
           social-sharable graphic version directly from the role's data, and store both on
           Drive with links surfaced on the role's detail page.</p>
         ),
@@ -188,7 +188,7 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
         id: 'assignment-email',
         question: 'How do Assignment emails get sent?',
         answer: (
-          <p>From a candidate's Assignment Round action, HMS composes and sends the assignment
+          <p>From a candidate's Assignment Round action, the Hiring Master System composes and sends the assignment
           email directly (from the shared HR inbox) — one action both creates the interview
           round record and sends the email, with the assignment link and any supporting docs
           included. If a send fails, the round stays in place and the action becomes a retry.</p>
@@ -258,7 +258,7 @@ export default function Help() {
           <h1 className="text-xl font-semibold text-gray-900">Help &amp; FAQ</h1>
         </div>
         <p className="text-sm text-gray-500 mt-0.5">
-          How HMS's sections, workflows, and AI automation fit together — available to everyone,
+          How the Hiring Master System's sections, workflows, and AI automation fit together — available to everyone,
           regardless of role.
         </p>
       </div>
@@ -275,9 +275,9 @@ export default function Help() {
           href="/DigitalPaani_HMS_User_Access_Guide.pdf"
           target="_blank"
           rel="noreferrer"
-          className="btn-primary text-sm flex items-center gap-1.5 shrink-0"
+          className="text-dp-600 hover:underline text-sm font-medium flex items-center gap-1.5 shrink-0"
         >
-          <Download className="w-3.5 h-3.5" /> Download guide (PDF)
+          Open guide <ExternalLink className="w-3.5 h-3.5" />
         </a>
       </div>
 

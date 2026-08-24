@@ -98,7 +98,7 @@ export default function Login() {
           </div>
           <div>
             <div className="text-white text-lg font-semibold">DigitalPaani</div>
-            <div className="text-dp-300 text-sm">Hiring Management System</div>
+            <div className="text-dp-300 text-sm">Hiring Master System</div>
           </div>
         </div>
 

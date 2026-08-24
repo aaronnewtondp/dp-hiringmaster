@@ -34,8 +34,8 @@ export default function Sidebar() {
           <Droplets className="w-4 h-4 text-white" />
         </div>
         <div>
-          <div className="text-white text-sm font-display font-semibold leading-tight">DigitalPaani</div>
-          <div className="text-navy-200 text-xs">HMS</div>
+          <div className="text-white text-sm font-display font-semibold leading-tight">Hiring Master System</div>
+          <div className="text-navy-200 text-xs">DigitalPaani</div>
         </div>
       </div>
 
