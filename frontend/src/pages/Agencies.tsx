@@ -33,7 +33,7 @@ export default function Agencies() {
           <table className="w-full">
             <thead className="border-b border-gray-100 bg-gray-50">
               <tr>
-                {['Agency Name','Status','Commission Tiers','Market Positioning','Hires','Replacement','Billing and Payment terms','Agreement Link'].map(h => (
+                {['Agency Name','Status','Requirement Type','Commission Tiers','Market Positioning','Hires','Replacement','Billing and Payment terms','Agreement Link'].map(h => (
                   <th key={h} className="table-th">{h}</th>
                 ))}
               </tr>
@@ -55,6 +55,9 @@ export default function Agencies() {
                     }`}>
                       {ag.contract_status}
                     </span>
+                  </td>
+                  <td className="table-td text-xs text-gray-600 max-w-[160px]">
+                    {ag.specialisations || <span className="text-gray-300">—</span>}
                   </td>
                   <td className="table-td text-xs font-mono text-gray-600">
                     {ag.tier1_rate && <div>{ag.tier1_band || 'All'}: {ag.tier1_rate}</div>}
