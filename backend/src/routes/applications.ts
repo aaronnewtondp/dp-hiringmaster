@@ -56,11 +56,16 @@ router.get('/', async (req: Request, res: Response) => {
            c.current_industry AS candidate_industry,
            c.resume_drive_link AS candidate_resume_link,
            r.title AS role_title, r.priority AS role_priority, r.ctc_band AS role_ctc_band,
-           ag.name AS agency_name
+           ag.name AS agency_name, last_activity.event_detail AS last_activity_detail
     FROM applications a
     JOIN candidates c ON c.id = a.candidate_id
     JOIN roles r ON r.id = a.role_id
     LEFT JOIN agencies ag ON ag.id = a.agency_id
+    LEFT JOIN LATERAL (
+      SELECT event_detail FROM activity_log
+      WHERE application_id = a.id
+      ORDER BY created_at DESC LIMIT 1
+    ) last_activity ON true
     WHERE 1=1
   `;
   const params: unknown[] = [];

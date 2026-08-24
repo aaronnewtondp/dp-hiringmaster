@@ -64,6 +64,7 @@ export interface Role {
   created_at:               string;
   // computed
   days_open:                number;
+  days_overdue:             number;
   aging_alert:              AgingAlert;
   active_candidate_count?:  number;
   shortlisted_count?:       number;
@@ -167,6 +168,10 @@ export interface Application {
   recruiter_screening_status:  ScreeningStatus;
   resume_drive_link?:          string;
   screening_answers?:          Array<{ question: string; answer: string }>;
+  rejection_reason_cat?:       string;
+  rejection_reason_detail?:    string;
+  withdrawal_reason_cat?:      string;
+  withdrawal_reason_detail?:   string;
 
   // ── ResumeIQ 8-dimension scoring (matches digitalpaani-candidate-scoring skill) ──
   score_technical?:            number;
@@ -227,6 +232,7 @@ export interface Application {
   candidate_company?:         string;
   candidate_industry?:        string;
   candidate_resume_link?:     string;
+  last_activity_detail?:      string;
   // Server-computed, never stripped for any persona (unlike role_ctc_band,
   // which IS stripped for non-HR-tier) — a Hiring Manager needs this yes/no
   // signal to see the mandatory-reason gate coming before they hit the
@@ -329,6 +335,7 @@ export interface DashboardData {
     offered_count:      number;
     tat_by_stage:       Array<{ stage: string; avg_hours: number; n: number }>;
     biggest_drop_off:   { stage: string; count: number } | null;
+    biggest_drop_off_by_rate: { stage: string; count: number; rate: number } | null;
   };
 }
 

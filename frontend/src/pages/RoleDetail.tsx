@@ -155,7 +155,7 @@ export default function RoleDetail() {
               <span>·</span>
               <span>{role.location}</span>
               <span>·</span>
-              <AgingBadge alert={role.aging_alert} days={role.days_open} />
+              <AgingBadge alert={role.aging_alert} daysOpen={role.days_open} daysOverdue={role.days_overdue} />
             </div>
           </div>
           <div className="text-right shrink-0 space-y-2">

@@ -102,9 +102,14 @@ export default function Roles() {
               <tr>
                 {[
                   'Role', 'Priority', 'Department', 'Location', 'Openings', 'Age',
-                  'Shortlisted', ...(canHR ? ['Salary Range'] : []), 'Candidates', 'Status', '',
+                  'Active Shortlist', ...(canHR ? ['Salary Range'] : []), 'Active Candidates', 'Status', '',
                 ].map(h => (
-                  <th key={h} className="table-th">{h}</th>
+                  <th
+                    key={h}
+                    className={`table-th ${h === 'Location' ? 'pr-1' : h === 'Openings' ? 'pl-1' : ''}`}
+                  >
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -122,10 +127,10 @@ export default function Roles() {
                   </td>
                   <td className="table-td"><PriorityBadge priority={role.priority} /></td>
                   <td className="table-td text-gray-500 text-xs">{role.department}</td>
-                  <td className="table-td text-gray-500 text-xs">{role.location}</td>
-                  <td className="table-td text-center">{role.num_openings}</td>
+                  <td className="table-td text-gray-500 text-xs pr-1">{role.location}</td>
+                  <td className="table-td text-center pl-1">{role.num_openings}</td>
                   <td className="table-td text-center">
-                    <AgingBadge alert={role.aging_alert} days={role.days_open} />
+                    <AgingBadge alert={role.aging_alert} daysOpen={role.days_open} daysOverdue={role.days_overdue} />
                   </td>
                   <td className="table-td text-center text-gray-500">{role.shortlisted_count ?? 0}</td>
                   {canHR && (

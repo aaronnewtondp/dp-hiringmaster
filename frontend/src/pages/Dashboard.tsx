@@ -280,7 +280,7 @@ export default function Dashboard() {
                     <td className="table-td"><PriorityBadge priority={r.priority as Priority} /></td>
                     <td className="table-td text-gray-500 text-xs">{r.hiring_manager_name}</td>
                     <td className="table-td">
-                      <AgingBadge alert={r.aging_alert} days={r.days_open} />
+                      <AgingBadge alert={r.aging_alert} daysOpen={r.days_open} daysOverdue={r.days_overdue} />
                     </td>
                   </tr>
                 ))}
@@ -480,10 +480,18 @@ export default function Dashboard() {
                 <span className="text-xs font-medium text-gray-500">Biggest drop-off stage</span>
               </div>
               {velocity.biggest_drop_off ? (
-                <>
-                  <div className="text-lg font-semibold text-gray-900">{velocity.biggest_drop_off.stage}</div>
-                  <div className="text-xs font-mono text-gray-400 mt-1">{velocity.biggest_drop_off.count} rejected here</div>
-                </>
+                <div className="space-y-2">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900">{velocity.biggest_drop_off.stage}</div>
+                    <div className="text-xs font-mono text-gray-400">{velocity.biggest_drop_off.count} rejected — highest count</div>
+                  </div>
+                  {velocity.biggest_drop_off_by_rate && velocity.biggest_drop_off_by_rate.stage !== velocity.biggest_drop_off.stage && (
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">{velocity.biggest_drop_off_by_rate.stage}</div>
+                      <div className="text-xs font-mono text-gray-400">{velocity.biggest_drop_off_by_rate.rate}% rejected — highest rate</div>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div className="text-sm text-gray-400">No rejections recorded</div>
               )}

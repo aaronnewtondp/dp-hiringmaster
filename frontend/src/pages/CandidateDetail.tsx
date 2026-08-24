@@ -78,6 +78,7 @@ export default function CandidateDetail() {
   const [statusValue, setStatusValue] = useState('');
   const [rejectionCat, setRejectionCat] = useState('');
   const [rejectionDetail, setRejectionDetail] = useState('');
+  const [viewingRejection, setViewingRejection] = useState<{ cat?: string; detail?: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [showFounderModal, setShowFounderModal] = useState(false);
@@ -393,7 +394,16 @@ export default function CandidateDetail() {
                           </div>
                           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                             <StageBadge stage={app.stage} />
-                            <StatusBadge status={app.status} />
+                            {app.status === 'Rejected' ? (
+                              <button
+                                onClick={() => setViewingRejection({ cat: app.rejection_reason_cat, detail: app.rejection_reason_detail })}
+                                title="Click to see the rejection reason"
+                              >
+                                <StatusBadge status={app.status} />
+                              </button>
+                            ) : (
+                              <StatusBadge status={app.status} />
+                            )}
                             <span className="text-xs text-gray-400">{app.recruiter_screening_status}</span>
                             {app.score_avg != null && <span className="text-xs font-semibold text-dp-700">ResumeIQ: {Number(app.score_avg).toFixed(1)}/10</span>}
                             <OverBudgetBadge overBudget={isOverBudget(app.candidate_expected_ctc ?? candidate.expected_ctc, app.role_ctc_band)} />
@@ -755,6 +765,19 @@ export default function CandidateDetail() {
             qc.invalidateQueries({ queryKey: ['applications'] });
           }}
         />
+      )}
+
+      {viewingRejection && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setViewingRejection(null)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-3" onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-semibold">Rejection reason</h3>
+            <p className="text-sm text-gray-900">{viewingRejection.cat || 'No reason logged'}</p>
+            {viewingRejection.detail && <p className="text-sm text-gray-500">{viewingRejection.detail}</p>}
+            <div className="flex justify-end">
+              <button onClick={() => setViewingRejection(null)} className="btn-secondary">Close</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showStatusModal && (

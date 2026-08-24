@@ -1,29 +1,24 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
 import { authenticate, requireHR, isHRTier } from '../middleware/auth.js';
-import { Role, AGING_THRESHOLDS, Priority } from '../types/index.js';
+import { Role } from '../types/index.js';
 import { generateJdContent } from '../services/jdContent.js';
 import { renderLongFormJd } from '../services/pdf/longFormJd.js';
 import { renderSocialJd } from '../services/pdf/socialJd.js';
 import { uploadJdPdf } from '../services/driveService.js';
 import { parseRoleFilters, buildRoleFilterSql } from '../utils/roleFilters.js';
 import { getCompBenchmark } from '../services/compBenchmark.js';
+import { computeAging } from '../utils/aging.js';
 
 const router = Router();
 router.use(authenticate);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function computeAging(startDate: string | null, priority: Priority) {
-  if (!startDate) return { days_open: 0, aging_alert: 'ok' as const };
-  const days = Math.floor((Date.now() - new Date(startDate).getTime()) / 86400000);
-  const thresh = AGING_THRESHOLDS[priority] || AGING_THRESHOLDS.P1;
-  const aging_alert = days >= thresh.red ? 'red' : days >= thresh.yellow ? 'yellow' : 'ok';
-  return { days_open: days, aging_alert };
-}
-
 function enrichRole(role: Role) {
-  const { days_open, aging_alert } = computeAging(role.start_date || null, role.priority);
-  return { ...role, days_open, aging_alert };
+  const { days_open, days_overdue, aging_alert } = computeAging(
+    role.start_date || null, role.target_closure_date || null, role.priority
+  );
+  return { ...role, days_open, days_overdue, aging_alert };
 }
 
 // ─── GET /api/roles — list all roles with computed fields ─────────────────────

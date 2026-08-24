@@ -1,9 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne } from '../db/index.js';
 import { authenticate } from '../middleware/auth.js';
-import { AGING_THRESHOLDS, Priority } from '../types/index.js';
+import { Priority } from '../types/index.js';
 import { runSlaCheck } from '../jobs/slaChecker.js';
 import { parseRoleFilters, buildRoleFilterSql, roleIdsSubquery } from '../utils/roleFilters.js';
+import { computeAging } from '../utils/aging.js';
 
 // ─── Compute-on-read SLA trigger ──────────────────────────────────────────────
 // Vercel Hobby tier only supports daily cron, not the 15-min interval the SLA
@@ -322,14 +323,11 @@ router.get('/', async (req: Request, res: Response) => {
   }
 
   // ── Compute aging for each role ─────────────────────────────────────────────
-  const now = Date.now();
   const rolesWithAging = agingRoles.map(r => {
-    const days = r.start_date
-      ? Math.floor((now - new Date(r.start_date).getTime()) / 86400000)
-      : 0;
-    const thresh = AGING_THRESHOLDS[r.priority as Priority] || AGING_THRESHOLDS.P1;
-    const aging_alert = days >= thresh.red ? 'red' : days >= thresh.yellow ? 'yellow' : 'ok';
-    return { ...r, days_open: days, aging_alert, active_count: parseInt(r.active_count || '0') };
+    const { days_open, days_overdue, aging_alert } = computeAging(
+      r.start_date || null, r.target_closure_date || null, r.priority as Priority
+    );
+    return { ...r, days_open, days_overdue, aging_alert, active_count: parseInt(r.active_count || '0') };
   });
 
   const redAlertRoles   = rolesWithAging.filter(r => r.aging_alert === 'red').length;
@@ -480,6 +478,23 @@ router.get('/', async (req: Request, res: Response) => {
   // when rejectedByStage used to be a sparse, rejections-only map.
   const biggestDropOff = Object.entries(rejectedByStage).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1])[0];
 
+  // Rejection RATE per stage (rejected / everyone who ever reached that
+  // stage) — a separate callout from the raw-count version above, since the
+  // two can point at different stages: a high-volume early stage (e.g.
+  // Resume Review) racks up the most rejections in absolute terms simply by
+  // funneling everyone through it, while a later stage with far fewer
+  // candidates can reject a much larger share of the ones it does see.
+  // Shown alongside biggest_drop_off rather than replacing it — by design
+  // decision, not a bug fix.
+  const biggestDropOffByRate = STAGE_ORDER
+    .map(stage => {
+      const b = funnelByStage[stage];
+      const total = b.active + b.rejected + b.withdrawn + b.hold_for_future;
+      return { stage, count: b.rejected, rate: total > 0 ? round1((b.rejected / total) * 100) : 0 };
+    })
+    .filter(s => s.count > 0)
+    .sort((a, b) => b.rate - a.rate)[0];
+
   res.json({
     metrics: {
       open_roles_count:       openRolesCount,
@@ -506,6 +521,7 @@ router.get('/', async (req: Request, res: Response) => {
       offered_count: offeredCount,
       tat_by_stage: tatByStage,
       biggest_drop_off: biggestDropOff ? { stage: biggestDropOff[0], count: biggestDropOff[1] } : null,
+      biggest_drop_off_by_rate: biggestDropOffByRate || null,
     },
     joining_risk:  joiningRisk,
   });

@@ -554,6 +554,11 @@ export default function Candidates() {
                   </td>
                   <td className="table-td px-2 py-4 text-xs text-gray-400 truncate">
                     {app.last_updated ? formatDistanceToNow(new Date(app.last_updated), { addSuffix: true }) : '—'}
+                    {app.last_activity_detail && (
+                      <div className="text-[10px] text-gray-300 truncate" title={app.last_activity_detail}>
+                        {app.last_activity_detail}
+                      </div>
+                    )}
                   </td>
                   <td className="table-td px-1 py-4">
                     <Link to={`/candidates/${app.candidate_id}`} className="text-gray-400 hover:text-dp-600">

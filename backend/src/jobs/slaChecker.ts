@@ -1,5 +1,6 @@
 import { query, queryOne, transaction } from '../db/index.js';
-import { SLA_HOURS, AGING_THRESHOLDS, Priority } from '../types/index.js';
+import { SLA_HOURS, Priority } from '../types/index.js';
+import { computeAging } from '../utils/aging.js';
 
 // ─── Main SLA check — called by scheduler every 15 minutes ───────────────────
 export async function runSlaCheck(): Promise<void> {
@@ -155,19 +156,24 @@ async function checkAssignmentDeadlines(): Promise<void> {
 }
 
 // ─── 3. Role aging alerts ────────────────────────────────────────────────────
+// Matches computeAging()'s target_closure_date-driven semantics (roles.ts /
+// dashboard.ts both use the same shared function) so this Leadership
+// notification never disagrees with what the Roles/Dashboard pages
+// themselves show — previously this duplicated the OLD days-open-only
+// logic independently, so a role could show "not overdue" everywhere in
+// the UI while still carrying a stale red pending_action from before
+// Close Target was ever set or was later pushed out.
 async function checkRoleAging(): Promise<void> {
-  const roles = await query<{ id: string; title: string; priority: string; start_date: string }>(`
-    SELECT id, title, priority, start_date
+  const roles = await query<{ id: string; title: string; priority: string; start_date: string; target_closure_date: string | null }>(`
+    SELECT id, title, priority, start_date, target_closure_date
     FROM roles
     WHERE status = 'Live – Sourcing' AND start_date IS NOT NULL
   `);
 
-  const now = Date.now();
   for (const role of roles) {
-    const days = Math.floor((now - new Date(role.start_date).getTime()) / 86400000);
-    const thresh = AGING_THRESHOLDS[role.priority as Priority] || AGING_THRESHOLDS.P1;
+    const { days_overdue, aging_alert } = computeAging(role.start_date, role.target_closure_date, role.priority as Priority);
 
-    if (days >= thresh.red) {
+    if (aging_alert === 'red') {
       const existing = await queryOne(
         `SELECT id FROM pending_actions WHERE role_title=$1 AND action_type='Role aging alert' AND resolved=false`,
         [role.title]
@@ -176,10 +182,18 @@ async function checkRoleAging(): Promise<void> {
         await query(
           `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, role_title, hours_overdue, role_id)
            VALUES ('Leadership / Founders','High','Role aging alert',
-             $1||' ('||$2||') — '||$3||' days open (Red Alert)', $1, 0, $4)`,
-          [role.title, role.priority, days, role.id]
+             $1||' ('||$2||') — '||$3||' days overdue on Close Target (Red Alert)', $1, 0, $4)`,
+          [role.title, role.priority, days_overdue, role.id]
         );
       }
+    } else {
+      // No longer overdue (Close Target pushed out, or was cleared) —
+      // resolve any lingering alert rather than leaving it stuck open.
+      await query(
+        `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
+         WHERE role_title=$1 AND action_type='Role aging alert' AND resolved=false`,
+        [role.title]
+      );
     }
   }
 }

@@ -49,10 +49,10 @@ export function StatusBadge({ status }: { status: string }) {
 }
 
 // ─── Aging indicator ─────────────────────────────────────────────────────────
-export function AgingBadge({ alert, days }: { alert: AgingAlert; days: number }) {
-  if (alert === 'red')    return <span className="text-xs font-medium font-mono text-red-600">🔴 {days}d</span>;
-  if (alert === 'yellow') return <span className="text-xs font-medium font-mono text-amber-600">🟡 {days}d</span>;
-  return <span className="text-xs font-mono text-gray-500">{days}d</span>;
+export function AgingBadge({ alert, daysOpen, daysOverdue }: { alert: AgingAlert; daysOpen: number; daysOverdue: number }) {
+  if (alert === 'red')    return <span className="text-xs font-medium font-mono text-red-600" title={`${daysOpen}d since the role opened`}>🔴 {daysOverdue}d over · {daysOpen}d open</span>;
+  if (alert === 'yellow') return <span className="text-xs font-medium font-mono text-amber-600" title={`${daysOpen}d since the role opened`}>🟡 {daysOverdue}d over · {daysOpen}d open</span>;
+  return <span className="text-xs font-mono text-gray-500">{daysOpen}d open</span>;
 }
 
 // ─── Fit score ────────────────────────────────────────────────────────────────

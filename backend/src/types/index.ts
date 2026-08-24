@@ -63,6 +63,7 @@ export interface Role {
   updated_at:               string;
   // computed fields (joined queries)
   days_open?:               number;
+  days_overdue?:            number;
   aging_alert?:             'ok' | 'yellow' | 'red';
   active_candidate_count?:  number;
   shortlisted_count?:       number;
