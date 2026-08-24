@@ -5,11 +5,28 @@ import { authenticate, requireHR } from '../middleware/auth.js';
 const router = Router();
 router.use(authenticate, requireHR);
 
+// A "hire" is counted off the CANDIDATE's own sourced_by_agency_id (Identity
+// section's Source = Agency, item added for the agency revamp) — not
+// applications.agency_id, a separate, older application-level field that
+// never had a working UI to actually set it. Counted per distinct candidate
+// (not per application) so a candidate with two applications that both
+// reached Offer Accepted+ doesn't count twice, and gated on Offer Accepted
+// or Joined specifically — Offer Released isn't a hire yet, the offer could
+// still fall through.
+const TOTAL_HIRED_SUBQUERY = `(
+       SELECT COUNT(DISTINCT c.id) FROM candidates c
+       WHERE c.sourced_by_agency_id = a.id
+         AND EXISTS (
+           SELECT 1 FROM applications app2
+           WHERE app2.candidate_id = c.id AND app2.stage IN ('Offer Accepted','Joined')
+         )
+     )`;
+
 router.get('/', async (_req, res: Response) => {
   const agencies = await query(
     `SELECT a.*,
        COUNT(DISTINCT app.id) FILTER (WHERE app.status NOT IN ('Rejected','Withdrawn')) AS total_submitted,
-       COUNT(DISTINCT app.id) FILTER (WHERE app.stage = 'Joined') AS total_hired
+       ${TOTAL_HIRED_SUBQUERY} AS total_hired
      FROM agencies a
      LEFT JOIN applications app ON app.agency_id = a.id
      GROUP BY a.id
@@ -19,7 +36,16 @@ router.get('/', async (_req, res: Response) => {
 });
 
 router.get('/:id', async (req: Request, res: Response) => {
-  const agency = await queryOne('SELECT * FROM agencies WHERE id=$1', [req.params.id]);
+  const agency = await queryOne(
+    `SELECT a.*,
+       COUNT(DISTINCT app.id) FILTER (WHERE app.status NOT IN ('Rejected','Withdrawn')) AS total_submitted,
+       ${TOTAL_HIRED_SUBQUERY} AS total_hired
+     FROM agencies a
+     LEFT JOIN applications app ON app.agency_id = a.id
+     WHERE a.id = $1
+     GROUP BY a.id`,
+    [req.params.id]
+  );
   if (!agency) { res.status(404).json({ error: 'Agency not found' }); return; }
   res.json({ agency });
 });
