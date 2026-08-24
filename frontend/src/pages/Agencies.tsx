@@ -34,11 +34,11 @@ export default function Agencies() {
             <thead className="border-b border-gray-100 bg-gray-50">
               <tr>
                 {[
-                  ['Agency Name', 'w-[15%]'],
+                  ['Agency Name', 'w-[12%]'],
                   ['Status', 'w-[7%]'],
                   ['Requirement Type', 'w-[10%]'],
                   ['Commission Tiers', 'w-[11%]'],
-                  ['Market Positioning', 'w-[15%]'],
+                  ['Market Positioning', 'w-[18%]'],
                   ['Hires', 'w-[6%]'],
                   ['Replacement', 'w-[12%]'],
                   ['Billing and Payment terms', 'w-[15%]'],
