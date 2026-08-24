@@ -72,8 +72,8 @@ router.get('/', async (req: Request, res: Response) => {
   // Run all aggregate queries in parallel
   const [
     roleStats, candidateStats, slaBreaches,
-    pendingActions, agingRoles, pipeline, joiningRisk,
-    sourceQualityRows, timeToFillRows, rejectedByStageRows,
+    pendingActions, agingRoles, funnelRows, joiningRisk,
+    sourceQualityRows, timeToFillRows,
     allStageRows, tatByStageRows,
   ] = await Promise.all([
     // Role counts by priority and status
@@ -166,16 +166,22 @@ router.get('/', async (req: Request, res: Response) => {
       `, f.params);
     })(),
 
-    // Hiring funnel — counts by stage across all active applications
+    // Hiring funnel — every candidate who ever reached each stage, broken
+    // down by what became of them (Active/Rejected/Withdrawn/Hold for
+    // Future), not just those still actively sitting there. Grouped by
+    // (stage, status) in one query; JS below fills in every canonical stage
+    // (even ones with zero rows here) so a role/filter where every
+    // candidate at a stage has since been rejected doesn't make that stage
+    // vanish from the funnel entirely — it used to, when this only counted
+    // status='Active'.
     (() => {
       const scoped = roleIdsSubquery(filters, 1);
-      return query<{ stage: string; count: string }>(`
-        SELECT stage, COUNT(*) as count
+      return query<{ stage: string; status: string; count: string }>(`
+        SELECT stage, status, COUNT(*) as count
         FROM applications
-        WHERE status = 'Active'
+        WHERE status IN ('Active','Rejected','Withdrawn','Hold for Future')
         ${scoped ? ` AND role_id IN ${scoped.sql}` : ''}
-        GROUP BY stage
-        ORDER BY COUNT(*) DESC
+        GROUP BY stage, status
       `, scoped?.params || []);
     })(),
 
@@ -190,6 +196,7 @@ router.get('/', async (req: Request, res: Response) => {
         JOIN candidates c ON c.id = a.candidate_id
         JOIN roles r ON r.id = a.role_id
         WHERE a.stage = 'Offer Accepted'
+          AND a.status = 'Active'
           AND (a.joining_risk_auto_flag = true
                OR a.joining_confidence = 'Low'
                OR (a.last_hr_contact IS NOT NULL AND a.last_hr_contact < NOW() - INTERVAL '5 days'))
@@ -210,7 +217,7 @@ router.get('/', async (req: Request, res: Response) => {
                COUNT(*) FILTER (WHERE stage <> 'Applied') AS engaged,
                COUNT(*) FILTER (WHERE stage = 'Joined')  AS hired
         FROM applications
-        WHERE source_channel IS NOT NULL
+        WHERE source_channel IS NOT NULL AND source_channel <> ''
         ${scoped ? ` AND role_id IN ${scoped.sql}` : ''}
         GROUP BY source_channel ORDER BY n DESC
       `, scoped?.params || []);
@@ -231,21 +238,6 @@ router.get('/', async (req: Request, res: Response) => {
         ${f.sql}
         GROUP BY r.priority
       `, f.params);
-    })(),
-
-    // Rejected-per-stage (hiring funnel subtext) — the stage column freezes
-    // at whatever it was when status became Rejected (stage/status are
-    // independent fields, nothing moves stage on rejection), so this is
-    // literally "how many were rejected while sitting at each stage."
-    (() => {
-      const scoped = roleIdsSubquery(filters, 1);
-      return query<{ stage: string; count: string }>(`
-        SELECT stage, COUNT(*) as count
-        FROM applications
-        WHERE status = 'Rejected'
-        ${scoped ? ` AND role_id IN ${scoped.sql}` : ''}
-        GROUP BY stage
-      `, scoped?.params || []);
     })(),
 
     // Operational Velocity (items #10/#29) — every application's current
@@ -360,9 +352,20 @@ router.get('/', async (req: Request, res: Response) => {
     );
   }
 
-  // For HMs — filter to their own pending actions only
+  // For HMs — filter to their own pending actions only. Was previously just
+  // owner_type === 'Hiring Manager', which pools EVERY hiring manager's
+  // actions together — any HM with open items saw every other HM's too,
+  // since owner_type only distinguishes the queue (HR/HM/Interviewer/
+  // Leadership), not which specific person within it. responsible_person is
+  // the same name field roles.ts already compares req.user!.name against
+  // for its own HM-identity checks.
+  const userNameLower = req.user!.name.trim().toLowerCase();
   const pendingForUser = persona === 'hiring_manager'
-    ? pendingActions.filter(pa => pa.owner_type === 'Hiring Manager')
+    ? pendingActions.filter(pa =>
+        pa.owner_type === 'Hiring Manager' &&
+        !!pa.responsible_person &&
+        pa.responsible_person.trim().toLowerCase() === userNameLower
+      )
     : pendingActions;
 
   // Pending Actions counter excludes SLA-breach-driven HR/Recruiter entries
@@ -409,11 +412,37 @@ router.get('/', async (req: Request, res: Response) => {
     by_priority: byPriority,
   };
 
-  // ── Rejected-per-stage — subtext under each hiring-funnel bar ───────────────
-  const rejectedByStage: Record<string, number> = {};
-  for (const row of rejectedByStageRows) {
-    rejectedByStage[row.stage] = parseInt(row.count);
+  // ── Hiring funnel — every canonical stage, every status ─────────────────────
+  // Always includes all 13 stages (even ones with zero rows in funnelRows),
+  // so a filtered view where every candidate at a stage has since moved off
+  // 'Active' doesn't make that stage disappear from the funnel.
+  type FunnelCounts = { active: number; rejected: number; withdrawn: number; hold_for_future: number };
+  const funnelByStage: Record<string, FunnelCounts> = {};
+  for (const stage of STAGE_ORDER) funnelByStage[stage] = { active: 0, rejected: 0, withdrawn: 0, hold_for_future: 0 };
+  for (const row of funnelRows) {
+    const bucket = funnelByStage[row.stage];
+    if (!bucket) continue; // a retired stage name from old data — nothing current can be sitting there
+    const n = parseInt(row.count);
+    if (row.status === 'Active') bucket.active = n;
+    else if (row.status === 'Rejected') bucket.rejected = n;
+    else if (row.status === 'Withdrawn') bucket.withdrawn = n;
+    else if (row.status === 'Hold for Future') bucket.hold_for_future = n;
   }
+  const hiringFunnel = STAGE_ORDER.map(stage => ({ stage, ...funnelByStage[stage] }));
+
+  // rejected_by_stage kept as its own top-level field (same shape as before)
+  // since biggest_drop_off below reads it directly — now just derived from
+  // the funnel query above instead of its own separate query.
+  const rejectedByStage: Record<string, number> = {};
+  for (const stage of STAGE_ORDER) rejectedByStage[stage] = funnelByStage[stage].rejected;
+
+  // Response contract for rejected_by_stage is sparse — only stages with an
+  // actual rejection appear as keys (pre-existing shape, unchanged by the
+  // funnel rework above). rejectedByStage itself stays dense internally
+  // since biggestDropOff below needs the zero-filtered view either way.
+  const rejectedByStageSparse: Record<string, number> = Object.fromEntries(
+    Object.entries(rejectedByStage).filter(([, c]) => c > 0)
+  );
 
   // ── Operational Velocity (items #10/#29) ────────────────────────────────────
   // Interview-to-offer ratio: of everyone who ever reached an interview
@@ -445,7 +474,11 @@ router.get('/', async (req: Request, res: Response) => {
   // Biggest drop-off — the single stage with the most rejections, already
   // computed above for the funnel subtext; surfaced here as one clear
   // callout rather than making the caller scan the whole map.
-  const biggestDropOff = Object.entries(rejectedByStage).sort((a, b) => b[1] - a[1])[0];
+  // rejectedByStage is now dense (every stage present, many at 0) since it's
+  // derived from the funnel map above — filter out zero-count stages first
+  // so this stays null when there are truly no rejections anywhere, same as
+  // when rejectedByStage used to be a sparse, rejections-only map.
+  const biggestDropOff = Object.entries(rejectedByStage).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1])[0];
 
   res.json({
     metrics: {
@@ -465,8 +498,8 @@ router.get('/', async (req: Request, res: Response) => {
     roles_by_status: rolesByStatus,
     source_quality:     sourceQuality,
     time_to_fill:       timeToFill,
-    hiring_funnel: pipeline,
-    rejected_by_stage: rejectedByStage,
+    hiring_funnel: hiringFunnel,
+    rejected_by_stage: rejectedByStageSparse,
     velocity: {
       interview_to_offer_ratio: interviewToOfferRatio,
       interviewed_count: interviewedCount,
@@ -482,15 +515,23 @@ router.get('/', async (req: Request, res: Response) => {
 router.get('/pending', async (req: Request, res: Response) => {
   const persona = req.user!.persona;
   let ownerFilter = '';
+  const params: unknown[] = [];
 
-  // Each persona only sees their own queue by default
-  if (persona === 'hiring_manager') ownerFilter = `AND owner_type='Hiring Manager'`;
+  // Each persona only sees their own queue by default. Hiring managers are
+  // further scoped to responsible_person matching their own name — owner_type
+  // alone only isolates the HM queue as a whole, not which specific HM each
+  // row belongs to, which previously showed every HM every other HM's items.
+  if (persona === 'hiring_manager') {
+    ownerFilter = `AND owner_type='Hiring Manager' AND lower(trim(responsible_person))=lower(trim($1))`;
+    params.push(req.user!.name);
+  }
   if (persona === 'interviewer')    ownerFilter = `AND owner_type='Interviewer'`;
   if (persona === 'leadership')     ownerFilter = `AND owner_type='Leadership / Founders'`;
 
   const actions = await query(
     `SELECT * FROM pending_actions WHERE resolved=false ${ownerFilter}
-     ORDER BY priority_level DESC, created_at ASC LIMIT 100`
+     ORDER BY priority_level DESC, created_at ASC LIMIT 100`,
+    params
   );
   res.json({ actions });
 });

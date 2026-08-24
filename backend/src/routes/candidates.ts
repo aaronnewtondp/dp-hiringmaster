@@ -273,7 +273,7 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
         `INSERT INTO applications (candidate_id, role_id, source_channel, agency_id, preferred_location,
            stage, status, recruiter_screening_status, stage_entry_time, sla_hours)
          VALUES ($1,$2,$3,$4,$5,'Applied','Active','New',NOW(),48) RETURNING *`,
-        [candidate.id, role_id, source_channel, agency_id || null, preferred_location ?? null]
+        [candidate.id, role_id, source_channel || null, agency_id || null, preferred_location ?? null]
       );
       application = app.rows[0];
 

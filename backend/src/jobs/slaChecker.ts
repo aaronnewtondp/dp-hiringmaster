@@ -7,6 +7,7 @@ export async function runSlaCheck(): Promise<void> {
   console.log(`[SLA] Running check at ${new Date().toISOString()}`);
 
   await Promise.all([
+    resolveOrphanedActions(),
     checkApplicationSLAs(),
     checkAssignmentDeadlines(),
     checkRoleAging(),
@@ -14,6 +15,25 @@ export async function runSlaCheck(): Promise<void> {
   ]);
 
   console.log(`[SLA] Check complete in ${Date.now() - start}ms`);
+}
+
+// ─── 0. Safety net: resolve any application-linked pending_actions left
+// dangling by an application that's no longer Active (rejected, withdrawn,
+// on hold, or joined). checkApplicationSLAs() below now guards against the
+// specific race that causes this going forward, but this sweep also covers
+// any other path that creates the same kind of orphan, and cleans up
+// whatever already exists. Role-level actions ('Role aging alert') and the
+// compensation-change flag have no application_id, so the join here never
+// touches them.
+async function resolveOrphanedActions(): Promise<void> {
+  await query(`
+    UPDATE pending_actions pa
+    SET resolved = true, resolved_at = NOW()
+    FROM applications a
+    WHERE pa.application_id = a.id
+      AND pa.resolved = false
+      AND a.status <> 'Active'
+  `);
 }
 
 // ─── 1. Application-level SLA breaches ───────────────────────────────────────
@@ -36,8 +56,22 @@ async function checkApplicationSLAs(): Promise<void> {
     const slaHrs = app.sla_hours || getSlaForStage(app.stage, app.ai_fit_score);
 
     if (hoursInStage > slaHrs && !app.sla_breach) {
-      // Mark breach on application
-      await query('UPDATE applications SET sla_breach=true WHERE id=$1', [app.id]);
+      // Mark breach on application — gated on status='Active' in the SAME
+      // statement as the initial SELECT above, not just at read time. That
+      // SELECT can go stale: this loop does several awaited queries per
+      // application, and a concurrent PATCH (e.g. HR rejecting this exact
+      // candidate) can land in the gap between the SELECT and this UPDATE.
+      // Without the re-check here, a pending_actions row gets INSERTed for
+      // an application that was already rejected moments earlier — and
+      // since the status-change route's own resolve-pending-actions UPDATE
+      // already ran (with nothing yet to resolve), that orphaned row is
+      // never cleaned up. RETURNING id makes "did this still apply" an
+      // atomic fact instead of a second race-prone read.
+      const stillActive = await queryOne<{ id: string }>(
+        `UPDATE applications SET sla_breach=true WHERE id=$1 AND status='Active' RETURNING id`,
+        [app.id]
+      );
+      if (!stillActive) continue;
 
       // Determine owner
       const ownerType = getOwnerForStage(app.stage);
@@ -165,11 +199,26 @@ async function checkJoiningRisk(): Promise<void> {
   for (const app of atRisk) {
     const cand = await queryOne<{ full_name: string }>('SELECT full_name FROM candidates WHERE id=$1', [app.candidate_id]);
     const role = await queryOne<{ title: string }>('SELECT title FROM roles WHERE id=$1', [app.role_id]);
+    // Was previously passing a stray, never-referenced $2 (a leftover null)
+    // in the params array while the query text jumped straight from $1 to
+    // $3 — Postgres can't infer a type for a placeholder position with no
+    // reference anywhere in the query text, so every single call threw
+    // 42P18 (could not determine data type of parameter $2). Since
+    // last_hr_contact is NULL by default on every freshly-created
+    // application, this fires the instant ANY application reaches Offer
+    // Accepted with no HR contact logged — i.e. on effectively every real
+    // at-risk candidate — meaning this INSERT has silently never succeeded
+    // in production. Swallowed one layer up by maybeRunSlaCheck's
+    // catch-and-log, so it never surfaced as a user-visible error; the
+    // joining_risk_auto_flag UPDATE above it still succeeded every time
+    // (a separate statement), so the dashboard's Joining Risk *list* was
+    // never actually broken — only the corresponding Pending Actions
+    // notification for HR/Recruiter was silently missing.
     await query(
       `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue, role_id)
        VALUES ('HR / Recruiter','High','Joining risk — no contact',
-         'No HR contact logged in 5+ days for '||$3||' (Offer Accepted)', $1, $3, $4, 120, $5)`,
-      [app.id, null, cand?.full_name || '', role?.title || '', app.role_id]
+         'No HR contact logged in 5+ days for '||$2||' (Offer Accepted)', $1, $2, $3, 120, $4)`,
+      [app.id, cand?.full_name || '', role?.title || '', app.role_id]
     );
   }
 }

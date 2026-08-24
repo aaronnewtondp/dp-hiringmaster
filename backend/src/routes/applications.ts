@@ -231,14 +231,26 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
   // transition itself, so every accepted offer silently had a NULL date and
   // never contributed to the metric despite the stage genuinely being
   // 'Offer Accepted'. Same gap existed for 'Offer Released' → offer_sent_date.
+  // Also stamped on a direct jump to 'Joined' (skip_reason bypasses the
+  // normal Offer Accepted step entirely) — COALESCE so a real, earlier
+  // Offer Accepted date from a non-skipped progression is never overwritten.
   let offerDateSql = '';
   if (new_stage === 'Offer Released') offerDateSql = ', offer_sent_date=NOW()';
   if (new_stage === 'Offer Accepted') offerDateSql = ', offer_accepted_date=NOW()';
+  if (new_stage === 'Joined') offerDateSql = ', offer_accepted_date=COALESCE(offer_accepted_date, NOW())';
+
+  // status is a separate field from stage (see CLAUDE.md's application state
+  // model) and nothing else ever sets it to 'Joined' — every dashboard
+  // metric that filters WHERE status='Active' (active_candidates,
+  // strong_fit_candidates, hiring_funnel, sla_breaches) was therefore
+  // permanently counting every actual hire as if still an open pipeline
+  // case, forever, with no way for that to self-correct.
+  const statusSql = new_stage === 'Joined' ? `, status='Joined'` : '';
 
   await transaction(async (client) => {
     await client.query(
       `UPDATE applications SET stage=$1, stage_entry_time=NOW(), sla_hours=$2,
-       sla_breach=false, last_updated=NOW()${offerDateSql},
+       sla_breach=false, last_updated=NOW()${offerDateSql}${statusSql},
        budget_exception_reason_cat=COALESCE($4, budget_exception_reason_cat),
        budget_exception_reason_detail=COALESCE($5, budget_exception_reason_detail)
        WHERE id=$3`,
@@ -396,12 +408,19 @@ router.post('/:id/status', async (req: Request, res: Response) => {
     return;
   }
 
+  // Same write-once problem as pending_actions: joining_risk_auto_flag is
+  // only ever set true, never reset — a candidate who accepted an offer,
+  // got auto-flagged at-risk, and then withdrew/was rejected would stay
+  // flagged (and stuck in the Joining Risk dashboard list) forever, since
+  // there was no path back to false once status moved off 'Active'.
+  const clearJoiningRisk = new_status !== 'Active' ? `, joining_risk_auto_flag = false` : '';
+
   await transaction(async (client) => {
     await client.query(
       `UPDATE applications SET status=$1,
        rejection_reason_cat=$2, rejection_reason_detail=$3,
        withdrawal_reason_cat=$4, withdrawal_reason_detail=$5,
-       last_updated=NOW() WHERE id=$6`,
+       last_updated=NOW()${clearJoiningRisk} WHERE id=$6`,
       [new_status, rejection_reason_cat || null, rejection_reason_detail || null,
        withdrawal_reason_cat || null, withdrawal_reason_detail || null, req.params.id]
     );
@@ -486,9 +505,17 @@ router.patch('/:id/notes', requireHR, async (req: Request, res: Response) => {
   }
   if (!updates.length) { res.status(400).json({ error: 'No valid fields' }); return; }
 
+  // joining_risk_auto_flag is otherwise write-once (only ever set true, by
+  // slaChecker.ts's checkJoiningRisk) — logging fresh HR contact here is the
+  // one real signal that the risk this flag represents has been addressed,
+  // so it's the one place that resets it back to false. Without this, a
+  // flagged application stayed flagged forever regardless of any later
+  // follow-up, permanently stuck in the dashboard's Joining Risk list.
+  const resetAutoFlag = req.body.last_hr_contact !== undefined ? `, joining_risk_auto_flag = false` : '';
+
   values.push(req.params.id);
   await queryOne(
-    `UPDATE applications SET ${updates.join(', ')}, last_updated=NOW() WHERE id=$${i}`,
+    `UPDATE applications SET ${updates.join(', ')}, last_updated=NOW()${resetAutoFlag} WHERE id=$${i}`,
     values
   );
 

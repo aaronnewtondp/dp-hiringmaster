@@ -315,7 +315,7 @@ export interface DashboardData {
   aging_roles:               Array<Role & { active_count: number }>;
   low_pipeline:              Array<Role & { active_count: number }>;
   roles_by_status:           Record<string, number>;
-  hiring_funnel:             Array<{ stage: string; count: string }>;
+  hiring_funnel:             Array<{ stage: string; active: number; rejected: number; withdrawn: number; hold_for_future: number }>;
   rejected_by_stage:         Record<string, number>;
 
   // ── Phase 2 (PRD §18) ──────────────────────────────────────────────────────

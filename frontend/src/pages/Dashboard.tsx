@@ -176,19 +176,19 @@ export default function Dashboard() {
 
   const d = data.data;
   const { metrics, pending_actions_by_owner, aging_roles, hiring_funnel,
-          source_quality, time_to_fill, roles_by_status, rejected_by_stage,
+          source_quality, time_to_fill, roles_by_status,
           velocity, low_pipeline } = d;
 
   const OWNERS = ['HR / Recruiter', 'Hiring Manager', 'Interviewer', 'Leadership / Founders'];
 
-  // Shared canonical order from types/index.ts — this used to be a separately
-  // hand-maintained subset that had already drifted out of sync (different
-  // stage count than RoleDetail.tsx's own copy) before the stage-list rework.
-  // filter(s => funnelMap.has(s)) below already only renders stages with
-  // actual data, so using the full list here doesn't clutter empty funnels.
+  // Shared canonical order from types/index.ts. hiring_funnel now always
+  // carries all 13 stages regardless of filters (the backend fills in zero
+  // counts), so every stage renders even when a filtered view has nobody
+  // currently Active there — it used to silently vanish when the funnel
+  // only counted status='Active' candidates.
   const FUNNEL_ORDER = STAGES;
-  const funnelMap = new Map(hiring_funnel.map(f => [f.stage, parseInt(f.count)]));
-  const maxFunnelVal = Math.max(...hiring_funnel.map(f => parseInt(f.count)), 1);
+  const funnelMap = new Map(hiring_funnel.map(f => [f.stage, f]));
+  const maxFunnelVal = Math.max(...hiring_funnel.map(f => f.active), 1);
 
   const hasActiveFilters = departments.length + locations.length + modes.length
     + filterPriorities.length + roleIds.length > 0;
@@ -298,10 +298,10 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="px-5 py-4 space-y-2.5">
-            {FUNNEL_ORDER.filter(s => funnelMap.has(s)).map(stage => {
-              const count    = funnelMap.get(stage) || 0;
-              const pct      = Math.round((count / maxFunnelVal) * 100);
-              const rejected = rejected_by_stage[stage] || 0;
+            {FUNNEL_ORDER.map(stage => {
+              const f = funnelMap.get(stage);
+              const active = f?.active ?? 0;
+              const pct    = Math.round((active / maxFunnelVal) * 100);
               return (
                 <div key={stage} className="flex items-center gap-3">
                   <span className="text-xs text-gray-500 w-36 truncate shrink-0">{stage}</span>
@@ -312,17 +312,18 @@ export default function Dashboard() {
                         style={{ width: `${pct}%` }}
                       />
                     </div>
-                    {rejected > 0 && (
-                      <div className="text-[10px] font-mono text-red-400 mt-0.5">{rejected} rejected at this stage</div>
+                    {(!!f?.rejected || !!f?.withdrawn || !!f?.hold_for_future) && (
+                      <div className="text-[10px] font-mono mt-0.5 space-x-2">
+                        {!!f?.rejected && <span className="text-red-400">{f.rejected} rejected</span>}
+                        {!!f?.withdrawn && <span className="text-amber-500">{f.withdrawn} withdrawn</span>}
+                        {!!f?.hold_for_future && <span className="text-gray-400">{f.hold_for_future} on hold</span>}
+                      </div>
                     )}
                   </div>
-                  <span className="text-xs font-mono font-medium text-gray-700 w-6 text-right">{count}</span>
+                  <span className="text-xs font-mono font-medium text-gray-700 w-6 text-right">{active}</span>
                 </div>
               );
             })}
-            {hiring_funnel.length === 0 && (
-              <EmptyState title="No active candidates" />
-            )}
           </div>
         </div>
       </div>

@@ -143,17 +143,25 @@ test.describe('Pending Actions by Owner — regressions', () => {
 
     // Persona-scoped variant: for a hiring_manager persona, dashboard.ts
     // derives `pendingForUser` by filtering to owner_type === 'Hiring
-    // Manager' *before* applying the same exclusion formula, so the counter
-    // a Hiring Manager sees is restricted to their own actions only. Note:
-    // pending_actions_by_owner itself (the full breakdown object) is built
-    // from the unfiltered action list regardless of persona — only the
-    // pendingForUser slice used for this one metric is persona-scoped — so
-    // this test deliberately checks the counter against the persona's own
-    // slice of the breakdown, not against the shape of the breakdown object
-    // as a whole.
+    // Manager' AND responsible_person matching the requesting HM's own name
+    // (case/whitespace-insensitive) *before* applying the same exclusion
+    // formula — this is the fix for a real bug where every Hiring Manager's
+    // queue was pooled together regardless of who a pending action was
+    // actually assigned to. pending_actions_by_owner itself (the full
+    // breakdown object) is still built from the unfiltered action list
+    // regardless of persona, so it can legitimately contain entries assigned
+    // to OTHER hiring managers — this test filters hmEntries down to the
+    // requesting HM's own name (fetched via /api/auth/me) before computing
+    // the expected total, matching dashboard.ts's own scoping exactly.
     test("hiring_manager persona: metrics.total_pending_actions matches the formula restricted to pending_actions_by_owner['Hiring Manager']", async ({ request }) => {
       const token = await getToken(request, 'hm_alex');
-      const res   = await authed(request, token).get('/api/dashboard');
+      const client = authed(request, token);
+      const meRes = await client.get('/api/auth/me');
+      expect(meRes.status()).toBe(200);
+      const { user } = await meRes.json();
+      const myName = String(user.name).trim().toLowerCase();
+
+      const res   = await client.get('/api/dashboard');
       expect(res.status()).toBe(200);
       const { metrics, pending_actions_by_owner } = await res.json();
 
@@ -161,7 +169,9 @@ test.describe('Pending Actions by Owner — regressions', () => {
       // otherwise the formula-restricted comparison below would trivially
       // pass on an empty array and prove nothing.
       expect(Object.prototype.hasOwnProperty.call(pending_actions_by_owner, 'Hiring Manager')).toBe(true);
-      const hmEntries: PendingActionEntry[] = pending_actions_by_owner['Hiring Manager'] || [];
+      const hmEntries: PendingActionEntry[] = (pending_actions_by_owner['Hiring Manager'] || []).filter(
+        (e: PendingActionEntry) => !!e.responsible_person && e.responsible_person.trim().toLowerCase() === myName
+      );
       expect(Array.isArray(hmEntries)).toBe(true);
       expect(hmEntries.length).toBeGreaterThan(0);
 
