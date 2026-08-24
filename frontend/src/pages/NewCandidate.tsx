@@ -7,14 +7,12 @@ import { candidatesApi, rolesApi, agenciesApi } from '../services/api.ts';
 import { Role, Agency, RECRUITMENT_CHANNELS } from '../types/index.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 
-const CHANNELS = ['Naukri', 'LinkedIn', 'IIMJobs', 'Employee Referral', 'Agency', 'Direct Outreach', 'WhatsApp Forward', 'Google Form'];
-
 type FormState = {
   full_name: string; email: string; phone: string; linkedin_url: string;
-  // Where this candidate was originally sourced (candidate-level) — distinct
-  // from source_channel below, which is this specific APPLICATION's channel.
+  role_id: string;
+  // Where this candidate was originally sourced (candidate-level).
   source: string; sourced_by_agency_id: string;
-  role_id: string; source_channel: string; agency_id: string;
+  agency_id: string;
   current_ctc_fixed: string; expected_ctc: string; notice_period_days: string;
   current_company: string; current_industry: string; current_designation: string;
   current_location: string; years_of_experience: string; preferred_location: string;
@@ -44,9 +42,8 @@ export default function NewCandidate() {
   const [form, setForm] = useState<FormState>({
     // Identity
     full_name: '', email: '', phone: '', linkedin_url: '',
-    source: '', sourced_by_agency_id: '',
     // Application
-    role_id: '', source_channel: '', agency_id: '',
+    role_id: '', source: '', sourced_by_agency_id: '', agency_id: '',
     // Compensation
     current_ctc_fixed: '', expected_ctc: '', notice_period_days: '',
     // Current role
@@ -142,6 +139,20 @@ export default function NewCandidate() {
               <label className="label">LinkedIn URL</label>
               <input className="input" value={form.linkedin_url} onChange={e => set('linkedin_url', e.target.value)} placeholder="linkedin.com/in/…" />
             </div>
+          </div>
+        </div>
+
+        {/* ── Application ──────────────────────────────────────────────────── */}
+        <div className="card p-6 space-y-4">
+          <h2 className="text-sm font-semibold text-gray-900">Application</h2>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Role applying for *</label>
+              <select className="select" value={form.role_id} onChange={e => set('role_id', e.target.value)} required>
+                <option value="">Select a role…</option>
+                {roles.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
+              </select>
+            </div>
             <div>
               <label className="label">Source</label>
               <select className="select" value={form.source} onChange={e => set('source', e.target.value)}>
@@ -158,27 +169,6 @@ export default function NewCandidate() {
                 </select>
               </div>
             )}
-          </div>
-        </div>
-
-        {/* ── Application ──────────────────────────────────────────────────── */}
-        <div className="card p-6 space-y-4">
-          <h2 className="text-sm font-semibold text-gray-900">Application</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">Role applying for *</label>
-              <select className="select" value={form.role_id} onChange={e => set('role_id', e.target.value)} required>
-                <option value="">Select a role…</option>
-                {roles.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label">Source channel</label>
-              <select className="select" value={form.source_channel} onChange={e => set('source_channel', e.target.value)}>
-                <option value="">Select…</option>
-                {CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
           </div>
         </div>
 
