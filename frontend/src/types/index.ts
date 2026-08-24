@@ -86,6 +86,20 @@ export interface Agency {
   specialisations?:            string;
   agreement_drive_link?:       string;
   notes?:                      string;
+  // What counts toward the commission-fee base (fixed salary, variables,
+  // joining bonus/PF, perks) — the same headline % means a very different
+  // effective fee depending on this.
+  ctc_definition?:             string;
+  market_positioning?:         string;
+  replacement_triggers?:       string;
+  replacement_exclusions?:     string;
+  replacement_remedy?:         string;
+  replacement_conditions?:     string;
+  billing_invoice_trigger?:    string;
+  billing_invoice_raised?:     string;
+  billing_payment_due?:        string;
+  billing_effective_window?:   string;
+  billing_late_penalty?:       string;
   created_at:                  string;
   updated_at:                  string;
   // computed (list query only)

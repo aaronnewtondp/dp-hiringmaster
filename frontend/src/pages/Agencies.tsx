@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Plus } from 'lucide-react';
+import { Plus, ExternalLink } from 'lucide-react';
 import { agenciesApi } from '../services/api.ts';
 import { Agency } from '../types/index.ts';
 import { Spinner, EmptyState } from '../components/shared/Badges.tsx';
@@ -33,7 +33,7 @@ export default function Agencies() {
           <table className="w-full">
             <thead className="border-b border-gray-100 bg-gray-50">
               <tr>
-                {['Agency','Status','Commission Tiers','Submissions','Hires','Replacement'].map(h => (
+                {['Agency Name','Status','Commission Tiers','Market Positioning','Hires','Replacement','Billing and Payment terms','Agreement Link'].map(h => (
                   <th key={h} className="table-th">{h}</th>
                 ))}
               </tr>
@@ -60,10 +60,37 @@ export default function Agencies() {
                     {ag.tier1_rate && <div>{ag.tier1_band || 'All'}: {ag.tier1_rate}</div>}
                     {ag.tier2_rate && <div>{ag.tier2_band}: {ag.tier2_rate}</div>}
                     {ag.tier3_rate && <div>{ag.tier3_band}: {ag.tier3_rate}</div>}
+                    {!ag.tier1_rate && !ag.tier2_rate && !ag.tier3_rate && <span className="text-gray-300">—</span>}
                   </td>
-                  <td className="table-td text-center font-medium font-mono">{ag.total_submitted ?? 0}</td>
+                  <td className="table-td text-xs text-gray-600 max-w-[220px]">
+                    {ag.market_positioning || <span className="text-gray-300">—</span>}
+                  </td>
                   <td className="table-td text-center text-green-700 font-medium font-mono">{ag.total_hired ?? 0}</td>
-                  <td className="table-td text-xs font-mono text-gray-500">{ag.replacement_guarantee_days ?? 60}d</td>
+                  <td className="table-td text-xs text-gray-500 max-w-[180px]">
+                    <div className="font-mono">{ag.replacement_guarantee_days ?? 60}d window</div>
+                    {ag.replacement_triggers && <div className="text-gray-400 mt-0.5">{ag.replacement_triggers}</div>}
+                  </td>
+                  <td className="table-td text-xs text-gray-500 max-w-[200px]">
+                    {ag.billing_effective_window
+                      ? <div className="font-mono text-gray-600">{ag.billing_effective_window}</div>
+                      : <span className="text-gray-300">—</span>}
+                    {ag.billing_late_penalty && ag.billing_late_penalty !== 'None stated' && (
+                      <div className="text-amber-600 mt-0.5">{ag.billing_late_penalty}</div>
+                    )}
+                  </td>
+                  <td className="table-td">
+                    {ag.agreement_drive_link ? (
+                      <a
+                        href={ag.agreement_drive_link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-xs text-dp-600 hover:underline"
+                      >
+                        View <ExternalLink className="w-3 h-3" />
+                      </a>
+                    ) : <span className="text-gray-300 text-xs">—</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>

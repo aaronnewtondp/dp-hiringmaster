@@ -82,6 +82,31 @@ export default function AgencyDetail() {
             { key: 'tier2_rate', label: 'Tier 2 Rate', type: 'text' },
             { key: 'tier3_band', label: 'Tier 3 Band', type: 'text' },
             { key: 'tier3_rate', label: 'Tier 3 Rate', type: 'text' },
+            { key: 'ctc_definition', label: 'CTC Definition (what the fee is calculated on)', type: 'textarea' },
+            { key: 'market_positioning', label: 'Market Positioning', type: 'textarea' },
+          ]}
+        />
+        <EditableSection
+          title="Replacement Policy"
+          data={agency}
+          onSave={saveAgencyFields}
+          fields={[
+            { key: 'replacement_triggers', label: 'Triggers (what qualifies)', type: 'textarea' },
+            { key: 'replacement_exclusions', label: 'Exclusions (what doesn\'t)', type: 'textarea' },
+            { key: 'replacement_remedy', label: 'Remedy if no replacement', type: 'textarea' },
+            { key: 'replacement_conditions', label: 'Conditions to stay valid', type: 'textarea' },
+          ]}
+        />
+        <EditableSection
+          title="Billing and Payment Terms"
+          data={agency}
+          onSave={saveAgencyFields}
+          fields={[
+            { key: 'billing_invoice_trigger', label: 'Invoice Trigger', type: 'text' },
+            { key: 'billing_invoice_raised', label: 'Invoice Raised', type: 'text' },
+            { key: 'billing_payment_due', label: 'Payment Due', type: 'text' },
+            { key: 'billing_effective_window', label: 'Effective Total Window', type: 'text' },
+            { key: 'billing_late_penalty', label: 'Late Payment Penalty', type: 'textarea' },
           ]}
         />
         <EditableSection

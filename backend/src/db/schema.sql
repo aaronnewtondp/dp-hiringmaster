@@ -708,6 +708,26 @@ CREATE INDEX IF NOT EXISTS idx_activity_log_role ON activity_log(role_id);
 -- fixed-width-parsed anywhere.
 ALTER TABLE roles ALTER COLUMN id SET DEFAULT 'R' || LPAD(nextval('seq_role')::TEXT, 4, '0');
 
+-- Agencies revamp — richer per-agency agreement terms, sourced from a
+-- manual review of each vendor's signed agreement (recruiter-agreement-
+-- analysis.html, not part of this repo). Existing tier1-3_band/rate +
+-- replacement_guarantee_days + agreement_drive_link stay as-is; these are
+-- the additional fields needed to give "Commission Tiers", "Replacement",
+-- and "Billing and Payment terms" real detail on the agency detail page
+-- instead of just the single summary figure each already had.
+ALTER TABLE agencies
+  ADD COLUMN IF NOT EXISTS ctc_definition          TEXT,
+  ADD COLUMN IF NOT EXISTS market_positioning      TEXT,
+  ADD COLUMN IF NOT EXISTS replacement_triggers    TEXT,
+  ADD COLUMN IF NOT EXISTS replacement_exclusions  TEXT,
+  ADD COLUMN IF NOT EXISTS replacement_remedy      TEXT,
+  ADD COLUMN IF NOT EXISTS replacement_conditions  TEXT,
+  ADD COLUMN IF NOT EXISTS billing_invoice_trigger TEXT,
+  ADD COLUMN IF NOT EXISTS billing_invoice_raised  TEXT,
+  ADD COLUMN IF NOT EXISTS billing_payment_due     TEXT,
+  ADD COLUMN IF NOT EXISTS billing_effective_window TEXT,
+  ADD COLUMN IF NOT EXISTS billing_late_penalty    TEXT;
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows
 -- ═════════════════════════════════════════════════════════════════════════════

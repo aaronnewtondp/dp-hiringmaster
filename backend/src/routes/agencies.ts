@@ -49,7 +49,11 @@ router.patch('/:id', async (req: Request, res: Response) => {
 
   const allowedFields = ['name','contact_name','contact_email','contact_phone','contract_status',
     'tier1_band','tier1_rate','tier2_band','tier2_rate','tier3_band','tier3_rate',
-    'replacement_guarantee_days','specialisations','agreement_drive_link','notes'];
+    'replacement_guarantee_days','specialisations','agreement_drive_link','notes',
+    'ctc_definition','market_positioning',
+    'replacement_triggers','replacement_exclusions','replacement_remedy','replacement_conditions',
+    'billing_invoice_trigger','billing_invoice_raised','billing_payment_due',
+    'billing_effective_window','billing_late_penalty'];
 
   const updates: string[] = [];
   const values: unknown[] = [];
