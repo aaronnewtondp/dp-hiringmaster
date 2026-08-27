@@ -245,6 +245,25 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
        calendar.synced ? round.calendar_event_link! : null,
        req.user!.userId, req.user!.name]
     );
+  } else if (round.round_type === 'Standard') {
+    // Standard round created without a scheduled_date and/or
+    // interviewer_emails — the block above never ran, so nothing was ever
+    // attempted. Previously this left `calendar` undefined in the response
+    // (the frontend's `if (res.data.calendar)` toast never fired) and
+    // calendar_sync_error null on the row (indistinguishable from "synced
+    // fine"), so a round could show as "scheduled" with genuinely no
+    // calendar invite sent and zero indication why. Surfaced explicitly
+    // now, same shape as a real sync failure, so it's never silent again.
+    const missing = [
+      !round.scheduled_date && 'a scheduled date/time',
+      (!Array.isArray(round.interviewer_emails) || round.interviewer_emails.length === 0) && 'interviewer emails',
+    ].filter(Boolean).join(' and ');
+    const message = `No calendar invite was sent — this round has no ${missing} set.`;
+    await query(
+      `UPDATE interview_rounds SET calendar_sync_error=$1, updated_at=NOW() WHERE id=$2`,
+      [message, round.id]
+    );
+    calendar = { synced: false, error: message };
   }
 
   // Same synchronous, gracefully-degrading pattern as Calendar sync above —

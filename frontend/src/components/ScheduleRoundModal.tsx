@@ -27,8 +27,10 @@ export default function ScheduleRoundModal({ applicationId, nextRoundNumber, def
 
   const handleSubmit = async () => {
     if (!roundName.trim()) { toast.error('Round name is required'); return; }
+    if (!scheduledDate) { toast.error('Scheduled date & time is required — without it no calendar invite can go out'); return; }
 
     const emails = interviewerEmails.split(',').map(e => e.trim()).filter(Boolean);
+    if (!emails.length) { toast.error('At least one interviewer email is required — that\'s who the calendar invite goes to'); return; }
     const invalid = emails.find(e => !EMAIL_RE.test(e));
     if (invalid) { toast.error(`"${invalid}" doesn't look like a valid email address`); return; }
 
@@ -80,16 +82,17 @@ export default function ScheduleRoundModal({ applicationId, nextRoundNumber, def
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1.5">Interviewer emails</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">Interviewer emails <span className="text-red-500">*</span></label>
             <input
               value={interviewerEmails}
               onChange={e => setInterviewerEmails(e.target.value)}
               placeholder="e.g. alex@digitalpaani.com, satyadev@digitalpaani.com"
               className="input text-sm"
             />
+            <p className="text-[11px] text-gray-400 mt-1">Required — this is who the calendar invite blocks time for.</p>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1.5">Scheduled date & time</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">Scheduled date & time <span className="text-red-500">*</span></label>
             <input
               type="datetime-local"
               value={scheduledDate}

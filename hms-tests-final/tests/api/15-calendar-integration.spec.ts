@@ -68,6 +68,13 @@ test.describe('Calendar integration on POST /api/interviews', () => {
     expect(body.calendar).toBeFalsy();
   });
 
+  // A round created without one of these two fields used to leave `calendar`
+  // absent from the response entirely — the frontend's `if (res.data
+  // .calendar)` toast never fired, so a user got a plain "round scheduled"
+  // success with zero indication no invite was ever attempted (exactly what
+  // a real HR user hit scheduling a round with no interviewer set). Fixed to
+  // always populate `calendar` for a Standard round with a real, specific
+  // reason instead of staying silent.
   test('Calendar sync is skipped when scheduled_date or interviewer_emails is missing', async ({ request }) => {
     const token = await getToken(request, 'hr');
     const api   = authed(request, token);
@@ -84,7 +91,9 @@ test.describe('Calendar integration on POST /api/interviews', () => {
       // interviewer_emails intentionally omitted
     });
     expect(resA.status()).toBe(201);
-    expect((await resA.json()).calendar).toBeFalsy();
+    const calendarA = (await resA.json()).calendar;
+    expect(calendarA.synced).toBe(false);
+    expect(calendarA.error).toContain('interviewer emails');
 
     // (b) interviewer_emails present, scheduled_date omitted
     const { application: appB } = await createCandidateWithApp(request, token);
@@ -98,7 +107,9 @@ test.describe('Calendar integration on POST /api/interviews', () => {
       // scheduled_date intentionally omitted
     });
     expect(resB.status()).toBe(201);
-    expect((await resB.json()).calendar).toBeFalsy();
+    const calendarB = (await resB.json()).calendar;
+    expect(calendarB.synced).toBe(false);
+    expect(calendarB.error).toContain('scheduled date');
   });
 
   test('Standard round with a real scheduled_date + interviewer_emails creates a real Calendar event (real external call)', async ({ request }) => {
