@@ -13,7 +13,9 @@ test.describe('Dashboard API', () => {
       expect(body.metrics).toHaveProperty('open_roles_count');
       expect(body.metrics).toHaveProperty('open_roles_by_priority');
       expect(body.metrics).toHaveProperty('active_candidates');
-      expect(body).toHaveProperty('pending_actions_by_owner');
+      expect(body.metrics).toHaveProperty('sla_breach_total');
+      expect(body.metrics).toHaveProperty('sla_breach_by_owner');
+      expect(body).toHaveProperty('hiring_funnel_snapshot');
       expect(body).toHaveProperty('hiring_funnel');
       expect(body).toHaveProperty('aging_roles');
     });
@@ -34,10 +36,40 @@ test.describe('Dashboard API', () => {
       expect(open_roles_count).toBeGreaterThanOrEqual(7);
     });
 
-    test('pending_actions_by_owner is an object', async ({ request }) => {
+    test('hiring_funnel_snapshot is an array of all 13 canonical stages, each with a breach_types array', async ({ request }) => {
       const token = await getToken(request, 'hr');
-      const { pending_actions_by_owner } = await (await authed(request, token).get('/api/dashboard')).json();
-      expect(typeof pending_actions_by_owner).toBe('object');
+      const { hiring_funnel_snapshot } = await (await authed(request, token).get('/api/dashboard')).json();
+      expect(Array.isArray(hiring_funnel_snapshot)).toBe(true);
+      expect(hiring_funnel_snapshot.length).toBe(13);
+      for (const stage of hiring_funnel_snapshot) {
+        expect(typeof stage.stage).toBe('string');
+        expect(typeof stage.total).toBe('number');
+        expect(Array.isArray(stage.breach_types)).toBe(true);
+      }
+    });
+
+    test('sla_breach_total equals the sum of sla_breach_by_owner, and both match a manual count from hiring_funnel_snapshot', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const { metrics, hiring_funnel_snapshot } = await (await authed(request, token).get('/api/dashboard')).json();
+
+      const sumByOwner = Object.values(metrics.sla_breach_by_owner as Record<string, number>).reduce((a, b) => a + b, 0);
+      expect(metrics.sla_breach_total).toBe(sumByOwner);
+
+      const manualCount = hiring_funnel_snapshot.reduce(
+        (sum: number, stage: { breach_types: Array<{ count: number }> }) =>
+          sum + stage.breach_types.reduce((s, bt) => s + bt.count, 0), 0
+      );
+      expect(metrics.sla_breach_total).toBe(manualCount);
+    });
+
+    test("'Role aging alert' never appears as a breach_types entry — it belongs to the Aging Roles box, not this stage-driven engine", async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const { hiring_funnel_snapshot } = await (await authed(request, token).get('/api/dashboard')).json();
+      for (const stage of hiring_funnel_snapshot) {
+        for (const bt of stage.breach_types) {
+          expect(bt.type).not.toBe('Role aging alert');
+        }
+      }
     });
 
     test('hiring_funnel is an array', async ({ request }) => {

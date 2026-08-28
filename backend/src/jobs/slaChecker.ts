@@ -1,5 +1,5 @@
 import { query, queryOne, transaction } from '../db/index.js';
-import { SLA_HOURS, Priority } from '../types/index.js';
+import { Priority } from '../types/index.js';
 import { computeAging } from '../utils/aging.js';
 
 // ─── Main SLA check — called by scheduler every 15 minutes ───────────────────
@@ -9,7 +9,9 @@ export async function runSlaCheck(): Promise<void> {
 
   await Promise.all([
     resolveOrphanedActions(),
-    checkApplicationSLAs(),
+    checkFlatStageBreaches(),
+    checkNotYetActioned(),
+    checkFeedbackDue(),
     checkAssignmentDeadlines(),
     checkRoleAging(),
     checkJoiningRisk(),
@@ -20,7 +22,7 @@ export async function runSlaCheck(): Promise<void> {
 
 // ─── 0. Safety net: resolve any application-linked pending_actions left
 // dangling by an application that's no longer Active (rejected, withdrawn,
-// on hold, or joined). checkApplicationSLAs() below now guards against the
+// on hold, or joined). The breach checks below already guard against the
 // specific race that causes this going forward, but this sweep also covers
 // any other path that creates the same kind of orphan, and cleans up
 // whatever already exists. Role-level actions ('Role aging alert') and the
@@ -37,88 +39,187 @@ async function resolveOrphanedActions(): Promise<void> {
   `);
 }
 
-// ─── 1. Application-level SLA breaches ───────────────────────────────────────
-async function checkApplicationSLAs(): Promise<void> {
-  const apps = await query<{
-    id: string; stage: string; status: string;
-    stage_entry_time: string; sla_hours: number; sla_breach: boolean;
-    ai_fit_score: number; candidate_id: string; role_id: string;
-  }>(`
-    SELECT a.id, a.stage, a.status, a.stage_entry_time, a.sla_hours,
-           a.sla_breach, a.ai_fit_score, a.candidate_id, a.role_id
-    FROM applications a
-    WHERE a.status = 'Active'
-      AND a.stage NOT IN ('Joined','Offer Accepted')
-      AND a.stage_entry_time IS NOT NULL
-  `);
+// ─── Breach engine — stage/breach-type table ─────────────────────────────────
+// Every check below only ever considers status='Active' applications. Each
+// stage's breach-type set is exhaustive and mutually exclusive by
+// construction — "Idle Candidate" only ever appears for a stage with no
+// other breach type defined for it, never as a runtime fallback race.
+const BREACH_IDLE_HOURS = 48;
+const BREACH_STANDARD_HOURS = 48;              // Resume Review / Shortlisted / Not-Scheduled / Feedback-Due
+const BREACH_ASSIGNMENT_FEEDBACK_HOURS = 96;
 
-  for (const app of apps) {
-    const hoursInStage = (Date.now() - new Date(app.stage_entry_time).getTime()) / 3600000;
-    const slaHrs = app.sla_hours || getSlaForStage(app.stage, app.ai_fit_score);
+type Owner = 'HR / Recruiter' | 'Hiring Manager';
 
-    if (hoursInStage > slaHrs && !app.sla_breach) {
-      // Mark breach on application — gated on status='Active' in the SAME
-      // statement as the initial SELECT above, not just at read time. That
-      // SELECT can go stale: this loop does several awaited queries per
-      // application, and a concurrent PATCH (e.g. HR rejecting this exact
-      // candidate) can land in the gap between the SELECT and this UPDATE.
-      // Without the re-check here, a pending_actions row gets INSERTed for
-      // an application that was already rejected moments earlier — and
-      // since the status-change route's own resolve-pending-actions UPDATE
-      // already ran (with nothing yet to resolve), that orphaned row is
-      // never cleaned up. RETURNING id makes "did this still apply" an
-      // atomic fact instead of a second race-prone read.
-      const stillActive = await queryOne<{ id: string }>(
-        `UPDATE applications SET sla_breach=true WHERE id=$1 AND status='Active' RETURNING id`,
-        [app.id]
-      );
-      if (!stillActive) continue;
+// Shared tail for every breach-type check below: atomically flip the
+// application's sla_breach flag (re-checking status='Active' in the same
+// statement — the same race a concurrent status change could otherwise
+// cause, per the pre-existing pattern this mirrors), resolve any stale
+// same-type action before inserting a fresh one, and stamp
+// responsible_person the same way the pre-existing code did (only
+// Hiring-Manager-owned rows get a named person — the role's own HM; HR rows
+// are a shared team queue, not one person's).
+async function applyBreach(
+  app: { id: string; candidate_id: string; role_id: string },
+  actionType: string,
+  ownerType: Owner,
+  hoursOverdue: number
+): Promise<void> {
+  const stillActive = await queryOne<{ id: string }>(
+    `UPDATE applications SET sla_breach=true WHERE id=$1 AND status='Active' RETURNING id`,
+    [app.id]
+  );
+  if (!stillActive) return;
 
-      // Determine owner
-      const ownerType = getOwnerForStage(app.stage);
-      const actionType = getActionTypeForStage(app.stage);
+  const cand = await queryOne<{ full_name: string }>('SELECT full_name FROM candidates WHERE id=$1', [app.candidate_id]);
+  const role = await queryOne<{ title: string; hiring_manager_name: string }>('SELECT title, hiring_manager_name FROM roles WHERE id=$1', [app.role_id]);
+  const responsiblePerson = ownerType === 'Hiring Manager' ? role?.hiring_manager_name || null : null;
 
-      // Look up names for display
-      const cand = await queryOne<{ full_name: string }>('SELECT full_name FROM candidates WHERE id=$1', [app.candidate_id]);
-      const role = await queryOne<{ title: string; hiring_manager_name: string }>('SELECT title, hiring_manager_name FROM roles WHERE id=$1', [app.role_id]);
-      // Only 'Hiring Manager'-owned actions have a specific named person to
-      // attribute to today (the role's own HM) — 'HR / Recruiter' actions
-      // are a shared team queue, not one person's, so left null there.
-      const responsiblePerson = ownerType === 'Hiring Manager' ? role?.hiring_manager_name || null : null;
+  await query(
+    `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
+     WHERE application_id=$1 AND action_type=$2 AND resolved=false`,
+    [app.id, actionType]
+  );
 
-      // Resolve any previous action of same type for this app (avoid duplicates)
-      await query(
-        `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
-         WHERE application_id=$1 AND action_type=$2 AND resolved=false`,
-        [app.id, actionType]
-      );
+  await query(
+    `INSERT INTO pending_actions
+       (owner_type, priority_level, action_type, description, application_id,
+        candidate_name, role_title, hours_overdue, role_id, responsible_person)
+     VALUES ($1,'High',$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [
+      ownerType, actionType,
+      `${actionType} — ${Math.floor(hoursOverdue)}h overdue`,
+      app.id, cand?.full_name || 'Unknown', role?.title || 'Unknown',
+      Math.max(0, hoursOverdue), app.role_id, responsiblePerson,
+    ]
+  );
+}
 
-      // Create new pending action
-      await query(
-        `INSERT INTO pending_actions
-           (owner_type, priority_level, action_type, description, application_id,
-            candidate_name, role_title, hours_overdue, role_id, responsible_person)
-         VALUES ($1,'High',$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [
-          ownerType, actionType,
-          `${actionType} — ${Math.floor(hoursInStage - slaHrs)}h overdue`,
-          app.id, cand?.full_name || 'Unknown', role?.title || 'Unknown',
-          Math.max(0, hoursInStage - slaHrs), app.role_id, responsiblePerson,
-        ]
-      );
-    } else if (hoursInStage <= slaHrs && app.sla_breach) {
-      // SLA recovered — clear breach (e.g. stage was updated)
-      await query('UPDATE applications SET sla_breach=false WHERE id=$1', [app.id]);
-      await query(
-        `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
-         WHERE application_id=$1 AND resolved=false`,
-        [app.id]
-      );
+// ─── 1. Flat, stage-entry-time-anchored breaches (no round involved) ─────────
+// Applied / Reference Check / Pre-Joining Documents / Offer Discussion /
+// Offer Released all share the plain "Idle Candidate" catch-all. Resume
+// Review and Shortlisted each get their own named breach type and owner.
+const FLAT_STAGE_CHECKS: Array<{ stages: string[]; actionType: string; owner: Owner }> = [
+  { stages: ['Applied', 'Reference Check', 'Pre-Joining Documents', 'Offer Discussion', 'Offer Released'], actionType: 'Idle Candidate', owner: 'HR / Recruiter' },
+  { stages: ['Resume Review'], actionType: 'Resume Shortlist Pending', owner: 'Hiring Manager' },
+  { stages: ['Shortlisted'], actionType: 'Interview to be Scheduled', owner: 'HR / Recruiter' },
+];
+
+async function checkFlatStageBreaches(): Promise<void> {
+  for (const cfg of FLAT_STAGE_CHECKS) {
+    const apps = await query<{ id: string; candidate_id: string; role_id: string; stage_entry_time: string }>(
+      `SELECT id, candidate_id, role_id, stage_entry_time
+       FROM applications
+       WHERE status='Active' AND stage = ANY($1) AND stage_entry_time IS NOT NULL`,
+      [cfg.stages]
+    );
+    const thresholdHours = cfg.actionType === 'Idle Candidate' ? BREACH_IDLE_HOURS : BREACH_STANDARD_HOURS;
+    for (const app of apps) {
+      const hoursOverdue = (Date.now() - new Date(app.stage_entry_time).getTime()) / 3600000 - thresholdHours;
+      if (hoursOverdue > 0) await applyBreach(app, cfg.actionType, cfg.owner, hoursOverdue);
     }
   }
 }
 
-// ─── 2. Assignment 60-hour deadline ─────────────────────────────────────────
+// ─── 2. "Not yet actioned" breaches (Interview 1/2, Founders Round, Assignment) ─
+// Fires when NO interview_rounds row of the matching round_type — created
+// at or after this stage visit began (stage_entry_time) — has its anchor
+// column (scheduled_date for Standard rounds, assignment_send_date for
+// Assignment) actually set. A round row that exists but is still "TBD"
+// (anchor column null) doesn't count as actioned.
+type NotYetActionedConfig = {
+  stage: string; roundType: 'Standard' | 'Assignment';
+  anchorColumn: 'scheduled_date' | 'assignment_send_date'; actionType: string;
+};
+const NOT_YET_ACTIONED_STAGES: NotYetActionedConfig[] = [
+  { stage: 'Interview Round 1', roundType: 'Standard', anchorColumn: 'scheduled_date', actionType: 'Interview 1 Not Scheduled' },
+  { stage: 'Interview Round 2', roundType: 'Standard', anchorColumn: 'scheduled_date', actionType: 'Interview 2 Not Scheduled' },
+  { stage: 'Founders Round', roundType: 'Standard', anchorColumn: 'scheduled_date', actionType: 'Founders Round Not Scheduled' },
+  { stage: 'Assignment Round', roundType: 'Assignment', anchorColumn: 'assignment_send_date', actionType: 'Assignment Not Sent' },
+];
+
+async function checkNotYetActioned(): Promise<void> {
+  for (const cfg of NOT_YET_ACTIONED_STAGES) {
+    // anchorColumn/roundType are fixed values from the internal config array
+    // above, never user input — safe to interpolate as a column/value
+    // identifier rather than a bound parameter (Postgres can't parameterize
+    // column names).
+    const apps = await query<{ id: string; candidate_id: string; role_id: string; stage_entry_time: string }>(
+      `SELECT a.id, a.candidate_id, a.role_id, a.stage_entry_time
+       FROM applications a
+       WHERE a.status='Active' AND a.stage=$1 AND a.stage_entry_time IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM interview_rounds ir
+           WHERE ir.application_id = a.id AND ir.round_type = $2
+             AND ir.created_at >= a.stage_entry_time AND ir.${cfg.anchorColumn} IS NOT NULL
+         )`,
+      [cfg.stage, cfg.roundType]
+    );
+    for (const app of apps) {
+      const hoursOverdue = (Date.now() - new Date(app.stage_entry_time).getTime()) / 3600000 - BREACH_STANDARD_HOURS;
+      if (hoursOverdue > 0) await applyBreach(app, cfg.actionType, 'HR / Recruiter', hoursOverdue);
+    }
+  }
+}
+
+// ─── 3. "Feedback due" breaches (Interview 1/2, Founders Round, Assignment) ──
+// Fires once a round of the matching type (created since this stage visit
+// began) has its anchor column set, feedback hasn't been submitted, and the
+// threshold has elapsed since that anchor time (not since stage entry —
+// waiting on a future-dated interview is never a breach). DISTINCT ON picks
+// the most recently anchored qualifying round per application, in the rare
+// case more than one exists.
+type FeedbackDueConfig = {
+  stage: string; roundType: 'Standard' | 'Assignment';
+  anchorColumn: 'scheduled_date' | 'assignment_send_date';
+  thresholdHours: number; actionType: string;
+};
+const FEEDBACK_DUE_STAGES: FeedbackDueConfig[] = [
+  { stage: 'Interview Round 1', roundType: 'Standard', anchorColumn: 'scheduled_date', thresholdHours: BREACH_STANDARD_HOURS, actionType: 'Interview 1 Feedback Due' },
+  { stage: 'Interview Round 2', roundType: 'Standard', anchorColumn: 'scheduled_date', thresholdHours: BREACH_STANDARD_HOURS, actionType: 'Interview 2 Feedback Due' },
+  { stage: 'Founders Round', roundType: 'Standard', anchorColumn: 'scheduled_date', thresholdHours: BREACH_STANDARD_HOURS, actionType: 'Founders Round Feedback Due' },
+  { stage: 'Assignment Round', roundType: 'Assignment', anchorColumn: 'assignment_send_date', thresholdHours: BREACH_ASSIGNMENT_FEEDBACK_HOURS, actionType: 'Assignment Feedback Due' },
+];
+
+export const FEEDBACK_DUE_ACTION_TYPES = FEEDBACK_DUE_STAGES.map(s => s.actionType);
+export const NOT_SCHEDULED_ACTION_TYPES = NOT_YET_ACTIONED_STAGES
+  .filter(s => s.roundType === 'Standard')
+  .map(s => s.actionType);
+
+async function checkFeedbackDue(): Promise<void> {
+  for (const cfg of FEEDBACK_DUE_STAGES) {
+    const rows = await query<{ id: string; candidate_id: string; role_id: string; anchor_time: string }>(
+      `SELECT DISTINCT ON (a.id) a.id, a.candidate_id, a.role_id, ir.${cfg.anchorColumn} AS anchor_time
+       FROM applications a
+       JOIN interview_rounds ir ON ir.application_id = a.id
+         AND ir.round_type = $2
+         AND ir.created_at >= a.stage_entry_time
+         AND ir.${cfg.anchorColumn} IS NOT NULL
+         AND ir.feedback_status != 'Submitted'
+       WHERE a.status='Active' AND a.stage=$1
+       ORDER BY a.id, ir.${cfg.anchorColumn} DESC`,
+      [cfg.stage, cfg.roundType]
+    );
+    for (const row of rows) {
+      const hoursOverdue = (Date.now() - new Date(row.anchor_time).getTime()) / 3600000 - cfg.thresholdHours;
+      if (hoursOverdue > 0) await applyBreach(row, cfg.actionType, 'Hiring Manager', hoursOverdue);
+    }
+  }
+}
+
+// Every action_type any breach check above can produce — applications.ts
+// uses this exact list to resolve a still-open stage-SLA action the moment
+// an application's stage changes, since one of these existing for the OLD
+// stage is stale the instant the application moves on.
+export const STAGE_SLA_ACTION_TYPES = [
+  'Idle Candidate', 'Resume Shortlist Pending', 'Interview to be Scheduled',
+  ...NOT_YET_ACTIONED_STAGES.map(s => s.actionType),
+  ...FEEDBACK_DUE_STAGES.map(s => s.actionType),
+] as const;
+
+// ─── 4. Assignment 60-hour hard submission deadline ─────────────────────────
+// Independent of "Assignment Feedback Due" above (96h, requires feedback not
+// yet submitted) — this is a separate, harder deadline: the candidate never
+// submitted anything at all within 60h of the assignment being sent.
 async function checkAssignmentDeadlines(): Promise<void> {
   const overdue = await query<{ id: string; application_id: string; assignment_deadline: string }>(`
     SELECT ir.id, ir.application_id, ir.assignment_deadline
@@ -155,7 +256,7 @@ async function checkAssignmentDeadlines(): Promise<void> {
   }
 }
 
-// ─── 3. Role aging alerts ────────────────────────────────────────────────────
+// ─── 5. Role aging alerts ────────────────────────────────────────────────────
 // Matches computeAging()'s target_closure_date-driven semantics (roles.ts /
 // dashboard.ts both use the same shared function) so this Leadership
 // notification never disagrees with what the Roles/Dashboard pages
@@ -198,7 +299,7 @@ async function checkRoleAging(): Promise<void> {
   }
 }
 
-// ─── 4. Joining risk — no HR contact in 5 days after Offer Accepted ──────────
+// ─── 6. Joining risk — no HR contact in 5 days after Offer Accepted ──────────
 async function checkJoiningRisk(): Promise<void> {
   const atRisk = await query<{ id: string; candidate_id: string; role_id: string }>(`
     UPDATE applications
@@ -213,21 +314,6 @@ async function checkJoiningRisk(): Promise<void> {
   for (const app of atRisk) {
     const cand = await queryOne<{ full_name: string }>('SELECT full_name FROM candidates WHERE id=$1', [app.candidate_id]);
     const role = await queryOne<{ title: string }>('SELECT title FROM roles WHERE id=$1', [app.role_id]);
-    // Was previously passing a stray, never-referenced $2 (a leftover null)
-    // in the params array while the query text jumped straight from $1 to
-    // $3 — Postgres can't infer a type for a placeholder position with no
-    // reference anywhere in the query text, so every single call threw
-    // 42P18 (could not determine data type of parameter $2). Since
-    // last_hr_contact is NULL by default on every freshly-created
-    // application, this fires the instant ANY application reaches Offer
-    // Accepted with no HR contact logged — i.e. on effectively every real
-    // at-risk candidate — meaning this INSERT has silently never succeeded
-    // in production. Swallowed one layer up by maybeRunSlaCheck's
-    // catch-and-log, so it never surfaced as a user-visible error; the
-    // joining_risk_auto_flag UPDATE above it still succeeded every time
-    // (a separate statement), so the dashboard's Joining Risk *list* was
-    // never actually broken — only the corresponding Pending Actions
-    // notification for HR/Recruiter was silently missing.
     await query(
       `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue, role_id)
        VALUES ('HR / Recruiter','High','Joining risk — no contact',
@@ -235,44 +321,6 @@ async function checkJoiningRisk(): Promise<void> {
       [app.id, cand?.full_name || '', role?.title || '', app.role_id]
     );
   }
-}
-
-// Every action_type getActionTypeForStage below can produce — applications.ts
-// uses this exact list to resolve a still-open stage-SLA action the moment an
-// application's stage changes, since one of these existing for the OLD stage
-// is stale the instant the application moves on (getSlaForStage/getOwnerForStage
-// only ever apply to the application's *current* stage).
-export const STAGE_SLA_ACTION_TYPES = [
-  'Resume to triage', 'HM shortlist review', 'Interview feedback due',
-  'Reference check to initiate', 'Offer follow-up', 'Idle candidate',
-] as const;
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-// 'Founders Round' no longer matches startsWith('Interview') after the
-// rename from 'Interview – Round 3' — each helper below treats it the
-// same as a plain interview round, same as applications.ts's getSlaHours.
-function getSlaForStage(stage: string, fitScore?: number): number {
-  if (stage === 'Resume Review') return fitScore && fitScore >= 75 ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL;
-  if (stage === 'Shortlisted') return SLA_HOURS.HM_SHORTLIST;
-  if (stage.startsWith('Interview') || stage === 'Founders Round') return SLA_HOURS.INTERVIEW_FEEDBACK;
-  if (stage === 'Reference Check') return SLA_HOURS.REF_INIT;
-  if (stage === 'Offer Released') return SLA_HOURS.OFFER_RELEASE;
-  return SLA_HOURS.IDLE;
-}
-
-function getOwnerForStage(stage: string): string {
-  if (stage === 'Shortlisted') return 'Hiring Manager';
-  if (stage.startsWith('Interview') || stage === 'Founders Round') return 'Hiring Manager';
-  return 'HR / Recruiter';
-}
-
-function getActionTypeForStage(stage: string): string {
-  if (stage === 'Resume Review') return 'Resume to triage';
-  if (stage === 'Shortlisted') return 'HM shortlist review';
-  if (stage.startsWith('Interview') || stage === 'Founders Round') return 'Interview feedback due';
-  if (stage === 'Reference Check') return 'Reference check to initiate';
-  if (stage === 'Offer Released') return 'Offer follow-up';
-  return 'Idle candidate';
 }
 
 // ─── Daily email digest ───────────────────────────────────────────────────────

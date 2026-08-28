@@ -11,7 +11,7 @@ router.use(authenticate, requireSuperAdmin);
 // super_admin is assigned to exactly one person by policy and is never a
 // selectable option in the User Management UI — enforced server-side too,
 // since the UI hiding it isn't a security boundary on its own.
-const ASSIGNABLE_PERSONAS: Persona[] = ['hr_recruiter', 'hiring_manager', 'interviewer', 'leadership'];
+const ASSIGNABLE_PERSONAS: Persona[] = ['hr_recruiter', 'hiring_manager', 'leadership'];
 
 // ─── GET /api/users — list every user ──────────────────────────────────────────
 router.get('/', async (_req: Request, res: Response) => {

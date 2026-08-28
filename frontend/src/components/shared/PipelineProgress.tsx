@@ -8,7 +8,7 @@ import { STAGES } from '../../types/index.ts';
 // exists, extended with new hues for stages that didn't have one, then
 // hand-tuned per user feedback so adjacent stages blend rather than jump
 // between unrelated hue families.
-const STAGE_COLORS: Record<string, string> = {
+export const STAGE_COLORS: Record<string, string> = {
   'Applied':               '#64748b',
   'Resume Review':         '#f43f5e',
   'Shortlisted':           '#ec4899',
@@ -42,7 +42,7 @@ const STAGE_LABELS: Record<string, string> = {
   'Joined': 'Joined',
 };
 
-const UNLIT_BG = '#6b7280';
+export const UNLIT_BG = '#6b7280';
 
 // Point/notch depth is 20% of a segment's own box in both clip-paths below.
 // The overlap here is intentionally less than that (eased ~20% off a full
@@ -56,7 +56,7 @@ const OVERLAP_PCT = (100 / STAGES.length) * 0.16;
 const CLIP_FIRST = 'polygon(0% 0%, 80% 0%, 100% 50%, 80% 100%, 0% 100%)';
 const CLIP_REST  = 'polygon(0% 0%, 80% 0%, 100% 50%, 80% 100%, 0% 100%, 20% 50%)';
 
-const shade = (hex: string, amount: number) => {
+export const shade = (hex: string, amount: number) => {
   const n = parseInt(hex.slice(1), 16);
   const clamp = (v: number) => Math.min(255, Math.max(0, v));
   const r = clamp((n >> 16) + amount);
@@ -65,7 +65,7 @@ const shade = (hex: string, amount: number) => {
   return `rgb(${r}, ${g}, ${b})`;
 };
 
-const glossyFill = (hex: string) =>
+export const glossyFill = (hex: string) =>
   `linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.08) 38%, rgba(255,255,255,0) 55%), ` +
   `linear-gradient(180deg, ${shade(hex, 55)} 0%, ${hex} 55%, ${shade(hex, -35)} 100%)`;
 

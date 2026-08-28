@@ -4,6 +4,7 @@ import { authenticate, requireHR, isHRTier } from '../middleware/auth.js';
 import { InterviewRound } from '../types/index.js';
 import { createInterviewCalendarEvent } from '../services/calendarService.js';
 import { sendAssignmentEmail } from '../services/gmailService.js';
+import { FEEDBACK_DUE_ACTION_TYPES, NOT_SCHEDULED_ACTION_TYPES } from '../jobs/slaChecker.js';
 
 const router = Router();
 router.use(authenticate);
@@ -74,6 +75,18 @@ async function attemptAssignmentEmail(
     round.assignment_send_date = new Date().toISOString();
     round.assignment_deadline = deadline.toISOString();
     round.assignment_email_error = undefined;
+    // The send just set assignment_send_date, so "Assignment Not Sent" no
+    // longer applies — resolve it now rather than waiting for the next
+    // SLA-check pass.
+    await query(
+      `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
+       WHERE application_id=$1 AND action_type='Assignment Not Sent' AND resolved=false`,
+      [round.application_id]
+    );
+    await query(
+      `UPDATE applications SET sla_breach=false WHERE id=$1 AND sla_breach=true`,
+      [round.application_id]
+    );
     await query(
       `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
@@ -171,6 +184,22 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     // Assignment Round) for this button to have been reachable at all, via
     // POST /applications/:id/stage, which already owns stage_entry_time and
     // sla_hours. Scheduling a round is purely additive.
+
+    // A Standard round created WITH a real scheduled_date resolves whichever
+    // "Not Scheduled" breach applied (mutually exclusive by construction, so
+    // resolving the whole family is safe). A round left "TBD" (no
+    // scheduled_date) doesn't count as actioned yet — nothing to resolve.
+    if (round_type === 'Standard' && scheduled_date) {
+      await client.query(
+        `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
+         WHERE application_id=$1 AND action_type = ANY($2::text[]) AND resolved=false`,
+        [application_id, NOT_SCHEDULED_ACTION_TYPES]
+      );
+      await client.query(
+        `UPDATE applications SET sla_breach=false WHERE id=$1 AND sla_breach=true`,
+        [application_id]
+      );
+    }
 
     await client.query(
       `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
@@ -368,10 +397,16 @@ router.patch('/:id/feedback', async (req: Request, res: Response) => {
       );
     }
 
-    // Resolve feedback-due pending action
+    // Resolve whichever feedback-due breach applied to this round (mutually
+    // exclusive by construction, so resolving the whole family is safe — at
+    // most one was ever open for this application).
     await client.query(
       `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
-       WHERE application_id=$1 AND action_type='Interview feedback due' AND resolved=false`,
+       WHERE application_id=$1 AND action_type = ANY($2::text[]) AND resolved=false`,
+      [round.application_id, FEEDBACK_DUE_ACTION_TYPES]
+    );
+    await client.query(
+      `UPDATE applications SET sla_breach=false WHERE id=$1 AND sla_breach=true`,
       [round.application_id]
     );
 

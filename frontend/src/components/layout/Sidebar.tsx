@@ -17,7 +17,7 @@ const NAV = [
 
 export default function Sidebar() {
   const { user, logout, canHR, isSuperAdmin } = useAuth();
-  const isHM = user?.persona === 'hiring_manager' || user?.persona === 'interviewer' || user?.persona === 'leadership';
+  const isHM = user?.persona === 'hiring_manager' || user?.persona === 'leadership';
 
   const visible = NAV.filter(n => {
     if (n.hrOnly && !canHR) return false;

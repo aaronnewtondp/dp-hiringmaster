@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query, queryOne } from '../db/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { Priority } from '../types/index.js';
-import { runSlaCheck } from '../jobs/slaChecker.js';
+import { runSlaCheck, STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
 import { parseRoleFilters, buildRoleFilterSql, roleIdsSubquery } from '../utils/roleFilters.js';
 import { computeAging } from '../utils/aging.js';
 
@@ -40,6 +40,13 @@ const STAGE_ORDER = [
 const FIRST_INTERVIEW_IDX = STAGE_ORDER.indexOf('Interview Round 1');
 const FIRST_OFFER_IDX     = STAGE_ORDER.indexOf('Offer Released');
 
+// Source Quality's Pass Rate / Hire Rate stage sets (KPI redesign) — derived
+// from STAGE_ORDER rather than hardcoded stage-name lists, so a future
+// change to the canonical stage order can't silently desync these from the
+// rest of the file's own index-based comparisons above.
+const SHORTLISTED_PLUS_STAGES = STAGE_ORDER.slice(STAGE_ORDER.indexOf('Shortlisted'));
+const OFFER_ACCEPTED_PLUS_STAGES = STAGE_ORDER.slice(STAGE_ORDER.indexOf('Offer Accepted'));
+
 // ─── GET /api/dashboard — all Phase 1 metrics in one call ────────────────────
 router.get('/', async (req: Request, res: Response) => {
   // Awaited, not fire-and-forget — same rule as JD generation/ResumeIQ (see
@@ -56,9 +63,6 @@ router.get('/', async (req: Request, res: Response) => {
   // on failure.
   await maybeRunSlaCheck();
 
-  const persona = req.user!.persona;
-  const userId  = req.user!.userId;
-
   // Master filters (Department/Location/Recruitment Mode/Priority/Status) —
   // same shape and SQL semantics as the Roles summary view's own filters.
   // Every query below is scoped to the matching role set: queries that
@@ -70,10 +74,17 @@ router.get('/', async (req: Request, res: Response) => {
   // entirely rather than paying for it on every dashboard load.
   const filters = parseRoleFilters(req.query as Record<string, unknown>);
 
+  // Hiring Funnel Snapshot's own owner filter — independent of the master
+  // role filters above, scopes just the SLA-breach query/section below.
+  const ownerParam = typeof req.query.owner === 'string' &&
+    (req.query.owner === 'HR / Recruiter' || req.query.owner === 'Hiring Manager')
+    ? req.query.owner : undefined;
+
   // Run all aggregate queries in parallel
   const [
-    roleStats, candidateStats, slaBreaches,
-    pendingActions, agingRoles, funnelRows, joiningRisk,
+    roleStats, candidateStats, activeCandidatesByStage, rolesFilledRow, unmatchedCountRow,
+    slaBreachRows, founderReviewCount,
+    agingRoles, funnelRows, joiningRisk,
     sourceQualityRows, timeToFillRows,
     allStageRows, tatByStageRows,
   ] = await Promise.all([
@@ -89,63 +100,122 @@ router.get('/', async (req: Request, res: Response) => {
       `, f.params);
     })(),
 
-    // Candidate stats
+    // Candidate stats — single-row aggregate (KPI redesign): total Active
+    // count plus the two score thresholds the new Active Candidates card
+    // needs. Superseded the old strong_fit/review/low/unscored bucket
+    // shape — nothing besides the old KPI subtitle ever read the
+    // review/low/unscored buckets, and strong_fit is replaced outright by
+    // the new score_ge_75/score_le_45 pair.
     (() => {
       const scoped = roleIdsSubquery(filters, 1);
-      return query<{ bucket: string; count: string }>(`
+      return queryOne<{ total: string; score_ge_75: string; score_le_45: string }>(`
         SELECT
-          CASE
-            WHEN ai_fit_score >= 70 THEN 'strong_fit'
-            WHEN ai_fit_score >= 50 THEN 'review'
-            WHEN ai_fit_score IS NULL THEN 'unscored'
-            ELSE 'low'
-          END AS bucket,
-          COUNT(*) as count
+          COUNT(*) AS total,
+          COUNT(*) FILTER (WHERE ai_fit_score >= 75) AS score_ge_75,
+          COUNT(*) FILTER (WHERE ai_fit_score <= 45) AS score_le_45
         FROM applications
         WHERE status = 'Active'
         ${scoped ? ` AND role_id IN ${scoped.sql}` : ''}
-        GROUP BY bucket
       `, scoped?.params || []);
     })(),
 
-    // SLA breach count
+    // Active candidates by current stage (KPI redesign) — mirrors the
+    // existing allStageRows velocity query below but Active-only, feeding
+    // "candidates at >= Interview Round 1 stage" (current position, not a
+    // historical "ever reached" — matches the metric's own present-tense
+    // wording).
     (() => {
       const scoped = roleIdsSubquery(filters, 1);
-      return queryOne<{ count: string }>(
-        `SELECT COUNT(*) as count FROM applications WHERE sla_breach=true AND status='Active'
-         ${scoped ? ` AND role_id IN ${scoped.sql}` : ''}`,
-        scoped?.params || []
-      );
+      return query<{ stage: string; count: string }>(`
+        SELECT stage, COUNT(*) as count
+        FROM applications
+        WHERE status = 'Active'
+        ${scoped ? ` AND role_id IN ${scoped.sql}` : ''}
+        GROUP BY stage
+      `, scoped?.params || []);
     })(),
 
-    // Pending actions by owner (unresolved only) — joined to the linked
-    // application for its live current stage (so the HR/Recruiter card can
-    // show where a breached candidate actually sits) and sla_breach flag
-    // (so the top-line counter can exclude SLA-breach-driven entries without
-    // hardcoding action_type strings — same underlying signal as the
-    // sla_breaches metric below, so the two numbers always reconcile).
-    // 'Role aging alert' is excluded outright: PRD-wise it belongs to the
-    // dedicated Aging Roles box, not Pending Actions — see aging_roles below.
-    // When master filters are active, entries with no linked application
-    // (currently just the CTC-change-trigger's 'Compensation change flag',
-    // which only carries a denormalized role_title snapshot, no role_id) are
-    // excluded too — there's no safe way to know which role they belong to.
+    // Roles filled in the last 30 days (KPI redesign) — mined from the same
+    // activity_log status-change trail roles.ts's PATCH already writes on
+    // every transition (the tat_by_stage query below already mines this
+    // same table for a different event type), so no schema change needed.
     (() => {
-      const scoped = roleIdsSubquery(filters, 1);
-      return query<{ owner_type: string; priority_level: string; action_type: string;
-               description: string; id: number; application_id: string;
-               candidate_name: string; role_title: string; hours_overdue: number;
-               current_stage: string | null; sla_breach: boolean | null;
-               candidate_id: string | null; role_id: string | null; responsible_person: string | null;
-               ai_fit_score: number | null }>(`
-        SELECT pa.*, a.stage AS current_stage, a.sla_breach AS sla_breach,
-               a.candidate_id AS candidate_id, a.ai_fit_score AS ai_fit_score
+      const f = buildRoleFilterSql(filters, 1);
+      return queryOne<{ count: string }>(`
+        SELECT COUNT(DISTINCT al.role_id) as count
+        FROM activity_log al
+        JOIN roles r ON r.id = al.role_id
+        WHERE al.event_type = 'Status Changed' AND al.new_value = 'Closed – Filled'
+          AND al.created_at >= NOW() - INTERVAL '30 days'
+        ${f.sql}
+      `, f.params);
+    })(),
+
+    // Unmatched candidates (KPI redesign) — reuses candidates.ts's
+    // /unmatched-role-submissions CTE verbatim (COUNT-only): a Job
+    // Application Form submission whose role text never matched a role,
+    // dropped the moment a real application resolves it. Not scoped by the
+    // master role filters — these candidates have no role_id by definition.
+    queryOne<{ count: string }>(`
+      WITH latest AS (
+        SELECT DISTINCT ON (al.candidate_id, al.event_detail)
+          al.candidate_id, al.event_detail AS submitted_text,
+          (SELECT r.id FROM roles r
+             WHERE lower(regexp_replace(translate(trim(r.title), '–—', '--'), '\\s+', ' ', 'g'))
+                 = lower(regexp_replace(translate(trim(al.event_detail), '–—', '--'), '\\s+', ' ', 'g'))
+               AND r.status NOT IN ('Closed – Filled', 'Closed – Cancelled')
+             LIMIT 1) AS suggested_role_id
+        FROM activity_log al
+        WHERE al.event_type = 'Unmatched Role — Manual Reconciliation'
+        ORDER BY al.candidate_id, al.event_detail, al.created_at DESC
+      )
+      SELECT COUNT(*) as count FROM latest l
+      WHERE NOT EXISTS (
+        SELECT 1 FROM applications a2 WHERE a2.candidate_id = l.candidate_id AND a2.role_id = l.suggested_role_id
+      )
+    `),
+
+    // SLA breach rows — every unresolved pending_actions row produced by the
+    // stage-driven breach engine (slaChecker.ts's STAGE_SLA_ACTION_TYPES),
+    // joined to its application for current stage/candidate id. Feeds BOTH
+    // the merged KPI card (sla_breach_total/by_owner) and the
+    // hiring_funnel_snapshot drill-down below, so the two numbers can never
+    // disagree. The section-local owner filter (ownerParam) scopes this
+    // query only — it's independent of the page's master role filters.
+    (() => {
+      const scoped = roleIdsSubquery(filters, 2);
+      const params: unknown[] = [STAGE_SLA_ACTION_TYPES, ...(scoped?.params || [])];
+      let ownerSql = '';
+      if (ownerParam) {
+        params.push(ownerParam);
+        ownerSql = ` AND pa.owner_type = $${params.length}`;
+      }
+      return query<{ id: number; action_type: string; owner_type: string; hours_overdue: number;
+               application_id: string; candidate_name: string; role_title: string;
+               pa_role_id: string | null; current_stage: string | null; candidate_id: string | null;
+               responsible_person: string | null }>(`
+        SELECT pa.id, pa.action_type, pa.owner_type, pa.hours_overdue, pa.application_id,
+               pa.candidate_name, pa.role_title, pa.role_id AS pa_role_id,
+               a.stage AS current_stage, a.candidate_id AS candidate_id, pa.responsible_person
         FROM pending_actions pa
         LEFT JOIN applications a ON a.id = pa.application_id
-        WHERE pa.resolved=false
-          AND pa.action_type <> 'Role aging alert'
+        WHERE pa.resolved=false AND pa.action_type = ANY($1::text[])
           ${scoped ? ` AND COALESCE(a.role_id, pa.role_id) IN ${scoped.sql}` : ''}
-        ORDER BY pa.priority_level DESC, pa.created_at ASC
+          ${ownerSql}
+        ORDER BY pa.hours_overdue DESC
+      `, params);
+    })(),
+
+    // Founder Review pending count — a separate, untouched mechanism (not
+    // stage-driven), scoped by the same master role filters for consistency.
+    (() => {
+      const scoped = roleIdsSubquery(filters, 1);
+      return queryOne<{ count: string }>(`
+        SELECT COUNT(*) as count
+        FROM pending_actions pa
+        LEFT JOIN applications a ON a.id = pa.application_id
+        WHERE pa.resolved=false AND pa.action_type='Founder Review'
+          ${scoped ? ` AND COALESCE(a.role_id, pa.role_id) IN ${scoped.sql}` : ''}
       `, scoped?.params || []);
     })(),
 
@@ -205,23 +275,26 @@ router.get('/', async (req: Request, res: Response) => {
       `, f.params);
     })(),
 
-    // Source Quality (Phase 2, PRD §18) — pass rate = advanced past raw
-    // intake (stage <> 'Applied'), hire rate = stage = 'Joined', matching
-    // agencies.ts's existing hire-rate precedent (stage, not status).
+    // Source Quality (Phase 2, PRD §18; redefined for the KPI redesign) —
+    // pass rate = reached Shortlisted stage or higher, hire rate = reached
+    // Offer Accepted stage or higher (both derived from STAGE_ORDER rather
+    // than a hardcoded single-stage check, so "or higher" is exact).
     // Computed over full history, not status='Active' only — a lagging
-    // quality measure, not a live-state snapshot.
+    // quality measure, not a live-state snapshot: restricting to Active
+    // would make hire_rate collapse toward 0% for every channel, since a
+    // hired candidate's status is 'Joined', not 'Active'.
     (() => {
-      const scoped = roleIdsSubquery(filters, 1);
+      const scoped = roleIdsSubquery(filters, 3);
       return query<{ source_channel: string; n: string; engaged: string; hired: string }>(`
         SELECT source_channel,
                COUNT(*) AS n,
-               COUNT(*) FILTER (WHERE stage <> 'Applied') AS engaged,
-               COUNT(*) FILTER (WHERE stage = 'Joined')  AS hired
+               COUNT(*) FILTER (WHERE stage = ANY($1::text[])) AS engaged,
+               COUNT(*) FILTER (WHERE stage = ANY($2::text[])) AS hired
         FROM applications
         WHERE source_channel IS NOT NULL AND source_channel <> ''
         ${scoped ? ` AND role_id IN ${scoped.sql}` : ''}
         GROUP BY source_channel ORDER BY n DESC
-      `, scoped?.params || []);
+      `, [SHORTLISTED_PLUS_STAGES, OFFER_ACCEPTED_PLUS_STAGES, ...(scoped?.params || [])]);
     })(),
 
     // Time to Fill (Phase 2, PRD §18) — literally AVG(offer_accepted_date -
@@ -315,12 +388,20 @@ router.get('/', async (req: Request, res: Response) => {
     }
   }
 
-  const candBuckets: Record<string, number> = { strong_fit: 0, review: 0, low: 0, unscored: 0 };
-  let activeCandidates = 0;
-  for (const row of candidateStats) {
-    candBuckets[row.bucket] = parseInt(row.count);
-    activeCandidates += parseInt(row.count);
+  const activeCandidates = parseInt(candidateStats?.total || '0');
+  const candidatesScoreGe75 = parseInt(candidateStats?.score_ge_75 || '0');
+  const candidatesScoreLe45 = parseInt(candidateStats?.score_le_45 || '0');
+
+  // Active candidates currently at Interview Round 1 or later — current
+  // stage position (frozen only on rejection, and this is Active-only
+  // anyway), matching the metric's own present-tense "candidates AT" wording.
+  let candidatesAtInterview1Plus = 0;
+  for (const row of activeCandidatesByStage) {
+    if (STAGE_ORDER.indexOf(row.stage) >= FIRST_INTERVIEW_IDX) candidatesAtInterview1Plus += parseInt(row.count);
   }
+
+  const rolesFilledLast30d = parseInt(rolesFilledRow?.count || '0');
+  const candidatesUnmatched = parseInt(unmatchedCountRow?.count || '0');
 
   // ── Compute aging for each role ─────────────────────────────────────────────
   const rolesWithAging = agingRoles.map(r => {
@@ -333,55 +414,95 @@ router.get('/', async (req: Request, res: Response) => {
   const redAlertRoles   = rolesWithAging.filter(r => r.aging_alert === 'red').length;
   const lowPipelineRoles = rolesWithAging.filter(r => r.active_count < 3 && r.aging_alert !== 'ok');
 
-  // ── Group pending actions by owner ──────────────────────────────────────────
-  const pendingByOwner: Record<string, typeof pendingActions> = {};
-  for (const pa of pendingActions) {
-    if (!pendingByOwner[pa.owner_type]) pendingByOwner[pa.owner_type] = [];
-    pendingByOwner[pa.owner_type].push(pa);
-  }
-  // Hiring Manager column specifically: highest fit score first, so the HM
-  // sees their best candidates at the top of an overdue list rather than
-  // whatever order SLA breaches happened to fire in. Rows with no score
-  // (e.g. the Compensation change flag, which isn't tied to an application)
-  // sort last, not first.
-  if (pendingByOwner['Hiring Manager']) {
-    pendingByOwner['Hiring Manager'] = [...pendingByOwner['Hiring Manager']].sort(
-      (a, b) => (b.ai_fit_score ?? -1) - (a.ai_fit_score ?? -1)
-    );
-  }
+  // Average active role age (KPI redesign) — mean days_open over the same
+  // "open roles" set already fetched for Aging Roles (its WHERE clause
+  // already reduces to exactly Live – Sourcing/Approved/Under Review).
+  // Roles with no start_date yet (not yet approved) are excluded rather
+  // than counted as 0 — age isn't meaningful for them yet.
+  const rolesWithRealAge = rolesWithAging.filter(r => !!r.start_date);
+  const avgActiveRoleAgeDays = rolesWithRealAge.length > 0
+    ? Math.round(rolesWithRealAge.reduce((sum, r) => sum + r.days_open, 0) / rolesWithRealAge.length)
+    : null;
 
-  // For HMs — filter to their own pending actions only. Was previously just
-  // owner_type === 'Hiring Manager', which pools EVERY hiring manager's
-  // actions together — any HM with open items saw every other HM's too,
-  // since owner_type only distinguishes the queue (HR/HM/Interviewer/
-  // Leadership), not which specific person within it. responsible_person is
-  // the same name field roles.ts already compares req.user!.name against
-  // for its own HM-identity checks.
+  // ── SLA breach total + by-owner (the merged KPI card) ───────────────────────
+  // A Hiring Manager's KPI number is scoped to just their own queue (matching
+  // the old total_pending_actions' persona-scoping) — the Hiring Funnel
+  // Snapshot section below stays unscoped/company-wide regardless of
+  // persona, same as the old "Pending Actions by Owner" board's columns
+  // always showed everyone's items to every viewer.
   const userNameLower = req.user!.name.trim().toLowerCase();
-  const pendingForUser = persona === 'hiring_manager'
-    ? pendingActions.filter(pa =>
+  const kpiScopedRows = req.user!.persona === 'hiring_manager'
+    ? slaBreachRows.filter(pa =>
         pa.owner_type === 'Hiring Manager' &&
         !!pa.responsible_person &&
         pa.responsible_person.trim().toLowerCase() === userNameLower
       )
-    : pendingActions;
+    : slaBreachRows;
 
-  // Pending Actions counter excludes SLA-breach-driven HR/Recruiter entries
-  // specifically — that's the box the SLA Breaches metric is "directly
-  // linked to" (nearly every HR/Recruiter action — Idle candidate, Resume to
-  // triage — exists *because* an SLA breached, so counting both would double
-  // up the same event). Hiring Manager/Interviewer/Leadership entries always
-  // count even when SLA-breach-driven (e.g. "Interview feedback due" is a
-  // distinct action a different persona owns, not a restatement of the SLA
-  // Breaches KPI) — excluding by sla_breach flag alone, regardless of owner,
-  // previously wiped out nearly every real pending action. Role aging alerts
-  // are already excluded upstream (query above).
-  const totalPendingActions = pendingForUser.filter(
-    pa => !(pa.owner_type === 'HR / Recruiter' && pa.sla_breach)
-  ).length;
+  const slaBreachByOwner: Record<string, number> = { 'HR / Recruiter': 0, 'Hiring Manager': 0 };
+  for (const pa of kpiScopedRows) {
+    slaBreachByOwner[pa.owner_type] = (slaBreachByOwner[pa.owner_type] || 0) + 1;
+  }
+  const slaBreachTotal = kpiScopedRows.length;
 
-  // ── Source Quality — pass_rate/hire_rate as 0-100, 1 decimal ────────────────
+  // SLA type/stage with the highest count (KPI redesign) — derived from the
+  // same kpiScopedRows array used just above, so a Hiring Manager viewer's
+  // breakdown stays consistently scoped to their own queue. Ties break on
+  // first-seen order (stable, since object key insertion order is
+  // preserved for string keys) — an acceptable simplification for a KPI
+  // subtitle, not presented as a precise ranking.
+  function topByCount(rows: typeof kpiScopedRows, key: 'action_type' | 'current_stage'): { value: string; count: number } | null {
+    const counts: Record<string, number> = {};
+    for (const pa of rows) {
+      const k = pa[key];
+      if (!k) continue;
+      counts[k] = (counts[k] || 0) + 1;
+    }
+    let best: { value: string; count: number } | null = null;
+    for (const [value, count] of Object.entries(counts)) {
+      if (!best || count > best.count) best = { value, count };
+    }
+    return best;
+  }
+  const topType  = topByCount(kpiScopedRows, 'action_type');
+  const topStage = topByCount(kpiScopedRows, 'current_stage');
+
+  // ── Hiring Funnel Snapshot — every canonical stage, its breach types, and
+  // the candidates behind each one. Always includes all 13 stages (even
+  // zero-breach ones) so the chevron strip never has to guess at a missing
+  // entry; a stage's breach_types array is simply empty when nothing's
+  // overdue there.
+  type SnapshotCandidate = {
+    application_id: string; candidate_id: string | null; candidate_name: string;
+    role_id: string | null; role_title: string; owner: string; stage: string; overdue_hours: number;
+  };
+  const snapshotByStage: Record<string, Record<string, SnapshotCandidate[]>> = {};
+  for (const stage of STAGE_ORDER) snapshotByStage[stage] = {};
+  for (const pa of slaBreachRows) {
+    const stage = pa.current_stage || 'Unknown';
+    if (!snapshotByStage[stage]) snapshotByStage[stage] = {};
+    if (!snapshotByStage[stage][pa.action_type]) snapshotByStage[stage][pa.action_type] = [];
+    snapshotByStage[stage][pa.action_type].push({
+      application_id: pa.application_id,
+      candidate_id: pa.candidate_id,
+      candidate_name: pa.candidate_name,
+      role_id: pa.pa_role_id,
+      role_title: pa.role_title,
+      owner: pa.owner_type,
+      stage,
+      overdue_hours: pa.hours_overdue,
+    });
+  }
+  const hiringFunnelSnapshot = STAGE_ORDER.map(stage => {
+    const breachTypes = Object.entries(snapshotByStage[stage] || {}).map(([type, candidates]) => ({
+      type, owner: candidates[0]?.owner || '', count: candidates.length, candidates,
+    }));
+    return { stage, total: breachTypes.reduce((sum, bt) => sum + bt.count, 0), breach_types: breachTypes };
+  });
+
+  // ── Source Quality — pass_rate/hire_rate/contribution_pct as 0-100, 1 decimal
   const round1 = (n: number) => Math.round(n * 10) / 10;
+  const sourceTotalN = sourceQualityRows.reduce((sum, r) => sum + parseInt(r.n), 0);
   const sourceQuality = sourceQualityRows.map(r => {
     const n = parseInt(r.n);
     return {
@@ -389,26 +510,25 @@ router.get('/', async (req: Request, res: Response) => {
       n,
       pass_rate: n > 0 ? round1((parseInt(r.engaged) / n) * 100) : 0,
       hire_rate: n > 0 ? round1((parseInt(r.hired) / n) * 100) : 0,
+      contribution_pct: sourceTotalN > 0 ? round1((n / sourceTotalN) * 100) : 0,
     };
   });
 
-  // ── Time to Fill — per-priority avg days, overall = weighted mean ──────────
-  const byPriority: Record<string, number | null> = { P0: null, P1: null, P2: null, P3: null };
+  // ── Time to Fill — weighted mean across priorities (KPI redesign: only the
+  // overall figure is surfaced now, relocated into the Open Roles card; the
+  // by-priority breakdown had no consumer besides the removed standalone
+  // card, so it's dropped rather than kept as unused surface).
   let weightedSum = 0;
   let totalFilled = 0;
   for (const row of timeToFillRows) {
     const n = parseInt(row.n);
     const avgDays = row.avg_days != null ? Number(row.avg_days) : null;
     if (avgDays != null) {
-      byPriority[row.priority] = round1(avgDays);
       weightedSum += avgDays * n;
       totalFilled += n;
     }
   }
-  const timeToFill = {
-    overall_days: totalFilled > 0 ? round1(weightedSum / totalFilled) : null,
-    by_priority: byPriority,
-  };
+  const avgTimeToFillDays = totalFilled > 0 ? round1(weightedSum / totalFilled) : null;
 
   // ── Hiring funnel — every canonical stage, every status ─────────────────────
   // Always includes all 13 stages (even ones with zero rows in funnelRows),
@@ -497,22 +617,29 @@ router.get('/', async (req: Request, res: Response) => {
 
   res.json({
     metrics: {
-      open_roles_count:       openRolesCount,
-      open_roles_by_priority: openRolesByPriority,
-      active_candidates:      activeCandidates,
-      strong_fit_candidates:  candBuckets.strong_fit,
-      sla_breaches:           parseInt(slaBreaches?.count || '0'),
-      total_pending_actions:  totalPendingActions,
-      red_aging_roles:        redAlertRoles,
-      founder_review_pending: pendingActions.filter(pa => pa.action_type === 'Founder Review').length,
-      joining_risk_count:     joiningRisk.length,
+      open_roles_count:            openRolesCount,
+      open_roles_by_priority:      openRolesByPriority,
+      avg_active_role_age_days:    avgActiveRoleAgeDays,
+      avg_time_to_fill_days:       avgTimeToFillDays,
+      roles_filled_last_30d:       rolesFilledLast30d,
+      active_candidates:           activeCandidates,
+      candidates_score_ge_75:      candidatesScoreGe75,
+      candidates_score_le_45:      candidatesScoreLe45,
+      candidates_at_interview1_plus: candidatesAtInterview1Plus,
+      candidates_unmatched:        candidatesUnmatched,
+      sla_breach_total:            slaBreachTotal,
+      sla_breach_by_owner:         slaBreachByOwner,
+      sla_breach_top_type:         topType ? { type: topType.value, count: topType.count } : null,
+      sla_breach_top_stage:        topStage ? { stage: topStage.value, count: topStage.count } : null,
+      red_aging_roles:             redAlertRoles,
+      founder_review_pending:      parseInt(founderReviewCount?.count || '0'),
+      joining_risk_count:          joiningRisk.length,
     },
-    pending_actions_by_owner: pendingByOwner,
+    hiring_funnel_snapshot: hiringFunnelSnapshot,
     aging_roles:   rolesWithAging.filter(r => r.aging_alert !== 'ok'),
     low_pipeline:  lowPipelineRoles,
     roles_by_status: rolesByStatus,
     source_quality:     sourceQuality,
-    time_to_fill:       timeToFill,
     hiring_funnel: hiringFunnel,
     rejected_by_stage: rejectedByStageSparse,
     velocity: {
@@ -541,7 +668,6 @@ router.get('/pending', async (req: Request, res: Response) => {
     ownerFilter = `AND owner_type='Hiring Manager' AND lower(trim(responsible_person))=lower(trim($1))`;
     params.push(req.user!.name);
   }
-  if (persona === 'interviewer')    ownerFilter = `AND owner_type='Interviewer'`;
   if (persona === 'leadership')     ownerFilter = `AND owner_type='Leadership / Founders'`;
 
   const actions = await query(

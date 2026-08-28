@@ -225,23 +225,100 @@ test.describe('Dashboard API additions', () => {
     });
   });
 
-  // ─── metrics.strong_fit_candidates threshold bump (bonus) ──────────────────
-  // strong_fit_candidates now buckets on ai_fit_score >= 70 (was 75). Not
-  // easily verified end-to-end without controlling exact seeded scores, so
-  // this is a light-touch sanity check rather than a threshold-precision
-  // test: the bucket is a real subset of active_candidates, never negative,
-  // never larger than the whole.
-  test.describe('metrics.strong_fit_candidates', () => {
+  // ─── KPI redesign — new Active Candidates score buckets ────────────────────
+  // strong_fit_candidates (>=70, one flat bucket) is retired outright in
+  // favor of two exact thresholds (>=75 / <=45) the new KPI card shows side
+  // by side. Not easily verified end-to-end without controlling exact
+  // seeded scores, so these are light-touch sanity checks: each bucket is a
+  // real subset of active_candidates, never negative, and the two buckets
+  // (being non-overlapping — a score can't be both >=75 and <=45) never sum
+  // to more than the whole.
+  test.describe('metrics.candidates_score_ge_75 / candidates_score_le_45', () => {
 
-    test('is a non-negative integer and never exceeds active_candidates', async ({ request }) => {
+    test('both are non-negative integers; neither exceeds active_candidates; the two never overlap-sum past it', async ({ request }) => {
       const token = await getToken(request, 'hr');
       const res   = await authed(request, token).get('/api/dashboard');
       expect(res.status()).toBe(200);
       const { metrics } = await res.json();
 
-      expect(Number.isInteger(metrics.strong_fit_candidates)).toBe(true);
-      expect(metrics.strong_fit_candidates).toBeGreaterThanOrEqual(0);
-      expect(metrics.active_candidates).toBeGreaterThanOrEqual(metrics.strong_fit_candidates);
+      expect(Number.isInteger(metrics.candidates_score_ge_75)).toBe(true);
+      expect(Number.isInteger(metrics.candidates_score_le_45)).toBe(true);
+      expect(metrics.candidates_score_ge_75).toBeGreaterThanOrEqual(0);
+      expect(metrics.candidates_score_le_45).toBeGreaterThanOrEqual(0);
+      expect(metrics.active_candidates).toBeGreaterThanOrEqual(metrics.candidates_score_ge_75);
+      expect(metrics.active_candidates).toBeGreaterThanOrEqual(metrics.candidates_score_le_45);
+      expect(metrics.active_candidates).toBeGreaterThanOrEqual(
+        metrics.candidates_score_ge_75 + metrics.candidates_score_le_45
+      );
+    });
+  });
+
+  // ─── KPI redesign — remaining Active Candidates / Open Roles / SLA sub-metrics
+  test.describe('metrics — remaining KPI-card sub-metrics', () => {
+
+    test('candidates_at_interview1_plus is a non-negative integer not exceeding active_candidates', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const { metrics } = await (await authed(request, token).get('/api/dashboard')).json();
+      expect(Number.isInteger(metrics.candidates_at_interview1_plus)).toBe(true);
+      expect(metrics.candidates_at_interview1_plus).toBeGreaterThanOrEqual(0);
+      expect(metrics.active_candidates).toBeGreaterThanOrEqual(metrics.candidates_at_interview1_plus);
+    });
+
+    test('candidates_unmatched is a non-negative integer', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const { metrics } = await (await authed(request, token).get('/api/dashboard')).json();
+      expect(Number.isInteger(metrics.candidates_unmatched)).toBe(true);
+      expect(metrics.candidates_unmatched).toBeGreaterThanOrEqual(0);
+    });
+
+    test('avg_active_role_age_days is null or a non-negative number', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const { metrics } = await (await authed(request, token).get('/api/dashboard')).json();
+      expect(metrics.avg_active_role_age_days === null || metrics.avg_active_role_age_days >= 0).toBe(true);
+    });
+
+    test('avg_time_to_fill_days is null or a non-negative number', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const { metrics } = await (await authed(request, token).get('/api/dashboard')).json();
+      expect(metrics.avg_time_to_fill_days === null || metrics.avg_time_to_fill_days >= 0).toBe(true);
+    });
+
+    test('roles_filled_last_30d is a non-negative integer', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const { metrics } = await (await authed(request, token).get('/api/dashboard')).json();
+      expect(Number.isInteger(metrics.roles_filled_last_30d)).toBe(true);
+      expect(metrics.roles_filled_last_30d).toBeGreaterThanOrEqual(0);
+    });
+
+    test('sla_breach_top_type / sla_breach_top_stage are null or { count > 0 }, consistent with sla_breach_total', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const { metrics } = await (await authed(request, token).get('/api/dashboard')).json();
+      if (metrics.sla_breach_total === 0) {
+        expect(metrics.sla_breach_top_type).toBeNull();
+        expect(metrics.sla_breach_top_stage).toBeNull();
+      } else {
+        expect(metrics.sla_breach_top_type.count).toBeGreaterThan(0);
+        expect(metrics.sla_breach_top_type.count).toBeLessThanOrEqual(metrics.sla_breach_total);
+        expect(metrics.sla_breach_top_stage.count).toBeGreaterThan(0);
+        expect(metrics.sla_breach_top_stage.count).toBeLessThanOrEqual(metrics.sla_breach_total);
+      }
+    });
+  });
+
+  // ─── KPI redesign — Source Quality's new contribution_pct ──────────────────
+  test.describe('source_quality contribution_pct', () => {
+
+    test('every channel has a 0-100 contribution_pct, and they sum to ~100% across channels', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const { source_quality } = await (await authed(request, token).get('/api/dashboard')).json();
+      if (source_quality.length === 0) return; // nothing sourced in this filtered view
+
+      for (const row of source_quality) {
+        expect(row.contribution_pct).toBeGreaterThanOrEqual(0);
+        expect(row.contribution_pct).toBeLessThanOrEqual(100);
+      }
+      const total = source_quality.reduce((sum: number, r: { contribution_pct: number }) => sum + r.contribution_pct, 0);
+      expect(Math.abs(total - 100)).toBeLessThan(0.5); // rounding tolerance across channels
     });
   });
 });

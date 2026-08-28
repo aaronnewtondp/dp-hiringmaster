@@ -11,7 +11,7 @@ import { Spinner, EmptyState } from '../components/shared/Badges.tsx';
 // super_admin is assigned to exactly one person by policy — never a
 // selectable role in this UI, matching the backend's own guard on
 // POST/PATCH /api/users.
-const ASSIGNABLE_ROLES = ['hr_recruiter', 'hiring_manager', 'interviewer', 'leadership'] as const;
+const ASSIGNABLE_ROLES = ['hr_recruiter', 'hiring_manager', 'leadership'] as const;
 type AssignableRole = typeof ASSIGNABLE_ROLES[number];
 
 function UserModal({ user, onClose, onSuccess }: {

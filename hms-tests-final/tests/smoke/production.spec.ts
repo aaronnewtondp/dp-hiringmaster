@@ -117,9 +117,11 @@ test('GET /api/dashboard — returns expected metric keys', async ({ request }) 
   expect(res.status()).toBe(200);
   const body = await res.json();
   expect(body.metrics).toHaveProperty('open_roles_count');
+  expect(body.metrics).toHaveProperty('sla_breach_total');
+  expect(body.metrics).toHaveProperty('sla_breach_by_owner');
   expect(body).toHaveProperty('hiring_funnel');
+  expect(body).toHaveProperty('hiring_funnel_snapshot');
   expect(body).toHaveProperty('aging_roles');
-  expect(body).toHaveProperty('pending_actions_by_owner');
 });
 
 test('GET /api/agencies — HR can access, HM cannot', async ({ request }) => {

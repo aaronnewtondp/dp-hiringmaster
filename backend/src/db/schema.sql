@@ -26,7 +26,7 @@ CREATE TABLE users (
   google_id      TEXT UNIQUE,
   avatar_url     TEXT,
   auth_provider  TEXT NOT NULL DEFAULT 'password' CHECK (auth_provider IN ('password','google','both')),
-  persona        TEXT NOT NULL CHECK (persona IN ('hr_recruiter','hiring_manager','interviewer','leadership')),
+  persona        TEXT NOT NULL CHECK (persona IN ('hr_recruiter','hiring_manager','leadership')),
   department     TEXT,
   is_active      BOOLEAN NOT NULL DEFAULT true,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -736,6 +736,21 @@ ALTER TABLE agencies
 ALTER TABLE candidates
   ADD COLUMN IF NOT EXISTS source TEXT CHECK (source IN ('Naukri/IIMjobs','Linkedin','Internal Referral','Agency','Direct Outreach')),
   ADD COLUMN IF NOT EXISTS sourced_by_agency_id TEXT REFERENCES agencies(id);
+
+-- ── users: merge 'interviewer' persona into 'hiring_manager' ────────────────
+-- Product decision: interviewer and hiring_manager are functionally
+-- identical everywhere in the app today (interview-feedback submission
+-- rights are gated by interview_rounds.interviewer_emails, an email match,
+-- not persona) — the only real persona-keyed branch on 'interviewer'
+-- (dashboard.ts's /pending route) was already dead code, since nothing has
+-- ever inserted a pending_actions row with owner_type='Interviewer'.
+-- Confirmed zero production users hold this persona; run the data migration
+-- BEFORE this constraint swap on any connection:
+--   UPDATE users SET persona='hiring_manager' WHERE persona='interviewer';
+ALTER TABLE users
+  DROP CONSTRAINT IF EXISTS users_persona_check,
+  ADD CONSTRAINT users_persona_check
+    CHECK (persona IN ('hr_recruiter','hiring_manager','leadership','super_admin'));
 
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows

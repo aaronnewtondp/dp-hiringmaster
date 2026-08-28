@@ -92,8 +92,11 @@ order, every time. Skipping the third step means the next `docker-compose down
   folder. TypeScript runs directly.
 
 ### Access control model
-Five personas: `hr_recruiter` (displayed as "HR/Admin" — same DB value, just
-relabeled), `hiring_manager`, `interviewer`, `leadership`, `super_admin`.
+Four personas: `hr_recruiter` (displayed as "HR/Admin" — same DB value, just
+relabeled), `hiring_manager`, `leadership`, `super_admin`. (A fifth,
+`interviewer`, was merged into `hiring_manager` — it was already functionally
+identical to it everywhere: interview-feedback submission rights are gated by
+`interview_rounds.interviewer_emails`, an email match, not persona.)
 
 `isHRTier(persona)` in `middleware/auth.ts` — `persona === 'hr_recruiter' ||
 persona === 'leadership' || persona === 'super_admin'` — is the **single
@@ -113,7 +116,7 @@ no field or route either is blocked from that the other isn't.
 nothing else can reach. **Policy: `super_admin` is assigned to exactly one
 person (aaron.newton@digitalpaani.com) and is never a selectable role
 anywhere in the UI** — `POST/PATCH /api/users` reject it outright, and the
-User Management page's role dropdown only ever offers the other four.
+User Management page's role dropdown only ever offers the other three.
 
 **Hiring Manager's real capability set**: view roles/candidates/applications
 (financial fields stripped), submit interview feedback for rounds they're

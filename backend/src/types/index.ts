@@ -1,5 +1,5 @@
 // ─── Auth ─────────────────────────────────────────────────────────────────────
-export type Persona = 'hr_recruiter' | 'hiring_manager' | 'interviewer' | 'leadership' | 'super_admin';
+export type Persona = 'hr_recruiter' | 'hiring_manager' | 'leadership' | 'super_admin';
 
 export interface User {
   id:          string;
@@ -271,15 +271,23 @@ export interface InterviewRound {
 
 // ─── Dashboard aggregates ─────────────────────────────────────────────────────
 export interface DashboardMetrics {
-  open_roles_count:       number;
-  open_roles_by_priority: Record<Priority, number>;
-  active_candidates:      number;
-  strong_fit_candidates:  number;
-  sla_breaches:           number;
-  total_pending_actions:  number;
-  red_aging_roles:        number;
-  founder_review_pending: number;
-  joining_risk_count:     number;
+  open_roles_count:              number;
+  open_roles_by_priority:        Record<Priority, number>;
+  avg_active_role_age_days:      number | null;
+  avg_time_to_fill_days:         number | null;
+  roles_filled_last_30d:         number;
+  active_candidates:             number;
+  candidates_score_ge_75:        number;
+  candidates_score_le_45:        number;
+  candidates_at_interview1_plus: number;
+  candidates_unmatched:          number;
+  sla_breach_total:              number;
+  sla_breach_by_owner:           Record<string, number>;
+  sla_breach_top_type:           { type: string; count: number } | null;
+  sla_breach_top_stage:          { stage: string; count: number } | null;
+  red_aging_roles:               number;
+  founder_review_pending:        number;
+  joining_risk_count:            number;
 }
 
 export interface PendingActionGroup {

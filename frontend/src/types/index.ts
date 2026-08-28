@@ -1,4 +1,4 @@
-export type Persona = 'hr_recruiter' | 'hiring_manager' | 'interviewer' | 'leadership' | 'super_admin';
+export type Persona = 'hr_recruiter' | 'hiring_manager' | 'leadership' | 'super_admin';
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3';
 export type AgingAlert = 'ok' | 'yellow' | 'red';
 export type ApplicationStatus = 'Active' | 'Rejected' | 'Withdrawn' | 'Hold for Future' | 'Joined' | 'Closed';
@@ -306,18 +306,50 @@ export interface PendingAction {
   ai_fit_score?:       number | null;
 }
 
+export interface SlaBreachCandidate {
+  application_id: string;
+  candidate_id:   string | null;
+  candidate_name: string;
+  role_id:        string | null;
+  role_title:     string;
+  owner:          string;
+  stage:          string;
+  overdue_hours:  number;
+}
+
+export interface SlaBreachType {
+  type:       string;
+  owner:      string;
+  count:      number;
+  candidates: SlaBreachCandidate[];
+}
+
+export interface HiringFunnelSnapshotStage {
+  stage:        string;
+  total:        number;
+  breach_types: SlaBreachType[];
+}
+
 export interface DashboardData {
   metrics: {
-    open_roles_count:        number;
-    open_roles_by_priority:  Record<Priority, number>;
-    active_candidates:       number;
-    strong_fit_candidates:   number;
-    sla_breaches:            number;
-    total_pending_actions:   number;
-    red_aging_roles:         number;
-    joining_risk_count:      number;
+    open_roles_count:              number;
+    open_roles_by_priority:        Record<Priority, number>;
+    avg_active_role_age_days:      number | null;
+    avg_time_to_fill_days:         number | null;
+    roles_filled_last_30d:         number;
+    active_candidates:             number;
+    candidates_score_ge_75:        number;
+    candidates_score_le_45:        number;
+    candidates_at_interview1_plus: number;
+    candidates_unmatched:          number;
+    sla_breach_total:              number;
+    sla_breach_by_owner:           Record<string, number>;
+    sla_breach_top_type:           { type: string; count: number } | null;
+    sla_breach_top_stage:          { stage: string; count: number } | null;
+    red_aging_roles:               number;
+    joining_risk_count:            number;
   };
-  pending_actions_by_owner:  Record<string, PendingAction[]>;
+  hiring_funnel_snapshot:    HiringFunnelSnapshotStage[];
   aging_roles:               Array<Role & { active_count: number }>;
   low_pipeline:              Array<Role & { active_count: number }>;
   roles_by_status:           Record<string, number>;
@@ -325,8 +357,7 @@ export interface DashboardData {
   rejected_by_stage:         Record<string, number>;
 
   // ── Phase 2 (PRD §18) ──────────────────────────────────────────────────────
-  source_quality:     Array<{ source_channel: string; n: number; pass_rate: number; hire_rate: number }>;
-  time_to_fill:       { overall_days: number | null; by_priority: Record<Priority, number | null> };
+  source_quality:     Array<{ source_channel: string; n: number; pass_rate: number; hire_rate: number; contribution_pct: number }>;
 
   // ── Operational Velocity (items #10/#29) ────────────────────────────────────
   velocity: {
@@ -442,7 +473,6 @@ export const REFERENCE_FEEDBACK_OPTIONS = ['Excellent', 'Good', 'Average', 'Belo
 export const PERSONAS: Record<Persona, string> = {
   hr_recruiter:   'HR/Admin',
   hiring_manager: 'Hiring Manager',
-  interviewer:    'Interviewer',
   leadership:     'Leadership',
   super_admin:    'Super Admin',
 };
