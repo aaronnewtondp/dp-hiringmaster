@@ -50,46 +50,59 @@ const BREACH_ASSIGNMENT_FEEDBACK_HOURS = 96;
 
 type Owner = 'HR / Recruiter' | 'Hiring Manager';
 
-// Shared tail for every breach-type check below: atomically flip the
-// application's sla_breach flag (re-checking status='Active' in the same
-// statement — the same race a concurrent status change could otherwise
-// cause, per the pre-existing pattern this mirrors), resolve any stale
-// same-type action before inserting a fresh one, and stamp
-// responsible_person the same way the pre-existing code did (only
-// Hiring-Manager-owned rows get a named person — the role's own HM; HR rows
-// are a shared team queue, not one person's).
-async function applyBreach(
-  app: { id: string; candidate_id: string; role_id: string },
+// Shared tail for every breach-type check below — batched across ALL
+// breached applications for one config at once, not one row at a time.
+// The original per-row version did up to 5 sequential round trips per
+// breach (atomic flip, candidate lookup, role lookup, resolve-stale,
+// insert) — fine locally, but with production's real network latency to
+// Supabase, a stage with a few hundred genuinely-overdue applications
+// turned into a thousand-plus serialized round trips on the dashboard's
+// synchronous critical path (maybeRunSlaCheck awaits this before
+// responding), which is exactly the kind of load that either times out or
+// just makes the page look like it's "crashed" from the user's side.
+// candidate_name/role_title/hiring_manager_name are now pre-joined by each
+// caller's own SELECT instead of looked up per row here.
+async function applyBreachBatch(
+  apps: Array<{ id: string; role_id: string; candidate_name: string; role_title: string; hiring_manager_name: string | null; hoursOverdue: number }>,
   actionType: string,
-  ownerType: Owner,
-  hoursOverdue: number
+  ownerType: Owner
 ): Promise<void> {
-  const stillActive = await queryOne<{ id: string }>(
-    `UPDATE applications SET sla_breach=true WHERE id=$1 AND status='Active' RETURNING id`,
-    [app.id]
-  );
-  if (!stillActive) return;
+  if (apps.length === 0) return;
 
-  const cand = await queryOne<{ full_name: string }>('SELECT full_name FROM candidates WHERE id=$1', [app.candidate_id]);
-  const role = await queryOne<{ title: string; hiring_manager_name: string }>('SELECT title, hiring_manager_name FROM roles WHERE id=$1', [app.role_id]);
-  const responsiblePerson = ownerType === 'Hiring Manager' ? role?.hiring_manager_name || null : null;
+  // Atomically flip sla_breach for every candidate row in one statement,
+  // re-checking status='Active' the same way the per-row version did — a
+  // concurrent status change landing in the gap between this batch's SELECT
+  // and now is still caught, just for the whole batch instead of one row.
+  const stillActiveRows = await query<{ id: string }>(
+    `UPDATE applications SET sla_breach=true WHERE id = ANY($1::text[]) AND status='Active' RETURNING id`,
+    [apps.map(a => a.id)]
+  );
+  const stillActiveIds = new Set(stillActiveRows.map(r => r.id));
+  const activeApps = apps.filter(a => stillActiveIds.has(a.id));
+  if (activeApps.length === 0) return;
 
   await query(
     `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
-     WHERE application_id=$1 AND action_type=$2 AND resolved=false`,
-    [app.id, actionType]
+     WHERE application_id = ANY($1::text[]) AND action_type=$2 AND resolved=false`,
+    [activeApps.map(a => a.id), actionType]
   );
 
   await query(
     `INSERT INTO pending_actions
        (owner_type, priority_level, action_type, description, application_id,
         candidate_name, role_title, hours_overdue, role_id, responsible_person)
-     VALUES ($1,'High',$2,$3,$4,$5,$6,$7,$8,$9)`,
+     SELECT $1, 'High', $2, $2||' — '||floor(d.hours_overdue)||'h overdue',
+            d.application_id, d.candidate_name, d.role_title, d.hours_overdue, d.role_id, d.responsible_person
+     FROM unnest($3::text[], $4::text[], $5::text[], $6::numeric[], $7::text[], $8::text[])
+       AS d(application_id, candidate_name, role_title, hours_overdue, role_id, responsible_person)`,
     [
       ownerType, actionType,
-      `${actionType} — ${Math.floor(hoursOverdue)}h overdue`,
-      app.id, cand?.full_name || 'Unknown', role?.title || 'Unknown',
-      Math.max(0, hoursOverdue), app.role_id, responsiblePerson,
+      activeApps.map(a => a.id),
+      activeApps.map(a => a.candidate_name || 'Unknown'),
+      activeApps.map(a => a.role_title || 'Unknown'),
+      activeApps.map(a => Math.max(0, a.hoursOverdue)),
+      activeApps.map(a => a.role_id),
+      activeApps.map(a => (ownerType === 'Hiring Manager' ? a.hiring_manager_name || null : null)),
     ]
   );
 }
@@ -106,17 +119,21 @@ const FLAT_STAGE_CHECKS: Array<{ stages: string[]; actionType: string; owner: Ow
 
 async function checkFlatStageBreaches(): Promise<void> {
   for (const cfg of FLAT_STAGE_CHECKS) {
-    const apps = await query<{ id: string; candidate_id: string; role_id: string; stage_entry_time: string }>(
-      `SELECT id, candidate_id, role_id, stage_entry_time
-       FROM applications
-       WHERE status='Active' AND stage = ANY($1) AND stage_entry_time IS NOT NULL`,
+    const apps = await query<{ id: string; role_id: string; stage_entry_time: string;
+             candidate_name: string; role_title: string; hiring_manager_name: string | null }>(
+      `SELECT a.id, a.role_id, a.stage_entry_time,
+              c.full_name AS candidate_name, r.title AS role_title, r.hiring_manager_name
+       FROM applications a
+       JOIN candidates c ON c.id = a.candidate_id
+       JOIN roles r ON r.id = a.role_id
+       WHERE a.status='Active' AND a.stage = ANY($1) AND a.stage_entry_time IS NOT NULL`,
       [cfg.stages]
     );
     const thresholdHours = cfg.actionType === 'Idle Candidate' ? BREACH_IDLE_HOURS : BREACH_STANDARD_HOURS;
-    for (const app of apps) {
-      const hoursOverdue = (Date.now() - new Date(app.stage_entry_time).getTime()) / 3600000 - thresholdHours;
-      if (hoursOverdue > 0) await applyBreach(app, cfg.actionType, cfg.owner, hoursOverdue);
-    }
+    const breached = apps
+      .map(app => ({ ...app, hoursOverdue: (Date.now() - new Date(app.stage_entry_time).getTime()) / 3600000 - thresholdHours }))
+      .filter(app => app.hoursOverdue > 0);
+    await applyBreachBatch(breached, cfg.actionType, cfg.owner);
   }
 }
 
@@ -143,9 +160,13 @@ async function checkNotYetActioned(): Promise<void> {
     // above, never user input — safe to interpolate as a column/value
     // identifier rather than a bound parameter (Postgres can't parameterize
     // column names).
-    const apps = await query<{ id: string; candidate_id: string; role_id: string; stage_entry_time: string }>(
-      `SELECT a.id, a.candidate_id, a.role_id, a.stage_entry_time
+    const apps = await query<{ id: string; role_id: string; stage_entry_time: string;
+             candidate_name: string; role_title: string; hiring_manager_name: string | null }>(
+      `SELECT a.id, a.role_id, a.stage_entry_time,
+              c.full_name AS candidate_name, r.title AS role_title, r.hiring_manager_name
        FROM applications a
+       JOIN candidates c ON c.id = a.candidate_id
+       JOIN roles r ON r.id = a.role_id
        WHERE a.status='Active' AND a.stage=$1 AND a.stage_entry_time IS NOT NULL
          AND NOT EXISTS (
            SELECT 1 FROM interview_rounds ir
@@ -154,10 +175,10 @@ async function checkNotYetActioned(): Promise<void> {
          )`,
       [cfg.stage, cfg.roundType]
     );
-    for (const app of apps) {
-      const hoursOverdue = (Date.now() - new Date(app.stage_entry_time).getTime()) / 3600000 - BREACH_STANDARD_HOURS;
-      if (hoursOverdue > 0) await applyBreach(app, cfg.actionType, 'HR / Recruiter', hoursOverdue);
-    }
+    const breached = apps
+      .map(app => ({ ...app, hoursOverdue: (Date.now() - new Date(app.stage_entry_time).getTime()) / 3600000 - BREACH_STANDARD_HOURS }))
+      .filter(app => app.hoursOverdue > 0);
+    await applyBreachBatch(breached, cfg.actionType, 'HR / Recruiter');
   }
 }
 
@@ -187,9 +208,13 @@ export const NOT_SCHEDULED_ACTION_TYPES = NOT_YET_ACTIONED_STAGES
 
 async function checkFeedbackDue(): Promise<void> {
   for (const cfg of FEEDBACK_DUE_STAGES) {
-    const rows = await query<{ id: string; candidate_id: string; role_id: string; anchor_time: string }>(
-      `SELECT DISTINCT ON (a.id) a.id, a.candidate_id, a.role_id, ir.${cfg.anchorColumn} AS anchor_time
+    const rows = await query<{ id: string; role_id: string; anchor_time: string;
+             candidate_name: string; role_title: string; hiring_manager_name: string | null }>(
+      `SELECT DISTINCT ON (a.id) a.id, a.role_id, ir.${cfg.anchorColumn} AS anchor_time,
+              c.full_name AS candidate_name, r.title AS role_title, r.hiring_manager_name
        FROM applications a
+       JOIN candidates c ON c.id = a.candidate_id
+       JOIN roles r ON r.id = a.role_id
        JOIN interview_rounds ir ON ir.application_id = a.id
          AND ir.round_type = $2
          AND ir.created_at >= a.stage_entry_time
@@ -199,10 +224,10 @@ async function checkFeedbackDue(): Promise<void> {
        ORDER BY a.id, ir.${cfg.anchorColumn} DESC`,
       [cfg.stage, cfg.roundType]
     );
-    for (const row of rows) {
-      const hoursOverdue = (Date.now() - new Date(row.anchor_time).getTime()) / 3600000 - cfg.thresholdHours;
-      if (hoursOverdue > 0) await applyBreach(row, cfg.actionType, 'Hiring Manager', hoursOverdue);
-    }
+    const breached = rows
+      .map(row => ({ ...row, hoursOverdue: (Date.now() - new Date(row.anchor_time).getTime()) / 3600000 - cfg.thresholdHours }))
+      .filter(row => row.hoursOverdue > 0);
+    await applyBreachBatch(breached, cfg.actionType, 'Hiring Manager');
   }
 }
 
