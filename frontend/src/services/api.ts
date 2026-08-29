@@ -53,6 +53,9 @@ export const rolesApi = {
   pipeline:      (id: string)                      => api.get(`/roles/${id}/pipeline`),
   compBenchmark: (id: string)                      => api.get(`/roles/${id}/comp-benchmark`),
   filterOptions: ()                                 => api.get('/roles/filter-options'),
+  // Binary PDF response — responseType 'blob' is required for axios to hand
+  // back a real Blob instead of trying (and failing) to parse it as JSON/text.
+  closureSummaryPdf: (id: string)                  => api.get(`/roles/${id}/closure-summary.pdf`, { responseType: 'blob' }),
 };
 
 export const candidatesApi = {

@@ -1,14 +1,16 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
 import { authenticate, requireHR, isHRTier, canSeeCompForRole, stripRestrictedFields } from '../middleware/auth.js';
-import { Role } from '../types/index.js';
+import { Role, STAGE_ORDER } from '../types/index.js';
 import { generateJdContent } from '../services/jdContent.js';
 import { renderLongFormJd } from '../services/pdf/longFormJd.js';
 import { renderSocialJd } from '../services/pdf/socialJd.js';
+import { renderRoleClosureSummary } from '../services/pdf/roleClosureSummary.js';
 import { uploadJdPdf } from '../services/driveService.js';
 import { parseRoleFilters, buildRoleFilterSql } from '../utils/roleFilters.js';
 import { getCompBenchmark } from '../services/compBenchmark.js';
 import { computeAging } from '../utils/aging.js';
+import { STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
 
 const router = Router();
 router.use(authenticate);
@@ -529,6 +531,171 @@ router.get('/:id/comp-benchmark', requireHR, async (req: Request, res: Response)
   } catch (err) {
     console.error('[CompBenchmark] Failed for role', req.params.id, err);
     res.status(500).json({ error: 'Compensation benchmarking failed — please try again' });
+  }
+});
+
+// ─── GET /api/roles/:id/closure-summary.pdf — 1-page retrospective PDF ───────
+// CEO directive (2026-08-29): only available once a role is actually closed
+// (Filled or Cancelled) — the button that hits this is hidden until then on
+// the frontend, and enforced here too so the link itself can't be shared/
+// reused before that. Metrics cover ALL candidates ever linked to this role
+// (not just Active — a retrospective needs the full history), unlike the
+// live Dashboard's own per-role metrics which are Active-scoped by design.
+// Visible to HR-tier always, and to the role's own Hiring Manager — same
+// ownership rule as compensation visibility (canSeeCompForRole), reused here
+// as a general "can manage/review this role" check rather than introducing
+// a second, differently-named ownership gate for the same underlying rule.
+const CLOSED_STATUSES = ['Closed – Filled', 'Closed – Cancelled'];
+
+// Every action_type a retrospective should count as a genuine candidate-flow
+// SLA breach — STAGE_SLA_ACTION_TYPES (the stage/breach-type engine's full
+// set) plus the two independent checks that aren't stage-driven.
+// Deliberately excludes 'Role aging alert' (that's about the role sitting
+// open too long, already covered by Days to close above, and dashboard.ts's
+// own test suite establishes it never belongs alongside candidate breach
+// types) and 'Compensation change flag' (a comp-admin concern, not a
+// candidate-flow SLA issue).
+const CLOSURE_BREACH_TYPES = [...STAGE_SLA_ACTION_TYPES, 'Assignment deadline breached', 'Joining risk — no contact'];
+
+router.get('/:id/closure-summary.pdf', async (req: Request, res: Response) => {
+  const role = await queryOne<Role>('SELECT * FROM roles WHERE id = $1', [req.params.id]);
+  if (!role) { res.status(404).json({ error: 'Role not found' }); return; }
+
+  if (!canSeeCompForRole(req.user!.persona, req.user!.name, role.hiring_manager_name)) {
+    res.status(403).json({ error: 'HR access required, or you must be this role\'s assigned Hiring Manager' });
+    return;
+  }
+  if (!CLOSED_STATUSES.includes(role.status)) {
+    res.status(400).json({ error: 'A closure summary is only available once a role is Closed – Filled or Closed – Cancelled' });
+    return;
+  }
+
+  const [closedAtRow, funnelRows, outcomeRow, breachRows, sourceRows, velocityRows, timeToFillRow] = await Promise.all([
+    // Most recent transition INTO a closed status — a role can in principle
+    // be reopened and re-closed (seen elsewhere this session), so this is
+    // "when it most recently closed," not "when it first ever did."
+    queryOne<{ created_at: string }>(
+      `SELECT created_at FROM activity_log
+       WHERE role_id=$1 AND event_type='Status Changed' AND new_value = ANY($2::text[])
+       ORDER BY created_at DESC LIMIT 1`,
+      [req.params.id, CLOSED_STATUSES]
+    ),
+    query<{ stage: string; status: string; count: string }>(
+      `SELECT stage, status, COUNT(*) as count FROM applications WHERE role_id=$1 GROUP BY stage, status`,
+      [req.params.id]
+    ),
+    queryOne<{ total: string; active: string; joined: string; rejected: string; withdrawn: string; hold_for_future: string }>(
+      `SELECT COUNT(*) AS total,
+              COUNT(*) FILTER (WHERE status='Active') AS active,
+              COUNT(*) FILTER (WHERE status='Joined') AS joined,
+              COUNT(*) FILTER (WHERE status='Rejected') AS rejected,
+              COUNT(*) FILTER (WHERE status='Withdrawn') AS withdrawn,
+              COUNT(*) FILTER (WHERE status='Hold for Future') AS hold_for_future
+       FROM applications WHERE role_id=$1`,
+      [req.params.id]
+    ),
+    query<{ action_type: string; count: string }>(
+      `SELECT pa.action_type, COUNT(*) as count
+       FROM pending_actions pa
+       WHERE pa.action_type = ANY($2::text[])
+         AND (pa.role_id=$1 OR pa.application_id IN (SELECT id FROM applications WHERE role_id=$1))
+       GROUP BY pa.action_type ORDER BY count DESC`,
+      [req.params.id, CLOSURE_BREACH_TYPES]
+    ),
+    query<{ source_channel: string; n: string; engaged: string; hired: string }>(
+      `SELECT source_channel, COUNT(*) AS n,
+              COUNT(*) FILTER (WHERE stage <> 'Applied') AS engaged,
+              COUNT(*) FILTER (WHERE stage = 'Joined') AS hired
+       FROM applications WHERE role_id=$1 AND source_channel IS NOT NULL AND source_channel <> ''
+       GROUP BY source_channel ORDER BY n DESC`,
+      [req.params.id]
+    ),
+    query<{ stage: string; count: string }>(
+      `SELECT stage, COUNT(*) as count FROM applications WHERE role_id=$1 GROUP BY stage`,
+      [req.params.id]
+    ),
+    queryOne<{ avg_days: string | null }>(
+      `SELECT AVG(offer_accepted_date - start_date) as avg_days FROM applications a
+       JOIN roles r ON r.id = a.role_id
+       WHERE a.role_id=$1 AND a.offer_accepted_date IS NOT NULL AND r.start_date IS NOT NULL`,
+      [req.params.id]
+    ),
+  ]);
+
+  const closedDate = closedAtRow?.created_at || null;
+  const daysToClose = role.start_date && closedDate
+    ? Math.floor((new Date(closedDate).getTime() - new Date(role.start_date).getTime()) / 86400000)
+    : null;
+
+  type FunnelCounts = { active: number; joined: number; rejected: number; withdrawn: number; hold_for_future: number };
+  const funnelByStage: Record<string, FunnelCounts> = {};
+  for (const stage of STAGE_ORDER) funnelByStage[stage] = { active: 0, joined: 0, rejected: 0, withdrawn: 0, hold_for_future: 0 };
+  for (const row of funnelRows) {
+    const bucket = funnelByStage[row.stage];
+    if (!bucket) continue;
+    const n = parseInt(row.count);
+    if (row.status === 'Active') bucket.active = n;
+    else if (row.status === 'Joined') bucket.joined = n;
+    else if (row.status === 'Rejected') bucket.rejected = n;
+    else if (row.status === 'Withdrawn') bucket.withdrawn = n;
+    else if (row.status === 'Hold for Future') bucket.hold_for_future = n;
+  }
+
+  const FIRST_INTERVIEW_IDX = STAGE_ORDER.indexOf('Interview Round 1');
+  const FIRST_OFFER_IDX = STAGE_ORDER.indexOf('Offer Released');
+  let interviewedCount = 0, offeredCount = 0;
+  for (const row of velocityRows) {
+    const idx = STAGE_ORDER.indexOf(row.stage);
+    if (idx < 0) continue;
+    const n = parseInt(row.count);
+    if (idx >= FIRST_INTERVIEW_IDX) interviewedCount += n;
+    if (idx >= FIRST_OFFER_IDX) offeredCount += n;
+  }
+
+  const rejectedByStage = STAGE_ORDER.map(stage => ({ stage, count: funnelByStage[stage].rejected }))
+    .filter(s => s.count > 0).sort((a, b) => b.count - a.count)[0];
+
+  const slaByType = breachRows.map(r => ({ type: r.action_type, count: parseInt(r.count) }));
+
+  try {
+    const pdfBuffer = await renderRoleClosureSummary({
+      role: {
+        id: role.id, title: role.title, department: role.department || null,
+        hiring_manager_name: role.hiring_manager_name || null, priority: role.priority,
+        location: role.location || null, employment_type: role.employment_type || null,
+        status: role.status, start_date: role.start_date || null,
+        target_closure_date: role.target_closure_date || null,
+        closed_date: closedDate, days_to_close: daysToClose, num_openings: role.num_openings,
+      },
+      totalApplications: parseInt(outcomeRow?.total || '0'),
+      outcomes: {
+        active: parseInt(outcomeRow?.active || '0'), joined: parseInt(outcomeRow?.joined || '0'),
+        rejected: parseInt(outcomeRow?.rejected || '0'), withdrawn: parseInt(outcomeRow?.withdrawn || '0'),
+        hold_for_future: parseInt(outcomeRow?.hold_for_future || '0'),
+      },
+      funnel: STAGE_ORDER.map(stage => ({ stage, ...funnelByStage[stage] })),
+      slaBreaches: { total: slaByType.reduce((s, t) => s + t.count, 0), byType: slaByType },
+      sourceQuality: sourceRows.map(r => {
+        const n = parseInt(r.n);
+        return {
+          source_channel: r.source_channel, n,
+          pass_rate: n > 0 ? Math.round((parseInt(r.engaged) / n) * 1000) / 10 : 0,
+          hire_rate: n > 0 ? Math.round((parseInt(r.hired) / n) * 1000) / 10 : 0,
+        };
+      }),
+      velocity: {
+        interview_to_offer_ratio: interviewedCount > 0 ? Math.round((offeredCount / interviewedCount) * 1000) / 10 : null,
+        biggest_drop_off: rejectedByStage || null,
+      },
+      timeToFillDays: timeToFillRow?.avg_days != null ? Math.round(Number(timeToFillRow.avg_days) * 10) / 10 : null,
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${role.id}-closure-summary.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    console.error('[ClosureSummary] Failed for role', req.params.id, err);
+    res.status(500).json({ error: 'Failed to generate closure summary PDF' });
   }
 });
 

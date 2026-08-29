@@ -48,7 +48,7 @@ export default function AssignmentOutcomeModal({ round, onClose, onSuccess }: Pr
     }
     setSaving(true);
     try {
-      await interviewsApi.feedback(round.id, {
+      const res = await interviewsApi.feedback(round.id, {
         assignment_outcome: outcome,
         score_technical_accuracy: scores.score_technical_accuracy,
         score_problem_solving: scores.score_problem_solving,
@@ -58,6 +58,8 @@ export default function AssignmentOutcomeModal({ round, onClose, onSuccess }: Pr
         assignment_notes: notes || null,
       });
       toast.success('Assignment outcome recorded');
+      const autoAdvanced = (res.data as { auto_advanced?: { from: string; to: string } | null })?.auto_advanced;
+      if (autoAdvanced) toast.success(`Positive outcome — candidate auto-advanced to ${autoAdvanced.to}`);
       onSuccess();
       onClose();
     } catch (err: unknown) {

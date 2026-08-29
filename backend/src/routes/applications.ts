@@ -12,7 +12,7 @@ const router = Router();
 router.use(authenticate);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function getSlaHours(stage: string, fitScore?: number | null): number {
+export function getSlaHours(stage: string, fitScore?: number | null): number {
   if (stage === 'Resume Review') {
     return (fitScore && fitScore >= 75) ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL;
   }

@@ -70,7 +70,7 @@ export default function InterviewFeedbackModal({ round, onClose, onSuccess }: Pr
     }
     setSaving(true);
     try {
-      await interviewsApi.feedback(round.id, {
+      const res = await interviewsApi.feedback(round.id, {
         eval_areas_assessed:  selectedAreas,
         scores_per_area:      scores,
         overall_assessment:   overall,
@@ -82,6 +82,8 @@ export default function InterviewFeedbackModal({ round, onClose, onSuccess }: Pr
         notes:                notes      || null,
       });
       toast.success('Feedback submitted');
+      const autoAdvanced = (res.data as { auto_advanced?: { from: string; to: string } | null })?.auto_advanced;
+      if (autoAdvanced) toast.success(`Positive feedback — candidate auto-advanced to ${autoAdvanced.to}`);
       onSuccess();
       onClose();
     } catch (err: unknown) {

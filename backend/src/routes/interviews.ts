@@ -4,7 +4,9 @@ import { authenticate, requireHR, isHRTier } from '../middleware/auth.js';
 import { InterviewRound } from '../types/index.js';
 import { createInterviewCalendarEvent } from '../services/calendarService.js';
 import { sendAssignmentEmail } from '../services/gmailService.js';
-import { FEEDBACK_DUE_ACTION_TYPES, NOT_SCHEDULED_ACTION_TYPES } from '../jobs/slaChecker.js';
+import { FEEDBACK_DUE_ACTION_TYPES, NOT_SCHEDULED_ACTION_TYPES, STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
+import { STAGE_ORDER } from '../types/index.js';
+import { getSlaHours } from './applications.js';
 
 const router = Router();
 router.use(authenticate);
@@ -439,7 +441,59 @@ router.patch('/:id/feedback', async (req: Request, res: Response) => {
   const updated = await queryOne<InterviewRound>(
     'SELECT * FROM interview_rounds WHERE id=$1', [req.params.id]
   );
-  res.json({ round: updated });
+
+  // Auto-advance on positive feedback (CEO directive, 2026-08-29) — reduces
+  // friction in moving candidates along: whoever submits it, a genuinely
+  // positive result no longer needs a separate manual stage-advance click.
+  // "Positive" maps to round_recommendation for Standard rounds (Proceed /
+  // Proceed with Concerns — Assignment rounds have no equivalent
+  // "with concerns" value, so assignment_outcome's one positive value
+  // stands in for both) combined with the average score exceeding the
+  // 2.5 midpoint of the 1-5 rubric scale both round shapes use. Only fires
+  // when the application is still sitting at the exact stage this
+  // round belongs to (Interview Round 1/2, Assignment Round, Founders
+  // Round) and still Active — feedback submitted late, after the
+  // application already moved on some other way, is a no-op here, not a
+  // surprise jump.
+  const isPositiveEnough = isAssignment
+    ? assignment_outcome === 'Approved for Next Round' && assignment_overall_score != null && assignment_overall_score > 2.5
+    : (round_recommendation === 'Proceed' || round_recommendation === 'Proceed with Concerns')
+      && overall_round_score != null && overall_round_score > 2.5;
+
+  let autoAdvanced: { from: string; to: string } | null = null;
+  if (isPositiveEnough) {
+    const TRIGGER_STAGES = ['Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round'];
+    const app = await queryOne<{ stage: string; status: string; candidate_id: string; role_id: string; ai_fit_score: number | null }>(
+      'SELECT stage, status, candidate_id, role_id, ai_fit_score FROM applications WHERE id=$1',
+      [round.application_id]
+    );
+    const nextStage = app && TRIGGER_STAGES.includes(app.stage) ? STAGE_ORDER[STAGE_ORDER.indexOf(app.stage) + 1] : null;
+
+    if (app && app.status === 'Active' && nextStage) {
+      const slaHours = getSlaHours(nextStage, app.ai_fit_score);
+      await transaction(async (client) => {
+        await client.query(
+          `UPDATE applications SET stage=$1, stage_entry_time=NOW(), sla_hours=$2, sla_breach=false, last_updated=NOW() WHERE id=$3`,
+          [nextStage, slaHours, round.application_id]
+        );
+        await client.query(
+          `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
+           WHERE application_id=$1 AND resolved=false AND action_type = ANY($2::text[])`,
+          [round.application_id, STAGE_SLA_ACTION_TYPES]
+        );
+        await client.query(
+          `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, old_value, new_value, performed_by, performed_by_name)
+           VALUES ($1,$2,$3,'Stage Changed',$4,$5,$6,$7,$8)`,
+          [round.application_id, app.candidate_id, app.role_id,
+           `Auto-advanced to ${nextStage} — positive feedback on ${round.round_name}`,
+           app.stage, nextStage, req.user!.userId, req.user!.name]
+        );
+      });
+      autoAdvanced = { from: app.stage, to: nextStage };
+    }
+  }
+
+  res.json({ round: updated, auto_advanced: autoAdvanced });
 });
 
 // ─── POST /api/interviews/:id/assignment-send — retry a failed send ──────────

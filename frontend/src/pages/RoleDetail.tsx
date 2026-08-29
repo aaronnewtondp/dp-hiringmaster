@@ -27,6 +27,7 @@ export default function RoleDetail() {
   const [savingNote, setSavingNote] = useState(false);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
   const [discarding, setDiscarding] = useState(false);
+  const [downloadingSummary, setDownloadingSummary] = useState(false);
 
   const { data: roleData, isLoading: roleLoading } = useQuery<{ data: { role: Role } }>({
     queryKey: ['role', id],
@@ -73,6 +74,24 @@ export default function RoleDetail() {
       toast.error(msg || 'Failed to approve role');
     }
     setApproving(false);
+  };
+
+  const handleDownloadSummary = async () => {
+    setDownloadingSummary(true);
+    try {
+      const res = await rolesApi.closureSummaryPdf(id!);
+      const url = URL.createObjectURL(res.data as Blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${id}-closure-summary.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Failed to generate closure summary');
+    }
+    setDownloadingSummary(false);
   };
 
   const handleSaveNote = async () => {
@@ -280,6 +299,16 @@ export default function RoleDetail() {
               className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg py-1.5 px-3 w-full transition-colors"
             >
               Discard role
+            </button>
+          )}
+          {canApproveThisRole && (role.status === 'Closed – Filled' || role.status === 'Closed – Cancelled') && (
+            <button
+              onClick={handleDownloadSummary}
+              disabled={downloadingSummary}
+              className="btn-secondary text-xs py-1.5 px-3 w-full"
+              title="A 1-page retrospective covering every candidate this role ever saw, SLA breaches, and time to close"
+            >
+              {downloadingSummary ? 'Generating…' : 'Download Closure Summary'}
             </button>
           )}
         </div>

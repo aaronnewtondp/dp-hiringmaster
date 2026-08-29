@@ -304,6 +304,20 @@ export interface PendingActionGroup {
   }>;
 }
 
+// ─── Canonical pipeline stage order ─────────────────────────────────────────
+// Mirrors frontend/src/types/index.ts's STAGES exactly. Previously
+// duplicated ad-hoc inside dashboard.ts (with a comment noting the backend
+// had "no shared copy of this list") — centralized here once a second
+// backend consumer (interviews.ts's auto-advance-on-positive-feedback)
+// needed the exact same list, to remove the drift risk of two independent
+// copies silently disagreeing.
+export const STAGE_ORDER: string[] = [
+  'Applied', 'Resume Review', 'Shortlisted',
+  'Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round',
+  'Reference Check', 'Pre-Joining Documents', 'Offer Discussion',
+  'Offer Released', 'Offer Accepted', 'Joined',
+];
+
 // ─── SLA definitions ─────────────────────────────────────────────────────────
 export const SLA_HOURS: Record<string, number> = {
   RESUME_REVIEW_NORMAL:  48,

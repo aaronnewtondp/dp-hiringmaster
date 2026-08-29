@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne } from '../db/index.js';
 import { authenticate } from '../middleware/auth.js';
-import { Priority } from '../types/index.js';
+import { Priority, STAGE_ORDER } from '../types/index.js';
 import { runSlaCheck, STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
 import { parseRoleFilters, buildRoleFilterSql, roleIdsSubquery } from '../utils/roleFilters.js';
 import { computeAging } from '../utils/aging.js';
@@ -28,15 +28,6 @@ async function maybeRunSlaCheck(): Promise<void> {
 const router = Router();
 router.use(authenticate);
 
-// Mirrors frontend/src/types/index.ts's STAGES exactly — backend has no
-// shared copy of this list, so it's duplicated here for the Operational
-// Velocity metrics' "reached interview"/"reached offer" threshold checks.
-const STAGE_ORDER = [
-  'Applied', 'Resume Review', 'Shortlisted',
-  'Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round',
-  'Reference Check', 'Pre-Joining Documents', 'Offer Discussion',
-  'Offer Released', 'Offer Accepted', 'Joined',
-];
 const FIRST_INTERVIEW_IDX = STAGE_ORDER.indexOf('Interview Round 1');
 const FIRST_OFFER_IDX     = STAGE_ORDER.indexOf('Offer Released');
 
