@@ -5,6 +5,13 @@ import { Plus, ChevronRight, Search } from 'lucide-react';
 import { rolesApi } from '../services/api.ts';
 import { Role, PRIORITIES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import InfoTooltip from '../components/shared/InfoTooltip.tsx';
+
+const COLUMN_INFO: Record<string, string> = {
+  'Age': 'Days overdue past this role\'s Close Target, and days since it opened — no alert shows at all until Close Target has actually passed.',
+  'Active Shortlist': 'Candidates currently sitting at Shortlisted or later, still Active — not a historical total.',
+  'Active Candidates': 'Everyone currently Active in this role\'s pipeline, at any stage — not a lifetime total.',
+};
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
@@ -108,7 +115,10 @@ export default function Roles() {
                     key={h}
                     className={`table-th ${h === 'Location' ? 'pr-1' : h === 'Openings' ? 'pl-1' : ''}`}
                   >
-                    {h}
+                    <span className="inline-flex items-center gap-1">
+                      {h}
+                      {COLUMN_INFO[h] && <InfoTooltip text={COLUMN_INFO[h]} />}
+                    </span>
                   </th>
                 ))}
               </tr>

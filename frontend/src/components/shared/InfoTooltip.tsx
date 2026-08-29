@@ -41,7 +41,12 @@ export default function InfoTooltip({ text, className = '', align = 'center', wi
         <Info className="w-3.5 h-3.5" />
       </button>
       {show && (
-        <div className={`absolute z-50 top-full mt-1.5 ${width} p-2.5 rounded-lg bg-gray-900 text-white text-[11px] leading-relaxed shadow-lg ${alignClass}`}>
+        // normal-case/font-normal/tracking-normal override rather than
+        // inherit — this icon shows up inside table headers styled
+        // uppercase/tracking-wide/font-medium (table-th), which would
+        // otherwise cascade into the popover and turn a normal-case
+        // sentence into unreadable all-caps.
+        <div className={`absolute z-50 top-full mt-1.5 ${width} p-2.5 rounded-lg bg-gray-900 text-white text-[11px] normal-case font-normal tracking-normal leading-relaxed shadow-lg ${alignClass}`}>
           {text}
         </div>
       )}
