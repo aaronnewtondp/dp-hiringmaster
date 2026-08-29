@@ -733,8 +733,14 @@ ALTER TABLE agencies
 -- application arrived, e.g. "Job Application Form"). Not mandatory.
 -- sourced_by_agency_id is only meaningful (and only required, enforced at
 -- the API layer, not here) when source = 'Agency'.
+-- 'LinkedIn' below was originally 'Linkedin' (wrong capitalization) in both
+-- this file and RECRUITMENT_CHANNELS (frontend/src/types/index.ts) — fixed
+-- in both places together, with existing Supabase/local Docker rows and the
+-- candidates_source_check constraint itself migrated to match (482/8 rows on
+-- Supabase, 483/23 on local Docker, across candidates.source and
+-- roles.recruitment_mode respectively).
 ALTER TABLE candidates
-  ADD COLUMN IF NOT EXISTS source TEXT CHECK (source IN ('Naukri/IIMjobs','Linkedin','Internal Referral','Agency','Direct Outreach')),
+  ADD COLUMN IF NOT EXISTS source TEXT CHECK (source IN ('Naukri/IIMjobs','LinkedIn','Internal Referral','Agency','Direct Outreach')),
   ADD COLUMN IF NOT EXISTS sourced_by_agency_id TEXT REFERENCES agencies(id);
 
 -- ── users: merge 'interviewer' persona into 'hiring_manager' ────────────────

@@ -39,12 +39,12 @@ test.describe('Candidate source field', () => {
       expect(candidate.sourced_by_agency_id).toBe('AGN001');
     });
 
-    test('source = Linkedin (non-Agency) — 201, no agency required', async ({ request }) => {
+    test('source = LinkedIn (non-Agency) — 201, no agency required', async ({ request }) => {
       const hrToken = await getToken(request, 'hr');
-      const { res } = await createCandidate(request, hrToken, { source: 'Linkedin' });
+      const { res } = await createCandidate(request, hrToken, { source: 'LinkedIn' });
       expect(res.status()).toBe(201);
       const { candidate } = await res.json();
-      expect(candidate.source).toBe('Linkedin');
+      expect(candidate.source).toBe('LinkedIn');
       expect(candidate.sourced_by_agency_id).toBeFalsy();
     });
   });

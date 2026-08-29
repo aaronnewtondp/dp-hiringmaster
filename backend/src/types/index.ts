@@ -100,7 +100,7 @@ export interface Candidate {
   duplicate_of?:          string;
   // Where this candidate was originally sourced — distinct from
   // Application.source_channel (how one specific application arrived).
-  source?:                'Naukri/IIMjobs' | 'Linkedin' | 'Internal Referral' | 'Agency' | 'Direct Outreach';
+  source?:                'Naukri/IIMjobs' | 'LinkedIn' | 'Internal Referral' | 'Agency' | 'Direct Outreach';
   sourced_by_agency_id?:  string;
   created_at:             string;
   updated_at:             string;

@@ -108,7 +108,7 @@ router.post('/ingest', async (req: Request, res: Response) => {
       // fill-null-only same as everything else here.
       if ((existing as unknown as { source?: string }).source == null) {
         setClauses.push(`source = $${idx++}`);
-        values.push('Linkedin');
+        values.push('LinkedIn');
       }
       values.push(existing.id);
       const updateResult = await client.query(
@@ -123,7 +123,7 @@ router.post('/ingest', async (req: Request, res: Response) => {
            current_ctc_fixed, current_ctc_variable, current_esops, expected_ctc,
            notice_period_days, current_company, current_industry, current_designation,
            current_location, years_of_experience, resume_drive_link, languages_known, source
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'Linkedin') RETURNING *`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'LinkedIn') RETURNING *`,
         [
           full_name, normEmail, submitted.phone, submitted.linkedin_url,
           submitted.current_ctc_fixed, submitted.current_ctc_variable, submitted.current_esops,

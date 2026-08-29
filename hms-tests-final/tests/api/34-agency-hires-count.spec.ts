@@ -70,7 +70,7 @@ test.describe('Agency Hires count (GET /api/agencies, GET /api/agencies/:id)', (
     const hrToken = await getToken(request, 'hr');
 
     const { res } = await createCandidate(request, hrToken, {
-      source: 'Linkedin',
+      source: 'LinkedIn',
       role_id: 'R006',
     });
     const { application, candidate } = await res.json();
