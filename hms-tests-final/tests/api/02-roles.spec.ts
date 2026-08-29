@@ -30,10 +30,20 @@ test.describe('Roles API', () => {
       expect(r.ctc_band).toBeTruthy();
     });
 
-    test('Hiring Manager does NOT see ctc_band', async ({ request }) => {
+    // A Hiring Manager now sees ctc_band for their OWN role(s) (CEO directive,
+    // 2026-08-29 — see 35-comp-visibility.spec.ts for the full, dedicated
+    // coverage of that rule). This was originally "HM never sees ctc_band,
+    // period" — updated to the same non-owned-role case rather than deleted,
+    // so this file keeps its own smoke check that the roles LIST route
+    // applies persona-based stripping at all.
+    test('Hiring Manager does NOT see ctc_band for a role they don\'t own', async ({ request }) => {
       const token = await getToken(request, 'hm_alex');
       const { roles } = await (await authed(request, token).get('/api/roles')).json();
-      for (const role of roles) expect(role.ctc_band).toBeUndefined();
+      for (const role of roles) {
+        if (role.hiring_manager_name?.trim().toLowerCase() !== 'alex') {
+          expect(role.ctc_band).toBeUndefined();
+        }
+      }
     });
 
     test('filters by priority', async ({ request }) => {

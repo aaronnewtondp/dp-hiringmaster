@@ -74,6 +74,22 @@ router.get('/', async (req: Request, res: Response) => {
   // entirely rather than paying for it on every dashboard load.
   const filters = parseRoleFilters(req.query as Record<string, unknown>);
 
+  // A Hiring Manager's dashboard is locked to their own role(s) — every
+  // metric on the page, not just an optional filter they could otherwise
+  // pick or clear. Enforced here (not just hidden in the UI) so this can't
+  // be bypassed by simply not sending role_id, or sending someone else's:
+  // whatever role_id/department/etc the client sent is overridden outright
+  // for this persona. A sentinel, unmatchable id is used when the HM owns
+  // no roles at all (rather than leaving roleIds empty, which
+  // buildRoleFilterSql would treat as "no filter" — i.e. everyone's data).
+  if (req.user!.persona === 'hiring_manager') {
+    const ownRoles = await query<{ id: string }>(
+      `SELECT id FROM roles WHERE lower(trim(hiring_manager_name)) = lower(trim($1))`,
+      [req.user!.name]
+    );
+    filters.roleIds = ownRoles.length ? ownRoles.map(r => r.id) : ['__no_roles_owned__'];
+  }
+
   // Hiring Funnel Snapshot's own owner filter — independent of the master
   // role filters above, scopes just the SLA-breach query/section below.
   const ownerParam = typeof req.query.owner === 'string' &&

@@ -321,4 +321,26 @@ test.describe('Dashboard API additions', () => {
       expect(Math.abs(total - 100)).toBeLessThan(0.5); // rounding tolerance across channels
     });
   });
+
+  // ─── KPI redesign — retired fields are fully removed ───────────────────────
+  // Same regression-guard pattern as the agency_performance removal test
+  // above: strong_fit_candidates (the old single >=70 bucket) and the
+  // standalone time_to_fill object were both retired outright by the KPI
+  // redesign (superseded by candidates_score_ge_75/le_45 and
+  // metrics.avg_time_to_fill_days respectively) — a silent reappearance of
+  // either key would mean a bad rebase/merge resurrected dead shape.
+  test.describe('KPI redesign — retired fields are fully removed', () => {
+
+    test('metrics.strong_fit_candidates no longer exists', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const { metrics } = await (await authed(request, token).get('/api/dashboard')).json();
+      expect(metrics).not.toHaveProperty('strong_fit_candidates');
+    });
+
+    test('the top-level time_to_fill object no longer exists', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const body = await (await authed(request, token).get('/api/dashboard')).json();
+      expect(body).not.toHaveProperty('time_to_fill');
+    });
+  });
 });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ExternalLink, Star, ChevronDown, ChevronUp, CalendarPlus, MessageSquare, FileText, Send, Link2, Plus } from 'lucide-react';
@@ -69,7 +69,7 @@ interface AssignmentModalState {
 
 export default function CandidateDetail() {
   const { id } = useParams<{ id: string }>();
-  const { canHR } = useAuth();
+  const { canHR, user } = useAuth();
   const qc = useQueryClient();
 
   const [stageModalApp, setStageModalApp] = useState<Application | null>(null);
@@ -133,6 +133,29 @@ export default function CandidateDetail() {
   const candidate = data?.data?.candidate;
   const applications = data?.data?.applications || [];
   const activity = actData?.data?.activity || [];
+
+  // Mirrors the backend's own canSeeCompForRole exactly (auth.ts) — the
+  // fields themselves are already stripped server-side for anyone this
+  // doesn't apply to, so this is only about not rendering a Compensation
+  // section that has nothing real behind it. A candidate can have
+  // applications to several roles, so this is true if ANY of them is a role
+  // this Hiring Manager is assigned to.
+  const canSeeComp = canHR || applications.some(app =>
+    user?.persona === 'hiring_manager' &&
+    !!app.hiring_manager_name &&
+    app.hiring_manager_name.trim().toLowerCase() === user.name.trim().toLowerCase()
+  );
+
+  // Applications section starts expanded by default (was collapsed) —
+  // seeded once per candidate load, keyed off candidate.id rather than
+  // `applications` itself, so a later refetch (e.g. after a stage change)
+  // doesn't fight a manual collapse the user made after the page loaded.
+  useEffect(() => {
+    if (candidate?.id && applications.length > 0) {
+      setExpandedApps(new Set(applications.map(a => a.id)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidate?.id]);
 
   // Agency list is HR-tier only server-side — only fetched for personas
   // that can actually use it, so a Hiring Manager viewing this page never
@@ -335,8 +358,8 @@ export default function CandidateDetail() {
             data={candidate}
             onSave={saveCandidateFields}
             fields={[
-              { key: 'current_ctc_fixed', label: 'Current CTC (Fixed and Variable breakup) in LPA', type: 'number' },
-              { key: 'expected_ctc', label: 'Expected CTC', type: 'number' },
+              { key: 'current_ctc_fixed', label: 'Current CTC (Fixed and Variable breakup) in LPA', type: 'number', hidden: !canSeeComp },
+              { key: 'expected_ctc', label: 'Expected CTC', type: 'number', hidden: !canSeeComp },
               { key: 'notice_period_days', label: 'Notice Period (days)', type: 'number' },
             ]}
           />

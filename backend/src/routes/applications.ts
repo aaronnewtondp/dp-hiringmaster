@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
-import { authenticate, requireHR, stripRestrictedFields, isHRTier } from '../middleware/auth.js';
+import { authenticate, requireHR, stripRestrictedFields, isHRTier, canSeeCompForRole } from '../middleware/auth.js';
 import { Application, SLA_HOURS, Candidate, Role } from '../types/index.js';
 import { scoreCandidate, priorityBucketFromScore } from '../services/resumeIQ.js';
 import { fetchResumeText } from '../services/driveService.js';
@@ -56,6 +56,7 @@ router.get('/', async (req: Request, res: Response) => {
            c.current_industry AS candidate_industry,
            c.resume_drive_link AS candidate_resume_link,
            r.title AS role_title, r.priority AS role_priority, r.ctc_band AS role_ctc_band,
+           r.hiring_manager_name,
            ag.name AS agency_name, last_activity.event_detail AS last_activity_detail
     FROM applications a
     JOIN candidates c ON c.id = a.candidate_id
@@ -129,9 +130,10 @@ router.get('/', async (req: Request, res: Response) => {
   // check depended on role_ctc_band, which is exactly the field stripped
   // for their persona.
   const result = apps.map(a => {
-    const row = a as unknown as Record<string, unknown> & { candidate_expected_ctc?: number; role_ctc_band?: string };
+    const row = a as unknown as Record<string, unknown> & { candidate_expected_ctc?: number; role_ctc_band?: string; hiring_manager_name?: string | null };
     const isSeverelyOver = isSeverelyOverBudget(row.candidate_expected_ctc, row.role_ctc_band);
-    return { ...stripRestrictedFields(row, persona), is_severely_over_budget: isSeverelyOver };
+    const canSeeComp = canSeeCompForRole(persona, req.user!.name, row.hiring_manager_name);
+    return { ...stripRestrictedFields(row, persona, canSeeComp), is_severely_over_budget: isSeverelyOver };
   });
   res.json({ applications: result, count: apps.length });
 });
@@ -143,6 +145,7 @@ router.get('/:id', async (req: Request, res: Response) => {
             c.parsed_skills, c.parsed_total_yoe, c.parsed_industries,
             c.expected_ctc AS candidate_expected_ctc,
             r.title AS role_title, r.priority AS role_priority, r.must_have_skills, r.ctc_band AS role_ctc_band,
+            r.hiring_manager_name,
             ag.name AS agency_name
      FROM applications a
      JOIN candidates c ON c.id = a.candidate_id
@@ -163,11 +166,12 @@ router.get('/:id', async (req: Request, res: Response) => {
   );
 
   const persona = req.user!.persona;
-  const rawApp = app as unknown as Record<string, unknown> & { candidate_expected_ctc?: number; role_ctc_band?: string };
+  const rawApp = app as unknown as Record<string, unknown> & { candidate_expected_ctc?: number; role_ctc_band?: string; hiring_manager_name?: string | null };
   // Same reasoning as the list route above — computed before stripping,
   // never itself stripped.
   const isSeverelyOver = isSeverelyOverBudget(rawApp.candidate_expected_ctc, rawApp.role_ctc_band);
-  const safeApp = { ...stripRestrictedFields(rawApp, persona), is_severely_over_budget: isSeverelyOver };
+  const canSeeComp = canSeeCompForRole(persona, req.user!.name, rawApp.hiring_manager_name);
+  const safeApp = { ...stripRestrictedFields(rawApp, persona, canSeeComp), is_severely_over_budget: isSeverelyOver };
   res.json({ application: safeApp, rounds, activity });
 });
 
@@ -382,7 +386,20 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
     );
   }
 
-  const updated = await queryOne<Application>('SELECT * FROM applications WHERE id = $1', [req.params.id]);
+  // This response used to return the raw, fully-unstripped row — internal_
+  // risk_notes/agency_fee_estimate/offer_ctc_fixed/offer_ctc_variable/
+  // hr_comp_alignment (and, before today, candidate/application CTC fields
+  // too) went out over the wire regardless of persona. Reachable by any
+  // persona via the Shortlist-from-Resume-Review carve-out above, so this
+  // was a real leak, not just an HR-only code path that happened to be safe.
+  const updatedRaw = await queryOne<Application & { hiring_manager_name?: string | null }>(
+    `SELECT a.*, r.hiring_manager_name FROM applications a JOIN roles r ON r.id = a.role_id WHERE a.id = $1`,
+    [req.params.id]
+  );
+  const canSeeComp = canSeeCompForRole(req.user!.persona, req.user!.name, updatedRaw?.hiring_manager_name);
+  const updated = updatedRaw
+    ? stripRestrictedFields(updatedRaw as unknown as Record<string, unknown>, req.user!.persona, canSeeComp)
+    : updatedRaw;
   res.json({ application: updated, resumeiq });
 });
 

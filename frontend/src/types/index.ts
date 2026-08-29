@@ -222,6 +222,7 @@ export interface Application {
   role_title?:                 string;
   role_priority?:              Priority;
   role_ctc_band?:              string;
+  hiring_manager_name?:        string;
   ai_fit_score?:               number;
   ai_priority_bucket?:         string;
   preferred_location?:         string;
@@ -420,7 +421,7 @@ export const EMPLOYMENT_TYPES = ['Full-Time / Permanent', 'Contract', 'Internshi
 // section, CandidateDetail.tsx/NewCandidate.tsx) — same vocabulary, kept
 // as one shared list rather than two near-duplicate ones.
 export const RECRUITMENT_CHANNELS = [
-  'Naukri/IIMjobs', 'Linkedin', 'Internal Referral', 'Agency', 'Direct Outreach',
+  'Naukri/IIMjobs', 'LinkedIn', 'Internal Referral', 'Agency', 'Direct Outreach',
 ];
 
 export const STAGES = [

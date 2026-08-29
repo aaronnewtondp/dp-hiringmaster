@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
-import { authenticate, requireHR, isHRTier } from '../middleware/auth.js';
+import { authenticate, requireHR, isHRTier, canSeeCompForRole, stripRestrictedFields } from '../middleware/auth.js';
 import { Role } from '../types/index.js';
 import { generateJdContent } from '../services/jdContent.js';
 import { renderLongFormJd } from '../services/pdf/longFormJd.js';
@@ -43,11 +43,14 @@ router.get('/', async (req: Request, res: Response) => {
 
   const roles = await query<Role>(sql, filterFragment.params);
 
-  // Strip ctc_band for non-HR/Leadership personas
+  // ctc_band visible to HR-tier always, and to a Hiring Manager only for
+  // the specific role(s) they're assigned to (canSeeCompForRole) — every
+  // other role stays stripped for them, same as before this existed.
   const persona = req.user!.persona;
   const result = roles.map(r => {
     const enriched = enrichRole(r);
-    if (!isHRTier(persona)) {
+    const canSeeComp = canSeeCompForRole(persona, req.user!.name, r.hiring_manager_name);
+    if (!canSeeComp) {
       const { ctc_band: _ctc, ...safe } = enriched as Role & { ctc_band: string };
       return safe;
     }
@@ -93,7 +96,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   const persona = req.user!.persona;
   const enriched = enrichRole(role);
 
-  if (!isHRTier(persona)) {
+  if (!canSeeCompForRole(persona, req.user!.name, role.hiring_manager_name)) {
     const { ctc_band: _ctc, ...safe } = enriched as Role & { ctc_band: string };
     res.json({ role: safe }); return;
   }
@@ -407,11 +410,18 @@ router.patch('/:id', async (req: Request, res: Response) => {
     }
   }
 
-  res.json({ role: enrichRole(updatedRole), jdGeneration });
+  const canSeeComp = canSeeCompForRole(req.user!.persona, req.user!.name, updatedRole.hiring_manager_name);
+  const safeUpdated = canSeeComp
+    ? enrichRole(updatedRole)
+    : (() => { const { ctc_band: _ctc, ...safe } = enrichRole(updatedRole) as Role & { ctc_band: string }; return safe; })();
+  res.json({ role: safeUpdated, jdGeneration });
 });
 
 // ─── GET /api/roles/:id/edit-log ──────────────────────────────────────────────
 router.get('/:id/edit-log', async (req: Request, res: Response) => {
+  const role = await queryOne<{ hiring_manager_name: string | null }>('SELECT hiring_manager_name FROM roles WHERE id=$1', [req.params.id]);
+  const canSeeComp = canSeeCompForRole(req.user!.persona, req.user!.name, role?.hiring_manager_name);
+
   const logs = await query(
     `SELECT el.*, u.name AS changed_by_name
      FROM role_edit_log el
@@ -420,7 +430,11 @@ router.get('/:id/edit-log', async (req: Request, res: Response) => {
      ORDER BY el.changed_at DESC`,
     [req.params.id]
   );
-  res.json({ logs });
+  // A row logging a ctc_band edit carries the plaintext old/new value —
+  // excluded entirely (not just redacted in place) for anyone who can't see
+  // this role's comp, same rule as everywhere else in this file.
+  const safeLogs = canSeeComp ? logs : logs.filter((l: unknown) => (l as { field_name?: string }).field_name !== 'ctc_band');
+  res.json({ logs: safeLogs });
 });
 
 // ─── GET /api/roles/:id/activity — role-level activity timeline ──────────────
@@ -429,6 +443,9 @@ router.get('/:id/edit-log', async (req: Request, res: Response) => {
 // role_id on its own activity_log rows (applications.ts's logActivity) but
 // belongs to that candidate's own timeline, not this one.
 router.get('/:id/activity', async (req: Request, res: Response) => {
+  const role = await queryOne<{ hiring_manager_name: string | null }>('SELECT hiring_manager_name FROM roles WHERE id=$1', [req.params.id]);
+  const canSeeComp = canSeeCompForRole(req.user!.persona, req.user!.name, role?.hiring_manager_name);
+
   const log = await query(
     // COALESCE, not a bare override: al.* already carries the row's own
     // performed_by_name (set at insert time for system-attributed events
@@ -444,11 +461,29 @@ router.get('/:id/activity', async (req: Request, res: Response) => {
      ORDER BY al.created_at DESC`,
     [req.params.id]
   );
-  res.json({ activity: log });
+  // A 'Role Updated' event's event_detail is a free-text summary that can
+  // bundle a ctc_band change together with unrelated field changes in one
+  // string (e.g. "ctc_band: "18-24 LPA" → "20-26 LPA"; location: "Pune" →
+  // "Gurgaon""), so the whole entry can't just be dropped — only the
+  // ctc_band segment is stripped out of the text for anyone who can't see
+  // this role's comp, leaving any other bundled field changes visible.
+  const safeLog = canSeeComp ? log : log.map((l: unknown) => {
+    const entry = l as { event_detail?: string };
+    if (!entry.event_detail || !entry.event_detail.includes('ctc_band:')) return l;
+    const redacted = entry.event_detail
+      .split('; ')
+      .filter(part => !part.trim().startsWith('ctc_band:'))
+      .join('; ');
+    return { ...entry, event_detail: redacted || '(compensation change — details hidden)' };
+  });
+  res.json({ activity: safeLog });
 });
 
 // ─── GET /api/roles/:id/pipeline — applications grouped by stage ──────────────
 router.get('/:id/pipeline', async (req: Request, res: Response) => {
+  const role = await queryOne<{ hiring_manager_name: string | null }>('SELECT hiring_manager_name FROM roles WHERE id=$1', [req.params.id]);
+  const canSeeComp = canSeeCompForRole(req.user!.persona, req.user!.name, role?.hiring_manager_name);
+
   const apps = await query(
     `SELECT a.*, c.full_name AS candidate_name, c.email, ag.name AS agency_name
      FROM applications a
@@ -459,15 +494,23 @@ router.get('/:id/pipeline', async (req: Request, res: Response) => {
     [req.params.id]
   );
 
+  // This route never stripped restricted fields before — every non-HR
+  // persona (and, before today, every Hiring Manager regardless of which
+  // role they were even looking at) got internal_risk_notes/agency_fee_
+  // estimate/offer_ctc_fixed/offer_ctc_variable/hr_comp_alignment/CTC
+  // figures unfiltered. Single check up front since this route is already
+  // scoped to one role.
+  const safeApps = apps.map(a => stripRestrictedFields(a as Record<string, unknown>, req.user!.persona, canSeeComp));
+
   // Group by stage
   const byStage: Record<string, unknown[]> = {};
-  for (const app of apps) {
+  for (const app of safeApps) {
     const stage = (app as Record<string,unknown>).stage as string;
     if (!byStage[stage]) byStage[stage] = [];
     byStage[stage].push(app);
   }
 
-  res.json({ pipeline: byStage, total: apps.length });
+  res.json({ pipeline: byStage, total: safeApps.length });
 });
 
 // ─── GET /api/roles/:id/comp-benchmark — internal comp benchmarking ───────────

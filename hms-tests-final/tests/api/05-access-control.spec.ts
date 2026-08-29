@@ -5,21 +5,34 @@ test.describe('Access Control — restricted field enforcement', () => {
 
   test.describe('Hiring Manager', () => {
 
-    test('cannot see ctc_band on roles list', async ({ request }) => {
+    // A Hiring Manager now sees ctc_band/internal_risk_notes/agency_fee_
+    // estimate for their OWN role(s) (CEO directive, 2026-08-29 — see
+    // 35-comp-visibility.spec.ts for the dedicated, full coverage of that
+    // rule: own-role visible, every other role still stripped). The four
+    // tests below originally asserted a blanket denial and happened to use
+    // R006 (Senior Product Manager) — which, per seed data, is Alex's own
+    // role — so they're updated to a role Alex does NOT own (R002, E&I
+    // Engineer Mumbai, owned by Satyadev) to keep testing the non-owner
+    // case they were actually meant to cover.
+    test('cannot see ctc_band on roles list, for a role they don\'t own', async ({ request }) => {
       const token = await getToken(request, 'hm_alex');
       const { roles } = await (await authed(request, token).get('/api/roles')).json();
-      for (const role of roles) expect(role.ctc_band).toBeUndefined();
+      for (const role of roles) {
+        if (role.hiring_manager_name?.trim().toLowerCase() !== 'alex') {
+          expect(role.ctc_band).toBeUndefined();
+        }
+      }
     });
 
-    test('cannot see ctc_band on individual role', async ({ request }) => {
+    test('cannot see ctc_band on an individual role they don\'t own', async ({ request }) => {
       const token = await getToken(request, 'hm_alex');
-      const { role } = await (await authed(request, token).get(`/api/roles/${SEEDED.roles.senior_pm}`)).json();
+      const { role } = await (await authed(request, token).get(`/api/roles/${SEEDED.roles.ei_mumbai}`)).json();
       expect(role.ctc_band).toBeUndefined();
     });
 
-    test('cannot see internal_risk_notes on application', async ({ request }) => {
+    test('cannot see internal_risk_notes on an application for a role they don\'t own', async ({ request }) => {
       const hrToken = await getToken(request, 'hr');
-      const { application } = await createCandidateWithApp(request, hrToken);
+      const { application } = await createCandidateWithApp(request, hrToken, SEEDED.roles.ei_mumbai);
       await authed(request, hrToken).patch(`/api/applications/${application.id}/notes`, {
         hr_recruiter_summary: 'Secret notes',
       });
@@ -28,9 +41,9 @@ test.describe('Access Control — restricted field enforcement', () => {
       expect(body.application.internal_risk_notes).toBeUndefined();
     });
 
-    test('cannot see agency_fee_estimate on application', async ({ request }) => {
+    test('cannot see agency_fee_estimate on an application for a role they don\'t own', async ({ request }) => {
       const hrToken = await getToken(request, 'hr');
-      const { application } = await createCandidateWithApp(request, hrToken);
+      const { application } = await createCandidateWithApp(request, hrToken, SEEDED.roles.ei_mumbai);
       const hmToken = await getToken(request, 'hm_alex');
       const body = await (await authed(request, hmToken).get(`/api/applications/${application.id}`)).json();
       expect(body.application.agency_fee_estimate).toBeUndefined();

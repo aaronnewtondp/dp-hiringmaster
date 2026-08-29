@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
-import { authenticate, requireHR, stripRestrictedFields } from '../middleware/auth.js';
+import { authenticate, requireHR, stripRestrictedFields, canSeeCompForRole, isHRTier } from '../middleware/auth.js';
 import { Candidate } from '../types/index.js';
 import { parseRoleFilters, buildRoleFilterSql, hasActiveFilters } from '../utils/roleFilters.js';
 import { isSeverelyOverBudget } from '../utils/budget.js';
@@ -19,7 +19,7 @@ router.get('/', async (req: Request, res: Response) => {
       json_agg(json_build_object(
         'id', a.id, 'role_id', a.role_id, 'role_title', r.title,
         'stage', a.stage, 'status', a.status, 'ai_fit_score', a.ai_fit_score,
-        'last_updated', a.last_updated
+        'last_updated', a.last_updated, 'hiring_manager_name', r.hiring_manager_name
       ) ORDER BY a.application_date DESC) FILTER (WHERE a.id IS NOT NULL) AS applications
     FROM candidates c
     LEFT JOIN applications a ON a.candidate_id = c.id
@@ -97,7 +97,17 @@ router.get('/', async (req: Request, res: Response) => {
   sql += ` GROUP BY c.id ORDER BY ${orderBy} LIMIT $${i++} OFFSET $${i++}`;
   params.push(parseInt(limit as string), parseInt(offset as string));
 
-  const candidates = await query<Candidate>(sql, params);
+  const candidates = await query<Candidate & { applications?: Array<{ hiring_manager_name?: string | null }> | null }>(sql, params);
+
+  // Same per-role comp visibility as GET /:id — a candidate's own profile
+  // CTC fields are visible if HR-tier, or if at least one of their
+  // applications belongs to a role this Hiring Manager is assigned to.
+  const persona = req.user!.persona;
+  const safeCandidates = candidates.map(c => {
+    const canSeeComp = isHRTier(persona) ||
+      (c.applications || []).some(a => canSeeCompForRole(persona, req.user!.name, a.hiring_manager_name));
+    return stripRestrictedFields(c as unknown as Record<string, unknown>, persona, canSeeComp);
+  });
 
   // COUNT(DISTINCT c.id), not COUNT(*) — the LEFT JOIN to applications fans
   // out one row per application, so a plain COUNT(*) over-counts any
@@ -109,7 +119,7 @@ router.get('/', async (req: Request, res: Response) => {
   const countResult = await queryOne<{ count: string }>(countSql.split('LIMIT')[0], params.slice(0, -2));
   const total = parseInt(countResult?.count || '0');
 
-  res.json({ candidates, total, limit: parseInt(limit as string), offset: parseInt(offset as string) });
+  res.json({ candidates: safeCandidates, total, limit: parseInt(limit as string), offset: parseInt(offset as string) });
 });
 
 // ─── GET /api/candidates/unmatched-role-submissions ────────────────────────────
@@ -180,7 +190,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
   // Fetch all applications for this candidate
   const applications = await query(
-    `SELECT a.*, r.title AS role_title, r.ctc_band AS role_ctc_band, ag.name AS agency_name
+    `SELECT a.*, r.title AS role_title, r.ctc_band AS role_ctc_band, r.hiring_manager_name, ag.name AS agency_name
      FROM applications a
      JOIN roles r ON r.id = a.role_id
      LEFT JOIN agencies ag ON ag.id = a.agency_id
@@ -194,6 +204,11 @@ router.get('/:id', async (req: Request, res: Response) => {
   // agency_fee_estimate unfiltered for every persona (the frontend just
   // never rendered them for non-HR, which isn't a real boundary). Fixed
   // here as a direct consequence of adding role_ctc_band, itself restricted.
+  //
+  // canSeeCompForRole is evaluated per application (this candidate can have
+  // applications against several different roles) — a Hiring Manager sees
+  // comp only for the application(s) tied to a role they're actually
+  // assigned to, per canSeeCompForRole's own logic; HR-tier always sees all.
   const persona = req.user!.persona;
   // is_severely_over_budget computed here too — this route has its own
   // separate applications query (distinct from GET /api/applications and
@@ -202,13 +217,24 @@ router.get('/:id', async (req: Request, res: Response) => {
   // reads applications from THIS endpoint, and without this field present
   // here the mandatory over-budget reason gate silently never triggered for
   // any persona using this page's Stage control specifically.
+  let candidateCanSeeComp = false;
   const safeApplications = applications.map(a => {
-    const row = a as unknown as Record<string, unknown> & { role_ctc_band?: string };
+    const row = a as unknown as Record<string, unknown> & { role_ctc_band?: string; hiring_manager_name?: string | null };
     const isSeverelyOver = isSeverelyOverBudget(candidate.expected_ctc, row.role_ctc_band);
-    return { ...stripRestrictedFields(row, persona), is_severely_over_budget: isSeverelyOver };
+    const canSeeComp = canSeeCompForRole(persona, req.user!.name, row.hiring_manager_name);
+    if (canSeeComp) candidateCanSeeComp = true;
+    return { ...stripRestrictedFields(row, persona, canSeeComp), is_severely_over_budget: isSeverelyOver };
   });
 
-  res.json({ candidate, applications: safeApplications });
+  // The candidate's own profile CTC fields (current_ctc_fixed/variable,
+  // current_esops, expected_ctc) aren't tied to any one role — visible if
+  // HR-tier, or if at least one of this candidate's applications belongs to
+  // a role this Hiring Manager is assigned to.
+  const safeCandidate = stripRestrictedFields(
+    candidate as unknown as Record<string, unknown>, persona, candidateCanSeeComp || isHRTier(persona)
+  );
+
+  res.json({ candidate: safeCandidate, applications: safeApplications });
 });
 
 // ─── POST /api/candidates — create candidate + optional application ───────────

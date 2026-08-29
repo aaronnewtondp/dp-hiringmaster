@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ChevronDown, ChevronUp, CheckCircle, PauseCircle, XCircle, Search } from 'lucide-react';
+import { CheckCircle, PauseCircle, XCircle, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi, rolesApi } from '../services/api.ts';
 import { Application, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
@@ -335,7 +335,7 @@ export default function ScorecardSummary() {
                   )}
                 </th>
                 {[
-                  ['#', 'w-[32px]'], ['', 'w-[28px]'], ['Candidate', 'w-[150px]'], ['Role', 'w-[120px]'],
+                  ['#', 'w-[32px]'], ['Candidate', 'w-[150px]'], ['Role', 'w-[120px]'],
                   ['Company / Industry', 'w-[140px]'], ['App. Age', 'w-[55px]'], ['Notice', 'w-[55px]'], ['CTC → ECTC', 'w-[95px]'],
                   ...DIMENSIONS.map(d => [d.label, 'w-[42px]'] as [string, string]),
                   ['Avg', 'w-[45px]'], ['Verdict', 'w-[80px]'], ['Resume', 'w-[55px]'],
@@ -355,11 +355,6 @@ export default function ScorecardSummary() {
                       )}
                     </td>
                     <td className="table-td px-1.5 py-3 text-xs text-gray-400">{idx + 1}</td>
-                    <td className="table-td px-1.5 py-3">
-                      <button onClick={() => toggleExpanded(app.id)} className="text-gray-400 hover:text-dp-600">
-                        {expanded.has(app.id) ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                      </button>
-                    </td>
                     <td className="table-td px-1.5 py-3">
                       <Link to={`/candidates/${app.candidate_id}`} className="text-sm font-medium text-gray-900 hover:text-dp-600 block truncate">
                         {app.candidate_name}
@@ -440,9 +435,21 @@ export default function ScorecardSummary() {
                       )}
                     </td>
                   </tr>
+                  <tr className="border-t-0">
+                    <td colSpan={8} className="p-0" />
+                    <td colSpan={DIMENSIONS.length} className="px-1.5 pb-2 text-center">
+                      <button
+                        onClick={() => toggleExpanded(app.id)}
+                        className="text-[11px] text-dp-600 hover:text-dp-700 hover:underline font-medium"
+                      >
+                        {expanded.has(app.id) ? 'Hide Highlights and Summary' : 'View Highlights and Summary'}
+                      </button>
+                    </td>
+                    <td colSpan={5} className="p-0" />
+                  </tr>
                   {expanded.has(app.id) && (
                     <tr key={`${app.id}-detail`} className="bg-gray-50/60">
-                      <td colSpan={8 + DIMENSIONS.length + 6} className="px-4 py-4">
+                      <td colSpan={8 + DIMENSIONS.length + 5} className="px-4 py-4">
                         <div className="grid grid-cols-3 gap-4">
                           <div>
                             <div className="text-xs text-green-600 font-medium mb-1">✓ Key strengths</div>

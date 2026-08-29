@@ -148,7 +148,14 @@ test.describe('Schedule Round Modal E2E', () => {
     await page.getByRole('button', { name: 'Schedule round' }).click();
 
     const roundName = `E2E Invalid Email Round ${uid()}`;
-    await fillScheduleModal(page, { roundName, interviewerEmails: 'not-an-email' });
+    // scheduledDate must be filled here — handleSubmit() in
+    // ScheduleRoundModal.tsx checks it BEFORE the email-format check (see
+    // its own validation order), so omitting it makes the "Scheduled date &
+    // time is required" toast fire instead of the email-format one this test
+    // actually means to exercise. A far-future placeholder value is enough:
+    // the invalid email still blocks handleSubmit() before interviewsApi.
+    // schedule() is ever called, so no real round/Calendar event is created.
+    await fillScheduleModal(page, { roundName, interviewerEmails: 'not-an-email', scheduledDate: '2027-03-15T14:00' });
     await page.getByRole('button', { name: 'Schedule', exact: true }).click();
 
     // Client-side EMAIL_RE check in ScheduleRoundModal.tsx fires before the
