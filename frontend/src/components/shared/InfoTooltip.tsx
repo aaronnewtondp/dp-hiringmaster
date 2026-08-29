@@ -34,7 +34,7 @@ export default function InfoTooltip({ text, className = '', align = 'center', wi
         type="button"
         onMouseEnter={() => setShow(true)}
         onMouseLeave={() => setShow(false)}
-        onClick={() => setShow(s => !s)}
+        onClick={e => { e.stopPropagation(); setShow(s => !s); }}
         className="text-gray-300 hover:text-dp-600 transition-colors"
         aria-label="More info"
       >

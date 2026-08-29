@@ -13,9 +13,14 @@ import BudgetExceptionModal from '../components/shared/BudgetExceptionModal.tsx'
 import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
+import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 
 // Same chunked-batching constant as Candidates.tsx / HMQueue.tsx's bulk actions.
 const BULK_CONCURRENCY = 3;
+
+const COLUMN_INFO: Record<string, string> = {
+  'CTC → ECTC': "Candidate's current fixed CTC, then the Expected CTC they quoted for this role — both read from the candidate's own profile, not this application's legacy fields.",
+};
 
 // Compact 0-10 dimension cell — mirrors ResumeIQPanel.tsx's private
 // scoreColor() thresholds (copied, not imported: four lines, not worth a
@@ -240,7 +245,16 @@ export default function ScorecardSummary() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">Scorecard Summary</h1>
+        <div className="inline-flex items-center gap-1.5">
+          <h1 className="text-xl font-semibold text-gray-900">Scorecard Summary</h1>
+          <InfoTooltip align="left" width="w-80" text={
+            <div className="space-y-1.5">
+              <p>8 ResumeIQ dimensions, each scored 0–10: <b>Tech</b>nical, <b>Exp</b>erience, <b>Ind</b>ustry Fit, <b>Cult</b>ure Fit, <b>Role</b> Alignment, <b>Traj</b>ectory, <b>Lead</b>ership, <b>Comm</b>unication.</p>
+              <p><b>Avg</b> is the mean of all 8. <b>Verdict</b> (Strong Yes / Yes / Maybe / No) comes from the same ResumeIQ pass, not a separate rule.</p>
+              <p>Use "View Highlights and Summary" under any row for that candidate's strengths, red flags, and executive summary.</p>
+            </div>
+          } />
+        </div>
         <p className="text-sm text-gray-500 mt-0.5">
           Every ResumeIQ-scored candidate, ranked and compared side by side — mirrors the
           digitalpaani-candidate-scoring skill's output format.
@@ -336,12 +350,19 @@ export default function ScorecardSummary() {
                 </th>
                 {[
                   ['#', 'w-[32px]'], ['Candidate', 'w-[150px]'], ['Role', 'w-[120px]'],
-                  ['Company / Industry', 'w-[140px]'], ['App. Age', 'w-[55px]'], ['Notice', 'w-[55px]'], ['CTC → ECTC', 'w-[95px]'],
+                  ['Company / Industry', 'w-[140px]'], ['App. Age', 'w-[55px]'], ['Notice', 'w-[55px]'], ['CTC → ECTC', 'w-[105px]'],
                   ...DIMENSIONS.map(d => [d.label, 'w-[42px]'] as [string, string]),
                   ['Avg', 'w-[45px]'], ['Verdict', 'w-[80px]'], ['Resume', 'w-[55px]'],
                   ['Stage', 'w-[110px]'], ['Actions', 'w-[150px]'],
                 ].map(([h, w], i) => (
-                  <th key={`${h}-${i}`} title={h} className={`table-th px-1.5 truncate tracking-normal ${w}`}>{h}</th>
+                  <th key={`${h}-${i}`} title={h} className={`table-th px-1.5 tracking-normal ${w} ${COLUMN_INFO[h] ? '' : 'truncate'}`}>
+                    {COLUMN_INFO[h] ? (
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                        {h}
+                        <InfoTooltip text={COLUMN_INFO[h]} width="w-60" />
+                      </span>
+                    ) : h}
+                  </th>
                 ))}
               </tr>
             </thead>

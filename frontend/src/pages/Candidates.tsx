@@ -12,8 +12,14 @@ import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { formatDistanceToNow } from 'date-fns';
+import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 
 const UNLINKED_PAGE_SIZE = 50;
+
+const COLUMN_INFO: Record<string, string> = {
+  'Fit': "ResumeIQ's AI-generated score (0-100), averaged across 8 dimensions: Technical, Experience, Industry Fit, Culture Fit, Role Alignment, Trajectory, Leadership, Communication. Computed once, the first time an application reaches Resume Review.",
+  'CTC → ECTC': "Candidate's current fixed CTC, then the Expected CTC they quoted for this role — both read from the candidate's own profile, not this application's legacy fields.",
+};
 
 interface UnmatchedSubmission {
   candidate_id:         string;
@@ -301,13 +307,19 @@ export default function Candidates() {
           filter is active, so hide it rather than show a confusing "0". */}
       {roleIds.length === 0 && (unlinkedTotal > 0 || unlinkedLoading) && (
         <div className="card overflow-hidden border-amber-200">
-          <button
+          <div
+            role="button"
+            tabIndex={0}
             onClick={() => setShowUnlinked(v => !v)}
-            className="w-full px-5 py-3 flex items-center justify-between hover:bg-amber-50/50 transition-colors"
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowUnlinked(v => !v); } }}
+            className="w-full px-5 py-3 flex items-center justify-between hover:bg-amber-50/50 transition-colors cursor-pointer"
           >
-            <h2 className="text-sm font-semibold font-mono text-amber-800">Unlinked candidates ({unlinkedTotal})</h2>
+            <span className="inline-flex items-center gap-1">
+              <h2 className="text-sm font-semibold font-mono text-amber-800">Unlinked candidates ({unlinkedTotal})</h2>
+              <InfoTooltip align="left" text="Candidates who exist in the system but have no application to any role — usually a manually-added candidate not yet linked, or a Job Application Form submission whose role text matched a real role but hasn't been confirmed yet." />
+            </span>
             {showUnlinked ? <ChevronUp className="w-4 h-4 text-amber-600" /> : <ChevronDown className="w-4 h-4 text-amber-600" />}
-          </button>
+          </div>
           {showUnlinked && (
             <>
               <div className="divide-y divide-gray-50 border-t border-amber-100">
@@ -360,13 +372,19 @@ export default function Candidates() {
           anywhere before this panel. */}
       {roleIds.length === 0 && (unmatchedTotal > 0 || unmatchedLoading) && (
         <div className="card overflow-hidden border-amber-200">
-          <button
+          <div
+            role="button"
+            tabIndex={0}
             onClick={() => setShowUnmatched(v => !v)}
-            className="w-full px-5 py-3 flex items-center justify-between hover:bg-amber-50/50 transition-colors"
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowUnmatched(v => !v); } }}
+            className="w-full px-5 py-3 flex items-center justify-between hover:bg-amber-50/50 transition-colors cursor-pointer"
           >
-            <h2 className="text-sm font-semibold font-mono text-amber-800">Unmatched role submissions ({unmatchedTotal})</h2>
+            <span className="inline-flex items-center gap-1">
+              <h2 className="text-sm font-semibold font-mono text-amber-800">Unmatched role submissions ({unmatchedTotal})</h2>
+              <InfoTooltip align="left" text="Job Application Form submissions whose typed-in role text never matched any real role — these never became a candidate record with an application at all. Link each to the right role, or the suggested one if the system found a likely match." />
+            </span>
             {showUnmatched ? <ChevronUp className="w-4 h-4 text-amber-600" /> : <ChevronDown className="w-4 h-4 text-amber-600" />}
-          </button>
+          </div>
           {showUnmatched && (
             <>
               <div className="divide-y divide-gray-50 border-t border-amber-100">
@@ -492,11 +510,18 @@ export default function Candidates() {
                 )}
                 {[
                   ['Candidate', 'w-[140px]'], ['Role', 'w-[100px]'], ['Stage', 'w-[95px]'],
-                  ['Fit', 'w-[55px]'], ['CTC → ECTC', 'w-[100px]'], ['Notice', 'w-[62px]'],
+                  ['Fit', 'w-[64px]'], ['CTC → ECTC', 'w-[110px]'], ['Notice', 'w-[62px]'],
                   ['Preferred Location', 'w-[115px]'], ['Current Company', 'w-[120px]'],
                   ['Resume Link', 'w-[72px]'], ['Last Updated', 'w-[108px]'], ['', 'w-[34px]'],
                 ].map(([h, w]) => (
-                  <th key={h} title={h} className={`table-th px-2 truncate tracking-normal ${w}`}>{h}</th>
+                  <th key={h} title={h} className={`table-th px-2 tracking-normal ${w} ${COLUMN_INFO[h] ? '' : 'truncate'}`}>
+                    {COLUMN_INFO[h] ? (
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                        {h}
+                        <InfoTooltip text={COLUMN_INFO[h]} width="w-60" />
+                      </span>
+                    ) : h}
+                  </th>
                 ))}
               </tr>
             </thead>

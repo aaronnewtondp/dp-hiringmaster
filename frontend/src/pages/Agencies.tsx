@@ -4,6 +4,14 @@ import { Plus, ExternalLink } from 'lucide-react';
 import { agenciesApi } from '../services/api.ts';
 import { Agency } from '../types/index.ts';
 import { Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import InfoTooltip from '../components/shared/InfoTooltip.tsx';
+
+const COLUMN_INFO: Record<string, string> = {
+  'Hires': 'Total candidates who reached Joined while sourced through this agency — a lifetime count, not scoped to any date range.',
+  'Commission Tiers': "This agency's fee tiers by CTC band — e.g. a lower-band placement billed at one rate, a higher-band placement at another.",
+  'Replacement': "The window (in days) during which this agency will re-source a replacement at no extra cost if a placed hire doesn't work out, plus what triggers that guarantee.",
+  'Billing and Payment terms': "When this agency expects payment relative to a candidate's joining date, and any stated penalty for late payment.",
+};
 
 export default function Agencies() {
   const { data, isLoading } = useQuery<{ data: { agencies: Agency[] } }>({
@@ -44,7 +52,12 @@ export default function Agencies() {
                   ['Billing and Payment terms', 'w-[15%]'],
                   ['Agreement Link', 'w-[9%]'],
                 ].map(([h, w]) => (
-                  <th key={h} className={`table-th ${w} px-2 whitespace-normal align-bottom`}>{h}</th>
+                  <th key={h} className={`table-th ${w} px-2 whitespace-normal align-bottom`}>
+                    <span className="inline-flex items-center gap-1">
+                      {h}
+                      {COLUMN_INFO[h] && <InfoTooltip text={COLUMN_INFO[h]} width="w-60" />}
+                    </span>
+                  </th>
                 ))}
               </tr>
             </thead>
