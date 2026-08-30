@@ -51,14 +51,16 @@ async function createTestApplication(page: Page, stage: string, roleId: string =
   return { candidate, application };
 }
 
-// Navigates to a candidate's detail page and expands their (only) application
-// card — CandidateDetail.tsx renders each application collapsed by default,
-// with a chevron toggle (title="Expand details"/"Collapse") that reveals the
-// "Interview rounds" section where the schedule buttons live.
+// Navigates to a candidate's detail page — every application card now starts
+// expanded by default (CandidateDetail.tsx seeds expandedApps from the full
+// applications list on load, per this session's "always expanded" fix), so
+// the "Interview rounds" section with the schedule buttons is already
+// visible; nothing needs clicking to reveal it. Kept as its own helper
+// (rather than inlining the goto+expect at each call site) so a future
+// default-collapsed reversal only needs updating here.
 async function openCandidateAndExpand(page: Page, candidate: { id: string; full_name: string }) {
   await page.goto(`${FRONTEND_BASE}/candidates/${candidate.id}`);
   await expect(page.getByRole('heading', { name: candidate.full_name, level: 1 })).toBeVisible({ timeout: 10000 });
-  await page.getByTitle('Expand details').click();
 }
 
 // Fills whichever ScheduleRoundModal fields are provided. Locators match the

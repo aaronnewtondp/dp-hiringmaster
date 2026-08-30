@@ -6,6 +6,9 @@
 // surfaces can never drift on what "Department = X" (or "Role = X") actually
 // matches in SQL.
 
+import { query } from '../db/index.js';
+import type { JwtPayload } from '../types/index.js';
+
 export interface RoleFilterParams {
   departments:      string[];
   locations:         string[];
@@ -34,6 +37,23 @@ export function parseRoleFilters(query: Record<string, unknown>): RoleFilterPara
     statuses:         toArray(query.status),
     roleIds:          toArray(query.role_id),
   };
+}
+
+// A Hiring Manager's view is locked to their own role(s) for every metric on
+// a page, not just an optional filter they could otherwise pick or clear —
+// enforced here (shared by every route that needs this lock, so it can
+// never be applied in one place and forgotten in another) rather than left
+// to each caller to remember. Mutates filters.roleIds in place to a
+// sentinel, unmatchable id when the HM owns no roles at all — leaving it
+// empty would make roleIdsSubquery/buildRoleFilterSql treat it as "no
+// filter," i.e. everyone's data.
+export async function applyHiringManagerRoleLock(filters: RoleFilterParams, user: JwtPayload): Promise<void> {
+  if (user.persona !== 'hiring_manager') return;
+  const ownRoles = await query<{ id: string }>(
+    `SELECT id FROM roles WHERE lower(trim(hiring_manager_name)) = lower(trim($1))`,
+    [user.name]
+  );
+  filters.roleIds = ownRoles.length ? ownRoles.map(r => r.id) : ['__no_roles_owned__'];
 }
 
 export function hasActiveFilters(f: RoleFilterParams): boolean {

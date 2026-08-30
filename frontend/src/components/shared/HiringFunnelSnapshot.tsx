@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ChevronDown } from 'lucide-react';
 import { dashboardApi } from '../../services/api.ts';
-import { DashboardData, HiringFunnelSnapshotStage } from '../../types/index.ts';
+import { HiringFunnelSnapshotStage } from '../../types/index.ts';
 import { EmptyState } from './Badges.tsx';
 import { STAGE_COLORS, UNLIT_BG, shade, glossyFill } from './PipelineProgress.tsx';
 
@@ -70,9 +70,16 @@ export default function HiringFunnelSnapshot({
   if (localRoleId) params.role_id = [localRoleId];
   if (owner) params.owner = owner;
 
-  const { data, isLoading } = useQuery<{ data: DashboardData }>({
+  // Its own lightweight endpoint, not the full GET /api/dashboard this used
+  // to call — this section only ever reads hiring_funnel_snapshot out of
+  // that much larger payload, so every load here (including every local
+  // owner/role-rail toggle, independent of the page's master filters) used
+  // to duplicate 13 unrelated queries' worth of work for nothing. See the
+  // RCA comment on GET /dashboard/funnel-snapshot in backend/src/routes/
+  // dashboard.ts.
+  const { data, isLoading } = useQuery<{ data: { hiring_funnel_snapshot: HiringFunnelSnapshotStage[] } }>({
     queryKey: ['dashboard-funnel-snapshot', masterFilterParams, localRoleId, owner],
-    queryFn:  () => dashboardApi.get(params),
+    queryFn:  () => dashboardApi.funnelSnapshot(params),
   });
 
   const snapshot: HiringFunnelSnapshotStage[] = data?.data?.hiring_funnel_snapshot || [];

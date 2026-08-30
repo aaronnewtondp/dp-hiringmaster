@@ -2,9 +2,10 @@ import { Router, Request, Response } from 'express';
 import { query, queryOne } from '../db/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { Priority, STAGE_ORDER } from '../types/index.js';
-import { runSlaCheck, STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
-import { parseRoleFilters, buildRoleFilterSql, roleIdsSubquery } from '../utils/roleFilters.js';
+import { runSlaCheck } from '../jobs/slaChecker.js';
+import { parseRoleFilters, buildRoleFilterSql, roleIdsSubquery, applyHiringManagerRoleLock } from '../utils/roleFilters.js';
 import { computeAging } from '../utils/aging.js';
+import { fetchSlaBreachRows, buildHiringFunnelSnapshot } from '../utils/hiringFunnelSnapshot.js';
 
 // ─── Compute-on-read SLA trigger ──────────────────────────────────────────────
 // Vercel Hobby tier only supports daily cron, not the 15-min interval the SLA
@@ -73,13 +74,7 @@ router.get('/', async (req: Request, res: Response) => {
   // for this persona. A sentinel, unmatchable id is used when the HM owns
   // no roles at all (rather than leaving roleIds empty, which
   // buildRoleFilterSql would treat as "no filter" — i.e. everyone's data).
-  if (req.user!.persona === 'hiring_manager') {
-    const ownRoles = await query<{ id: string }>(
-      `SELECT id FROM roles WHERE lower(trim(hiring_manager_name)) = lower(trim($1))`,
-      [req.user!.name]
-    );
-    filters.roleIds = ownRoles.length ? ownRoles.map(r => r.id) : ['__no_roles_owned__'];
-  }
+  await applyHiringManagerRoleLock(filters, req.user!);
 
   // Hiring Funnel Snapshot's own owner filter — independent of the master
   // role filters above, scopes just the SLA-breach query/section below.
@@ -189,29 +184,7 @@ router.get('/', async (req: Request, res: Response) => {
     // hiring_funnel_snapshot drill-down below, so the two numbers can never
     // disagree. The section-local owner filter (ownerParam) scopes this
     // query only — it's independent of the page's master role filters.
-    (() => {
-      const scoped = roleIdsSubquery(filters, 2);
-      const params: unknown[] = [STAGE_SLA_ACTION_TYPES, ...(scoped?.params || [])];
-      let ownerSql = '';
-      if (ownerParam) {
-        params.push(ownerParam);
-        ownerSql = ` AND pa.owner_type = $${params.length}`;
-      }
-      return query<{ id: number; action_type: string; owner_type: string; hours_overdue: number;
-               application_id: string; candidate_name: string; role_title: string;
-               pa_role_id: string | null; current_stage: string | null; candidate_id: string | null;
-               responsible_person: string | null }>(`
-        SELECT pa.id, pa.action_type, pa.owner_type, pa.hours_overdue, pa.application_id,
-               pa.candidate_name, pa.role_title, pa.role_id AS pa_role_id,
-               a.stage AS current_stage, a.candidate_id AS candidate_id, pa.responsible_person
-        FROM pending_actions pa
-        LEFT JOIN applications a ON a.id = pa.application_id
-        WHERE pa.resolved=false AND pa.action_type = ANY($1::text[])
-          ${scoped ? ` AND COALESCE(a.role_id, pa.role_id) IN ${scoped.sql}` : ''}
-          ${ownerSql}
-        ORDER BY pa.hours_overdue DESC
-      `, params);
-    })(),
+    fetchSlaBreachRows(filters, ownerParam),
 
     // Founder Review pending count — a separate, untouched mechanism (not
     // stage-driven), scoped by the same master role filters for consistency.
@@ -474,38 +447,13 @@ router.get('/', async (req: Request, res: Response) => {
   const topType  = topByCount(kpiScopedRows, 'action_type');
   const topStage = topByCount(kpiScopedRows, 'current_stage');
 
-  // ── Hiring Funnel Snapshot — every canonical stage, its breach types, and
-  // the candidates behind each one. Always includes all 13 stages (even
-  // zero-breach ones) so the chevron strip never has to guess at a missing
-  // entry; a stage's breach_types array is simply empty when nothing's
-  // overdue there.
-  type SnapshotCandidate = {
-    application_id: string; candidate_id: string | null; candidate_name: string;
-    role_id: string | null; role_title: string; owner: string; stage: string; overdue_hours: number;
-  };
-  const snapshotByStage: Record<string, Record<string, SnapshotCandidate[]>> = {};
-  for (const stage of STAGE_ORDER) snapshotByStage[stage] = {};
-  for (const pa of slaBreachRows) {
-    const stage = pa.current_stage || 'Unknown';
-    if (!snapshotByStage[stage]) snapshotByStage[stage] = {};
-    if (!snapshotByStage[stage][pa.action_type]) snapshotByStage[stage][pa.action_type] = [];
-    snapshotByStage[stage][pa.action_type].push({
-      application_id: pa.application_id,
-      candidate_id: pa.candidate_id,
-      candidate_name: pa.candidate_name,
-      role_id: pa.pa_role_id,
-      role_title: pa.role_title,
-      owner: pa.owner_type,
-      stage,
-      overdue_hours: pa.hours_overdue,
-    });
-  }
-  const hiringFunnelSnapshot = STAGE_ORDER.map(stage => {
-    const breachTypes = Object.entries(snapshotByStage[stage] || {}).map(([type, candidates]) => ({
-      type, owner: candidates[0]?.owner || '', count: candidates.length, candidates,
-    }));
-    return { stage, total: breachTypes.reduce((sum, bt) => sum + bt.count, 0), breach_types: breachTypes };
-  });
+  // ── Hiring Funnel Snapshot — kept in this response for backward
+  // compatibility (existing tests assert it here), but the frontend's
+  // HiringFunnelSnapshot component no longer fetches it this way — see
+  // GET /dashboard/funnel-snapshot below, which computes only this and
+  // nothing else. Building it here from slaBreachRows (already fetched
+  // above for the merged KPI card) is pure JS, no extra query.
+  const hiringFunnelSnapshot = buildHiringFunnelSnapshot(slaBreachRows);
 
   // ── Source Quality — pass_rate/hire_rate/contribution_pct as 0-100, 1 decimal
   const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -659,6 +607,30 @@ router.get('/', async (req: Request, res: Response) => {
     },
     joining_risk:  joiningRisk,
   });
+});
+
+// ─── GET /api/dashboard/funnel-snapshot — just the Hiring Funnel Snapshot ─────
+// section's own data. Split out from the main GET / above (RCA, 2026-08-30):
+// HiringFunnelSnapshot.tsx used to call the full dashboard endpoint on every
+// load AND on every local owner/role-rail change inside that section alone —
+// duplicating all 13 of the main endpoint's other, unrelated queries (role
+// stats, aging roles, source quality, time-to-fill, velocity, etc.) just to
+// refresh this one section. This route runs only the one query this section
+// actually needs. Same filter/owner semantics as the main route (parses the
+// same query params the same way), so switching the frontend to call this
+// instead changes nothing about what shows up — only how much work it costs.
+router.get('/funnel-snapshot', async (req: Request, res: Response) => {
+  await maybeRunSlaCheck();
+
+  const filters = parseRoleFilters(req.query as Record<string, unknown>);
+  await applyHiringManagerRoleLock(filters, req.user!);
+
+  const ownerParam = typeof req.query.owner === 'string' &&
+    (req.query.owner === 'HR / Recruiter' || req.query.owner === 'Hiring Manager')
+    ? req.query.owner : undefined;
+
+  const slaBreachRows = await fetchSlaBreachRows(filters, ownerParam);
+  res.json({ hiring_funnel_snapshot: buildHiringFunnelSnapshot(slaBreachRows) });
 });
 
 // ─── GET /api/dashboard/pending — just the pending actions queue ──────────────

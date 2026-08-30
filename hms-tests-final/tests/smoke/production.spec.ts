@@ -105,10 +105,17 @@ test('GET /api/roles — returns seeded roles (≥7)', async ({ request }) => {
   expect(roles.length).toBeGreaterThanOrEqual(7);
 });
 
-test('GET /api/roles — HM response strips ctc_band', async ({ request }) => {
+test('GET /api/roles — HM response strips ctc_band for roles they don\'t own', async ({ request }) => {
+  // Comp visibility is scoped to the role's own HM (plus HR-tier), not
+  // blanket-hidden from every Hiring Manager — Alex legitimately sees
+  // ctc_band on her own roles (R006/R007) since this session's comp-
+  // visibility change. This checks the actual non-owner case: R002
+  // (E&I Engineer, Mumbai) belongs to Satyadev, not Alex.
   const token = await getToken(request, 'hm_alex');
   const { roles } = await (await authed(request, token).get('/api/roles')).json();
-  for (const r of roles) expect(r.ctc_band).toBeUndefined();
+  const notAlexsRole = roles.find((r: { id: string }) => r.id === 'R002');
+  expect(notAlexsRole).toBeTruthy();
+  expect(notAlexsRole.ctc_band).toBeUndefined();
 });
 
 test('GET /api/dashboard — returns expected metric keys', async ({ request }) => {
