@@ -290,14 +290,18 @@ async function checkAssignmentDeadlines(): Promise<void> {
 // the UI while still carrying a stale red pending_action from before
 // Close Target was ever set or was later pushed out.
 async function checkRoleAging(): Promise<void> {
-  const roles = await query<{ id: string; title: string; priority: string; start_date: string; target_closure_date: string | null }>(`
-    SELECT id, title, priority, start_date, target_closure_date
+  // Approved counts too, not just Live – Sourcing — a role's aging clock
+  // starts the moment it's approved (Open Date is set then, see roles.ts),
+  // so it can already be overdue on its Close Target before it's even
+  // posted for sourcing.
+  const roles = await query<{ id: string; title: string; priority: string; start_date: string; target_closure_date: string | null; status: string }>(`
+    SELECT id, title, priority, start_date, target_closure_date, status
     FROM roles
-    WHERE status = 'Live – Sourcing' AND start_date IS NOT NULL
+    WHERE status IN ('Approved', 'Live – Sourcing') AND start_date IS NOT NULL
   `);
 
   for (const role of roles) {
-    const { days_overdue, aging_alert } = computeAging(role.start_date, role.target_closure_date, role.priority as Priority);
+    const { days_overdue, aging_alert } = computeAging(role.start_date, role.target_closure_date, role.priority as Priority, role.status);
 
     if (aging_alert === 'red') {
       const existing = await queryOne(

@@ -10,24 +10,6 @@ function mapPriority(raw?: string): string {
   return 'P1';
 }
 
-// Google Sheets' onFormSubmit trigger sends the submission timestamp in the
-// sheet's own display format — for this workspace's IST locale that's
-// "DD/MM/YYYY HH:MM:SS" (same shape seen in the candidate ingest CSV export).
-// Extract just the date portion for start_date, which is a DATE column.
-// Returns null on unrecognized shapes (also handles ISO fallback).
-function parseFormTimestampToDate(ts: string | undefined): string | null {
-  if (!ts) return null;
-  const s = String(ts).trim();
-  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if (dmy) {
-    const [, d, m, y] = dmy;
-    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-  }
-  const iso = s.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (iso) return iso[1];
-  return null;
-}
-
 // "Vacancy Caused Due To" is a checkbox (multi-select) question — Google
 // Forms/Apps Script joins multiple selections into one comma-space-joined
 // string in the sheet ("Increased Work Load, Additional Assignments /
@@ -57,7 +39,7 @@ router.post('/ingest', async (req: Request, res: Response) => {
     new_or_replacement, vacancy_reason, job_title, num_openings, location,
     appointment_type, qualification_required, must_have_skills, nice_to_have_skills,
     yoe_required, ctc_band, kpi_expectations, additional_remarks,
-    target_closure_date, start_date,
+    target_closure_date,
   } = req.body;
 
   if (!job_title) {
@@ -81,6 +63,10 @@ router.post('/ingest', async (req: Request, res: Response) => {
     const seq = await client.query(`SELECT nextval('seq_role') as n`);
     const roleId = 'R' + String(seq.rows[0].n).padStart(3, '0');
 
+    // start_date (Open Date) is deliberately left unset here — a Draft role
+    // hasn't been approved yet, so its aging clock hasn't started. PATCH
+    // /:id's approval branch (roles.ts) sets it automatically the day this
+    // role is actually approved, same as a manually-created role.
     const result = await client.query(
       `INSERT INTO roles (
          id, title, department, hiring_manager_name, priority, status,
@@ -88,9 +74,9 @@ router.post('/ingest', async (req: Request, res: Response) => {
          new_or_replacement, vacancy_reason, appointment_type, qualification_required,
          must_have_skills, nice_to_have_skills, yoe_required, ctc_band,
          kpi_expectations, additional_remarks,
-         target_closure_date, start_date, requisition_source_row
+         target_closure_date, requisition_source_row
        )
-       VALUES ($1,$2,$3,$4,$5,'Draft',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+       VALUES ($1,$2,$3,$4,$5,'Draft',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        RETURNING *`,
       [
         roleId, job_title, department || null, hiring_manager || null,
@@ -103,10 +89,6 @@ router.post('/ingest', async (req: Request, res: Response) => {
         yoe_required || null, ctc_band || null,
         kpi_expectations || null, additional_remarks || null,
         target_closure_date || null,
-        // Fall back to the requisition submission date when the form itself
-        // doesn't send a start_date — matches how HR would treat "when did
-        // this role become open" (the moment the requisition was filed).
-        start_date || parseFormTimestampToDate(timestamp),
         sourceRowKey,
       ]
     );

@@ -184,7 +184,7 @@ test.describe('Dashboard audit fixes — SLA race, orphan sweep, funnel shape, s
     expect(fetched.status).toBe('Joined');
   });
 
-  test('an empty-string source_channel is normalized to null on write and excluded from source_quality', async ({ request }) => {
+  test('an empty-string source_channel is normalized to null on write (an application-level field, separate from source_quality)', async ({ request }) => {
     const hrToken = await getToken(request, 'hr');
     const api = authed(request, hrToken);
     const createRes = await api.post('/api/candidates', {
@@ -199,6 +199,25 @@ test.describe('Dashboard audit fixes — SLA race, orphan sweep, funnel shape, s
     const getRes = await api.get(`/api/applications/${application.id}`);
     const { application: fetched } = await getRes.json();
     expect(fetched.source_channel).toBeNull();
+  });
+
+  // source_quality is grouped by candidates.source (the unified, currently-
+  // collected Naukri/IIMjobs · LinkedIn · Internal Referral · Agency ·
+  // Direct Outreach vocabulary), not applications.source_channel, which was
+  // retired as a collected field on 2026-08-24 (commit 2092a54) — see the
+  // matching comment in dashboard.ts's Source Quality query.
+  test('an empty-string candidate source is normalized to null on write and excluded from source_quality', async ({ request }) => {
+    const hrToken = await getToken(request, 'hr');
+    const api = authed(request, hrToken);
+    const createRes = await api.post('/api/candidates', {
+      full_name: 'Empty Source Test Candidate',
+      email: `emptysource+${Date.now()}@example.com`,
+      role_id: 'R006',
+      source: '',
+    });
+    expect(createRes.status()).toBe(201);
+    const { candidate } = await createRes.json();
+    expect(candidate.source).toBeNull();
 
     const dashRes = await api.get('/api/dashboard');
     const { source_quality } = await dashRes.json();

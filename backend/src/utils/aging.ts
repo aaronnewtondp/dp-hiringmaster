@@ -18,11 +18,26 @@ export interface AgingResult {
 export function computeAging(
   startDate: string | null,
   targetClosureDate: string | null,
-  priority: Priority
+  priority: Priority,
+  status: string
 ): AgingResult {
   const now = Date.now();
   const days_open = startDate ? Math.floor((now - new Date(startDate).getTime()) / 86400000) : 0;
   const thresh = AGING_THRESHOLDS[priority] || AGING_THRESHOLDS.P1;
+
+  // Aging SLA only ever applies to a role that's actually being actively
+  // sourced — Approved (about to post) or Live – Sourcing. A Draft/Under
+  // Review role hasn't started its clock yet; an On Hold or Closed role has
+  // stopped it — flagging any of those red/yellow doesn't mean anything
+  // actionable, so they always come back 'ok' regardless of start_date.
+  // days_open itself stays a neutral, always-computed stat (still shown in
+  // the UI as "Xd open") — only the alert/overdue-count is gated here.
+  // status is a required param (not defaulted) specifically so every call
+  // site is forced to think about it at compile time, not left to silently
+  // fall through un-gated.
+  if (status !== 'Approved' && status !== 'Live – Sourcing') {
+    return { days_open, days_overdue: 0, aging_alert: 'ok' };
+  }
 
   // No Close Target set yet — fall back to the pre-existing days-open
   // thresholds so a role isn't silently stripped of aging visibility just

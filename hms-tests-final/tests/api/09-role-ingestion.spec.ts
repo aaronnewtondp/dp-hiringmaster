@@ -33,7 +33,6 @@ test.describe('Role Ingestion Webhook', () => {
           kpi_expectations:       'Ship features on time',
           additional_remarks:     'Urgent backfill',
           target_closure_date:    '2026-09-01',
-          start_date:             '2026-09-15',
         },
       });
       expect(res.status()).toBe(201);
@@ -48,6 +47,11 @@ test.describe('Role Ingestion Webhook', () => {
       expect(role.priority).toBe('P2');
       expect(Number(role.num_openings)).toBe(2);
       expect(role.location).toBe('Bengaluru');
+      // Open Date (start_date) tracks "days since approved," not "days since
+      // this Requisition Form was submitted" — an ingested role arrives as a
+      // Draft, so it has no Open Date yet regardless of the form's own
+      // submission timestamp.
+      expect(role.start_date).toBeNull();
     });
 
     test('returns 400 when job_title is missing', async ({ request }) => {

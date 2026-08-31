@@ -98,6 +98,21 @@ test.describe('Roles API', () => {
       expect(role.status).toBe('Draft');
     });
 
+    // Role Age (Open Date) is meant to track "days since approved," not
+    // "days since this form was submitted" — a client-supplied start_date
+    // at creation time would defeat that entirely, so it's ignored outright
+    // regardless of persona. roles.ts's PATCH /:id approval branch is the
+    // only place that ever sets it (see 27-role-approval-workflow.spec.ts).
+    test('start_date is never accepted at creation, even if the client sends one — stays null until approved', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const res   = await authed(request, token).post('/api/roles', {
+        title: `Test Role ${uid()}`, priority: 'P2', start_date: '2020-01-01',
+      });
+      expect(res.status()).toBe(201);
+      const { role } = await res.json();
+      expect(role.start_date).toBeNull();
+    });
+
     test('returns 400 when title is missing', async ({ request }) => {
       const token = await getToken(request, 'hr');
       const res   = await authed(request, token).post('/api/roles', { priority: 'P1' });

@@ -13,7 +13,7 @@ type FormState = {
   ctc_band: string; kpi_expectations: string; job_description: string;
   must_have_skills: string; nice_to_have_skills: string; additional_remarks: string;
   recruitment_mode: string[];
-  start_date: string; target_closure_date: string;
+  target_closure_date: string;
 };
 
 // Every field is required except kpi_expectations and additional_remarks —
@@ -46,7 +46,7 @@ export default function NewRole() {
     ctc_band: '', kpi_expectations: '', job_description: '',
     must_have_skills: '', nice_to_have_skills: '', additional_remarks: '',
     recruitment_mode: [],
-    start_date: new Date().toISOString().slice(0,10), target_closure_date: '',
+    target_closure_date: '',
   });
 
   const set = (k: keyof FormState, v: unknown) => setForm(f => ({ ...f, [k]: v }));
@@ -166,10 +166,6 @@ export default function NewRole() {
                 <input className="input" value={form.ctc_band} onChange={e => set('ctc_band', e.target.value)} required placeholder="e.g. 18–24 LPA" />
               </div>
             )}
-            <div>
-              <label className="label">Open Date *</label>
-              <input className="input" type="date" value={form.start_date} onChange={e => set('start_date', e.target.value)} required />
-            </div>
             <div>
               <label className="label">Target Close Date *</label>
               <input className="input" type="date" value={form.target_closure_date} onChange={e => set('target_closure_date', e.target.value)} required />

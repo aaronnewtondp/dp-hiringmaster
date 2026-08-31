@@ -263,17 +263,33 @@ router.get('/', async (req: Request, res: Response) => {
     // quality measure, not a live-state snapshot: restricting to Active
     // would make hire_rate collapse toward 0% for every channel, since a
     // hired candidate's status is 'Joined', not 'Active'.
+    //
+    // Grouped by candidates.source, NOT applications.source_channel — the
+    // latter was retired as a collected field the moment "Add candidate"
+    // moved to the unified 5-value Source vocabulary on the candidate
+    // itself (2026-08-24, commit 2092a54 "drop Source channel"). Since then
+    // source_channel has only ever been set by a handful of link-flows
+    // (Job Application Form reconciliation, Talent Pool Reactivation,
+    // Manual Add) and reports whatever pre-2026-08-24 values happened to
+    // exist otherwise — an 8-value legacy vocabulary (Naukri, IIMJobs,
+    // Employee Referral, WhatsApp Forward, Google Form, ...) that most new
+    // candidates never get tagged with at all. candidates.source is what
+    // every current candidate actually gets, from the same finalized list
+    // RECRUITMENT_CHANNELS uses for a role's own Recruitment Mode. Aliased
+    // back to source_channel so the API response shape and every existing
+    // consumer (frontend, role closure summary PDF) stay unchanged.
     (() => {
       const scoped = roleIdsSubquery(filters, 3);
       return query<{ source_channel: string; n: string; engaged: string; hired: string }>(`
-        SELECT source_channel,
+        SELECT c.source AS source_channel,
                COUNT(*) AS n,
-               COUNT(*) FILTER (WHERE stage = ANY($1::text[])) AS engaged,
-               COUNT(*) FILTER (WHERE stage = ANY($2::text[])) AS hired
-        FROM applications
-        WHERE source_channel IS NOT NULL AND source_channel <> ''
-        ${scoped ? ` AND role_id IN ${scoped.sql}` : ''}
-        GROUP BY source_channel ORDER BY n DESC
+               COUNT(*) FILTER (WHERE a.stage = ANY($1::text[])) AS engaged,
+               COUNT(*) FILTER (WHERE a.stage = ANY($2::text[])) AS hired
+        FROM applications a
+        JOIN candidates c ON c.id = a.candidate_id
+        WHERE c.source IS NOT NULL AND c.source <> ''
+        ${scoped ? ` AND a.role_id IN ${scoped.sql}` : ''}
+        GROUP BY c.source ORDER BY n DESC
       `, [SHORTLISTED_PLUS_STAGES, OFFER_ACCEPTED_PLUS_STAGES, ...(scoped?.params || [])]);
     })(),
 
@@ -386,7 +402,7 @@ router.get('/', async (req: Request, res: Response) => {
   // ── Compute aging for each role ─────────────────────────────────────────────
   const rolesWithAging = agingRoles.map(r => {
     const { days_open, days_overdue, aging_alert } = computeAging(
-      r.start_date || null, r.target_closure_date || null, r.priority as Priority
+      r.start_date || null, r.target_closure_date || null, r.priority as Priority, r.status
     );
     return { ...r, days_open, days_overdue, aging_alert, active_count: parseInt(r.active_count || '0') };
   });

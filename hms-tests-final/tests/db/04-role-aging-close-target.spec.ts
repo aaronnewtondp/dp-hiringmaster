@@ -50,7 +50,7 @@ test.describe('Role aging alert — target_closure_date driven, not days-open dr
     await client.end();
   });
 
-  async function createRole(overrides: { priority?: string; startDaysAgo: number; targetClosureDaysFromNow: number | null }) {
+  async function createRole(overrides: { priority?: string; startDaysAgo: number; targetClosureDaysFromNow: number | null; status?: string }) {
     const startDate = new Date(Date.now() - overrides.startDaysAgo * 86400000).toISOString().slice(0, 10);
     const targetDate = overrides.targetClosureDaysFromNow == null
       ? null
@@ -58,9 +58,9 @@ test.describe('Role aging alert — target_closure_date driven, not days-open dr
 
     const { rows } = await client.query(
       `INSERT INTO roles (title, department, hiring_manager_name, priority, status, location, employment_type, start_date, target_closure_date)
-       VALUES ($1, 'Tech/Devs', 'Test HM', $2, 'Live – Sourcing', 'Gurgaon', 'Full-Time / Permanent', $3, $4)
+       VALUES ($1, 'Tech/Devs', 'Test HM', $2, $5, 'Gurgaon', 'Full-Time / Permanent', $3, $4)
        RETURNING id`,
-      [`Aging Test Role ${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, overrides.priority || 'P0', startDate, targetDate]
+      [`Aging Test Role ${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, overrides.priority || 'P0', startDate, targetDate, overrides.status || 'Live – Sourcing']
     );
     const id = rows[0].id;
     createdRoleIds.push(id);
@@ -146,5 +146,73 @@ test.describe('Role aging alert — target_closure_date driven, not days-open dr
       [roleId]
     );
     expect(afterResolve.length).toBe(0);
+  });
+
+  // ── Status scoping (2026-08-31 product decision) ──────────────────────────
+  // Role aging SLA only ever makes sense for a role that's actually being
+  // actively sourced — Approved (about to post) or Live – Sourcing. A role
+  // sitting in any other status never gets flagged, no matter how stale its
+  // start_date/target_closure_date look, since computeAging() (backend/src/
+  // utils/aging.ts) gates on status before doing any date math at all.
+  test.describe('aging is scoped to Approved and Live – Sourcing only', () => {
+
+    test('a Draft role with a badly overdue Close Target is never flagged', async ({ request }) => {
+      const roleId = await createRole({ priority: 'P0', startDaysAgo: 200, targetClosureDaysFromNow: -20, status: 'Draft' });
+      const hrToken = await getToken(request, 'hr');
+      const { role } = await (await authed(request, hrToken).get(`/api/roles/${roleId}`)).json();
+      expect(role.aging_alert).toBe('ok');
+      expect(role.days_overdue).toBe(0);
+    });
+
+    test('an Under Review role with a badly overdue Close Target is never flagged', async ({ request }) => {
+      const roleId = await createRole({ priority: 'P0', startDaysAgo: 200, targetClosureDaysFromNow: -20, status: 'Under Review' });
+      const hrToken = await getToken(request, 'hr');
+      const { role } = await (await authed(request, hrToken).get(`/api/roles/${roleId}`)).json();
+      expect(role.aging_alert).toBe('ok');
+    });
+
+    test('an On Hold role with a badly overdue Close Target is never flagged', async ({ request }) => {
+      const roleId = await createRole({ priority: 'P0', startDaysAgo: 200, targetClosureDaysFromNow: -20, status: 'On Hold' });
+      const hrToken = await getToken(request, 'hr');
+      const { role } = await (await authed(request, hrToken).get(`/api/roles/${roleId}`)).json();
+      expect(role.aging_alert).toBe('ok');
+    });
+
+    test('a Closed – Filled role with a badly overdue Close Target is never flagged', async ({ request }) => {
+      const roleId = await createRole({ priority: 'P0', startDaysAgo: 200, targetClosureDaysFromNow: -20, status: 'Closed – Filled' });
+      const hrToken = await getToken(request, 'hr');
+      const { role } = await (await authed(request, hrToken).get(`/api/roles/${roleId}`)).json();
+      expect(role.aging_alert).toBe('ok');
+    });
+
+    test('an Approved role (not just Live – Sourcing) with an overdue Close Target IS flagged red', async ({ request }) => {
+      const roleId = await createRole({ priority: 'P0', startDaysAgo: 200, targetClosureDaysFromNow: -20, status: 'Approved' });
+      const hrToken = await getToken(request, 'hr');
+      const { role } = await (await authed(request, hrToken).get(`/api/roles/${roleId}`)).json();
+      expect(role.aging_alert).toBe('red');
+      expect(role.days_overdue).toBeGreaterThanOrEqual(19);
+    });
+
+    test("checkRoleAging creates a 'Role aging alert' pending_action for an overdue Approved role too, not just Live – Sourcing", async ({ request }) => {
+      const roleId = await createRole({ priority: 'P0', startDaysAgo: 200, targetClosureDaysFromNow: -20, status: 'Approved' });
+      const cronRes = await authed(request, CRON_SECRET).post('/api/cron/sla-check', {});
+      expect(cronRes.status()).toBe(200);
+      const { rows: created } = await client.query(
+        `SELECT id FROM pending_actions WHERE role_id = $1 AND action_type = 'Role aging alert' AND resolved = false`,
+        [roleId]
+      );
+      expect(created.length).toBe(1);
+    });
+
+    test("checkRoleAging never creates a 'Role aging alert' for an overdue On Hold role", async ({ request }) => {
+      const roleId = await createRole({ priority: 'P0', startDaysAgo: 200, targetClosureDaysFromNow: -20, status: 'On Hold' });
+      const cronRes = await authed(request, CRON_SECRET).post('/api/cron/sla-check', {});
+      expect(cronRes.status()).toBe(200);
+      const { rows: created } = await client.query(
+        `SELECT id FROM pending_actions WHERE role_id = $1 AND action_type = 'Role aging alert' AND resolved = false`,
+        [roleId]
+      );
+      expect(created.length).toBe(0);
+    });
   });
 });
