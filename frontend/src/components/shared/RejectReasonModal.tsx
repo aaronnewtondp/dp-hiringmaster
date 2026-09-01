@@ -10,7 +10,7 @@ interface Props {
   onClose:    () => void;
 }
 
-// Shared by ScorecardSummary.tsx and HMQueue.tsx — Reject is the only one
+// Shared by ScorecardSummary.tsx and MyTasks.tsx — Reject is the only one
 // of the three HM-facing actions (Shortlist / Hold for Future / Reject)
 // that needs a modal at all, since the backend requires a reason category
 // for it (POST /applications/:id/status's existing, untouched validation).

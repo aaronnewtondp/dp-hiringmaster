@@ -758,6 +758,28 @@ ALTER TABLE users
   ADD CONSTRAINT users_persona_check
     CHECK (persona IN ('hr_recruiter','hiring_manager','leadership','super_admin'));
 
+-- ── applications: retire 'Resume Review'/'Shortlisted' as distinct stages ───
+-- Product decision (2026-09-01): every applicant now runs through ResumeIQ
+-- scoring and is shortlist-eligible straight from 'Applied' — a Hiring
+-- Manager shortlists directly into 'Interview Round 1', with no separate
+-- intermediate stage. STAGE_ORDER/STAGES (backend/frontend types/index.ts)
+-- were reduced from 13 to 11 stages accordingly, but `applications.stage`
+-- is plain TEXT with no CHECK constraint, so existing rows already sitting
+-- at the old stage values need this one-time migration — otherwise they'd
+-- keep displaying a stage badge that no longer exists anywhere else in the
+-- app, and would never be picked up by the new stage-keyed SLA breach
+-- checks in slaChecker.ts. Also resolves any 'Interview to be Scheduled'
+-- pending_actions left dangling by the same change (that breach type, keyed
+-- to the old 'Shortlisted' stage, was retired outright as redundant with
+-- the pre-existing 'Interview 1 Not Scheduled' check once shortlisting
+-- lands a candidate directly at Interview Round 1 — see slaChecker.ts).
+-- Applied to local Docker (378/67/64 rows) and Supabase (373/10/0 rows) on
+-- 2026-09-01:
+--   UPDATE applications SET stage = 'Applied' WHERE stage = 'Resume Review';
+--   UPDATE applications SET stage = 'Interview Round 1' WHERE stage = 'Shortlisted';
+--   UPDATE pending_actions SET resolved = true, resolved_at = NOW()
+--     WHERE action_type = 'Interview to be Scheduled' AND resolved = false;
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows
 -- ═════════════════════════════════════════════════════════════════════════════

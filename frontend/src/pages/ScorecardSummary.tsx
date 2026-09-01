@@ -15,7 +15,7 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 
-// Same chunked-batching constant as Candidates.tsx / HMQueue.tsx's bulk actions.
+// Same chunked-batching constant as Candidates.tsx / MyTasks.tsx's bulk actions.
 const BULK_CONCURRENCY = 3;
 
 const COLUMN_INFO: Record<string, string> = {
@@ -56,6 +56,15 @@ const DIMENSIONS: Array<{ key: keyof Application; label: string }> = [
   { key: 'score_leadership',     label: 'Lead' },
   { key: 'score_communication',  label: 'Comm' },
 ];
+
+// Column counts flanking the DIMENSIONS block, for the toggle/detail rows'
+// colSpan math — kept as named constants so a future column add/remove only
+// needs updating here, not re-derived by hand at every colSpan call site.
+// Before: checkbox, #, Candidate, Role, Stage, CTC→ECTC, Notice,
+// Preferred Location, Company/Industry, Resume. After: Avg, Verdict,
+// App. Age, Actions.
+const SCORECARD_COLS_BEFORE_DIMS = 10;
+const SCORECARD_COLS_AFTER_DIMS = 4;
 
 export default function ScorecardSummary() {
   const qc = useQueryClient();
@@ -137,9 +146,12 @@ export default function ScorecardSummary() {
     return s;
   });
 
-  // Shortlist / Hold for Future / Reject only make sense at Resume Review —
-  // same precondition the backend enforces for the non-HR-tier carve-out.
-  const reviewable = apps.filter(a => a.stage === 'Resume Review');
+  // Shortlist / Hold for Future / Reject only make sense at Applied — same
+  // precondition the backend enforces for the non-HR-tier carve-out. Every
+  // application is auto-scored right at Applied now (Resume Review was
+  // retired as its own stage), so this is the one and only "reviewable"
+  // stage.
+  const reviewable = apps.filter(a => a.stage === 'Applied');
   const allReviewableSelected  = reviewable.length > 0 && reviewable.every(a => selectedIds.has(a.id));
   const someReviewableSelected = reviewable.some(a => selectedIds.has(a.id));
 
@@ -175,12 +187,14 @@ export default function ScorecardSummary() {
   // 15%+ over-budget candidates need an explicit reason before shortlisting
   // (backend enforces this too — this is just so the user isn't surprised by
   // a 400). One shared reason applies to the whole batch when bulk-acting,
-  // same as bulk Reject's single reason-for-the-batch pattern.
+  // same as bulk Reject's single reason-for-the-batch pattern. "Shortlist"
+  // now advances straight to Interview Round 1 — 'Shortlisted' was retired
+  // as its own intermediate stage.
   const shortlistIds = async (ids: string[], reasonCat?: string, reasonDetail?: string) => {
     const opts = { budgetExceptionReasonCat: reasonCat, budgetExceptionReasonDetail: reasonDetail };
     if (ids.length === 1) {
       try {
-        await applicationsApi.advanceStage(ids[0], 'Shortlisted', opts);
+        await applicationsApi.advanceStage(ids[0], 'Interview Round 1', opts);
         toast.success('Candidate shortlisted');
         refreshApps();
       } catch (err: unknown) {
@@ -188,7 +202,7 @@ export default function ScorecardSummary() {
         toast.error(msg || 'Action failed');
       }
     } else {
-      await runBulk(id => applicationsApi.advanceStage(id, 'Shortlisted', opts), ids, 'shortlisted');
+      await runBulk(id => applicationsApi.advanceStage(id, 'Interview Round 1', opts), ids, 'shortlisted');
     }
   };
 
@@ -344,16 +358,17 @@ export default function ScorecardSummary() {
                       checked={allReviewableSelected}
                       ref={el => { if (el) el.indeterminate = someReviewableSelected && !allReviewableSelected; }}
                       onChange={toggleSelectAll}
-                      title="Select all (Resume Review only)"
+                      title="Select all (Applied only)"
                     />
                   )}
                 </th>
                 {[
-                  ['#', 'w-[32px]'], ['Candidate', 'w-[150px]'], ['Role', 'w-[120px]'],
-                  ['Company / Industry', 'w-[140px]'], ['App. Age', 'w-[55px]'], ['Notice', 'w-[55px]'], ['CTC → ECTC', 'w-[105px]'],
+                  ['#', 'w-[32px]'], ['Candidate', 'w-[150px]'], ['Role', 'w-[120px]'], ['Stage', 'w-[100px]'],
+                  ['CTC → ECTC', 'w-[105px]'], ['Notice', 'w-[55px]'], ['Preferred Location', 'w-[110px]'],
+                  ['Company / Industry', 'w-[140px]'], ['Resume', 'w-[55px]'],
                   ...DIMENSIONS.map(d => [d.label, 'w-[42px]'] as [string, string]),
-                  ['Avg', 'w-[45px]'], ['Verdict', 'w-[80px]'], ['Resume', 'w-[55px]'],
-                  ['Stage', 'w-[110px]'], ['Actions', 'w-[150px]'],
+                  ['Avg', 'w-[45px]'], ['Verdict', 'w-[80px]'],
+                  ['App. Age', 'w-[55px]'], ['Actions', 'w-[150px]'],
                 ].map(([h, w], i) => (
                   <th key={`${h}-${i}`} title={h} className={`table-th px-1.5 tracking-normal ${w} ${COLUMN_INFO[h] ? '' : 'truncate'}`}>
                     {COLUMN_INFO[h] ? (
@@ -371,7 +386,7 @@ export default function ScorecardSummary() {
                 <Fragment key={app.id}>
                   <tr className="hover:bg-gray-50 transition-colors">
                     <td className="table-td px-1.5 py-3">
-                      {app.stage === 'Resume Review' && (
+                      {app.stage === 'Applied' && (
                         <input type="checkbox" checked={selectedIds.has(app.id)} onChange={() => toggleSelected(app.id)} />
                       )}
                     </td>
@@ -387,14 +402,14 @@ export default function ScorecardSummary() {
                         {app.role_title}
                       </Link>
                     </td>
-                    <td className="table-td px-1.5 py-3 text-xs text-gray-500 truncate" title={`${app.candidate_company || '—'} / ${app.candidate_industry || '—'}`}>
-                      {app.candidate_company || '—'} / {app.candidate_industry || '—'}
-                    </td>
-                    <td className="table-td px-1.5 py-3 text-xs font-mono text-gray-500 truncate">
-                      {app.application_date ? `${Math.floor((Date.now() - new Date(app.application_date).getTime()) / 86400000)}d` : '—'}
-                    </td>
-                    <td className="table-td px-1.5 py-3 text-xs text-gray-500 truncate">
-                      {app.candidate_notice_period_days != null ? `${app.candidate_notice_period_days}d` : '—'}
+                    <td className="table-td px-1.5 py-3">
+                      {canLead ? (
+                        <button onClick={() => setStageModalApp(app)} className="text-xs text-gray-600 hover:text-dp-600 underline truncate block">
+                          {app.stage}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-500 truncate block">{app.stage}</span>
+                      )}
                     </td>
                     <td className="table-td px-1.5 py-3 text-xs text-gray-500 truncate">
                       <div className="flex items-center gap-1.5">
@@ -406,6 +421,20 @@ export default function ScorecardSummary() {
                         <OverBudgetBadge overBudget={isOverBudget(app.candidate_expected_ctc, app.role_ctc_band)} />
                       </div>
                     </td>
+                    <td className="table-td px-1.5 py-3 text-xs text-gray-500 truncate">
+                      {app.candidate_notice_period_days != null ? `${app.candidate_notice_period_days}d` : '—'}
+                    </td>
+                    <td className="table-td px-1.5 py-3 text-xs text-gray-500 truncate" title={app.preferred_location || ''}>
+                      {app.preferred_location || '—'}
+                    </td>
+                    <td className="table-td px-1.5 py-3 text-xs text-gray-500 truncate" title={`${app.candidate_company || '—'} / ${app.candidate_industry || '—'}`}>
+                      {app.candidate_company || '—'} / {app.candidate_industry || '—'}
+                    </td>
+                    <td className="table-td px-1.5 py-3 text-xs">
+                      {app.candidate_resume_link ? (
+                        <a href={app.candidate_resume_link} target="_blank" rel="noreferrer" className="text-dp-600 hover:underline">View</a>
+                      ) : '—'}
+                    </td>
                     {DIMENSIONS.map(d => (
                       <td key={d.key} className="table-td px-1.5 py-3 text-right"><ScoreCell score={app[d.key] as number | undefined} /></td>
                     ))}
@@ -413,22 +442,11 @@ export default function ScorecardSummary() {
                       {app.score_avg != null ? Number(app.score_avg).toFixed(1) : '—'}
                     </td>
                     <td className="table-td px-1.5 py-3"><VerdictBadge recommendation={app.score_recommendation} /></td>
-                    <td className="table-td px-1.5 py-3 text-xs">
-                      {app.candidate_resume_link ? (
-                        <a href={app.candidate_resume_link} target="_blank" rel="noreferrer" className="text-dp-600 hover:underline">View</a>
-                      ) : '—'}
+                    <td className="table-td px-1.5 py-3 text-xs font-mono text-gray-500 truncate">
+                      {app.application_date ? `${Math.floor((Date.now() - new Date(app.application_date).getTime()) / 86400000)}d` : '—'}
                     </td>
                     <td className="table-td px-1.5 py-3">
-                      {canLead ? (
-                        <button onClick={() => setStageModalApp(app)} className="text-xs text-gray-600 hover:text-dp-600 underline truncate block">
-                          {app.stage}
-                        </button>
-                      ) : (
-                        <span className="text-xs text-gray-500 truncate block">{app.stage}</span>
-                      )}
-                    </td>
-                    <td className="table-td px-1.5 py-3">
-                      {app.stage === 'Resume Review' && (
+                      {app.stage === 'Applied' && (
                         <div className="flex gap-1.5">
                           <button
                             onClick={() => setRejectTargetIds([app.id])}
@@ -457,7 +475,7 @@ export default function ScorecardSummary() {
                     </td>
                   </tr>
                   <tr className="border-t-0">
-                    <td colSpan={8} className="p-0" />
+                    <td colSpan={SCORECARD_COLS_BEFORE_DIMS} className="p-0" />
                     <td colSpan={DIMENSIONS.length} className="px-1.5 pb-2 text-center">
                       <button
                         onClick={() => toggleExpanded(app.id)}
@@ -466,11 +484,11 @@ export default function ScorecardSummary() {
                         {expanded.has(app.id) ? 'Hide Highlights and Summary' : 'View Highlights and Summary'}
                       </button>
                     </td>
-                    <td colSpan={5} className="p-0" />
+                    <td colSpan={SCORECARD_COLS_AFTER_DIMS} className="p-0" />
                   </tr>
                   {expanded.has(app.id) && (
                     <tr key={`${app.id}-detail`} className="bg-gray-50/60">
-                      <td colSpan={8 + DIMENSIONS.length + 5} className="px-4 py-4">
+                      <td colSpan={SCORECARD_COLS_BEFORE_DIMS + DIMENSIONS.length + SCORECARD_COLS_AFTER_DIMS} className="px-4 py-4">
                         <div className="grid grid-cols-3 gap-4">
                           <div>
                             <div className="text-xs text-green-600 font-medium mb-1">✓ Key strengths</div>

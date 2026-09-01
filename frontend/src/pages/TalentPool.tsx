@@ -10,9 +10,24 @@ import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { formatDistanceToNow } from 'date-fns';
+import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 
 type Mode = 'hold_for_future' | 'archived';
 const LIMIT = 50;
+
+const COLUMN_INFO: Record<string, string> = {
+  'Status': "The application's Active/Hold for Future/Rejected/Withdrawn status — this is why the row is in Talent Pool.",
+  'Application Date': 'Days since the candidate applied to this specific role.',
+  'Last Added': "When this candidate/application pair last had activity — same underlying data as Candidates' Last Updated, just relabeled here.",
+};
+
+// One row per (candidate, application) — same flattening Candidates.tsx uses
+// for its own table, so the two pages share a row-level column model (item
+// #8.2). A candidate lands in this pool if ANY of their applications match
+// the current mode (backend's own EXISTS filter), but every application of
+// that candidate is still shown, preserving this page's original "show full
+// history, not just the flagged one" behavior from the old card layout.
+type TalentPoolRow = { candidate: Candidate; app: NonNullable<Candidate['applications']>[number] };
 
 export default function TalentPool() {
   const { canHR } = useAuth();
@@ -76,6 +91,10 @@ export default function TalentPool() {
     setTotal(data.data.total || 0);
   }, [data]);
 
+  const rows: TalentPoolRow[] = items.flatMap(c =>
+    (c.applications || []).map(app => ({ candidate: c, app }))
+  );
+
   return (
     <div className="space-y-5">
       <div>
@@ -138,73 +157,107 @@ export default function TalentPool() {
         <MultiSelectFilter label="Role"       options={roleOptions} selected={roleIds}     onChange={resetAndSet<string[]>(setRoleIds)} />
       </div>
 
-      {/* Results */}
+      {/* Results — table, same column model as Candidates.tsx (item #8.2):
+          Candidate, Role, Stage, Status, Fit, CTC → ECTC, Notice, Preferred
+          Location, Company / Industry, Resume Link, Application Date, Last
+          Added (= last_updated, just relabeled since this page reads as
+          "when this candidate's application last moved" rather than "last
+          edited"), Actions. */}
       {isLoading && offset === 0 ? (
         <div className="flex justify-center p-12"><Spinner size="lg" /></div>
-      ) : items.length === 0 ? (
+      ) : rows.length === 0 ? (
         <div className="card p-12">
           <EmptyState
             title={mode === 'hold_for_future' ? 'No candidates on hold for future roles' : 'No archived candidates match your filters'}
           />
         </div>
       ) : (
-        <div className="space-y-3">
-          {items.map(c => (
-            <div key={c.id} className="card p-5 space-y-3">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <Link to={`/candidates/${c.id}`} className="font-medium text-gray-900 hover:text-dp-600">
-                    {c.full_name}
-                  </Link>
-                  <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400 flex-wrap">
-                    {c.email && <span>{c.email}</span>}
-                    {c.phone && <span>· {c.phone}</span>}
-                  </div>
-                  {c.hr_tags && c.hr_tags.length > 0 && (
-                    <div className="flex gap-1 mt-1.5 flex-wrap">
-                      {c.hr_tags.map(t => (
-                        <span key={t} className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{t}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {canHR && (
-                  <button
-                    onClick={() => setLinkCandidate(c)}
-                    className="btn-secondary text-xs py-1.5 px-3 shrink-0"
-                  >
-                    Reactivate
-                  </button>
-                )}
-              </div>
-
-              {c.applications && c.applications.length > 0 && (
-                <div className="divide-y divide-gray-50 border-t border-gray-100 pt-2">
-                  {c.applications.map(a => (
-                    <div key={a.id} className="flex items-center justify-between gap-3 py-1.5">
-                      <Link
-                        to={`/roles/${a.role_id}`}
-                        className="text-sm text-gray-700 hover:text-dp-600 truncate max-w-[220px]"
-                      >
-                        {a.role_title}
+        <div className="card overflow-x-auto">
+          <table className="w-full table-fixed">
+            <thead className="border-b border-gray-100 bg-gray-50">
+              <tr>
+                {[
+                  ['Candidate', 'w-[150px]'], ['Role', 'w-[100px]'], ['Stage', 'w-[90px]'],
+                  ['Status', 'w-[90px]'], ['Fit', 'w-[56px]'], ['CTC → ECTC', 'w-[105px]'],
+                  ['Notice', 'w-[55px]'], ['Preferred Location', 'w-[110px]'], ['Company / Industry', 'w-[130px]'],
+                  ['Resume Link', 'w-[68px]'], ['Application Date', 'w-[95px]'], ['Last Added', 'w-[95px]'],
+                  ['Actions', 'w-[90px]'],
+                ].map(([h, w]) => (
+                  <th key={h} title={h} className={`table-th px-2 tracking-normal ${w} ${COLUMN_INFO[h] ? '' : 'truncate'}`}>
+                    {COLUMN_INFO[h] ? (
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                        {h}
+                        <InfoTooltip text={COLUMN_INFO[h]} width="w-60" />
+                      </span>
+                    ) : h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {rows.map(({ candidate: c, app: a }) => (
+                <tr key={a.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="table-td px-2 py-4">
+                    <div className="min-w-0">
+                      <Link to={`/candidates/${c.id}`} className="font-medium text-gray-900 hover:text-dp-600 block truncate">
+                        {c.full_name}
                       </Link>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <StageBadge stage={a.stage} />
-                        <StatusBadge status={a.status} />
-                        <FitScore score={a.ai_fit_score} />
-                        <span className="text-xs text-gray-400 whitespace-nowrap">
-                          {a.last_updated ? formatDistanceToNow(new Date(a.last_updated), { addSuffix: true }) : '—'}
-                        </span>
-                      </div>
+                      {c.hr_tags && c.hr_tags.length > 0 && (
+                        <div className="flex gap-1 mt-0.5 flex-wrap">
+                          {c.hr_tags.map(t => (
+                            <span key={t} className="text-[10px] bg-gray-100 text-gray-600 px-1 rounded">{t}</span>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+                  </td>
+                  <td className="table-td px-2 py-4 truncate">
+                    <Link to={`/roles/${a.role_id}`} className="text-sm text-gray-700 hover:text-dp-600 block truncate">
+                      {a.role_title}
+                    </Link>
+                  </td>
+                  <td className="table-td px-2 py-4"><StageBadge stage={a.stage} /></td>
+                  <td className="table-td px-2 py-4"><StatusBadge status={a.status} /></td>
+                  <td className="table-td px-2 py-4"><FitScore score={a.ai_fit_score} /></td>
+                  <td className="table-td px-2 py-4 text-xs text-gray-500 truncate font-mono">
+                    {c.current_ctc_fixed ? `₹${c.current_ctc_fixed}L` : '—'}
+                    {' → '}
+                    {c.expected_ctc ? `₹${c.expected_ctc}L` : '—'}
+                  </td>
+                  <td className="table-td px-2 py-4 text-xs font-mono text-gray-500 truncate">
+                    {c.notice_period_days != null ? `${c.notice_period_days}d` : '—'}
+                  </td>
+                  <td className="table-td px-2 py-4 text-xs text-gray-500 truncate" title={a.preferred_location || ''}>
+                    {a.preferred_location || '—'}
+                  </td>
+                  <td className="table-td px-2 py-4 text-xs text-gray-500 truncate" title={`${c.current_company || '—'} / ${c.current_industry || '—'}`}>
+                    {c.current_company || '—'} / {c.current_industry || '—'}
+                  </td>
+                  <td className="table-td px-2 py-4 text-xs truncate">
+                    {c.resume_drive_link ? (
+                      <a href={c.resume_drive_link} target="_blank" rel="noreferrer" className="text-dp-600 hover:underline">View</a>
+                    ) : '—'}
+                  </td>
+                  <td className="table-td px-2 py-4 text-xs font-mono text-gray-500 truncate">
+                    {a.application_date ? `${Math.floor((Date.now() - new Date(a.application_date).getTime()) / 86400000)}d ago` : '—'}
+                  </td>
+                  <td className="table-td px-2 py-4 text-xs text-gray-400 truncate">
+                    {a.last_updated ? formatDistanceToNow(new Date(a.last_updated), { addSuffix: true }) : '—'}
+                  </td>
+                  <td className="table-td px-2 py-4">
+                    {canHR && (
+                      <button onClick={() => setLinkCandidate(c)} className="btn-secondary text-xs py-1 px-2.5 whitespace-nowrap">
+                        Reactivate
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
           {items.length < total && (
-            <div className="flex justify-center pt-2">
+            <div className="flex justify-center py-3 border-t border-gray-100">
               <button onClick={() => setOffset(o => o + LIMIT)} className="btn-secondary text-sm">
                 Load more
               </button>

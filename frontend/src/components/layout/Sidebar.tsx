@@ -3,25 +3,27 @@ import { LayoutDashboard, Briefcase, Users, Building2, LogOut, Droplets, ListChe
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { PERSONAS } from '../../types/index.ts';
 
+// "My Tasks" (formerly "My Queue") is now visible to every persona — its
+// own contents are scoped per-persona server/client-side (see MyTasks.tsx),
+// same principle as GET /dashboard/pending, rather than the whole nav item
+// being hidden from HR/Admin the way it used to be.
 const NAV = [
-  { to: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard',   hrOnly: false, queueOnly: false, superAdminOnly: false },
-  { to: '/roles',      icon: Briefcase,       label: 'Roles',       hrOnly: false, queueOnly: false, superAdminOnly: false },
-  { to: '/candidates', icon: Users,           label: 'Candidates',  hrOnly: false, queueOnly: false, superAdminOnly: false },
-  { to: '/talent-pool',icon: Archive,         label: 'Talent Pool', hrOnly: false, queueOnly: false, superAdminOnly: false },
-  { to: '/hm-queue',   icon: ListChecks,      label: 'My Queue',    hrOnly: false, queueOnly: true,  superAdminOnly: false },
-  { to: '/scorecard',  icon: BarChart3,       label: 'Scorecard Summary', hrOnly: false, queueOnly: false, superAdminOnly: false },
-  { to: '/agencies',   icon: Building2,       label: 'Agencies',    hrOnly: true,  queueOnly: false, superAdminOnly: false },
-  { to: '/users',      icon: ShieldCheck,     label: 'User Management', hrOnly: false, queueOnly: false, superAdminOnly: true },
-  { to: '/help',       icon: HelpCircle,      label: 'Help / FAQ',  hrOnly: false, queueOnly: false, superAdminOnly: false },
+  { to: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard',   hrOnly: false, superAdminOnly: false },
+  { to: '/roles',      icon: Briefcase,       label: 'Roles',       hrOnly: false, superAdminOnly: false },
+  { to: '/candidates', icon: Users,           label: 'Candidates',  hrOnly: false, superAdminOnly: false },
+  { to: '/talent-pool',icon: Archive,         label: 'Talent Pool', hrOnly: false, superAdminOnly: false },
+  { to: '/my-tasks',   icon: ListChecks,      label: 'My Tasks',    hrOnly: false, superAdminOnly: false },
+  { to: '/scorecard',  icon: BarChart3,       label: 'Scorecard Summary', hrOnly: false, superAdminOnly: false },
+  { to: '/agencies',   icon: Building2,       label: 'Agencies',    hrOnly: true,  superAdminOnly: false },
+  { to: '/users',      icon: ShieldCheck,     label: 'User Management', hrOnly: false, superAdminOnly: true },
+  { to: '/help',       icon: HelpCircle,      label: 'Help / FAQ',  hrOnly: false, superAdminOnly: false },
 ];
 
 export default function Sidebar() {
   const { user, logout, canHR, isSuperAdmin } = useAuth();
-  const isHM = user?.persona === 'hiring_manager' || user?.persona === 'leadership';
 
   const visible = NAV.filter(n => {
     if (n.hrOnly && !canHR) return false;
-    if (n.queueOnly && !isHM) return false;
     if (n.superAdminOnly && !isSuperAdmin) return false;
     return true;
   });

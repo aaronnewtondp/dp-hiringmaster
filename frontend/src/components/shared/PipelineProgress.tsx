@@ -10,8 +10,6 @@ import { STAGES } from '../../types/index.ts';
 // between unrelated hue families.
 export const STAGE_COLORS: Record<string, string> = {
   'Applied':               '#64748b',
-  'Resume Review':         '#f43f5e',
-  'Shortlisted':           '#ec4899',
   'Interview Round 1':     '#a855f7',
   'Interview Round 2':     '#8b5cf6',
   'Assignment Round':      '#7761f4',
@@ -28,8 +26,6 @@ export const STAGE_COLORS: Record<string, string> = {
 // the native title tooltip on hover.
 const STAGE_LABELS: Record<string, string> = {
   'Applied': 'Applied',
-  'Resume Review': 'Resume Review',
-  'Shortlisted': 'Shortlisted',
   'Interview Round 1': 'Interview 1',
   'Interview Round 2': 'Interview 2',
   'Assignment Round': 'Assignment',

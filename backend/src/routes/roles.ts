@@ -33,7 +33,7 @@ router.get('/', async (req: Request, res: Response) => {
       COUNT(DISTINCT a.id) FILTER (WHERE a.status = 'Active') AS active_candidate_count,
       COUNT(DISTINCT a.id) FILTER (
         WHERE a.status = 'Active'
-        AND a.stage IN ('Shortlisted','Interview Round 1','Interview Round 2',
+        AND a.stage IN ('Interview Round 1','Interview Round 2',
                          'Assignment Round','Founders Round')
       ) AS shortlisted_count
     FROM roles r
@@ -216,27 +216,17 @@ router.patch('/:id', async (req: Request, res: Response) => {
   const existing = await queryOne<Role>('SELECT * FROM roles WHERE id = $1', [req.params.id]);
   if (!existing) { res.status(404).json({ error: 'Role not found' }); return; }
 
-  // Approving a role (Draft/Under Review → Approved) is open to HR-tier
-  // (Admin/Leadership, via isHRTier) or the specific Hiring Manager named on
-  // THIS role — matched by name, since roles.hiring_manager_name is a plain
-  // text field with no user_id FK to compare against instead. Everyone else
-  // (including that same HM trying to edit any other field) stays fully
-  // gated behind HR-tier, same as before.
+  // Approving a role (Draft/Under Review → Approved) is HR-tier only
+  // (HR/Admin, Leadership, Super Admin) — a Hiring Manager can no longer
+  // approve even their own role (2026-09-01 product decision, tightened
+  // from the earlier own-role carve-out). They can still submit a role
+  // request and see/edit their own role's other fields is unaffected by
+  // this gate — approval specifically now always requires HR-tier.
   const isApprovingThisRole = req.body.status === 'Approved' && existing.status !== 'Approved';
-  const isHmForThisRole = req.user!.persona === 'hiring_manager' &&
-    !!existing.hiring_manager_name &&
-    existing.hiring_manager_name.trim().toLowerCase() === req.user!.name.trim().toLowerCase();
 
   if (!isHRTier(req.user!.persona)) {
-    if (!(isApprovingThisRole && isHmForThisRole)) {
-      res.status(403).json({ error: 'HR access required' });
-      return;
-    }
-    const extraKeys = Object.keys(req.body).filter(k => k !== 'status');
-    if (extraKeys.length > 0) {
-      res.status(403).json({ error: 'Hiring Managers may only approve a role here, not edit other fields' });
-      return;
-    }
+    res.status(403).json({ error: 'HR access required' });
+    return;
   }
 
   // approver_name/approval_date/start_date are never client-settable — set

@@ -1,26 +1,32 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, PauseCircle, XCircle, MessageSquare, Clock, AlertCircle, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { applicationsApi, dashboardApi } from '../services/api.ts';
-import { Application, PendingAction, InterviewRound } from '../types/index.ts';
+import { applicationsApi, dashboardApi, rolesApi } from '../services/api.ts';
+import { Application, PendingAction, InterviewRound, Role } from '../types/index.ts';
 import { StageBadge, FitScore, PriorityBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import InterviewFeedbackModal from '../components/InterviewFeedbackModal.tsx';
 import RejectReasonModal from '../components/shared/RejectReasonModal.tsx';
 import BudgetExceptionModal from '../components/shared/BudgetExceptionModal.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
+import { useAuth } from '../contexts/AuthContext.tsx';
 import { formatDistanceToNow } from 'date-fns';
 
 // Same chunked-batching constant/reasoning as Candidates.tsx's bulk actions.
 const BULK_CONCURRENCY = 3;
 
+// Sentinel role_id used when a Hiring Manager owns no roles at all — mirrors
+// applyHiringManagerRoleLock's own backend convention (roleFilters.ts) so an
+// empty owned-role set reliably yields zero rows via `r.id = ANY($n)` rather
+// than an unfiltered (i.e. everyone else's) result.
+const NO_ROLES_OWNED_SENTINEL = '__no_roles_owned__';
+
 // ─── Shortlist decision row ───────────────────────────────────────────────────
-// Three actions, all open to every persona (backend enforces the same
-// Resume-Review-only precondition regardless of who calls it) — Shortlist
-// moves the application's STAGE to 'Shortlisted'; Hold for Future / Reject
-// change its STATUS instead, which is what actually drops it out of this
-// queue (see the query below).
+// Three actions — Shortlist moves the application's STAGE to 'Interview
+// Round 1' (shortlisting no longer has its own intermediate stage); Hold for
+// Future / Reject change its STATUS instead, which is what actually drops it
+// out of this queue (see the query below).
 function ShortlistRow({
   app,
   selected,
@@ -189,31 +195,81 @@ function FeedbackRow({
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
-export default function HMQueue() {
+// "Ready for review" visibility/scoping — this page is a PERSONAL worklist,
+// not another company-wide table (that's what Candidates/Scorecard Summary
+// are for), so each persona sees only what's actually theirs to act on:
+//   - HR/Admin & Super Admin: every Applied candidate, unfiltered — there's
+//     no per-recruiter ownership field on roles to split this further, and
+//     screening oversight company-wide genuinely IS HR's own job function,
+//     not a slice borrowed from someone else's queue.
+//   - Hiring Manager: only candidates on the role(s) they're the hiring
+//     manager for — the whole point of "my" tasks for this persona. Scoped
+//     the same way applyHiringManagerRoleLock (backend, roleFilters.ts)
+//     already scopes their Dashboard: matching roles.hiring_manager_name
+//     against their own name.
+//   - Leadership: only candidates flagged for Founder Review — the one
+//     existing Leadership-specific concept tied to individual applications
+//     (founder_review_flag, settable only by HR/Leadership; setting it
+//     already raises an owner_type='Leadership / Founders' pending action,
+//     same family as the Feedback-due/Other-pending scoping below). Every
+//     OTHER Applied candidate is HR/HM's day-to-day job, not Leadership's,
+//     so this is genuinely "their own" rather than "everything" or
+//     "nothing".
+export default function MyTasks() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const isHiringManager = user?.persona === 'hiring_manager';
+  const isLeadership    = user?.persona === 'leadership';
+  // Every persona sees SOME slice of "Ready for review" now (HR/Admin/Super
+  // Admin: everyone; Hiring Manager: own roles; Leadership: Founder-flagged
+  // only) — there's no persona left to hide this section from entirely, so
+  // unlike ownRoleIds below there's no visibility gate left to compute here.
+
   const [feedbackRound, setFeedbackRound] = useState<(InterviewRound & { candidate_name?: string; role_title?: string }) | null>(null);
-  const [searchInput, setSearchInput] = usePersistedState('hmqueue.search', '');
+  const [searchInput, setSearchInput] = usePersistedState('mytasks.search', '');
   const [search,      setSearch]      = useState(searchInput);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [rejectTargetIds, setRejectTargetIds] = useState<string[] | null>(null);
   const [budgetExceptionIds, setBudgetExceptionIds] = useState<string[] | null>(null);
   const [bulkSaving, setBulkSaving] = useState(false);
 
-  // Candidates HR has advanced to Resume Review — this IS the "ready for HM
-  // review" signal now (no separate screening-status gate). status=Active
-  // is what makes Hold-for-Future/Reject actually remove a candidate from
-  // this list — Shortlist removes them via the stage filter instead, since
-  // 'Shortlisted' !== 'Resume Review'.
+  // Only fetched for a Hiring Manager — the one persona whose "Ready for
+  // review" scope depends on which roles are actually theirs.
+  const { data: ownRolesData, isSuccess: ownRolesLoaded } =
+    useQuery<{ data: { roles: Role[] } }>({
+      queryKey: ['my-tasks-own-roles', user?.name],
+      queryFn:  () => rolesApi.list(),
+      enabled:  isHiringManager,
+    });
+  const ownRoleIds = useMemo(() => {
+    if (!isHiringManager) return [];
+    const mine = (ownRolesData?.data?.roles || []).filter(
+      r => (r.hiring_manager_name || '').trim().toLowerCase() === (user?.name || '').trim().toLowerCase()
+    );
+    return mine.length ? mine.map(r => r.id) : [NO_ROLES_OWNED_SENTINEL];
+  }, [isHiringManager, ownRolesData, user?.name]);
+
+  // Every applicant is scored by ResumeIQ automatically and can be
+  // shortlisted directly from Applied — this IS the "ready for review"
+  // signal now (no separate screening-status gate, no Resume Review stage).
+  // status=Active is what makes Hold-for-Future/Reject actually remove a
+  // candidate from this list; Shortlist removes them via the stage filter.
   const { data: awaitingData, isLoading: loadingAwaiting, refetch: refetchAwaiting } =
     useQuery<{ data: { applications: Application[] } }>({
-      queryKey: ['hm-queue-awaiting'],
-      queryFn:  () => applicationsApi.list({ stage: 'Resume Review', status: 'Active' }),
+      queryKey: ['my-tasks-awaiting', isHiringManager, ownRoleIds, isLeadership],
+      queryFn:  () => applicationsApi.list({
+        stage: 'Applied', status: 'Active',
+        ...(isHiringManager ? { role_id: ownRoleIds } : {}),
+        ...(isLeadership ? { founder_flag: 'true' } : {}),
+      }),
+      enabled: !isHiringManager || ownRolesLoaded,
     });
 
-  // Pending actions for the current user (feedback due etc.)
+  // Pending actions for the current user (feedback due etc.) — already
+  // persona-scoped server-side (see GET /dashboard/pending).
   const { data: pendingData, isLoading: loadingPending, refetch: refetchPending } =
     useQuery<{ data: { actions: PendingAction[] } }>({
-      queryKey: ['hm-queue-pending'],
+      queryKey: ['my-tasks-pending'],
       queryFn:  () => dashboardApi.pending(),
     });
 
@@ -240,7 +296,7 @@ export default function HMQueue() {
 
   const refreshQueue = () => {
     refetchAwaiting();
-    qc.invalidateQueries({ queryKey: ['hm-queue-pending'] });
+    qc.invalidateQueries({ queryKey: ['my-tasks-pending'] });
     setSelectedIds(new Set());
   };
 
@@ -279,7 +335,7 @@ export default function HMQueue() {
     const opts = { budgetExceptionReasonCat: reasonCat, budgetExceptionReasonDetail: reasonDetail };
     if (ids.length === 1) {
       try {
-        await applicationsApi.advanceStage(ids[0], 'Shortlisted', opts);
+        await applicationsApi.advanceStage(ids[0], 'Interview Round 1', opts);
         toast.success('Candidate shortlisted');
         refreshQueue();
       } catch (err: unknown) {
@@ -287,7 +343,7 @@ export default function HMQueue() {
         toast.error(msg || 'Action failed');
       }
     } else {
-      await runBulk(id => applicationsApi.advanceStage(id, 'Shortlisted', opts), ids, 'shortlisted');
+      await runBulk(id => applicationsApi.advanceStage(id, 'Interview Round 1', opts), ids, 'shortlisted');
     }
   };
 
@@ -345,15 +401,22 @@ export default function HMQueue() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">My Queue</h1>
-        <p className="text-sm text-gray-400 mt-1">Candidates awaiting your decision and feedback due from you</p>
+        <h1 className="text-xl font-semibold text-gray-900">My Tasks</h1>
+        <p className="text-sm text-gray-400 mt-1">
+          {isLeadership
+            ? 'Founder-flagged candidates awaiting a shortlist decision, and feedback due from you'
+            : 'Candidates awaiting your shortlist decision and feedback due from you'}
+        </p>
       </div>
 
       {isLoading ? (
         <div className="flex justify-center p-12"><Spinner size="lg" /></div>
       ) : (
         <div className="space-y-6">
-          {/* ── Section 1: Ready for review ─────────────────────────────────── */}
+          {/* ── Section 1: Ready for review — every persona sees a scoped
+               slice now (HR/Admin/Super Admin: everyone; Hiring Manager: own
+               roles; Leadership: Founder-flagged only), see the note above
+               the component. ─────────────────────────────────────────────── */}
           <div className="card overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-3">
@@ -367,7 +430,13 @@ export default function HMQueue() {
                 )}
                 <div>
                   <h2 className="text-sm font-semibold text-gray-900">Ready for review</h2>
-                  <p className="text-xs text-gray-400 mt-0.5">Candidates at Resume Review — shortlist, hold for future, or reject</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {isHiringManager
+                      ? "Candidates who've applied to your role(s) — shortlist, hold for future, or reject"
+                      : isLeadership
+                      ? 'Founder-flagged candidates who\'ve applied — shortlist, hold for future, or reject'
+                      : "Candidates who've applied — shortlist, hold for future, or reject"}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -425,7 +494,11 @@ export default function HMQueue() {
               <div className="p-8">
                 <EmptyState
                   title={awaiting.length === 0 ? 'All caught up' : 'No matches'}
-                  message={awaiting.length === 0 ? 'No candidates awaiting your shortlist decision.' : 'No candidates match this search.'}
+                  message={awaiting.length === 0
+                    ? (isLeadership
+                        ? 'No Founder-flagged candidates awaiting a shortlist decision.'
+                        : 'No candidates awaiting your shortlist decision.')
+                    : 'No candidates match this search.'}
                 />
               </div>
             ) : (

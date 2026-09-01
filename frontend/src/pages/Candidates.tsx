@@ -17,9 +17,13 @@ import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 const UNLINKED_PAGE_SIZE = 50;
 
 const COLUMN_INFO: Record<string, string> = {
-  'Fit': "ResumeIQ's AI-generated score (0-100), averaged across 8 dimensions: Technical, Experience, Industry Fit, Culture Fit, Role Alignment, Trajectory, Leadership, Communication. Computed once, the first time an application reaches Resume Review.",
+  'Fit': "ResumeIQ's AI-generated score (0-100), averaged across 8 dimensions: Technical, Experience, Industry Fit, Culture Fit, Role Alignment, Trajectory, Leadership, Communication. Computed once, automatically, as soon as a candidate applies.",
   'CTC → ECTC': "Candidate's current fixed CTC, then the Expected CTC they quoted for this role — both read from the candidate's own profile, not this application's legacy fields.",
+  'Application Date': 'Days since the candidate applied — not the same as Last Updated.',
+  'Company / Industry': "Current company and industry from the candidate's own profile, shown as one field.",
 };
+
+type SortKey = 'fit' | 'application_date' | 'last_updated';
 
 interface UnmatchedSubmission {
   candidate_id:         string;
@@ -79,6 +83,17 @@ export default function Candidates() {
   const [bulkBudgetReasonCat,    setBulkBudgetReasonCat]    = useState('');
   const [bulkBudgetReasonDetail, setBulkBudgetReasonDetail] = useState('');
   const [bulkSaving,        setBulkSaving]        = useState(false);
+
+  // Column sort — Fit Score, Application Date, Last Updated only (item #7).
+  // Sorts whatever's already fetched/filtered client-side, same as the
+  // existing In-budget-only filter above — the `limit: 100` fetch already
+  // bounds the working set, so no backend sort param is needed.
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('desc'); }
+  };
 
   // Debounced free-text search — same reasoning and timing as TalentPool.tsx's
   // own `q` search: this now hits the server (see `params.q` below) rather
@@ -212,6 +227,15 @@ export default function Candidates() {
 
   const slaCount = all.filter(a => a.sla_breach).length;
 
+  const sortValue = (a: Application, key: SortKey): number => {
+    if (key === 'fit') return a.ai_fit_score ?? -Infinity;
+    const raw = key === 'application_date' ? a.application_date : a.last_updated;
+    return raw ? new Date(raw).getTime() : -Infinity;
+  };
+  const sorted = sortKey
+    ? [...filtered].sort((a, b) => (sortDir === 'desc' ? 1 : -1) * (sortValue(b, sortKey) - sortValue(a, sortKey)))
+    : filtered;
+
   const toggleSelected = (id: string) => setSelectedIds(prev => {
     const s = new Set(prev);
     s.has(id) ? s.delete(id) : s.add(id);
@@ -225,20 +249,19 @@ export default function Candidates() {
     return s;
   });
 
-  // Chunked, not all-at-once — only matters when the batch includes a move
-  // into 'Resume Review' (a real, synchronous Drive+Claude call per
-  // application, ~10-16s observed) but applied uniformly for simplicity;
-  // the cost of chunking a handful of cheap DB-only transitions is
-  // negligible. Each single-ID call already exists and is unchanged —
-  // this is a client-side fan-out, not a new backend endpoint.
+  // Chunked, not all-at-once — ResumeIQ scoring now runs automatically at
+  // application creation, not on a stage transition, so no bulk stage move
+  // triggers a slow synchronous Drive+Claude call anymore; chunking is kept
+  // anyway since it's harmless and this is still a client-side fan-out over
+  // the existing single-ID endpoint, not a new backend endpoint.
   const BULK_CONCURRENCY = 3;
   // Bulk stage-change is a generic "jump to any stage" tool too, same gap as
   // StageChangeModal.tsx — item #1's mandatory over-budget reason has to be
-  // handled here as well, not just on ScorecardSummary/HMQueue's dedicated
+  // handled here as well, not just on ScorecardSummary/MyTasks's dedicated
   // Shortlist buttons. is_severely_over_budget is server-computed and never
   // stripped for any persona, so this check is safe regardless of who's
   // driving this modal.
-  const bulkNeedsBudgetReason = bulkStageValue === 'Shortlisted' &&
+  const bulkNeedsBudgetReason = bulkStageValue === 'Interview Round 1' &&
     all.some(a => selectedIds.has(a.id) && a.is_severely_over_budget);
 
   const handleBulkStage = async () => {
@@ -509,24 +532,52 @@ export default function Candidates() {
                   </th>
                 )}
                 {[
-                  ['Candidate', 'w-[140px]'], ['Role', 'w-[100px]'], ['Stage', 'w-[95px]'],
-                  ['Fit', 'w-[64px]'], ['CTC → ECTC', 'w-[110px]'], ['Notice', 'w-[62px]'],
-                  ['Preferred Location', 'w-[115px]'], ['Current Company', 'w-[120px]'],
-                  ['Resume Link', 'w-[72px]'], ['Last Updated', 'w-[108px]'], ['', 'w-[34px]'],
-                ].map(([h, w]) => (
-                  <th key={h} title={h} className={`table-th px-2 tracking-normal ${w} ${COLUMN_INFO[h] ? '' : 'truncate'}`}>
-                    {COLUMN_INFO[h] ? (
-                      <span className="inline-flex items-center gap-1 whitespace-nowrap">
-                        {h}
-                        <InfoTooltip text={COLUMN_INFO[h]} width="w-60" />
+                  { label: 'Candidate', width: 'w-[140px]' },
+                  { label: 'Role', width: 'w-[100px]' },
+                  { label: 'Stage', width: 'w-[90px]' },
+                  { label: 'Fit', width: 'w-[64px]', sortKey: 'fit' as const },
+                  { label: 'CTC → ECTC', width: 'w-[110px]' },
+                  { label: 'Notice', width: 'w-[58px]' },
+                  { label: 'Preferred Location', width: 'w-[110px]' },
+                  { label: 'Company / Industry', width: 'w-[130px]' },
+                  { label: 'Resume Link', width: 'w-[68px]' },
+                  { label: 'Application Date', width: 'w-[100px]', sortKey: 'application_date' as const },
+                  { label: 'Last Updated', width: 'w-[100px]', sortKey: 'last_updated' as const },
+                  { label: '', width: 'w-[34px]' },
+                ].map(col => (
+                  <th key={col.label} title={col.label} className={`table-th px-2 tracking-normal ${col.width} ${COLUMN_INFO[col.label] || col.sortKey ? '' : 'truncate'}`}>
+                    {col.sortKey ? (
+                      // InfoTooltip renders its own <button> internally, so it
+                      // sits OUTSIDE the sort-toggle button as a sibling here
+                      // — nesting a <button> inside a <button> is invalid HTML
+                      // (browsers/screen readers handle it unpredictably).
+                      <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => toggleSort(col.sortKey)}
+                          className="inline-flex items-center gap-0.5 whitespace-nowrap hover:text-dp-600 transition-colors"
+                        >
+                          {col.label}
+                          {sortKey === col.sortKey ? (
+                            sortDir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                          ) : (
+                            <ChevronDown className="w-3 h-3 opacity-20" />
+                          )}
+                        </button>
+                        {COLUMN_INFO[col.label] && <InfoTooltip text={COLUMN_INFO[col.label]} width="w-60" />}
                       </span>
-                    ) : h}
+                    ) : COLUMN_INFO[col.label] ? (
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                        {col.label}
+                        <InfoTooltip text={COLUMN_INFO[col.label]} width="w-60" />
+                      </span>
+                    ) : col.label}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {filtered.map(app => (
+              {sorted.map(app => (
                 <tr key={app.id} className={`hover:bg-gray-50 transition-colors ${app.sla_breach ? 'bg-red-50/30' : ''}`}>
                   {canHR && (
                     <td className="table-td px-2 py-4">
@@ -569,13 +620,18 @@ export default function Candidates() {
                     {app.candidate_notice_period_days != null ? `${app.candidate_notice_period_days}d` : '—'}
                   </td>
                   <td className="table-td px-2 py-4 text-xs text-gray-500 truncate" title={app.preferred_location || ''}>{app.preferred_location || '—'}</td>
-                  <td className="table-td px-2 py-4 text-xs text-gray-500 truncate" title={app.candidate_company || ''}>{app.candidate_company || '—'}</td>
+                  <td className="table-td px-2 py-4 text-xs text-gray-500 truncate" title={`${app.candidate_company || '—'} / ${app.candidate_industry || '—'}`}>
+                    {app.candidate_company || '—'} / {app.candidate_industry || '—'}
+                  </td>
                   <td className="table-td px-2 py-4 text-xs truncate">
                     {app.candidate_resume_link ? (
                       <a href={app.candidate_resume_link} target="_blank" rel="noreferrer" className="text-dp-600 hover:underline">
                         View
                       </a>
                     ) : '—'}
+                  </td>
+                  <td className="table-td px-2 py-4 text-xs font-mono text-gray-500 truncate">
+                    {app.application_date ? `${Math.floor((Date.now() - new Date(app.application_date).getTime()) / 86400000)}d ago` : '—'}
                   </td>
                   <td className="table-td px-2 py-4 text-xs text-gray-400 truncate">
                     {app.last_updated ? formatDistanceToNow(new Date(app.last_updated), { addSuffix: true }) : '—'}

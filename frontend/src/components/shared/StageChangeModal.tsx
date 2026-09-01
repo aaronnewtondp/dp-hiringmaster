@@ -21,13 +21,14 @@ export default function StageChangeModal({ application, onClose, onUpdated }: St
   const [reasonDetail, setReasonDetail] = useState('');
 
   // This is a generic "jump to any stage" control — the dedicated Shortlist
-  // buttons on ScorecardSummary/HMQueue aren't the only way to move an
-  // application to Shortlisted, so the mandatory over-budget reason (item
-  // #1) has to be handled here too, not just there. is_severely_over_budget
-  // is server-computed and never stripped for any persona (unlike the raw
-  // ctc_band figures), so this check works the same regardless of who's
-  // driving this modal.
-  const needsBudgetReason = stageValue === 'Shortlisted' && application.is_severely_over_budget;
+  // buttons on ScorecardSummary/My Tasks aren't the only way to move an
+  // application to Interview Round 1 (i.e. shortlist it — 'Shortlisted' was
+  // retired as its own intermediate stage), so the mandatory over-budget
+  // reason (item #1) has to be handled here too, not just there.
+  // is_severely_over_budget is server-computed and never stripped for any
+  // persona (unlike the raw ctc_band figures), so this check works the same
+  // regardless of who's driving this modal.
+  const needsBudgetReason = stageValue === 'Interview Round 1' && application.is_severely_over_budget;
 
   const handleUpdate = async () => {
     if (needsBudgetReason && !reasonCat) {

@@ -145,13 +145,15 @@ export interface Candidate {
   // no applications yet (e.g. an ingested candidate whose "role applying
   // for" answer didn't match any open role).
   applications?: Array<{
-    id:            string;
-    role_id:       string;
-    role_title:    string;
-    stage:         string;
-    status:        string;
-    ai_fit_score?: number;
-    last_updated?: string;
+    id:                 string;
+    role_id:            string;
+    role_title:         string;
+    stage:              string;
+    status:             string;
+    ai_fit_score?:      number;
+    last_updated?:      string;
+    preferred_location?: string;
+    application_date?:  string;
   }> | null;
 }
 
@@ -424,8 +426,10 @@ export const RECRUITMENT_CHANNELS = [
   'Naukri/IIMjobs', 'LinkedIn', 'Internal Referral', 'Agency', 'Direct Outreach',
 ];
 
+// Resume Review and Shortlisted were retired as distinct stages (2026-09-01)
+// — see backend/src/types/index.ts's STAGE_ORDER for the full reasoning.
 export const STAGES = [
-  'Applied', 'Resume Review', 'Shortlisted',
+  'Applied',
   'Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round',
   'Reference Check', 'Pre-Joining Documents', 'Offer Discussion',
   'Offer Released', 'Offer Accepted', 'Joined',

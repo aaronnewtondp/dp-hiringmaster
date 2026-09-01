@@ -20,6 +20,18 @@ import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { formatDistanceToNow, format } from 'date-fns';
 
+// Screening & Risk Notes stays collapsed by default (item #10) unless it
+// already has something in it — once a note exists it should just be
+// visible, not hidden behind an extra click every time the page loads.
+function hasScreeningNotes(app: Application): boolean {
+  return !!(
+    app.hr_recruiter_summary || app.hr_key_positives || app.hr_key_concerns ||
+    app.hr_comp_alignment || app.hr_communication_assessment ||
+    app.hr_priority_override || app.hr_priority_override_reason ||
+    (app.hr_tags && app.hr_tags.length > 0) || app.internal_risk_notes
+  );
+}
+
 function FeedbackBadge({ status }: { status: string }) {
   if (status === 'Submitted') return <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">Submitted</span>;
   if (status === 'Overdue') return <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium animate-pulse">Overdue</span>;
@@ -98,6 +110,12 @@ export default function CandidateDetail() {
   // toggle pattern one level down.
   const [expandedRounds, setExpandedRounds] = useState<Set<string>>(new Set());
   const [showAddApplication, setShowAddApplication] = useState(false);
+  // Screening & Risk Notes no longer shows by default (item #10) — most
+  // applications never have anything in it, so it read as visual clutter on
+  // every expanded application. An "Add HR Screening Notes" button reveals
+  // it on demand instead; once a note exists it should just be visible, not
+  // hidden behind an extra click every time the page loads.
+  const [screeningNotesOpen, setScreeningNotesOpen] = useState<Set<string>>(new Set());
 
   const [assignmentModal, setAssignmentModal] = useState<AssignmentModalState | null>(null);
 
@@ -244,7 +262,7 @@ export default function CandidateDetail() {
       toast.success(`Status updated to ${statusValue}`);
       setShowStatusModal(false);
       qc.invalidateQueries({ queryKey: ['candidate', id] });
-      // Status drives inclusion on Scorecard Summary/My Queue/Talent Pool —
+      // Status drives inclusion on Scorecard Summary/My Tasks/Talent Pool —
       // those live on the shared 'applications' key, not this page's own.
       qc.invalidateQueries({ queryKey: ['applications'] });
     } catch { toast.error('Failed to update status'); }
@@ -260,32 +278,46 @@ export default function CandidateDetail() {
         <Link to="/candidates" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3">
           <ArrowLeft className="w-4 h-4" /> Candidates
         </Link>
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-full bg-dp-100 flex items-center justify-center text-dp-700 font-semibold text-lg">
-            {candidate.full_name.charAt(0).toUpperCase()}
-          </div>
-          <div className="flex-1">
-            <h1 className="text-xl font-semibold text-gray-900">{candidate.full_name}</h1>
-            <div className="flex items-center gap-3 mt-1 text-sm text-gray-500 flex-wrap">
-              {candidate.email && <span>{candidate.email}</span>}
-              {candidate.phone && <><span>·</span><span>{candidate.phone}</span></>}
-              {candidate.linkedin_url && (
-                <a href={candidate.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-dp-600 hover:underline flex items-center gap-1">
-                  <ExternalLink className="w-3 h-3" /> LinkedIn
-                </a>
-              )}
-              {candidate.resume_drive_link && (
-                <a href={candidate.resume_drive_link} target="_blank" rel="noopener noreferrer" className="text-dp-600 hover:underline flex items-center gap-1">
-                  <FileText className="w-3 h-3" /> Resume
-                </a>
-              )}
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-full bg-dp-100 flex items-center justify-center text-dp-700 font-semibold text-lg">
+              {candidate.full_name.charAt(0).toUpperCase()}
             </div>
-            <div className="flex gap-2 mt-2 flex-wrap">
-              {(candidate.hr_tags || []).map(tag => (
-                <span key={tag} className="px-2 py-0.5 rounded-full text-xs bg-dp-50 text-dp-700 font-medium">{tag}</span>
-              ))}
+            <div className="flex-1">
+              <h1 className="text-xl font-semibold text-gray-900">{candidate.full_name}</h1>
+              <div className="flex items-center gap-3 mt-1 text-sm text-gray-500 flex-wrap">
+                {candidate.email && <span>{candidate.email}</span>}
+                {candidate.phone && <><span>·</span><span>{candidate.phone}</span></>}
+                {candidate.linkedin_url && (
+                  <a href={candidate.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-dp-600 hover:underline flex items-center gap-1">
+                    <ExternalLink className="w-3 h-3" /> LinkedIn
+                  </a>
+                )}
+                {candidate.resume_drive_link && (
+                  <a href={candidate.resume_drive_link} target="_blank" rel="noopener noreferrer" className="text-dp-600 hover:underline flex items-center gap-1">
+                    <FileText className="w-3 h-3" /> Resume
+                  </a>
+                )}
+              </div>
+              <div className="flex gap-2 mt-2 flex-wrap">
+                {(candidate.hr_tags || []).map(tag => (
+                  <span key={tag} className="px-2 py-0.5 rounded-full text-xs bg-dp-50 text-dp-700 font-medium">{tag}</span>
+                ))}
+              </div>
             </div>
           </div>
+          {/* Stage/Status moved to the top-right of the page (item #11) for
+              the common one-application case, rather than requiring a
+              scroll down to that application's own row. A candidate with
+              more than one application has no single unambiguous "the"
+              stage to act on from here, so those keep their per-row
+              buttons further down instead. */}
+          {canHR && applications.length === 1 && (
+            <div className="flex gap-2 shrink-0">
+              <button onClick={() => setStageModalApp(applications[0])} className="btn-secondary text-xs py-1.5 px-3">Stage</button>
+              <button onClick={() => { setSelectedAppId(applications[0].id); setStatusValue(applications[0].status); setShowStatusModal(true); }} className="btn-secondary text-xs py-1.5 px-3">Status</button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -438,7 +470,11 @@ export default function CandidateDetail() {
                           </div>
                         </div>
                         <div className="flex gap-2 shrink-0 items-start">
-                          {canHR && (
+                          {/* Single-application candidates get these buttons
+                              at the page's top-right instead (item #11) —
+                              only shown here when there's more than one
+                              application to disambiguate between. */}
+                          {canHR && applications.length > 1 && (
                             <>
                               <button onClick={() => setStageModalApp(app)} className="btn-secondary text-xs py-1.5 px-3">Stage</button>
                               <button onClick={() => { setSelectedAppId(app.id); setStatusValue(app.status); setShowStatusModal(true); }} className="btn-secondary text-xs py-1.5 px-3">Status</button>
@@ -722,22 +758,31 @@ export default function CandidateDetail() {
                         )}
 
                         {canHR ? (
-                          <EditableSection
-                            title="Screening & Risk Notes"
-                            data={app}
-                            onSave={(changes) => saveApplicationNotes(app.id, changes)}
-                            fields={[
-                              { key: 'hr_recruiter_summary', label: 'Recruiter Summary', type: 'textarea' },
-                              { key: 'hr_key_positives', label: 'Key Positives', type: 'textarea' },
-                              { key: 'hr_key_concerns', label: 'Key Concerns', type: 'textarea' },
-                              { key: 'hr_comp_alignment', label: 'Compensation Alignment', type: 'textarea' },
-                              { key: 'hr_communication_assessment', label: 'Communication Assessment', type: 'textarea' },
-                              { key: 'hr_priority_override', label: 'Priority Override', type: 'select', options: ['Normal', 'High', 'Critical'] },
-                              { key: 'hr_priority_override_reason', label: 'Override Reason', type: 'text' },
-                              { key: 'hr_tags', label: 'Tags', type: 'tags' },
-                              { key: 'internal_risk_notes', label: 'Internal Risk Notes', type: 'textarea' },
-                            ]}
-                          />
+                          hasScreeningNotes(app) || screeningNotesOpen.has(app.id) ? (
+                            <EditableSection
+                              title="Screening & Risk Notes"
+                              data={app}
+                              onSave={(changes) => saveApplicationNotes(app.id, changes)}
+                              fields={[
+                                { key: 'hr_recruiter_summary', label: 'Recruiter Summary', type: 'textarea' },
+                                { key: 'hr_key_positives', label: 'Key Positives', type: 'textarea' },
+                                { key: 'hr_key_concerns', label: 'Key Concerns', type: 'textarea' },
+                                { key: 'hr_comp_alignment', label: 'Compensation Alignment', type: 'textarea' },
+                                { key: 'hr_communication_assessment', label: 'Communication Assessment', type: 'textarea' },
+                                { key: 'hr_priority_override', label: 'Priority Override', type: 'select', options: ['Normal', 'High', 'Critical'] },
+                                { key: 'hr_priority_override_reason', label: 'Override Reason', type: 'text' },
+                                { key: 'hr_tags', label: 'Tags', type: 'tags' },
+                                { key: 'internal_risk_notes', label: 'Internal Risk Notes', type: 'textarea' },
+                              ]}
+                            />
+                          ) : (
+                            <button
+                              onClick={() => setScreeningNotesOpen(prev => new Set(prev).add(app.id))}
+                              className="text-xs text-dp-600 hover:text-dp-700 hover:underline font-medium border-t border-gray-100 pt-3 mt-3"
+                            >
+                              + Add HR Screening Notes
+                            </button>
+                          )
                         ) : app.hr_recruiter_summary && (
                           <div className="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2 italic border-l-2 border-dp-300">"{app.hr_recruiter_summary}"</div>
                         )}
@@ -782,8 +827,8 @@ export default function CandidateDetail() {
           onClose={() => setStageModalApp(null)}
           onUpdated={() => {
             qc.invalidateQueries({ queryKey: ['candidate', id] });
-            // Stage drives inclusion on Scorecard Summary/My Queue (Resume
-            // Review-gated actions, budget/stage filters) — those live on
+            // Stage drives inclusion on Scorecard Summary/My Tasks (Applied-
+            // gated actions, budget/stage filters) — those live on
             // the shared 'applications' key, not this page's own.
             qc.invalidateQueries({ queryKey: ['applications'] });
           }}

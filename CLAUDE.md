@@ -29,17 +29,27 @@ north star for all future work, not just a task list):
 Requisition Form filled
    → new row in Requisition Sheet
    → role auto-created in HMS (Draft status)                    [DONE]
-   → HR reviews, moves role to Approved
-   → JD auto-generated (long-form + social, downloadable)        [TODO]
+   → HR/Leadership/Super Admin reviews, moves role to Approved
+     (a Hiring Manager cannot approve even their own role)       [DONE]
+   → JD auto-generated (long-form + social, downloadable)        [DONE]
    → candidate applies via Job Application Form
-   → candidate + application auto-created, linked to role        [TODO]
-   → HR advances candidate to "Resume Review"
-   → ResumeIQ fetches resume from Drive, reads actual text        [DONE]
-   → ResumeIQ scores resume against the GENERATED JD document     [TODO — currently
-                                                                     scores against
-                                                                     short DB fields]
+   → candidate + application auto-created, linked to role,
+     application starts at "Applied"                             [DONE]
+   → ResumeIQ fetches resume from Drive, reads actual text,
+     and scores it automatically and synchronously at Applied
+     — no manual "advance the stage" step triggers it             [DONE]
+   → ResumeIQ scores resume against the GENERATED JD document
+     (falls back to short DB fields for a role with no JD yet)    [DONE]
    → 8-dimension results shown in candidate view                  [DONE]
-   → HR/HM screening, interviews, offer, onboarding               [PARTIAL]
+   → HR (any persona, in practice usually HR/HM) shortlists
+     straight from Applied into Interview Round 1 — no separate
+     intermediate "Shortlisted" stage                             [DONE]
+   → HR/HM screening, interviews, offer, onboarding               [PARTIAL —
+                                                                     offer letter
+                                                                     generation and
+                                                                     pre-joining
+                                                                     docs checklist
+                                                                     still TODO]
 ```
 
 **Active roles the system was built around** (useful for realistic test data):
@@ -122,12 +132,20 @@ User Management page's role dropdown only ever offers the other three.
 (financial fields stripped), submit interview feedback for rounds they're
 actually listed in (`interview_rounds.interviewer_emails`) — enforced in
 `PATCH /interviews/:id/feedback`, not just a comment — record an Assignment
-outcome, and set `recruiter_screening_status` specifically to `'HM
-Shortlisted'` (every other screening-status value is HR-tier only, per
-`POST /applications/:id/screening`). A round with no `interviewer_emails` set
-at all (e.g. Assignment rounds) has no assignee to check, so feedback on
-those stays open to any persona — this isn't a residual gap, it's the
-correct behavior when nobody was specifically assigned.
+outcome, shortlist a candidate straight from `Applied` to `Interview Round 1`
+(this one stage transition is open to every persona, not HR-tier-gated — see
+the Application state model section below), and set
+`recruiter_screening_status` specifically to `'HM Shortlisted'` (every other
+screening-status value is HR-tier only, per `POST /applications/:id/screening`
+— note this is a different field from `stage`, untouched by the shortlist
+change above). A round with no `interviewer_emails` set at all (e.g.
+Assignment rounds) has no assignee to check, so feedback on those stays open
+to any persona — this isn't a residual gap, it's the correct behavior when
+nobody was specifically assigned. **A Hiring Manager cannot approve a
+role — not even their own.** `PATCH /roles/:id` is `isHRTier`-gated
+end to end (no `isHmForThisRole` carve-out); approver name and date are
+captured from the acting HR-tier user and Open Date copies from Approval
+Date the same moment.
 
 **User Management** (`/users`, Super-Admin only — the first page in the app
 with a real route-level guard, `RequireSuperAdmin` in
@@ -148,7 +166,20 @@ is descriptive only, never branched on) but is now corrected in
 ### Application state model — three independent fields
 Every application has three separately-updatable fields, each with its own
 API endpoint — never conflate them:
-- `stage` — pipeline position (Applied → Resume Review → ... → Joined)
+- `stage` — pipeline position (Applied → Interview Round 1 → Interview Round 2
+  → Assignment Round → Founders Round → Reference Check → Pre-Joining
+  Documents → Offer Discussion → Offer Released → Offer Accepted → Joined).
+  `Resume Review` and `Shortlisted` were retired as distinct stages — every
+  application is scored by ResumeIQ automatically and synchronously the
+  moment it's created (at `Applied`), and "shortlisting" is a direct
+  `Applied` → `Interview Round 1` move, open to **every** persona
+  specifically from `Applied` (every other transition stays HR-tier-only).
+  `STAGE_ORDER`/`STAGES` (`backend/src/types/index.ts`,
+  `frontend/src/types/index.ts`) are the single canonical array — removing a
+  value from it does **not** migrate rows already stored with the old value,
+  since `applications.stage` is plain `TEXT` with no `CHECK` constraint; the
+  retirement above required a one-time data migration on top of the type
+  change (see `schema.sql`).
 - `status` — Active / On Hold / Rejected / Withdrawn / Hold for Future / Joined
 - `recruiter_screening_status` — New → Under Recruiter Review → Awaiting HM
   Review → HM Shortlisted (etc.)
@@ -171,11 +202,15 @@ scoring` skill's rubric exactly: Technical, Experience, Industry Fit, Culture
 Fit, Role Alignment, Trajectory, Leadership, Communication → average score,
 strengths, red flags, executive summary, recommendation.
 
-Triggered automatically when an application's `stage` transitions to
-`Resume Review`, guarded by `!app.score_avg` so it only runs once per
-application. **Synchronous (awaited), not fire-and-forget** — see the
-Vercel serverless async rule below; this was the exact bug class that rule
-documents, fixed at the same time as JD generation.
+Triggered automatically the moment an application is **created** (at stage
+`Applied` — there's no later "advance to Resume Review" step, that stage was
+retired), via `runResumeIQScoring()` in
+`backend/src/services/resumeIQTrigger.ts`, called from `candidates.ts`'s
+`POST /` and `POST /:id/applications` and from `candidateIngest.ts`. Guarded
+by `!app.score_avg` so it only ever runs once per application. **Synchronous
+(awaited), not fire-and-forget** — see the Vercel serverless async rule
+below; this was the exact bug class that rule documents, fixed at the same
+time as JD generation.
 
 **Resume text is fetched live from Google Drive** via a service account
 (`hiring-master-drive-data@dp-hiring-master.iam.gserviceaccount.com`) —
@@ -185,11 +220,14 @@ a default function export, that's a different API shape than v1), DOCX (via
 profile-fields-only scoring if the fetch fails for any reason — this is
 intentional, never make a failed Drive fetch a hard error.
 
-**Known gap, not yet closed:** the JD side of the comparison currently reads
-`roles.must_have_skills` / `roles.kpi_expectations` — short DB text fields —
-rather than the full generated JD document. Once JD generation (Phase 3) is
-built, ResumeIQ should be updated to score against that document instead. See
-`ROADMAP.md`.
+**JD side of the comparison — closed.** `resumeIQ.ts`'s
+`buildRoleRequirementsSection()` reads `roles.generated_jd_content` (the
+same structured content the JD PDFs render from, persisted as JSONB
+alongside the two Drive links at JD-generation time) when present, giving
+the scoring prompt the full generated JD rather than just the three short DB
+fields (`must_have_skills`/`nice_to_have_skills`/`kpi_expectations`). Falls
+back to those same three fields, unchanged, for any role that hasn't been
+through the Approved+JD-generation flow yet. See `ROADMAP.md` Phase 4.
 
 ### Assignment emails (Gmail API)
 "Send Assignment" (on a candidate's `Assignment Round` stage) composes and

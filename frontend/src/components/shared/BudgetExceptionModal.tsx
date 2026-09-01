@@ -13,7 +13,7 @@ interface Props {
 // Gate for shortlisting a candidate whose expected CTC is 15%+ over the
 // role's stated band (utils/budget.ts's isSeverelyOverBudget) — mirrors
 // RejectReasonModal.tsx's shape exactly, just a different reason list and
-// trigger condition. Shared by ScorecardSummary.tsx and HMQueue.tsx.
+// trigger condition. Shared by ScorecardSummary.tsx and MyTasks.tsx.
 export default function BudgetExceptionModal({ count, saving, onConfirm, onClose }: Props) {
   const [reasonCat,    setReasonCat]    = useState('');
   const [reasonDetail, setReasonDetail] = useState('');

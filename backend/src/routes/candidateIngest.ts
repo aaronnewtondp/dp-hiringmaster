@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { transaction } from '../db/index.js';
 import { Candidate } from '../types/index.js';
+import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
 
 const router = Router();
 
@@ -205,8 +206,17 @@ router.post('/ingest', async (req: Request, res: Response) => {
     return;
   }
 
+  // Every application is scored the moment it's created — see
+  // resumeIQTrigger.ts. Synchronous/awaited, same no-fire-and-forget
+  // reasoning as JD generation: this webhook's own serverless invocation
+  // could be frozen the instant a response goes out.
+  let resumeiq: { scored: boolean; error?: string } | undefined;
+  if (result.application) {
+    resumeiq = await runResumeIQScoring((result.application as { id: string }).id);
+  }
+
   console.log(`[Candidate Ingest] ${result.application ? 'Created application for' : 'Processed'} candidate ${result.candidate.id}${result.warning ? ` — ${result.warning}` : ''}`);
-  res.status(201).json({ candidate: result.candidate, application: result.application, warning: result.warning });
+  res.status(201).json({ candidate: result.candidate, application: result.application, warning: result.warning, resumeiq });
 });
 
 export default router;

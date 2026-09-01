@@ -27,10 +27,14 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             the app for an on-the-spot explanation of exactly what it measures.</p>
             <p className="mt-2">Below that, the <strong>Hiring Funnel Snapshot</strong> is an
             interactive chevron strip: click any stage to see which SLA breach types are open
-            there and exactly who's overdue, filterable by owner (HR/Recruiter or Hiring Manager)
-            and by role.</p>
-            <p className="mt-2">Further down: <strong>Aging roles</strong> (past their Close
-            Target date, not just "open a long time"), the <strong>Hiring funnel</strong> chart
+            there and exactly who's overdue, filterable by owner (HR/Recruiter or Hiring Manager).
+            Role isn't a filter local to this section anymore — it inherits the Role filter from
+            the master filters above, like every other section.</p>
+            <p className="mt-2">Further down: <strong>Aging roles</strong> (every role currently
+            Approved, Live – Sourcing, or On Hold, with days-open shown for all of them — only
+            ones actually past their Close Target get a red/yellow flag, sorted to the top; On
+            Hold roles are listed for reference but never flagged), the <strong>Hiring
+            funnel</strong> chart
             (every stage, broken into Active/Rejected/Withdrawn/Hold for Future so a stage never
             silently disappears just because nobody's currently sitting there), Source Quality,
             Low Pipeline Roles, and Operational Velocity (turnaround time per stage,
@@ -50,7 +54,7 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
         answer: (
           <>
             <p>Roles lists every requisition — one row per open position, with priority, status,
-            hiring manager, Active Shortlist count, and Active Candidates count. Click into a role
+            hiring manager, Active Candidates count, and Active Shortlist count. Click into a role
             for its full detail: requirements, compensation band, approval status, links (JD,
             calendar, assignment repo), pipeline, and activity timeline. New roles normally arrive
             automatically from the Requisition Form, but the New Role / Request Role button lets
@@ -69,9 +73,14 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
         answer: (
           <>
             <p>Candidates is the full applicant list across every role, with search and the same
-            filter set as the Dashboard. The Last Updated column shows a one-line subtext of what
-            actually happened most recently (a stage change, a score, an email sent) — not just
-            when. Two amber banners can appear above the table:</p>
+            filter set as the Dashboard. Company / Industry is a merged column ("company /
+            industry", both from the candidate's own profile); Application Date shows how many
+            days ago the candidate applied. The Last Updated column shows a one-line subtext of
+            what actually happened most recently (a stage change, a score, an email sent) — not
+            just when. Click the <strong>Fit</strong>, <strong>Application Date</strong>, or{' '}
+            <strong>Last Updated</strong> column headers to sort by that column — click again to
+            flip direction (starts descending); sorting only reorders whatever rows are currently
+            visible after your filters. Two amber banners can appear above the table:</p>
             <ul className="list-disc pl-5 mt-1.5 space-y-1">
               <li><strong>Unlinked candidates</strong> — a candidate record exists but has no
               application to any role yet (e.g. a resume was added directly, or an old
@@ -94,30 +103,61 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
         ),
       },
       {
+        id: 'screening-notes',
+        question: 'Why don\'t I see Screening & Risk Notes on every application? (HR/Leadership only)',
+        answer: (
+          <p>The "Screening & Risk Notes" panel on an application only shows automatically if it
+          already has notes on it. If it's empty, click <strong>+ Add HR Screening Notes</strong>{' '}
+          to reveal the fields and start one — this keeps the page from showing an empty panel on
+          every application that's never needed one.</p>
+        ),
+      },
+      {
+        id: 'stage-status-buttons',
+        question: 'Where are the Stage/Status buttons on a candidate\'s page? (HR/Leadership only)',
+        answer: (
+          <p>If a candidate has exactly one application, Stage/Status buttons sit at the top of
+          the page next to their name. If they have two or more applications, there's no single
+          "the" application to act on from the top, so the buttons move down to sit on each
+          application's own row instead. These buttons are HR-tier only — a Hiring Manager
+          shortlists a candidate from Applied via the Candidates, Scorecard Summary, or My Tasks
+          pages instead.</p>
+        ),
+      },
+      {
         id: 'talent-pool',
         question: 'What is Talent Pool for?',
         answer: (
-          <p>A separate holding area for candidates who are either <strong>on hold for future
-          roles</strong> (good candidates, wrong timing) or <strong>archived</strong> (rejected
-          or withdrawn). They're pulled out of the main Candidates pipeline view so they don't
-          clutter active hiring, but stay searchable and re-linkable to a new role at any time.</p>
+          <>
+            <p>A separate holding area for candidates who are either <strong>on hold for future
+            roles</strong> (good candidates, wrong timing) or <strong>archived</strong> (rejected
+            or withdrawn). They're pulled out of the main Candidates pipeline view so they don't
+            clutter active hiring, but stay searchable and re-linkable to a new role at any time.</p>
+            <p className="mt-2">It's a table, not a card grid — one row per candidate <em>and</em>
+            application, so a candidate with more than one past application shows their full
+            history here, not just the one that put them in this pool. Each row has its own{' '}
+            <strong>Reactivate</strong> button to re-link that candidate to a new role.</p>
+          </>
         ),
       },
       {
         id: 'scorecard-queue',
-        question: 'What\'s the difference between My Queue and Scorecard Summary?',
+        question: 'What\'s the difference between My Tasks and Scorecard Summary?',
         answer: (
           <>
-            <p><strong>My Queue</strong> is your own personal worklist — candidates who've
-            reached Resume Review and are awaiting a shortlist decision, plus any interview
-            feedback you owe. It only shows what's actually yours to act on.</p>
+            <p><strong>My Tasks</strong> is your own personal worklist, scoped to what's actually
+            yours to act on: a <strong>Ready for review</strong> section (candidates who've
+            applied and are awaiting a shortlist decision — HR/Admin and Super Admin see everyone,
+            a Hiring Manager sees only their own role's candidates, and Leadership sees only candidates
+            flagged for Founder Review, since day-to-day shortlisting is HR/HM's job rather than
+            a leadership task), plus any interview or assignment feedback you personally owe.</p>
             <p className="mt-1.5"><strong>Scorecard Summary</strong> is the full, org-wide table
             of every ResumeIQ-scored candidate side by side, with all 8 dimension scores and
             verdict — built for comparing candidates against each other, not just working through
-            your own queue. Instead of a chevron, a centered <strong>View Highlights and
+            your own tasks. Instead of a chevron, a centered <strong>View Highlights and
             Summary</strong> button under the score columns expands a candidate's strengths, red
             flags, and executive summary. Both pages offer the same Shortlist / Hold for Future /
-            Reject actions on Resume Review candidates, individually or in bulk.</p>
+            Reject actions on Applied candidates, individually or in bulk.</p>
           </>
         ),
       },
@@ -156,7 +196,9 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             Review</strong> → <strong>Approved</strong> (an authorized approver has signed off —
             this is also when the role's Open Date is set) → <strong>Live – Sourcing</strong>{' '}
             (actively hiring) → <strong>On Hold</strong> or <strong>Closed – Filled</strong> /
-            <strong> Closed – Cancelled</strong>.</p>
+            <strong> Closed – Cancelled</strong>. The acting approver's name and the approval date
+            are recorded automatically the moment a role is approved (never something you type
+            in) and shown on the role's detail page.</p>
             <p className="mt-1.5"><strong>Close Target</strong> is a separate date HR sets for
             when a role should realistically close. A role's red/yellow aging alert is driven
             entirely by this date, not by how long it's simply been open — a role isn't flagged
@@ -174,7 +216,10 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             <p>They track three independent things, each updated separately:</p>
             <ul className="list-disc pl-5 mt-1.5 space-y-1">
               <li><strong>Stage</strong> — where the candidate sits in the pipeline (Applied →
-              Resume Review → Shortlisted → Interview rounds → Reference Check → Offer → Joined).</li>
+              Interview rounds → Reference Check → Offer → Joined). Every applicant is scored by
+              ResumeIQ automatically at Applied and can be shortlisted straight into Interview
+              Round 1 from there — Resume Review and Shortlisted no longer exist as separate
+              stages.</li>
               <li><strong>Status</strong> — whether they're still active in that pipeline: Active,
               Rejected, Withdrawn, Hold for Future, or Joined.</li>
               <li><strong>Recruiter Screening Status</strong> — HR's own internal screening
@@ -195,10 +240,10 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             to act. Each breach has its own named type and owner — hover the{' '}
             <span className="italic">i</span> next to the Dashboard's SLA Breaches card for the
             full list, but broadly: <strong>Idle Candidate</strong> (no movement for 48h+ at the
-            flatter stages), <strong>Resume Shortlist Pending</strong> / <strong>Interview to be
-            Scheduled</strong> (Resume Review / Shortlisted specifically), <strong>Interview/
-            Founders/Assignment "Not Scheduled"</strong> or <strong>"Feedback Due"</strong>{' '}
-            (a round exists but hasn't been booked, or feedback hasn't been submitted since it
+            flatter stages), <strong>Resume Shortlist Pending</strong> (Applied specifically),
+            <strong> Interview/Founders "Not Scheduled"</strong> (a round hasn't been booked),
+            <strong> Assignment "Not Sent"</strong> (the assignment hasn't gone out), or{' '}
+            <strong>"Feedback Due"</strong> (feedback hasn't been submitted since a round
             happened), and <strong>Joining risk — no contact</strong> (5+ days with no HR
             follow-up after Offer Accepted). A breached application is marked sla_breach and a
             pending action is raised for whoever owns that step. These checks run automatically
@@ -213,9 +258,9 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
         question: 'Why was I asked for a reason before shortlisting a candidate?',
         answer: (
           <p>If a candidate's expected CTC is 15% or more above the role's stated compensation
-          band, the Hiring Master System requires an explicit, on-record reason before they can be moved to
-          Shortlisted — so an over-budget hire is always a documented decision, not an
-          accident.</p>
+          band, the Hiring Master System requires an explicit, on-record reason before they can be
+          shortlisted into Interview Round 1 — so an over-budget hire is always a documented
+          decision, not an accident.</p>
         ),
       },
       {
@@ -240,8 +285,8 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
         id: 'resumeiq',
         question: 'What is ResumeIQ, and when does it run?',
         answer: (
-          <p>ResumeIQ automatically scores a candidate the moment their application moves to
-          Resume Review. It fetches the actual resume text from Drive (PDF, DOCX, or Google
+          <p>ResumeIQ automatically scores a candidate the moment they apply — there's no manual
+          step to trigger it. It fetches the actual resume text from Drive (PDF, DOCX, or Google
           Docs) and scores it across 8 dimensions — Technical, Experience, Industry Fit, Culture
           Fit, Role Alignment, Trajectory, Leadership, Communication — producing an average
           score, strengths, red flags, an executive summary, and a recommendation (Strong Yes /
@@ -288,8 +333,9 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
               <li><strong>Hiring Manager</strong> — views roles/candidates/applications company-wide
               with compensation fields hidden, <em>except</em> for the specific role(s) they're
               assigned to, where they see comp the same as HR. Submits interview feedback for
-              rounds they're listed on, records Assignment outcomes, can shortlist/hold/reject
-              candidates at Resume Review, and can approve their own role. Their Dashboard is
+              rounds they're listed on, records Assignment outcomes, and can shortlist/hold/reject
+              candidates from Applied. Role approval is HR/Leadership/Super Admin only — a Hiring
+              Manager can't approve even their own role. Their Dashboard is
               locked to their own role(s) — this can't be changed.</li>
               <li><strong>Leadership</strong> — sees everything HR/Admin sees (no field or route
               either is blocked from that the other isn't) and additionally approves roles.</li>

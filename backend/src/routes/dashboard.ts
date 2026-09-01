@@ -35,8 +35,10 @@ const FIRST_OFFER_IDX     = STAGE_ORDER.indexOf('Offer Released');
 // Source Quality's Pass Rate / Hire Rate stage sets (KPI redesign) — derived
 // from STAGE_ORDER rather than hardcoded stage-name lists, so a future
 // change to the canonical stage order can't silently desync these from the
-// rest of the file's own index-based comparisons above.
-const SHORTLISTED_PLUS_STAGES = STAGE_ORDER.slice(STAGE_ORDER.indexOf('Shortlisted'));
+// rest of the file's own index-based comparisons above. "Shortlisted" was
+// retired as a distinct stage (2026-09-01) — being shortlisted now directly
+// means reaching Interview Round 1, so that's Pass Rate's new milestone.
+const SHORTLISTED_PLUS_STAGES = STAGE_ORDER.slice(STAGE_ORDER.indexOf('Interview Round 1'));
 const OFFER_ACCEPTED_PLUS_STAGES = STAGE_ORDER.slice(STAGE_ORDER.indexOf('Offer Accepted'));
 
 // ─── GET /api/dashboard — all Phase 1 metrics in one call ────────────────────
@@ -199,7 +201,14 @@ router.get('/', async (req: Request, res: Response) => {
       `, scoped?.params || []);
     })(),
 
-    // Roles with aging alerts (open roles past thresholds)
+    // Roles feeding BOTH the Aging Roles table (Approved/Live – Sourcing/On
+    // Hold, every role in that set — not just overdue ones, per the
+    // 2026-09-01 "show days open for everyone, only highlight what's
+    // actually overdue" decision) AND avg_active_role_age_days's "open
+    // roles" population (Live – Sourcing/Approved/Under Review — a
+    // deliberately different 3-status set, see below). The union of both
+    // sets is fetched once here; each consumer filters down to its own
+    // subset in JS rather than paying for two near-identical queries.
     (() => {
       const f = buildRoleFilterSql(filters, 1);
       return query<{ id: string; title: string; priority: string; hiring_manager_name: string;
@@ -210,7 +219,7 @@ router.get('/', async (req: Request, res: Response) => {
                COUNT(a.id) FILTER (WHERE a.status='Active') AS active_count
         FROM roles r
         LEFT JOIN applications a ON a.role_id = r.id
-        WHERE r.status NOT IN ('Closed – Filled','Closed – Cancelled','On Hold','Draft')
+        WHERE r.status IN ('Approved','Live – Sourcing','Under Review','On Hold')
         ${f.sql}
         GROUP BY r.id
         ORDER BY r.priority, r.start_date
@@ -410,15 +419,29 @@ router.get('/', async (req: Request, res: Response) => {
   const redAlertRoles   = rolesWithAging.filter(r => r.aging_alert === 'red').length;
   const lowPipelineRoles = rolesWithAging.filter(r => r.active_count < 3 && r.aging_alert !== 'ok');
 
-  // Average active role age (KPI redesign) — mean days_open over the same
-  // "open roles" set already fetched for Aging Roles (its WHERE clause
-  // already reduces to exactly Live – Sourcing/Approved/Under Review).
-  // Roles with no start_date yet (not yet approved) are excluded rather
-  // than counted as 0 — age isn't meaningful for them yet.
-  const rolesWithRealAge = rolesWithAging.filter(r => !!r.start_date);
+  // Average active role age (KPI redesign) — mean days_open over the "open
+  // roles" set (Live – Sourcing/Approved/Under Review), a deliberately
+  // different 3-status population than the Aging Roles table below (which
+  // wants On Hold instead of Under Review) — both are carved out of the
+  // same shared agingRoles query rather than paying for two near-identical
+  // ones. Roles with no start_date yet (not yet approved) are excluded
+  // rather than counted as 0 — age isn't meaningful for them yet.
+  const rolesWithRealAge = rolesWithAging.filter(r =>
+    !!r.start_date && ['Live – Sourcing', 'Approved', 'Under Review'].includes(r.status)
+  );
   const avgActiveRoleAgeDays = rolesWithRealAge.length > 0
     ? Math.round(rolesWithRealAge.reduce((sum, r) => sum + r.days_open, 0) / rolesWithRealAge.length)
     : null;
+
+  // Aging Roles table population (2026-09-01) — every role currently
+  // Approved, Live – Sourcing, or On Hold, shown with its own days-open
+  // figure regardless of whether it's actually overdue; only a genuinely
+  // overdue Approved/Live – Sourcing role gets the red/yellow highlight
+  // (On Hold never does — computeAging() already returns 'ok' for it, per
+  // the "aging SLA only applies to Approved/Live – Sourcing" rule).
+  const agingTableRoles = rolesWithAging.filter(r =>
+    ['Approved', 'Live – Sourcing', 'On Hold'].includes(r.status)
+  );
 
   // ── SLA breach total + by-owner (the merged KPI card) ───────────────────────
   // A Hiring Manager's KPI number is scoped to just their own queue (matching
@@ -607,7 +630,7 @@ router.get('/', async (req: Request, res: Response) => {
       joining_risk_count:          joiningRisk.length,
     },
     hiring_funnel_snapshot: hiringFunnelSnapshot,
-    aging_roles:   rolesWithAging.filter(r => r.aging_alert !== 'ok'),
+    aging_roles:   agingTableRoles,
     low_pipeline:  lowPipelineRoles,
     roles_by_status: rolesByStatus,
     source_quality:     sourceQuality,

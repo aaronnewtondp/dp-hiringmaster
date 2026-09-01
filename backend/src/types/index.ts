@@ -311,8 +311,13 @@ export interface PendingActionGroup {
 // backend consumer (interviews.ts's auto-advance-on-positive-feedback)
 // needed the exact same list, to remove the drift risk of two independent
 // copies silently disagreeing.
+// Resume Review and Shortlisted were retired as distinct stages (2026-09-01):
+// every application now runs through ResumeIQ scoring automatically the
+// moment it's created, so there's no separate "move into Resume Review"
+// step, and "Shortlist" now advances an application directly from Applied
+// to Interview Round 1 rather than parking it at an intermediate stage.
 export const STAGE_ORDER: string[] = [
-  'Applied', 'Resume Review', 'Shortlisted',
+  'Applied',
   'Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round',
   'Reference Check', 'Pre-Joining Documents', 'Offer Discussion',
   'Offer Released', 'Offer Accepted', 'Joined',

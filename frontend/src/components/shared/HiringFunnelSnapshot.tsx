@@ -21,7 +21,7 @@ const CLIP_FIRST = 'polygon(0% 0%, 80% 0%, 100% 50%, 80% 100%, 0% 100%)';
 const CLIP_REST  = 'polygon(0% 0%, 80% 0%, 100% 50%, 80% 100%, 0% 100%, 20% 50%)';
 
 const STAGE_LABELS: Record<string, string> = {
-  'Applied': 'Applied', 'Resume Review': 'Resume Review', 'Shortlisted': 'Shortlisted',
+  'Applied': 'Applied',
   'Interview Round 1': 'Interview 1', 'Interview Round 2': 'Interview 2',
   'Assignment Round': 'Assignment', 'Founders Round': 'Founders',
   'Reference Check': 'Reference Check', 'Pre-Joining Documents': 'Pre-Joining',
@@ -41,44 +41,29 @@ function toggleBtnClass(active: boolean) {
   }`;
 }
 
-function railBtnClass(active: boolean) {
-  // Deliberately no truncate/line-clamp — a role title wraps to as many
-  // lines as it needs (the rail's own max-h-80 overflow-y-auto already
-  // bounds the section) so a name is never cut off, per the user's
-  // explicit "all names should be clearly visible" ask. line-clamp-2 was
-  // tried first but doesn't actually clamp to 2 visible lines in this
-  // browser's rendering of legacy -webkit-box (confirmed via computed
-  // style/box metrics) — plain wrapping has no such cross-engine risk.
-  return `w-full text-left px-3 py-2 rounded-lg text-xs font-medium leading-snug whitespace-normal break-words transition-colors ${
-    active ? 'bg-dp-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-  }`;
-}
-
+// Local per-section Role filter (and its rail) was retired — this section
+// now relies solely on the Dashboard's own master filters, matching every
+// other section on the page instead of carrying an independent one.
 export default function HiringFunnelSnapshot({
   masterFilterParams,
-  roleOptions,
 }: {
   masterFilterParams: Record<string, string[]>;
-  roleOptions: { value: string; label: string }[];
 }) {
-  const [localRoleId, setLocalRoleId] = useState<string | null>(null);
   const [owner, setOwner] = useState<string | null>(null);
   const [openStage, setOpenStage] = useState<string | null>(null);
   const [openType, setOpenType] = useState<string | null>(null);
 
   const params: Record<string, string | string[]> = { ...masterFilterParams };
-  if (localRoleId) params.role_id = [localRoleId];
   if (owner) params.owner = owner;
 
   // Its own lightweight endpoint, not the full GET /api/dashboard this used
   // to call — this section only ever reads hiring_funnel_snapshot out of
-  // that much larger payload, so every load here (including every local
-  // owner/role-rail toggle, independent of the page's master filters) used
-  // to duplicate 13 unrelated queries' worth of work for nothing. See the
-  // RCA comment on GET /dashboard/funnel-snapshot in backend/src/routes/
-  // dashboard.ts.
+  // that much larger payload, so every load here (including every owner
+  // toggle, independent of the page's master filters) used to duplicate 13
+  // unrelated queries' worth of work for nothing. See the RCA comment on
+  // GET /dashboard/funnel-snapshot in backend/src/routes/dashboard.ts.
   const { data, isLoading } = useQuery<{ data: { hiring_funnel_snapshot: HiringFunnelSnapshotStage[] } }>({
-    queryKey: ['dashboard-funnel-snapshot', masterFilterParams, localRoleId, owner],
+    queryKey: ['dashboard-funnel-snapshot', masterFilterParams, owner],
     queryFn:  () => dashboardApi.funnelSnapshot(params),
   });
 
@@ -114,35 +99,8 @@ export default function HiringFunnelSnapshot({
         ))}
       </div>
 
-      <div className="px-5 pb-5 pt-4 flex gap-4">
-        {/* Role filter — vertical rail, left (collapses to a select below lg).
-            Bounded height with its own scroll region — a company with many
-            open roles must never let this rail dictate the whole page's
-            height. */}
-        <div className="hidden lg:flex flex-col gap-1 w-56 shrink-0">
-          <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-1 px-1">Filter this section by role</div>
-          <div className="flex flex-col gap-1 max-h-80 overflow-y-auto pr-1">
-            <button className={railBtnClass(localRoleId === null)} onClick={() => setLocalRoleId(null)}>All roles</button>
-            {roleOptions.map(r => (
-              <button key={r.value} className={railBtnClass(localRoleId === r.value)} onClick={() => setLocalRoleId(r.value)} title={r.label}>
-                {r.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="lg:hidden w-full max-w-[10rem] shrink-0">
-          <label className="text-[10px] uppercase tracking-wide text-gray-400 mb-1 block">Filter this section by role</label>
-          <select
-            className="select text-xs"
-            value={localRoleId ?? ''}
-            onChange={e => setLocalRoleId(e.target.value || null)}
-          >
-            <option value="">All roles</option>
-            {roleOptions.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-          </select>
-        </div>
-
-        <div className="flex-1 min-w-0">
+      <div className="px-5 pb-5 pt-4">
+        <div className="max-w-4xl mx-auto">
           {isLoading ? (
             <div className="text-xs text-gray-400 py-8 text-center">Loading…</div>
           ) : (

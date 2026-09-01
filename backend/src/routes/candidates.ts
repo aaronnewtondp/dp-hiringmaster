@@ -4,6 +4,7 @@ import { authenticate, requireHR, stripRestrictedFields, canSeeCompForRole, isHR
 import { Candidate } from '../types/index.js';
 import { parseRoleFilters, buildRoleFilterSql, hasActiveFilters } from '../utils/roleFilters.js';
 import { isSeverelyOverBudget } from '../utils/budget.js';
+import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
 
 const router = Router();
 router.use(authenticate);
@@ -19,7 +20,8 @@ router.get('/', async (req: Request, res: Response) => {
       json_agg(json_build_object(
         'id', a.id, 'role_id', a.role_id, 'role_title', r.title,
         'stage', a.stage, 'status', a.status, 'ai_fit_score', a.ai_fit_score,
-        'last_updated', a.last_updated, 'hiring_manager_name', r.hiring_manager_name
+        'last_updated', a.last_updated, 'hiring_manager_name', r.hiring_manager_name,
+        'preferred_location', a.preferred_location, 'application_date', a.application_date
       ) ORDER BY a.application_date DESC) FILTER (WHERE a.id IS NOT NULL) AS applications
     FROM candidates c
     LEFT JOIN applications a ON a.candidate_id = c.id
@@ -316,7 +318,18 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     return { candidate, application };
   });
 
-  res.status(201).json(result);
+  // Every application is scored the moment it's created now — there's no
+  // separate "move to Resume Review" step to trigger it later (that stage
+  // was retired, see STAGE_ORDER). Synchronous/awaited, same no-fire-and-
+  // forget reasoning as JD generation: a callback scheduled after this
+  // response is sent has no guarantee of completing on Vercel's serverless
+  // runtime.
+  let resumeiq: { scored: boolean; error?: string } | undefined;
+  if (result.application) {
+    resumeiq = await runResumeIQScoring(result.application.id);
+  }
+
+  res.status(201).json({ ...result, resumeiq });
 });
 
 // ─── POST /api/candidates/:id/applications — link an existing candidate to a
@@ -369,7 +382,10 @@ router.post('/:id/applications', requireHR, async (req: Request, res: Response) 
     return app;
   });
 
-  res.status(201).json({ application });
+  // Same synchronous scoring trigger as POST / above.
+  const resumeiq = await runResumeIQScoring(application.id);
+
+  res.status(201).json({ application, resumeiq });
 });
 
 // ─── PATCH /api/candidates/:id — update profile fields, with edit log ────────

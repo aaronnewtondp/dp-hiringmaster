@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { AlertTriangle, Briefcase, Users, TrendingUp, TrendingDown, Radio, Gauge, Lock } from 'lucide-react';
 import { dashboardApi, rolesApi } from '../services/api.ts';
 import { DashboardData, Priority, STAGES, PRIORITIES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
-import { PriorityBadge, AgingBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import { PriorityBadge, AgingBadge, StageBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import HiringFunnelSnapshot from '../components/shared/HiringFunnelSnapshot.tsx';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
@@ -14,13 +14,17 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 // SLA breach types, per slaChecker.ts's stage/breach-type engine — kept here
 // (not generated from the backend) since these are fixed, named categories
 // meant for a human reader, not a live data shape.
+// Aging Roles now lists every Approved/Live – Sourcing/On Hold role, not
+// just overdue ones (2026-09-01) — sorted red-first so the roles that
+// actually need attention still surface at the top of a now-longer list.
+const AGING_SEVERITY: Record<'red' | 'yellow' | 'ok', number> = { red: 0, yellow: 1, ok: 2 };
+
 const SLA_BREACH_TYPES_INFO = (
   <div className="space-y-1.5">
     <div className="font-medium text-white">SLA breach types</div>
     <ul className="space-y-1">
-      <li><b>Idle Candidate</b> — no stage change in 48h+ (Applied, Reference Check, Pre-Joining Docs, Offer Discussion, Offer Released)</li>
-      <li><b>Resume Shortlist Pending</b> — HM hasn't shortlisted within 48h of Resume Review</li>
-      <li><b>Interview to be Scheduled</b> — HR hasn't scheduled an interview within 48h of Shortlisted</li>
+      <li><b>Idle Candidate</b> — no stage change in 48h+ (Reference Check, Pre-Joining Docs, Offer Discussion, Offer Released)</li>
+      <li><b>Resume Shortlist Pending</b> — HM hasn't shortlisted within 48h of Applied</li>
       <li><b>Interview/Founders Round Not Scheduled</b> — no round booked within 48h of entering that stage</li>
       <li><b>Assignment Not Sent</b> — assignment not sent within 48h of entering Assignment Round</li>
       <li><b>Interview/Founders Feedback Due</b> — HM hasn't submitted feedback within 48h of the interview</li>
@@ -48,13 +52,13 @@ function KpiCard({ icon: Icon, label, value, sub, accent, info, infoWidth, infoA
         <Icon className={`w-4 h-4 shrink-0 ${accent || 'text-gray-400'}`} />
         <span className="text-xs font-medium text-gray-500">{label}</span>
         {info && <InfoTooltip text={info} align={infoAlign} {...(infoWidth ? { width: infoWidth } : {})} />}
-        <span className="text-lg font-mono font-bold text-gray-900 ml-auto">{value}</span>
+        <span className="text-3xl font-mono font-bold text-gray-900 ml-auto">{value}</span>
       </div>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2 pt-3 border-t border-gray-100">
         {sub.map(([subLabel, subValue]) => (
           <div key={subLabel}>
             <div className="text-[11px] text-gray-400 leading-tight">{subLabel}</div>
-            <div className="text-xs font-mono font-semibold text-gray-700 mt-0.5">{subValue}</div>
+            <div className="text-sm font-mono font-semibold text-gray-700 mt-0.5">{subValue}</div>
           </div>
         ))}
       </div>
@@ -191,7 +195,7 @@ export default function Dashboard() {
       </div>
 
       {/* Hiring Funnel Snapshot — replaces the old "Pending actions by owner" board */}
-      <HiringFunnelSnapshot masterFilterParams={filterParams} roleOptions={roleOptions} />
+      <HiringFunnelSnapshot masterFilterParams={filterParams} />
 
       {/* Aging roles + Hiring funnel */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -199,35 +203,41 @@ export default function Dashboard() {
         <div className="card overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
             <h2 className="text-sm font-semibold text-gray-900">Aging roles</h2>
-            <InfoTooltip align="left" text="Open roles (Live – Sourcing, Approved, or Under Review) that have passed their Close Target date, colored by how far overdue: yellow then red, thresholds set per priority. A role with no Close Target set falls back to flagging on days-since-opened instead. Not overdue yet never appears here regardless of how long the role has been open." />
+            <InfoTooltip align="left" text="Every role currently Approved, Live – Sourcing, or On Hold, with how long it's been open. Only an Approved or Live – Sourcing role that's actually passed its own Close Target gets highlighted — yellow then red, thresholds set per priority — a role with no Close Target set falls back to flagging on days-since-opened instead. On Hold roles are shown for reference (how long they've been open) but never get an aging alert, since the clock isn't really running while a role is paused." />
           </div>
           {aging_roles.length === 0 ? (
-            <div className="p-5"><EmptyState title="All roles within thresholds ✓" /></div>
+            <div className="p-5"><EmptyState title="No open roles" /></div>
           ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="table-th">Role</th>
-                  <th className="table-th">P</th>
-                  <th className="table-th">HM</th>
-                  <th className="table-th">Age</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {aging_roles.map(r => (
-                  <tr key={r.id} className={r.aging_alert === 'red' ? 'bg-red-50' : 'bg-amber-50'}>
-                    <td className="table-td font-medium text-gray-900">
-                      <Link to={`/roles/${r.id}`} className="hover:text-dp-600">{r.title}</Link>
-                    </td>
-                    <td className="table-td"><PriorityBadge priority={r.priority as Priority} /></td>
-                    <td className="table-td text-gray-500 text-xs">{r.hiring_manager_name}</td>
-                    <td className="table-td">
-                      <AgingBadge alert={r.aging_alert} daysOpen={r.days_open} daysOverdue={r.days_overdue} />
-                    </td>
+            <div className="max-h-96 overflow-y-auto">
+              <table className="w-full">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="border-b border-gray-100">
+                    <th className="table-th">Role</th>
+                    <th className="table-th">P</th>
+                    <th className="table-th">HM</th>
+                    <th className="table-th">Status</th>
+                    <th className="table-th">Age</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {[...aging_roles]
+                    .sort((a, b) => AGING_SEVERITY[a.aging_alert] - AGING_SEVERITY[b.aging_alert])
+                    .map(r => (
+                    <tr key={r.id} className={r.aging_alert === 'red' ? 'bg-red-50' : r.aging_alert === 'yellow' ? 'bg-amber-50' : ''}>
+                      <td className="table-td font-medium text-gray-900">
+                        <Link to={`/roles/${r.id}`} className="hover:text-dp-600">{r.title}</Link>
+                      </td>
+                      <td className="table-td"><PriorityBadge priority={r.priority as Priority} /></td>
+                      <td className="table-td text-gray-500 text-xs">{r.hiring_manager_name}</td>
+                      <td className="table-td"><StageBadge stage={r.status} /></td>
+                      <td className="table-td">
+                        <AgingBadge alert={r.aging_alert} daysOpen={r.days_open} daysOverdue={r.days_overdue} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
@@ -289,7 +299,7 @@ export default function Dashboard() {
             <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
               <Radio className="w-4 h-4 text-gray-400" />
               <h2 className="text-sm font-semibold text-gray-900">Source quality</h2>
-              <InfoTooltip align="left" text="Computed over full application history (not just Active), per source channel. Pass rate = % that ever reached Shortlisted or later. Hire rate = % that ever reached Offer Accepted or later. Contribution = that channel's share of all sourced applications." />
+              <InfoTooltip align="left" text="Computed over full application history (not just Active), per source channel. Pass rate = % that ever reached Interview Round 1 or later. Hire rate = % that ever reached Offer Accepted or later. Contribution = that channel's share of all sourced applications." />
             </div>
             <div className="px-5 py-4 space-y-4">
               {source_quality.length === 0 ? (

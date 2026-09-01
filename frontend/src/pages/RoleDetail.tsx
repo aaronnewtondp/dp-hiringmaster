@@ -14,7 +14,7 @@ import { format } from 'date-fns';
 
 export default function RoleDetail() {
   const { id } = useParams<{ id: string }>();
-  const { canHR, user } = useAuth();
+  const { canHR } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
 
@@ -53,14 +53,11 @@ export default function RoleDetail() {
   const total    = pipelineData?.data?.total || 0;
   const activity = activityData?.data?.activity || [];
 
-  // Approving (Draft/Under Review → Approved) is open to HR-tier (via
-  // canHR) or specifically the Hiring Manager named on THIS role — matched
-  // by name since roles.hiring_manager_name has no user_id to compare
-  // against instead. Mirrors the backend's own check in roles.ts exactly.
-  const isHmForThisRole = user?.persona === 'hiring_manager' &&
-    !!role?.hiring_manager_name &&
-    role.hiring_manager_name.trim().toLowerCase() === user.name.trim().toLowerCase();
-  const canApproveThisRole = canHR || isHmForThisRole;
+  // Approving (Draft/Under Review → Approved) is HR-tier only (HR/Admin,
+  // Leadership, Super Admin) — a Hiring Manager can no longer approve even
+  // their own role (2026-09-01 product decision). Mirrors the backend's own
+  // check in roles.ts exactly.
+  const canApproveThisRole = canHR;
 
   const handleApprove = async () => {
     setApproving(true);

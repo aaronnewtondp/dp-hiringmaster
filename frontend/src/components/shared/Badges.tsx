@@ -21,8 +21,7 @@ export function StageBadge({ stage }: { stage: string }) {
     stage.startsWith('Interview') ? 'bg-dp-100 text-dp-800' :
     stage === 'Founders Round'    ? 'bg-indigo-100 text-indigo-800' :
     stage === 'Assignment Round'  ? 'bg-violet-100 text-violet-700' :
-    stage === 'Shortlisted'       ? 'bg-violet-100 text-violet-800' :
-    stage === 'Resume Review'     ? 'bg-yellow-100 text-yellow-800' :
+    stage === 'Applied'           ? 'bg-yellow-100 text-yellow-800' :
     'bg-gray-100 text-gray-600';
 
   return (

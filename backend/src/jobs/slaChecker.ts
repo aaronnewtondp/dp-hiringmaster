@@ -45,7 +45,7 @@ async function resolveOrphanedActions(): Promise<void> {
 // construction — "Idle Candidate" only ever appears for a stage with no
 // other breach type defined for it, never as a runtime fallback race.
 const BREACH_IDLE_HOURS = 48;
-const BREACH_STANDARD_HOURS = 48;              // Resume Review / Shortlisted / Not-Scheduled / Feedback-Due
+const BREACH_STANDARD_HOURS = 48;              // Applied / Not-Scheduled / Feedback-Due
 const BREACH_ASSIGNMENT_FEEDBACK_HOURS = 96;
 
 type Owner = 'HR / Recruiter' | 'Hiring Manager';
@@ -108,13 +108,21 @@ async function applyBreachBatch(
 }
 
 // ─── 1. Flat, stage-entry-time-anchored breaches (no round involved) ─────────
-// Applied / Reference Check / Pre-Joining Documents / Offer Discussion /
-// Offer Released all share the plain "Idle Candidate" catch-all. Resume
-// Review and Shortlisted each get their own named breach type and owner.
+// Reference Check / Pre-Joining Documents / Offer Discussion / Offer
+// Released all share the plain "Idle Candidate" catch-all. Applied gets its
+// own named breach type and owner instead (below) — 2026-09-01: 'Resume
+// Review' and 'Shortlisted' were retired as distinct stages (every
+// application is scored automatically at Applied now, and "Shortlist"
+// advances straight to Interview Round 1), so "Resume Shortlist Pending"
+// now measures from Applied instead, and the old "Interview to be
+// Scheduled" (fired at Shortlisted) is dropped outright — once shortlisting
+// lands a candidate directly at Interview Round 1, "Interview 1 Not
+// Scheduled" below (NOT_YET_ACTIONED_STAGES) already covers exactly the
+// same "no round booked yet" condition; keeping both would have been two
+// breach types firing for the same thing.
 const FLAT_STAGE_CHECKS: Array<{ stages: string[]; actionType: string; owner: Owner }> = [
-  { stages: ['Applied', 'Reference Check', 'Pre-Joining Documents', 'Offer Discussion', 'Offer Released'], actionType: 'Idle Candidate', owner: 'HR / Recruiter' },
-  { stages: ['Resume Review'], actionType: 'Resume Shortlist Pending', owner: 'Hiring Manager' },
-  { stages: ['Shortlisted'], actionType: 'Interview to be Scheduled', owner: 'HR / Recruiter' },
+  { stages: ['Reference Check', 'Pre-Joining Documents', 'Offer Discussion', 'Offer Released'], actionType: 'Idle Candidate', owner: 'HR / Recruiter' },
+  { stages: ['Applied'], actionType: 'Resume Shortlist Pending', owner: 'Hiring Manager' },
 ];
 
 async function checkFlatStageBreaches(): Promise<void> {
@@ -236,7 +244,7 @@ async function checkFeedbackDue(): Promise<void> {
 // an application's stage changes, since one of these existing for the OLD
 // stage is stale the instant the application moves on.
 export const STAGE_SLA_ACTION_TYPES = [
-  'Idle Candidate', 'Resume Shortlist Pending', 'Interview to be Scheduled',
+  'Idle Candidate', 'Resume Shortlist Pending',
   ...NOT_YET_ACTIONED_STAGES.map(s => s.actionType),
   ...FEEDBACK_DUE_STAGES.map(s => s.actionType),
 ] as const;

@@ -2,8 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
 import { authenticate, requireHR, stripRestrictedFields, isHRTier, canSeeCompForRole } from '../middleware/auth.js';
 import { Application, SLA_HOURS, Candidate, Role } from '../types/index.js';
-import { scoreCandidate, priorityBucketFromScore } from '../services/resumeIQ.js';
-import { fetchResumeText } from '../services/driveService.js';
+import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
 import { parseRoleFilters, buildRoleFilterSql, toArray } from '../utils/roleFilters.js';
 import { STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
 import { isSeverelyOverBudget } from '../utils/budget.js';
@@ -13,10 +12,12 @@ router.use(authenticate);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 export function getSlaHours(stage: string, fitScore?: number | null): number {
-  if (stage === 'Resume Review') {
+  // Applied now covers what 'Resume Review' used to (that stage was
+  // retired — see STAGE_ORDER) — same high-fit/normal threshold, just
+  // measured from application creation instead of a later manual move.
+  if (stage === 'Applied') {
     return (fitScore && fitScore >= 75) ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL;
   }
-  if (stage === 'Shortlisted') return SLA_HOURS.HM_SHORTLIST;
   if (stage === 'Reference Check') return SLA_HOURS.REF_INIT;
   if (stage === 'Offer Released') return SLA_HOURS.OFFER_RELEASE;
   // 'Founders Round' no longer matches startsWith('Interview') after the
@@ -186,8 +187,10 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
   // A candidate 15%+ over the role's stated CTC band needs an explicit,
   // on-record reason before they can be shortlisted — enforced here (not
   // just the frontend gate) since this is the only place every shortlist
-  // path (single-row, bulk, either page) actually goes through.
-  if (new_stage === 'Shortlisted') {
+  // path (single-row, bulk, either page) actually goes through. "Shortlist"
+  // now means advancing straight to Interview Round 1 (the old intermediate
+  // 'Shortlisted' stage was retired — see STAGE_ORDER).
+  if (new_stage === 'Interview Round 1') {
     const candidate = await queryOne<{ expected_ctc: number }>('SELECT expected_ctc FROM candidates WHERE id=$1', [app.candidate_id]);
     const role      = await queryOne<{ ctc_band: string }>('SELECT ctc_band FROM roles WHERE id=$1', [app.role_id]);
     if (isSeverelyOverBudget(candidate?.expected_ctc, role?.ctc_band) && !budget_exception_reason_cat) {
@@ -197,11 +200,11 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
   }
 
   // HR-tier can advance to any stage. Everyone else may only make the one
-  // transition the simplified HM-shortlist workflow depends on — Resume
-  // Review straight to Shortlisted — from Scorecard Summary/My Queue's
+  // transition the simplified HM-shortlist workflow depends on — Applied
+  // straight to Interview Round 1 — from Scorecard Summary/My Tasks'
   // "Shortlist" action, which is deliberately open to every persona.
-  const canShortlistFromResumeReview = app.stage === 'Resume Review' && new_stage === 'Shortlisted';
-  if (!isHRTier(req.user!.persona) && !canShortlistFromResumeReview) {
+  const canShortlistFromApplied = app.stage === 'Applied' && new_stage === 'Interview Round 1';
+  if (!isHRTier(req.user!.persona) && !canShortlistFromApplied) {
     res.status(403).json({ error: 'HR access required' });
     return;
   }
@@ -285,91 +288,23 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
     );
   });
 
-  // Trigger ResumeIQ when entering Resume Review — synchronous (awaited),
-  // NOT fire-and-forget. Same reasoning as JD generation in roles.ts: a
-  // setImmediate() callback scheduled after the response is sent has no
-  // guarantee of ever completing on Vercel's serverless runtime (execution
-  // can be frozen/terminated as soon as the response goes out) — this was
-  // confirmed to be silently breaking JD generation in production the same
-  // way. Awaiting it here means this request takes as long as scoring
-  // actually takes; see vercel.json's maxDuration, raised to accommodate it.
+  // Defensive fallback only — every application is scored synchronously the
+  // moment it's created now (candidates.ts / candidateIngest.ts both call
+  // runResumeIQScoring() inline on creation), so this should normally be a
+  // no-op (score_avg already set). Kept here in case an application somehow
+  // reached this route unscored (e.g. pre-existing data from before this
+  // change), so advancing it still triggers scoring rather than silently
+  // leaving it unscored forever.
   let resumeiq: { scored: boolean; error?: string } | undefined;
-  if (new_stage === 'Resume Review' && !app.score_avg) {
-    try {
-      const candidate = await queryOne<Candidate>('SELECT * FROM candidates WHERE id=$1', [app.candidate_id]);
-      const role      = await queryOne<Role>('SELECT * FROM roles WHERE id=$1', [app.role_id]);
-      if (!candidate || !role) {
-        resumeiq = { scored: false, error: 'Candidate or role not found' };
-      } else {
-        // Fetch actual resume text from Drive if a link is on file.
-        // Falls back gracefully to profile-fields-only scoring on any failure.
-        let resumeText: string | null = null;
-        if (candidate.resume_drive_link) {
-          resumeText = await fetchResumeText(candidate.resume_drive_link);
-          if (resumeText) {
-            console.log(`[ResumeIQ] Resume text fetched for ${candidate.id} (${resumeText.length} chars)`);
-          } else {
-            console.warn(`[ResumeIQ] Could not fetch resume for ${candidate.id} — scoring from profile fields only`);
-          }
-        }
-
-        const result = await scoreCandidate(candidate, role, resumeText, app.preferred_location, app.screening_answers);
-        // ai_fit_score/ai_priority_bucket are the legacy 0-100-scale columns
-        // still read by the dashboard's fit buckets, the role-pipeline sort,
-        // and the SLA-by-fit-score branch above (line ~116) — nothing wrote
-        // to them once scoring moved to the 8-dimension score_* columns, so
-        // derive them from avgScore (0-10) here to keep every reader in sync.
-        const aiFitScore = Math.round(result.avgScore * 10);
-        const aiPriorityBucket = priorityBucketFromScore(result.avgScore);
-        await query(
-          `UPDATE applications SET
-             score_technical=$1, score_technical_note=$2,
-             score_experience=$3, score_experience_note=$4,
-             score_industry_fit=$5, score_industry_fit_note=$6,
-             score_culture_fit=$7, score_culture_fit_note=$8,
-             score_role_alignment=$9, score_role_alignment_note=$10,
-             score_trajectory=$11, score_trajectory_note=$12,
-             score_leadership=$13, score_leadership_note=$14,
-             score_communication=$15, score_communication_note=$16,
-             score_avg=$17, score_strengths=$18, score_red_flags=$19,
-             score_summary=$20, score_recommendation=$21, score_resume_read=$22,
-             score_computed_at=NOW(), ai_fit_score=$23, ai_priority_bucket=$24
-           WHERE id=$25`,
-          [
-            result.technical.score, result.technical.note,
-            result.experience.score, result.experience.note,
-            result.industryFit.score, result.industryFit.note,
-            result.cultureFit.score, result.cultureFit.note,
-            result.roleAlignment.score, result.roleAlignment.note,
-            result.trajectory.score, result.trajectory.note,
-            result.leadership.score, result.leadership.note,
-            result.communication.score, result.communication.note,
-            result.avgScore, result.strengths, result.redFlags,
-            result.summary, result.recommendation, result.resumeRead,
-            aiFitScore, aiPriorityBucket,
-            app.id,
-          ]
-        );
-        // Update SLA now we know the fit score (avgScore is out of 10)
-        const refinedSla = result.avgScore >= 8 ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL;
-        await query('UPDATE applications SET sla_hours=$1 WHERE id=$2', [refinedSla, app.id]);
-        await query(
-          `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by_name)
-           VALUES ($1,$2,$3,'ResumeIQ Scoring Completed',$4,$5,'System')`,
-          [app.id, app.candidate_id, app.role_id,
-           `Score: ${aiFitScore}/100 (${aiPriorityBucket})`,
-           aiPriorityBucket]
-        );
-        resumeiq = { scored: true };
-      }
-    } catch (err) {
-      console.error('[ResumeIQ] Scoring failed for', app.id, err);
-      resumeiq = { scored: false, error: 'Scoring failed — will retry automatically the next time this application enters Resume Review' };
-    }
+  if (!app.score_avg) {
+    resumeiq = await runResumeIQScoring(app.id);
   }
 
-  // If advancing to Shortlisted, create pending action for HM
-  if (new_stage === 'Shortlisted') {
+  // If shortlisting (Applied → Interview Round 1), create a pending action
+  // for the HM — same event this used to fire on reaching the old
+  // intermediate 'Shortlisted' stage, just retargeted to the new direct
+  // transition.
+  if (app.stage === 'Applied' && new_stage === 'Interview Round 1') {
     const role = await queryOne<{ title: string; hiring_manager_name: string }>(
       'SELECT title, hiring_manager_name FROM roles WHERE id = $1', [app.role_id]
     );
@@ -416,10 +351,10 @@ router.post('/:id/status', async (req: Request, res: Response) => {
 
   // HR-tier can set any status. Everyone else may only set the two values
   // the simplified HM workflow depends on — Hold for Future / Rejected —
-  // and only from Resume Review, matching the Shortlist carve-out above.
-  const canActFromResumeReview = app.stage === 'Resume Review' &&
+  // and only from Applied, matching the Shortlist carve-out above.
+  const canActFromApplied = app.stage === 'Applied' &&
     (new_status === 'Hold for Future' || new_status === 'Rejected');
-  if (!isHRTier(req.user!.persona) && !canActFromResumeReview) {
+  if (!isHRTier(req.user!.persona) && !canActFromApplied) {
     res.status(403).json({ error: 'HR access required' });
     return;
   }

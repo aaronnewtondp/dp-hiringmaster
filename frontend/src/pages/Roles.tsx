@@ -9,7 +9,7 @@ import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 
 const COLUMN_INFO: Record<string, string> = {
   'Age': 'Days overdue past this role\'s Close Target, and days since it opened — no alert shows at all until Close Target has actually passed.',
-  'Active Shortlist': 'Candidates currently sitting at Shortlisted or later, still Active — not a historical total.',
+  'Active Shortlist': 'Candidates currently sitting at Interview Round 1 or later, still Active — not a historical total.',
   'Active Candidates': 'Everyone currently Active in this role\'s pipeline, at any stage — not a lifetime total.',
 };
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
@@ -97,8 +97,10 @@ export default function Roles() {
         <MultiSelectFilter label="Status"           options={ROLE_STATUSES}     selected={statuses}    onChange={setStatuses} />
       </div>
 
-      {/* Table */}
-      <div className="card overflow-hidden">
+      {/* Table — overflow-x-auto (not overflow-hidden) so a narrow viewport
+          scrolls horizontally instead of silently clipping the last
+          columns with no way to reach them. */}
+      <div className="card overflow-x-auto">
         {isLoading ? (
           <div className="flex justify-center p-12"><Spinner size="lg" /></div>
         ) : filtered.length === 0 ? (
@@ -109,7 +111,7 @@ export default function Roles() {
               <tr>
                 {[
                   'Role', 'Priority', 'Department', 'Location', 'Openings', 'Age',
-                  'Active Shortlist', ...(canHR ? ['Salary Range'] : []), 'Active Candidates', 'Status', '',
+                  'Active Candidates', 'Active Shortlist', ...(canHR ? ['Salary Range'] : []), 'Status', '',
                 ].map(h => (
                   <th
                     key={h}
@@ -142,15 +144,15 @@ export default function Roles() {
                   <td className="table-td text-center">
                     <AgingBadge alert={role.aging_alert} daysOpen={role.days_open} daysOverdue={role.days_overdue} />
                   </td>
-                  <td className="table-td text-center text-gray-500">{role.shortlisted_count ?? 0}</td>
-                  {canHR && (
-                    <td className="table-td text-gray-500 text-xs whitespace-nowrap">{role.ctc_band || '—'}</td>
-                  )}
                   <td className="table-td text-center font-medium">
                     <span className={role.active_candidate_count === 0 ? 'text-red-500' : 'text-gray-900'}>
                       {role.active_candidate_count ?? 0}
                     </span>
                   </td>
+                  <td className="table-td text-center text-gray-500">{role.shortlisted_count ?? 0}</td>
+                  {canHR && (
+                    <td className="table-td text-gray-500 text-xs whitespace-nowrap">{role.ctc_band || '—'}</td>
+                  )}
                   <td className="table-td"><StageBadge stage={role.status} /></td>
                   <td className="table-td">
                     <Link to={`/roles/${role.id}`} className="text-gray-400 hover:text-dp-600 transition-colors">

@@ -40,8 +40,12 @@ live.
 - [x] ResumeIQ score display — rebuilt as full 8-dimension table
       (`ResumeIQPanel.tsx`), matching the `digitalpaani-candidate-scoring`
       skill's output format exactly
-- [x] HM Queue page (`HMQueue.tsx`) — shortlist decisions + feedback due,
-      visible to `hiring_manager`/`interviewer`/`leadership` personas
+- [x] HM Queue page (`HMQueue.tsx`) — shortlist decisions + feedback due.
+      **Superseded in Phase 5** — renamed to "My Tasks" (`MyTasks.tsx`,
+      `/my-tasks`), now visible to every persona instead of just
+      `hiring_manager`/`leadership` (the `interviewer` persona referenced
+      here no longer exists — merged into `hiring_manager` earlier in the
+      project, see the bug-fix log at the bottom of this file).
 - [x] SLA checker fixed for Vercel — compute-on-read pattern in
       `dashboard.ts`, since Vercel Hobby doesn't support the 15-min cron the
       original design assumed
@@ -156,6 +160,61 @@ live.
 
 ---
 
+## Phase 5 — Pipeline simplification, ownership-scoped worklists, UI polish
+
+- [x] **Stage model simplified — 'Resume Review' and 'Shortlisted' retired.**
+      `STAGE_ORDER`/`STAGES` cut from 13 to 11 stages. Every application
+      starts at `Applied` and is scored by ResumeIQ automatically and
+      synchronously at creation (`resumeIQTrigger.ts`'s
+      `runResumeIQScoring()`, called from `candidates.ts` and
+      `candidateIngest.ts`) rather than on a later stage transition.
+      "Shortlisting" is now a direct `Applied` → `Interview Round 1` move,
+      open to every persona from `Applied` specifically (still HR-tier-only
+      for every other transition). Touched the budget-exception gate, the
+      SLA breach engine (`Idle Candidate` no longer covers `Applied`;
+      `Resume Shortlist Pending` retargeted to `Applied`; the old
+      `Interview to be Scheduled` breach dropped as redundant with
+      `Interview 1 Not Scheduled`), Source Quality's Pass Rate definition,
+      and Roles' `Active Shortlist` count. A one-time data migration moved
+      every already-existing application off the two retired stage values
+      on both local Docker and production Supabase (documented in
+      `schema.sql`) — removing a stage from the type doesn't touch rows
+      already sitting at the old value.
+- [x] **Role approval restricted to HR-tier.** A Hiring Manager can no
+      longer approve even their own role (`PATCH /:id`'s `isHmForThisRole`
+      carve-out removed — the whole route is now `isHRTier`-gated).
+      Approver name/date are captured and shown; Open Date copies from
+      Approval Date the same moment, feeding Role Age.
+- [x] **Aging Roles widened** to list every `Approved`/`Live – Sourcing`/
+      `On Hold` role (not just overdue ones), with alert coloring only for
+      roles actually past their Close Target.
+- [x] **"My Tasks"** (renamed from "My Queue", `MyTasks.tsx`, `/my-tasks`,
+      visible to every persona). Its "Ready for review" section is scoped
+      per persona: HR/Admin & Super Admin see every `Applied` candidate
+      unfiltered; a Hiring Manager sees only their own role(s); Leadership
+      sees only candidates flagged for Founder Review
+      (`founder_review_flag`) — the one existing Leadership-specific
+      concept tied to individual applications, rather than either
+      "everything" or "nothing".
+- [x] **Column-order consistency** across Candidates, Talent Pool, and
+      Scorecard Summary (Candidate → Role → Stage → \[Status on Talent
+      Pool] → Fit → CTC → ECTC → Notice → Preferred Location → Company /
+      Industry → Resume Link → \[scoring section on Scorecard] →
+      Application Date → Last Updated/Last Added → Actions). Talent Pool
+      rebuilt from a card layout into a table (one row per candidate ×
+      application, preserving the "show full application history" behavior
+      the cards had). Candidates gained a sortable Application Date column
+      (plus Fit/Last Updated made sortable too).
+- [x] Dashboard KPI cards enlarged; Hiring Funnel Snapshot's local Role
+      filter removed (master filters only) and the chevron strip centered.
+- [x] Candidate Detail: Screening & Risk Notes collapsed by default behind
+      an "+ Add HR Screening Notes" button; Stage/Status action buttons
+      moved to the page's top-right for a single-application candidate
+      (stay per-row when there are multiple applications, since there's no
+      single unambiguous "the" stage to act on from a page-level control).
+
+---
+
 ## Notable bugs fixed this project (context for why certain code looks the way it does)
 
 - `express.json()` body parser must be registered **before** any route that
@@ -176,3 +235,12 @@ live.
   `candidates`-level columns — fixed on the Candidates list view; worth
   double-checking any new UI that touches these fields reads from the right
   table.
+- Removing a value from `STAGE_ORDER`/`STAGES` (or any similar enum-like
+  array) does **not** touch rows already stored with that old value —
+  `applications.stage` is plain `TEXT` with no `CHECK` constraint. Retiring
+  `Resume Review`/`Shortlisted` (Phase 5) left 378 local / 373 Supabase rows
+  silently stuck displaying a stage badge that no longer existed anywhere
+  else in the app, until caught by an in-browser check and fixed with a
+  one-time data migration (see `schema.sql`). Any future stage/enum removal
+  needs the same treatment: migrate existing rows in the same pass, not just
+  the type definition.
