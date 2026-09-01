@@ -117,20 +117,23 @@ export default function ScorecardSummary() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  // Scoped to Applied and Screened — this page's whole reason for existing
-  // is the shortlisting decision that only applies at that one stage (see
-  // the `reviewable` filter below), so there's nothing to gain by competing
-  // for the same flat `limit` window against every other stage's scored
-  // applications too. `scored_only` was dropped deliberately: an
-  // application whose ResumeIQ scoring failed or never completed
-  // (score_avg IS NULL) still needs the exact same shortlist/reject/hold
-  // decision — hiding it here just because it has no score left it
-  // permanently invisible with no way to discover or act on it. The score
-  // columns already render '—' for a null value, so nothing breaks by
-  // including these rows. `limit: '500'` is generous headroom above any
-  // realistic Active+Applied-and-Screened backlog for a queue that's meant
-  // to be worked down to zero, not accumulate indefinitely.
-  const params: Record<string, string | string[]> = { limit: '500', stage: 'Applied and Screened' };
+  // NOT scoped to Applied and Screened — this page compares every scored
+  // candidate across the whole pipeline, not just the shortlisting queue
+  // (removing every other stage broke that comparison entirely — see
+  // scored_only_exempt_stage below for how the shortlisting queue still
+  // stays fully visible without narrowing the fetch to just it).
+  // `scored_only_exempt_stage: 'Applied and Screened'` keeps `scored_only`'s
+  // original "only show real ResumeIQ scores" rule for every other stage,
+  // but carves out Applied and Screened: an application there whose
+  // automatic scoring failed or never completed (score_avg IS NULL) still
+  // needs the exact same shortlist/reject/hold decision, so it can't be
+  // hidden just because it has no score yet. The score columns already
+  // render '—' for a null value, so nothing breaks by including these rows.
+  // `limit: '500'` is generous headroom above any realistic Active+scored
+  // population across the whole pipeline.
+  const params: Record<string, string | string[]> = {
+    limit: '500', scored_only: 'true', scored_only_exempt_stage: 'Applied and Screened',
+  };
   if (search)              params.q = search;
   if (roleIds.length)     params.role_id = roleIds;
   if (departments.length) params.department = departments;
@@ -309,8 +312,8 @@ export default function ScorecardSummary() {
           } />
         </div>
         <p className="text-sm text-gray-500 mt-0.5">
-          Every candidate at Applied and Screened, ranked and compared side by side — mirrors the
-          digitalpaani-candidate-scoring skill's output format.
+          Every candidate at Applied and Screened, plus every other ResumeIQ-scored active candidate,
+          ranked and compared side by side — mirrors the digitalpaani-candidate-scoring skill's output format.
         </p>
         {roleIds.length === 1 && roleOptions.some(r => r.value === roleIds[0]) && (
           <div className="mt-2 inline-flex items-center gap-2 text-sm bg-dp-50 text-dp-800 px-3 py-1.5 rounded-lg">

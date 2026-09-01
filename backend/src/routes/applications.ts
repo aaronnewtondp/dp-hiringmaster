@@ -46,7 +46,7 @@ async function logActivity(
 // ─── GET /api/applications — list with filters ────────────────────────────────
 router.get('/', async (req: Request, res: Response) => {
   const { stage, status, screening_status, sla_breach, founder_flag,
-          exclude_stale_archived, scored_only, q, limit = '50', offset = '0' } = req.query;
+          exclude_stale_archived, scored_only, scored_only_exempt_stage, q, limit = '50', offset = '0' } = req.query;
 
   let sql = `
     SELECT a.*, c.full_name AS candidate_name, c.email, c.phone,
@@ -90,9 +90,21 @@ router.get('/', async (req: Request, res: Response) => {
   }
   // Scorecard Summary's "only show applications that have actually been
   // through ResumeIQ" filter — opt-in, so every existing caller is
-  // unaffected.
+  // unaffected. `scored_only_exempt_stage` carves out one stage from that
+  // rule (Scorecard Summary passes 'Applied and Screened'): every
+  // application at that stage shows regardless of score — including one
+  // whose automatic ResumeIQ pass failed or never ran, since it still needs
+  // the exact same shortlist/reject/hold decision — while every OTHER
+  // stage's applications still require a real score to appear, same as
+  // before. Without the exempt stage, this is the original unconditional
+  // filter.
   if (scored_only === 'true') {
-    sql += ` AND a.score_avg IS NOT NULL`;
+    if (scored_only_exempt_stage) {
+      sql += ` AND (a.score_avg IS NOT NULL OR a.stage = $${i++})`;
+      params.push(scored_only_exempt_stage);
+    } else {
+      sql += ` AND a.score_avg IS NOT NULL`;
+    }
   }
   // Free-text search — matches candidates.ts's own `q` param SQL shape.
   // Candidates.tsx used to filter client-side over whatever this route's
@@ -115,7 +127,20 @@ router.get('/', async (req: Request, res: Response) => {
   params.push(...roleFilterParams);
   i += roleFilterParams.length;
 
-  sql += ` ORDER BY a.ai_fit_score DESC NULLS LAST, a.application_date DESC LIMIT $${i++} OFFSET $${i++}`;
+  // scored_only_exempt_stage's whole point is that an unscored row at that
+  // stage must never be missing — but a plain `ai_fit_score DESC NULLS
+  // LAST` sorts every unscored row (score or not) dead last, behind every
+  // real score in the table. At high enough volume that's exactly as bad
+  // as the bug this exists to fix: once non-null scores alone fill the
+  // LIMIT window, no unscored exempt-stage row ever survives to reach the
+  // client. Ranking that stage first (regardless of score) guarantees it
+  // always wins the window; every other caller's ordering is unchanged.
+  if (scored_only_exempt_stage) {
+    sql += ` ORDER BY (a.stage = $${i++}) DESC, a.ai_fit_score DESC NULLS LAST, a.application_date DESC LIMIT $${i++} OFFSET $${i++}`;
+    params.push(scored_only_exempt_stage);
+  } else {
+    sql += ` ORDER BY a.ai_fit_score DESC NULLS LAST, a.application_date DESC LIMIT $${i++} OFFSET $${i++}`;
+  }
   params.push(parseInt(limit as string), parseInt(offset as string));
 
   const apps = await query<Application>(sql, params);
