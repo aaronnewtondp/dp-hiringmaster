@@ -13,7 +13,7 @@ test.describe('Candidate-Role Linking API', () => {
       });
       expect(res.status()).toBe(201);
       const { application } = await res.json();
-      expect(application.stage).toBe('Applied');
+      expect(application.stage).toBe('Applied and Screened');
       expect(application.status).toBe('Active');
       expect(application.recruiter_screening_status).toBe('New');
       expect(application.candidate_id).toBe(candidate.id);

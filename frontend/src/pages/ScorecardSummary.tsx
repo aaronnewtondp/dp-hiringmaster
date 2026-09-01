@@ -169,7 +169,7 @@ export default function ScorecardSummary() {
   // application is auto-scored right at Applied now (Resume Review was
   // retired as its own stage), so this is the one and only "reviewable"
   // stage.
-  const reviewable = apps.filter(a => a.stage === 'Applied');
+  const reviewable = apps.filter(a => a.stage === 'Applied and Screened');
   const allReviewableSelected  = reviewable.length > 0 && reviewable.every(a => selectedIds.has(a.id));
   const someReviewableSelected = reviewable.some(a => selectedIds.has(a.id));
 
@@ -430,12 +430,12 @@ export default function ScorecardSummary() {
                 <Fragment key={app.id}>
                   <tr className="hover:bg-gray-50 transition-colors">
                     <td className="table-td px-1.5 py-3">
-                      {app.stage === 'Applied' && (
+                      {app.stage === 'Applied and Screened' && (
                         <input type="checkbox" checked={selectedIds.has(app.id)} onChange={() => toggleSelected(app.id)} />
                       )}
                     </td>
-                    <td className="table-td px-1.5 py-3 text-xs text-gray-400">{idx + 1}</td>
-                    <td className="table-td px-1.5 py-3">
+                    <td className="table-td px-1.5 py-3 text-xs text-gray-400 truncate">{idx + 1}</td>
+                    <td className="table-td px-1.5 py-3 truncate">
                       <Link to={`/candidates/${app.candidate_id}`} className="text-sm font-medium text-gray-900 hover:text-dp-600 block truncate">
                         {app.candidate_name}
                       </Link>
@@ -446,7 +446,13 @@ export default function ScorecardSummary() {
                         {app.role_title}
                       </Link>
                     </td>
-                    <td className="table-td px-1.5 py-3">
+                    {/* truncate on the <td> itself (not just its child
+                        button/span) is load-bearing here — a table-fixed
+                        cell's own overflow stays visible by default, so a
+                        long Stage value like "Assignment Round" rendered
+                        without it visibly bled into the next column
+                        (CTC → ECTC) rather than actually clipping. */}
+                    <td className="table-td px-1.5 py-3 truncate">
                       {canLead ? (
                         <button onClick={() => setStageModalApp(app)} className="text-xs text-gray-600 hover:text-dp-600 underline truncate block">
                           {app.stage}
@@ -474,7 +480,7 @@ export default function ScorecardSummary() {
                     <td className="table-td px-1.5 py-3 text-xs text-gray-500 truncate" title={`${app.candidate_company || '—'} / ${app.candidate_industry || '—'}`}>
                       {app.candidate_company || '—'} / {app.candidate_industry || '—'}
                     </td>
-                    <td className="table-td px-1.5 py-3 text-xs">
+                    <td className="table-td px-1.5 py-3 text-xs truncate">
                       {app.candidate_resume_link ? (
                         <a href={app.candidate_resume_link} target="_blank" rel="noreferrer" className="text-dp-600 hover:underline">View</a>
                       ) : '—'}
@@ -485,12 +491,12 @@ export default function ScorecardSummary() {
                     <td className="table-td px-1.5 py-3 text-sm font-semibold text-gray-900">
                       {app.score_avg != null ? Number(app.score_avg).toFixed(1) : '—'}
                     </td>
-                    <td className="table-td px-1.5 py-3"><VerdictBadge recommendation={app.score_recommendation} /></td>
+                    <td className="table-td px-1.5 py-3 truncate"><VerdictBadge recommendation={app.score_recommendation} /></td>
                     <td className="table-td px-1.5 py-3 text-xs font-mono text-gray-500 truncate">
                       {app.application_date ? `${Math.floor((Date.now() - new Date(app.application_date).getTime()) / 86400000)}d` : '—'}
                     </td>
                     <td className="table-td px-1.5 py-3">
-                      {app.stage === 'Applied' && (
+                      {app.stage === 'Applied and Screened' && (
                         <div className="flex gap-1.5">
                           <button
                             onClick={() => setRejectTargetIds([app.id])}

@@ -117,7 +117,7 @@ live.
       logging an `activity_log` entry (`Unmatched Role — Manual
       Reconciliation`) for HR to resolve by hand rather than failing the
       whole webhook call. A clean match creates an `applications` row
-      (`stage='Applied'`, source `'Job Application Form'`), reusing the
+      (`stage='Applied and Screened'`, source `'Job Application Form'`), reusing the
       exact insert shape `candidates.ts`'s manual creation route already
       uses. Verified live against local Docker: fresh candidate + matched
       role, duplicate resubmit (no-op), same email + second role (reuses
@@ -164,22 +164,35 @@ live.
 
 - [x] **Stage model simplified — 'Resume Review' and 'Shortlisted' retired.**
       `STAGE_ORDER`/`STAGES` cut from 13 to 11 stages. Every application
-      starts at `Applied` and is scored by ResumeIQ automatically and
+      starts at `Applied and Screened` (renamed same-day from plain
+      `Applied` — see below) and is scored by ResumeIQ automatically and
       synchronously at creation (`resumeIQTrigger.ts`'s
       `runResumeIQScoring()`, called from `candidates.ts` and
       `candidateIngest.ts`) rather than on a later stage transition.
-      "Shortlisting" is now a direct `Applied` → `Interview Round 1` move,
-      open to every persona from `Applied` specifically (still HR-tier-only
-      for every other transition). Touched the budget-exception gate, the
-      SLA breach engine (`Idle Candidate` no longer covers `Applied`;
-      `Resume Shortlist Pending` retargeted to `Applied`; the old
-      `Interview to be Scheduled` breach dropped as redundant with
-      `Interview 1 Not Scheduled`), Source Quality's Pass Rate definition,
-      and Roles' `Active Shortlist` count. A one-time data migration moved
-      every already-existing application off the two retired stage values
-      on both local Docker and production Supabase (documented in
-      `schema.sql`) — removing a stage from the type doesn't touch rows
-      already sitting at the old value.
+      "Shortlisting" is now a direct `Applied and Screened` →
+      `Interview Round 1` move, open to every persona from `Applied and
+      Screened` specifically (still HR-tier-only for every other
+      transition). Touched the budget-exception gate, the SLA breach engine
+      (`Idle Candidate` no longer covers this stage; `Resume Shortlist
+      Pending` retargeted to it; the old `Interview to be Scheduled` breach
+      dropped as redundant with `Interview 1 Not Scheduled`), Source
+      Quality's Pass Rate definition, and Roles' `Active Shortlist` count. A
+      one-time data migration moved every already-existing application off
+      the two retired stage values on both local Docker and production
+      Supabase (documented in `schema.sql`) — removing a stage from the
+      type doesn't touch rows already sitting at the old value.
+- [x] **'Applied' renamed 'Applied and Screened'** (same day as the above,
+      after using the plain name for a few hours) — the longer name signals
+      at a glance that ResumeIQ has already scored the candidate by the
+      time they're at this stage, not just that they submitted an
+      application. Same treatment as the stage retirement above: every
+      `STAGE_ORDER`/`FLAT_STAGE_CHECKS`/UI reference updated together with
+      a one-time data migration on local Docker and Supabase (schema.sql's
+      `DEFAULT` updated too). The stage's color was also standardized to
+      yellow across every visual (StageBadge, the candidate-detail pipeline
+      chevron bar, and the Dashboard's Hiring Funnel Snapshot, which shares
+      the same `STAGE_COLORS` constant) — previously slate-gray on the two
+      chevron views despite already being yellow on the plain badge.
 - [x] **Role approval restricted to HR-tier.** A Hiring Manager can no
       longer approve even their own role (`PATCH /:id`'s `isHmForThisRole`
       carve-out removed — the whole route is now `isHRTier`-gated).
@@ -190,7 +203,7 @@ live.
       roles actually past their Close Target.
 - [x] **"My Tasks"** (renamed from "My Queue", `MyTasks.tsx`, `/my-tasks`,
       visible to every persona). Its "Ready for review" section is scoped
-      per persona: HR/Admin & Super Admin see every `Applied` candidate
+      per persona: HR/Admin & Super Admin see every `Applied and Screened` candidate
       unfiltered; a Hiring Manager sees only their own role(s); Leadership
       sees only candidates flagged for Founder Review
       (`founder_review_flag`) — the one existing Leadership-specific

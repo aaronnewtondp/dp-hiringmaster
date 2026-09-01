@@ -74,8 +74,8 @@ test.describe('Access Control — restricted field enforcement', () => {
     });
 
     test('cannot advance application stage — returns 403', async ({ request }) => {
-      // Applied -> Interview Round 1 is the one open-to-everyone shortlist
-      // carve-out (canShortlistFromApplied in applications.ts), so this uses
+      // Applied and Screened -> Interview Round 1 is the one open-to-everyone
+      // shortlist carve-out (canShortlistFromApplied in applications.ts), so this uses
       // a different target stage to test the general "HM cannot advance
       // stage" rule rather than accidentally exercising that exception.
       const hrToken = await getToken(request, 'hr');

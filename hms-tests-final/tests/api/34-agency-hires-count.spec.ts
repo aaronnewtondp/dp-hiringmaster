@@ -49,7 +49,7 @@ test.describe('Agency Hires count (GET /api/agencies, GET /api/agencies/:id)', (
     expect(fetched.sourced_by_agency_id).toBe(agencyId);
   });
 
-  test('candidate sourced from an agency but still at Applied does NOT count as a hire', async ({ request }) => {
+  test('candidate sourced from an agency but still at Applied and Screened does NOT count as a hire', async ({ request }) => {
     const hrToken = await getToken(request, 'hr');
     const agencyId = 'AGN003'; // Talhive (seeded) — separate agency, avoids interference with the test above
 

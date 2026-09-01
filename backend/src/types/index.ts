@@ -315,9 +315,14 @@ export interface PendingActionGroup {
 // every application now runs through ResumeIQ scoring automatically the
 // moment it's created, so there's no separate "move into Resume Review"
 // step, and "Shortlist" now advances an application directly from Applied
-// to Interview Round 1 rather than parking it at an intermediate stage.
+// and Screened to Interview Round 1 rather than parking it at an
+// intermediate stage. Renamed 'Applied' -> 'Applied and Screened' the same
+// day, to make it explicit at a glance that every candidate at this stage
+// has already been auto-scored by ResumeIQ, not just recorded as having
+// applied. A one-time data migration moved existing rows off the old
+// 'Applied' value on both local Docker and Supabase — see schema.sql.
 export const STAGE_ORDER: string[] = [
-  'Applied',
+  'Applied and Screened',
   'Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round',
   'Reference Check', 'Pre-Joining Documents', 'Offer Discussion',
   'Offer Released', 'Offer Accepted', 'Joined',

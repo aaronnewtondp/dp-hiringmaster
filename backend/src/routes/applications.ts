@@ -12,10 +12,11 @@ router.use(authenticate);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 export function getSlaHours(stage: string, fitScore?: number | null): number {
-  // Applied now covers what 'Resume Review' used to (that stage was
-  // retired — see STAGE_ORDER) — same high-fit/normal threshold, just
-  // measured from application creation instead of a later manual move.
-  if (stage === 'Applied') {
+  // Applied and Screened (renamed from plain 'Applied' 2026-09-01, see
+  // STAGE_ORDER) now covers what 'Resume Review' used to (that stage was
+  // retired) — same high-fit/normal threshold, just measured from
+  // application creation instead of a later manual move.
+  if (stage === 'Applied and Screened') {
     return (fitScore && fitScore >= 75) ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL;
   }
   if (stage === 'Reference Check') return SLA_HOURS.REF_INIT;
@@ -201,9 +202,9 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
 
   // HR-tier can advance to any stage. Everyone else may only make the one
   // transition the simplified HM-shortlist workflow depends on — Applied
-  // straight to Interview Round 1 — from Scorecard Summary/My Tasks'
-  // "Shortlist" action, which is deliberately open to every persona.
-  const canShortlistFromApplied = app.stage === 'Applied' && new_stage === 'Interview Round 1';
+  // and Screened straight to Interview Round 1 — from Scorecard Summary/
+  // My Tasks' "Shortlist" action, which is deliberately open to every persona.
+  const canShortlistFromApplied = app.stage === 'Applied and Screened' && new_stage === 'Interview Round 1';
   if (!isHRTier(req.user!.persona) && !canShortlistFromApplied) {
     res.status(403).json({ error: 'HR access required' });
     return;
@@ -300,11 +301,11 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
     resumeiq = await runResumeIQScoring(app.id);
   }
 
-  // If shortlisting (Applied → Interview Round 1), create a pending action
-  // for the HM — same event this used to fire on reaching the old
-  // intermediate 'Shortlisted' stage, just retargeted to the new direct
-  // transition.
-  if (app.stage === 'Applied' && new_stage === 'Interview Round 1') {
+  // If shortlisting (Applied and Screened → Interview Round 1), create a
+  // pending action for the HM — same event this used to fire on reaching
+  // the old intermediate 'Shortlisted' stage, just retargeted to the new
+  // direct transition.
+  if (app.stage === 'Applied and Screened' && new_stage === 'Interview Round 1') {
     const role = await queryOne<{ title: string; hiring_manager_name: string }>(
       'SELECT title, hiring_manager_name FROM roles WHERE id = $1', [app.role_id]
     );
@@ -351,8 +352,8 @@ router.post('/:id/status', async (req: Request, res: Response) => {
 
   // HR-tier can set any status. Everyone else may only set the two values
   // the simplified HM workflow depends on — Hold for Future / Rejected —
-  // and only from Applied, matching the Shortlist carve-out above.
-  const canActFromApplied = app.stage === 'Applied' &&
+  // and only from Applied and Screened, matching the Shortlist carve-out above.
+  const canActFromApplied = app.stage === 'Applied and Screened' &&
     (new_status === 'Hold for Future' || new_status === 'Rejected');
   if (!isHRTier(req.user!.persona) && !canActFromApplied) {
     res.status(403).json({ error: 'HR access required' });

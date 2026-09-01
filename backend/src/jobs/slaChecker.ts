@@ -123,7 +123,7 @@ async function applyBreachBatch(
 // breach types firing for the same thing.
 const FLAT_STAGE_CHECKS: Array<{ stages: string[]; actionType: string; owner: Owner }> = [
   { stages: ['Reference Check', 'Pre-Joining Documents', 'Offer Discussion', 'Offer Released'], actionType: 'Idle Candidate', owner: 'HR / Recruiter' },
-  { stages: ['Applied'], actionType: 'Resume Shortlist Pending', owner: 'Hiring Manager' },
+  { stages: ['Applied and Screened'], actionType: 'Resume Shortlist Pending', owner: 'Hiring Manager' },
 ];
 
 async function checkFlatStageBreaches(): Promise<void> {

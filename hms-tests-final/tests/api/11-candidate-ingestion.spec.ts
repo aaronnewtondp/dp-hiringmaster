@@ -13,7 +13,7 @@ test.describe('Candidate Ingestion Webhook', () => {
 
   test.describe('POST /api/candidates/ingest', () => {
 
-    test('happy path — exact role title match creates candidate + Applied application', async ({ request }) => {
+    test('happy path — exact role title match creates candidate + Applied-and-Screened application', async ({ request }) => {
       const marker = uid();
       const res = await request.post(`${BASE}/api/candidates/ingest`, {
         headers: { 'x-ingest-secret': CANDIDATE_INGEST_SECRET },
@@ -29,7 +29,7 @@ test.describe('Candidate Ingestion Webhook', () => {
       expect(body.application).not.toBeNull();
       expect(body.application.role_id).toBe(SEEDED.roles.qa_eng);
       expect(body.application.source_channel).toBe('Job Application Form');
-      expect(body.application.stage).toBe('Applied');
+      expect(body.application.stage).toBe('Applied and Screened');
     });
 
     test('re-POSTing an identical body is a no-op — 200, does not create a second application', async ({ request }) => {

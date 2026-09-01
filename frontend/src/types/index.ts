@@ -428,8 +428,10 @@ export const RECRUITMENT_CHANNELS = [
 
 // Resume Review and Shortlisted were retired as distinct stages (2026-09-01)
 // — see backend/src/types/index.ts's STAGE_ORDER for the full reasoning.
+// 'Applied' -> 'Applied and Screened' the same day, so the stage name
+// itself signals that ResumeIQ has already scored the candidate.
 export const STAGES = [
-  'Applied',
+  'Applied and Screened',
   'Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round',
   'Reference Check', 'Pre-Joining Documents', 'Offer Discussion',
   'Offer Released', 'Offer Accepted', 'Joined',

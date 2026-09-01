@@ -300,7 +300,7 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
       const app = await client.query(
         `INSERT INTO applications (candidate_id, role_id, source_channel, agency_id, preferred_location,
            stage, status, recruiter_screening_status, stage_entry_time, sla_hours)
-         VALUES ($1,$2,$3,$4,$5,'Applied','Active','New',NOW(),48) RETURNING *`,
+         VALUES ($1,$2,$3,$4,$5,'Applied and Screened','Active','New',NOW(),48) RETURNING *`,
         [candidate.id, role_id, source_channel || null, agency_id || null, preferred_location ?? null]
       );
       application = app.rows[0];
@@ -310,7 +310,7 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
         `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
         [application.id, candidate.id, role_id, 'Application Created', 'New application created',
-         JSON.stringify({ stage: 'Applied', source: source_channel }),
+         JSON.stringify({ stage: 'Applied and Screened', source: source_channel }),
          req.user!.userId, req.user!.name]
       );
     }
@@ -363,7 +363,7 @@ router.post('/:id/applications', requireHR, async (req: Request, res: Response) 
       `INSERT INTO applications (
          candidate_id, role_id, source_channel,
          stage, status, recruiter_screening_status, stage_entry_time, sla_hours
-       ) VALUES ($1,$2,$3,'Applied','Active','New',NOW(),48) RETURNING *`,
+       ) VALUES ($1,$2,$3,'Applied and Screened','Active','New',NOW(),48) RETURNING *`,
       [req.params.id, role_id, source_channel || null]
     );
     const app = appResult.rows[0];
@@ -376,7 +376,7 @@ router.post('/:id/applications', requireHR, async (req: Request, res: Response) 
     await client.query(
       `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
        VALUES ($1,$2,$3,'Application Created',$4,$5,$6,$7)`,
-      [app.id, req.params.id, role_id, eventDetail, JSON.stringify({ stage: 'Applied', source: source_channel }), req.user!.userId, req.user!.name]
+      [app.id, req.params.id, role_id, eventDetail, JSON.stringify({ stage: 'Applied and Screened', source: source_channel }), req.user!.userId, req.user!.name]
     );
 
     return app;

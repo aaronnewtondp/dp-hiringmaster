@@ -426,6 +426,15 @@ export default function CandidateDetail() {
                 const rounds = roundsMap?.[app.id] || [];
                 const refChecks = refChecksMap?.[app.id] || [];
                 const expanded = expandedApps.has(app.id);
+                // Same fallback pattern (and same source data) the Over
+                // Budget badge below already uses for its own calculation —
+                // shown right next to it so "Over Budget" is never a flag
+                // with no visible figures to justify it (CLAUDE.md's
+                // budget-flagging convention: consistent everywhere
+                // compensation is surfaced). Naturally hides for a persona
+                // these fields are stripped for, same as the badge does.
+                const ctcFixed = app.candidate_ctc_fixed ?? candidate.current_ctc_fixed;
+                const ectc = app.candidate_expected_ctc ?? candidate.expected_ctc;
                 return (
                   <div key={app.id} className={`${app.sla_breach ? 'bg-red-50/30' : ''}`}>
                     <div className="p-4">
@@ -461,7 +470,12 @@ export default function CandidateDetail() {
                             )}
                             <span className="text-xs text-gray-400">{app.recruiter_screening_status}</span>
                             {app.score_avg != null && <span className="text-xs font-semibold text-dp-700">ResumeIQ: {Number(app.score_avg).toFixed(1)}/10</span>}
-                            <OverBudgetBadge overBudget={isOverBudget(app.candidate_expected_ctc ?? candidate.expected_ctc, app.role_ctc_band)} />
+                            {(ctcFixed != null || ectc != null) && (
+                              <span className="text-xs font-mono text-gray-500">
+                                {ctcFixed ? `₹${ctcFixed}L` : '—'} → {ectc ? `₹${ectc}L` : '—'}
+                              </span>
+                            )}
+                            <OverBudgetBadge overBudget={isOverBudget(ectc, app.role_ctc_band)} />
                           </div>
                           <div className="flex gap-3 mt-2 text-xs text-gray-400">
                             <span>Source: {app.source_channel || '—'}</span>

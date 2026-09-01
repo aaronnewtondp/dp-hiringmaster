@@ -43,9 +43,9 @@ test.describe('GET /api/candidates — Talent Pool Department/Location/Role filt
 
   test('department filter narrows the candidate list and leaves the applications array intact', async ({ request }) => {
     // makeHoldForFutureCandidate below triggers a real, synchronous
-    // ResumeIQ scoring call at creation (Applied is scored immediately now,
-    // not on a later stage move) — same reasoning as the equivalent
-    // per-test timeouts added across this suite for the same change.
+    // ResumeIQ scoring call at creation (Applied and Screened is scored
+    // immediately now, not on a later stage move) — same reasoning as the
+    // equivalent per-test timeouts added across this suite for the same change.
     test.setTimeout(60_000);
     const token = await getToken(request, 'hr');
     const api   = authed(request, token);

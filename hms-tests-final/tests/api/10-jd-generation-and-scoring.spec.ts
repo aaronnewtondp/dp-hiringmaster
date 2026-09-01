@@ -94,7 +94,7 @@ test.describe('JD Generation + ResumeIQ scoring (real external calls)', () => {
     expect(createCandRes.status()).toBe(201);
     const { application, resumeiq } = await createCandRes.json();
     expect(application.role_id).toBe(roleId);
-    expect(application.stage).toBe('Applied');
+    expect(application.stage).toBe('Applied and Screened');
     expect(resumeiq).toBeTruthy();
     expect(resumeiq.scored).toBe(true);
     expect(resumeiq.error).toBeUndefined();

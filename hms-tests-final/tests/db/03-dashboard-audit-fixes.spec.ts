@@ -53,9 +53,10 @@ test.describe('Dashboard audit fixes — SLA race, orphan sweep, funnel shape, s
     const api = authed(request, hrToken);
     const { application } = await createCandidateWithApp(request, hrToken);
 
-    // Already sitting at 'Applied' from creation ('Resume Review' was
-    // retired as a stage — see STAGE_ORDER) — 'Applied' carries the same
-    // 48h SLA that stage used to (see getSlaHours in applications.ts). Push
+    // Already sitting at 'Applied and Screened' from creation ('Resume
+    // Review' was retired as a stage, and the entry stage was later renamed
+    // from plain 'Applied' — see STAGE_ORDER) — it carries the same 48h SLA
+    // that stage used to (see getSlaHours in applications.ts). Push
     // stage_entry_time back past that threshold.
     await client.query(
       `UPDATE applications SET stage_entry_time = NOW() - INTERVAL '60 hours' WHERE id = $1`,

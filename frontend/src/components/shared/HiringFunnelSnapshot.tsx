@@ -16,12 +16,15 @@ import { STAGE_COLORS, UNLIT_BG, shade, glossyFill } from './PipelineProgress.ts
 // out every other one (UNLIT_BG), so "which stage is selected" is an
 // unambiguous, high-contrast state rather than a subtle shade shift. The
 // breach-count badge stays the dominant visual element either way.
-const OVERLAP_PCT_OF = (n: number) => (100 / n) * 0.11;
+// Eased down from 0.11 — now that the strip isn't squeezed into a max-w-4xl
+// cap, less overlap reads as more comfortably spaced stages instead of the
+// tighter interlock a cramped container needed.
+const OVERLAP_PCT_OF = (n: number) => (100 / n) * 0.07;
 const CLIP_FIRST = 'polygon(0% 0%, 80% 0%, 100% 50%, 80% 100%, 0% 100%)';
 const CLIP_REST  = 'polygon(0% 0%, 80% 0%, 100% 50%, 80% 100%, 0% 100%, 20% 50%)';
 
 const STAGE_LABELS: Record<string, string> = {
-  'Applied': 'Applied',
+  'Applied and Screened': 'Applied',
   'Interview Round 1': 'Interview 1', 'Interview Round 2': 'Interview 2',
   'Assignment Round': 'Assignment', 'Founders Round': 'Founders',
   'Reference Check': 'Reference Check', 'Pre-Joining Documents': 'Pre-Joining',
@@ -100,12 +103,20 @@ export default function HiringFunnelSnapshot({
       </div>
 
       <div className="px-5 pb-5 pt-4">
-        <div className="max-w-4xl mx-auto">
+        <div className="w-full">
           {isLoading ? (
             <div className="text-xs text-gray-400 py-8 text-center">Loading…</div>
           ) : (
             <>
               <div className="relative">
+                {/* No max-width cap here (was max-w-4xl, ~896px) — at 11
+                    stages × 84px min-width each (924px), that cap forced
+                    this strip into horizontal scroll on every normal
+                    viewport, which defeats the point of an at-a-glance
+                    lifecycle view. overflow-x-auto stays only as a defensive
+                    floor for a genuinely narrow window, same convention as
+                    every other wide table in this app — it's not expected
+                    to actually engage at typical desktop widths anymore. */}
                 <div className="flex w-full overflow-x-auto pb-1">
                   {snapshot.map((s, i) => {
                     const isOpen = openStage === s.stage;
@@ -149,7 +160,6 @@ export default function HiringFunnelSnapshot({
                     );
                   })}
                 </div>
-                <div className="pointer-events-none absolute right-0 top-0 bottom-1 w-6 bg-gradient-to-l from-white to-transparent" />
               </div>
 
               {openStage && activeStageData && (

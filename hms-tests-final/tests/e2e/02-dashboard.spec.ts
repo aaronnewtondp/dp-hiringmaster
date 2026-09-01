@@ -46,8 +46,12 @@ test.describe('Hiring Funnel Snapshot', () => {
   test('every stage chevron is colored by default; selecting one greys out every other stage', async ({ page }) => {
     await loginViaApi(page);
     // 'Resume Review' was retired as a stage (STAGE_ORDER now has 11 stages,
-    // not 13) — 'Interview Round 1' is the next real chevron after 'Applied'.
-    const applied = page.locator('button[title="Applied"]');
+    // not 13) — 'Interview Round 1' is the next real chevron after 'Applied
+    // and Screened' (the entry stage, renamed from plain 'Applied'). The
+    // button's title attribute is the raw stage key (HiringFunnelSnapshot.tsx's
+    // title={s.stage}), not the short "Applied" label shown inside the
+    // chevron for space reasons — so the locator must match the full name.
+    const applied = page.locator('button[title="Applied and Screened"]');
     const interview1 = page.locator('button[title="Interview Round 1"]');
     await expect(applied).toBeVisible({ timeout: 15000 });
     await expect(interview1).toBeVisible();
@@ -92,7 +96,7 @@ test.describe('Hiring Funnel Snapshot', () => {
   // (and its "Filter this section by role" trigger text) doesn't reappear.
   test('the funnel snapshot no longer renders its own local role-filter rail', async ({ page }) => {
     await loginViaApi(page);
-    await expect(page.locator('button[title="Applied"]')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('button[title="Applied and Screened"]')).toBeVisible({ timeout: 15000 });
 
     await expect(page.locator('text=Filter this section by role')).toHaveCount(0);
     await expect(page.locator('div.max-h-80.overflow-y-auto button')).toHaveCount(0);

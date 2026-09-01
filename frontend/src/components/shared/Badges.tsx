@@ -21,11 +21,22 @@ export function StageBadge({ stage }: { stage: string }) {
     stage.startsWith('Interview') ? 'bg-dp-100 text-dp-800' :
     stage === 'Founders Round'    ? 'bg-indigo-100 text-indigo-800' :
     stage === 'Assignment Round'  ? 'bg-violet-100 text-violet-700' :
-    stage === 'Applied'           ? 'bg-yellow-100 text-yellow-800' :
+    stage === 'Applied and Screened' ? 'bg-yellow-100 text-yellow-800' :
     'bg-gray-100 text-gray-600';
 
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${color}`}>
+    // max-w-full + truncate is load-bearing in any narrow table column — a
+    // long stage name ("Pre-Joining Documents", "Interview Round 1") is
+    // wider than several of this app's fixed-width Stage columns, and
+    // without this the badge just overflowed past its own <td> into the
+    // next column instead of clipping (this component has no width of its
+    // own to constrain against otherwise). Self-contained here so every
+    // table using this badge is protected, not just the one a bug report
+    // happened to be filed against.
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium max-w-full truncate ${color}`}
+      title={stage}
+    >
       {stage}
     </span>
   );

@@ -7,7 +7,7 @@ import { getToken, authed } from '../helpers/api';
 // validate velocity.tat_by_stage's canonical-name filter; nothing else in
 // this file needs it.
 const STAGE_ORDER = [
-  'Applied',
+  'Applied and Screened',
   'Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round',
   'Reference Check', 'Pre-Joining Documents', 'Offer Discussion',
   'Offer Released', 'Offer Accepted', 'Joined',

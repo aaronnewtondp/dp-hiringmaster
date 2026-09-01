@@ -603,7 +603,7 @@ router.get('/:id/closure-summary.pdf', async (req: Request, res: Response) => {
     // so renderRoleClosureSummary's ClosureSummaryData shape stays unchanged.
     query<{ source_channel: string; n: string; engaged: string; hired: string }>(
       `SELECT c.source AS source_channel, COUNT(*) AS n,
-              COUNT(*) FILTER (WHERE a.stage <> 'Applied') AS engaged,
+              COUNT(*) FILTER (WHERE a.stage <> 'Applied and Screened') AS engaged,
               COUNT(*) FILTER (WHERE a.stage = 'Joined') AS hired
        FROM applications a
        JOIN candidates c ON c.id = a.candidate_id

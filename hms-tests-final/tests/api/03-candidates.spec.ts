@@ -28,7 +28,7 @@ test.describe('Candidates API', () => {
       const body = await res.json();
       expect(body.application).toBeDefined();
       expect(body.application.id).toMatch(/^A\d{4}$/);
-      expect(body.application.stage).toBe('Applied');
+      expect(body.application.stage).toBe('Applied and Screened');
       expect(body.application.status).toBe('Active');
       expect(body.application.recruiter_screening_status).toBe('New');
     });

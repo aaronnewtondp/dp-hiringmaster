@@ -120,8 +120,8 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
           the page next to their name. If they have two or more applications, there's no single
           "the" application to act on from the top, so the buttons move down to sit on each
           application's own row instead. These buttons are HR-tier only — a Hiring Manager
-          shortlists a candidate from Applied via the Candidates, Scorecard Summary, or My Tasks
-          pages instead.</p>
+          shortlists a candidate from Applied and Screened via the Candidates, Scorecard Summary,
+          or My Tasks pages instead.</p>
         ),
       },
       {
@@ -157,7 +157,7 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             your own tasks. Instead of a chevron, a centered <strong>View Highlights and
             Summary</strong> button under the score columns expands a candidate's strengths, red
             flags, and executive summary. Both pages offer the same Shortlist / Hold for Future /
-            Reject actions on Applied candidates, individually or in bulk.</p>
+            Reject actions on Applied and Screened candidates, individually or in bulk.</p>
           </>
         ),
       },
@@ -215,11 +215,12 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
           <>
             <p>They track three independent things, each updated separately:</p>
             <ul className="list-disc pl-5 mt-1.5 space-y-1">
-              <li><strong>Stage</strong> — where the candidate sits in the pipeline (Applied →
-              Interview rounds → Reference Check → Offer → Joined). Every applicant is scored by
-              ResumeIQ automatically at Applied and can be shortlisted straight into Interview
-              Round 1 from there — Resume Review and Shortlisted no longer exist as separate
-              stages.</li>
+              <li><strong>Stage</strong> — where the candidate sits in the pipeline (Applied and
+              Screened → Interview rounds → Reference Check → Offer → Joined). Every applicant is
+              scored by ResumeIQ automatically at Applied and Screened (the name reflects that
+              scoring has already happened by the time a candidate is at this stage) and can be
+              shortlisted straight into Interview Round 1 from there — Resume Review and
+              Shortlisted no longer exist as separate stages.</li>
               <li><strong>Status</strong> — whether they're still active in that pipeline: Active,
               Rejected, Withdrawn, Hold for Future, or Joined.</li>
               <li><strong>Recruiter Screening Status</strong> — HR's own internal screening
@@ -240,7 +241,7 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             to act. Each breach has its own named type and owner — hover the{' '}
             <span className="italic">i</span> next to the Dashboard's SLA Breaches card for the
             full list, but broadly: <strong>Idle Candidate</strong> (no movement for 48h+ at the
-            flatter stages), <strong>Resume Shortlist Pending</strong> (Applied specifically),
+            flatter stages), <strong>Resume Shortlist Pending</strong> (Applied and Screened specifically),
             <strong> Interview/Founders "Not Scheduled"</strong> (a round hasn't been booked),
             <strong> Assignment "Not Sent"</strong> (the assignment hasn't gone out), or{' '}
             <strong>"Feedback Due"</strong> (feedback hasn't been submitted since a round
@@ -334,7 +335,7 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
               with compensation fields hidden, <em>except</em> for the specific role(s) they're
               assigned to, where they see comp the same as HR. Submits interview feedback for
               rounds they're listed on, records Assignment outcomes, and can shortlist/hold/reject
-              candidates from Applied. Role approval is HR/Leadership/Super Admin only — a Hiring
+              candidates from Applied and Screened. Role approval is HR/Leadership/Super Admin only — a Hiring
               Manager can't approve even their own role. Their Dashboard is
               locked to their own role(s) — this can't be changed.</li>
               <li><strong>Leadership</strong> — sees everything HR/Admin sees (no field or route

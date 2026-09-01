@@ -112,17 +112,18 @@ test.describe('Compensation visibility — own-role Hiring Manager + HR-tier onl
     const alexToken = await getToken(request, 'hm_alex');
 
     // Not Alex's role, and reachable by any persona per the Shortlist-from-
-    // Applied carve-out (Applied -> Interview Round 1 is open to every
-    // persona regardless of role ownership — see applications.ts's
-    // canShortlistFromApplied) — the scenario that actually leaked before.
-    // A new application starts directly at 'Applied' now (the old
-    // intermediate 'Resume Review' stage was retired), so there's no
-    // earlier transition needed to set this up. expected_ctc kept within
-    // R002's own band (3-3.5 LPA) so this doesn't also trip the unrelated
-    // over-budget mandatory-reason gate.
+    // Applied-and-Screened carve-out (Applied and Screened -> Interview
+    // Round 1 is open to every persona regardless of role ownership — see
+    // applications.ts's canShortlistFromApplied) — the scenario that
+    // actually leaked before. A new application starts directly at
+    // 'Applied and Screened' now (the old intermediate 'Resume Review'
+    // stage was retired, and 'Applied' was later renamed to 'Applied and
+    // Screened'), so there's no earlier transition needed to set this up.
+    // expected_ctc kept within R002's own band (3-3.5 LPA) so this doesn't
+    // also trip the unrelated over-budget mandatory-reason gate.
     const { res } = await createCandidate(request, hrToken, { role_id: SEEDED.roles.ei_mumbai, expected_ctc: 3.2 });
     const { application } = await res.json();
-    expect(application.stage).toBe('Applied');
+    expect(application.stage).toBe('Applied and Screened');
 
     const stageRes = await authed(request, alexToken).post(`/api/applications/${application.id}/stage`, { new_stage: 'Interview Round 1' });
     expect(stageRes.status()).toBe(200);

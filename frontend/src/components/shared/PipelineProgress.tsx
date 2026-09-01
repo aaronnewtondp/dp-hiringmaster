@@ -9,7 +9,10 @@ import { STAGES } from '../../types/index.ts';
 // hand-tuned per user feedback so adjacent stages blend rather than jump
 // between unrelated hue families.
 export const STAGE_COLORS: Record<string, string> = {
-  'Applied':               '#64748b',
+  // Matches StageBadge's yellow treatment (Badges.tsx) for the same stage —
+  // consistent across every visual: this chevron bar, the Dashboard's
+  // Hiring Funnel Snapshot (shares this same palette), and the plain badge.
+  'Applied and Screened':  '#eab308',
   'Interview Round 1':     '#a855f7',
   'Interview Round 2':     '#8b5cf6',
   'Assignment Round':      '#7761f4',
@@ -25,7 +28,7 @@ export const STAGE_COLORS: Record<string, string> = {
 // Shortened for the tight in-arrow label — full stage name still shows via
 // the native title tooltip on hover.
 const STAGE_LABELS: Record<string, string> = {
-  'Applied': 'Applied',
+  'Applied and Screened': 'Applied',
   'Interview Round 1': 'Interview 1',
   'Interview Round 2': 'Interview 2',
   'Assignment Round': 'Assignment',

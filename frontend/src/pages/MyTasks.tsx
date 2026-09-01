@@ -258,7 +258,7 @@ export default function MyTasks() {
     useQuery<{ data: { applications: Application[] } }>({
       queryKey: ['my-tasks-awaiting', isHiringManager, ownRoleIds, isLeadership],
       queryFn:  () => applicationsApi.list({
-        stage: 'Applied', status: 'Active',
+        stage: 'Applied and Screened', status: 'Active',
         ...(isHiringManager ? { role_id: ownRoleIds } : {}),
         ...(isLeadership ? { founder_flag: 'true' } : {}),
       }),

@@ -198,7 +198,7 @@ CREATE TABLE applications (
   sub_source                    TEXT,
   agency_id                     TEXT REFERENCES agencies(id),
   agency_fee_estimate           DECIMAL(10,2),
-  stage                         TEXT NOT NULL DEFAULT 'Applied',
+  stage                         TEXT NOT NULL DEFAULT 'Applied and Screened',
   status                        TEXT NOT NULL DEFAULT 'Active' CHECK (status IN (
                                   'Active','On Hold','Rejected','Withdrawn','Hold for Future','Joined','Closed')),
   recruiter_screening_status    TEXT NOT NULL DEFAULT 'New' CHECK (recruiter_screening_status IN (
@@ -779,6 +779,20 @@ ALTER TABLE users
 --   UPDATE applications SET stage = 'Interview Round 1' WHERE stage = 'Shortlisted';
 --   UPDATE pending_actions SET resolved = true, resolved_at = NOW()
 --     WHERE action_type = 'Interview to be Scheduled' AND resolved = false;
+
+-- ── applications: rename stage 'Applied' -> 'Applied and Screened' ──────────
+-- Product decision (2026-09-01, same day as the retirement above): the
+-- stage name itself should signal that ResumeIQ has already scored the
+-- candidate by the time they're sitting here, not just that they submitted
+-- an application. Same "TEXT column, no CHECK constraint, migrate rows
+-- alongside the type change" treatment as every other stage rename in this
+-- file — applied to local Docker (6072 rows) and Supabase (583 rows) on
+-- 2026-09-01:
+--   UPDATE applications SET stage = 'Applied and Screened' WHERE stage = 'Applied';
+-- No pending_actions cleanup needed for this one specifically (unlike the
+-- retirement above) — slaChecker.ts's resolveStaleStageActionTypes() sweep
+-- (added the same day) now catches this general class of staleness on
+-- every SLA check going forward, not just as a one-time patch.
 
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows

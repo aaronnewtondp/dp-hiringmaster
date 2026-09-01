@@ -6,10 +6,11 @@
 // per-breach-type table: several stages now carry two distinct breach types
 // (an HR-owned "not yet actioned" gap and an HM-owned "feedback due" gap).
 // The "Resume Shortlist Pending" breach (HM-owned, not HR) now fires at
-// 'Applied' itself — its original home was the since-retired 'Resume
-// Review' stage, retargeted straight to 'Applied' when that stage was
-// removed (see STAGE_ORDER) — and the whole "Pending Actions by Owner"
-// board was replaced by the
+// 'Applied and Screened' itself — its original home was the since-retired
+// 'Resume Review' stage, retargeted straight to 'Applied' (later renamed
+// to 'Applied and Screened' — same first stage, same semantics) when that
+// stage was removed (see STAGE_ORDER) — and the whole "Pending Actions by
+// Owner" board was replaced by the
 // hiring_funnel_snapshot section (stage → breach_types → candidates) plus a
 // single merged sla_breach_total/sla_breach_by_owner KPI.
 //
@@ -111,18 +112,18 @@ test.describe('SLA breach engine — stage/breach-type table regressions', () =>
 
   // ─── Ownership per breach type ──────────────────────────────────────────────
   test.describe('breach ownership matches the new stage/breach-type table', () => {
-    test('Applied breaches ("Resume Shortlist Pending") are Hiring-Manager-owned, not HR', async ({ request }) => {
+    test('Applied and Screened breaches ("Resume Shortlist Pending") are Hiring-Manager-owned, not HR', async ({ request }) => {
       const hrToken = await getToken(request, 'hr');
       const { application } = await createCandidateWithApp(request, hrToken, 'R006');
-      // Every new application already starts at 'Applied' — no explicit
-      // transition needed. 'Resume Review' was retired as a stage; this
-      // breach now fires directly at 'Applied' (see slaChecker.ts's
-      // FLAT_STAGE_BREACHES).
+      // Every new application already starts at 'Applied and Screened' — no
+      // explicit transition needed. 'Resume Review' was retired as a stage;
+      // this breach now fires directly at 'Applied and Screened' (renamed
+      // from plain 'Applied' — see slaChecker.ts's FLAT_STAGE_BREACHES).
       await client.query(`UPDATE applications SET stage_entry_time = NOW() - INTERVAL '50 hours' WHERE id = $1`, [application.id]);
       await runCronSlaCheck(request);
 
       const snapshot = await getSnapshot(request, hrToken);
-      const found = findCandidate(snapshot, 'Applied', application.id);
+      const found = findCandidate(snapshot, 'Applied and Screened', application.id);
       expect(found?.type).toBe('Resume Shortlist Pending');
       expect(found?.owner).toBe('Hiring Manager');
     });
@@ -234,8 +235,8 @@ test.describe('SLA breach engine — stage/breach-type table regressions', () =>
       const hrToken = await getToken(request, 'hr');
       const api = authed(request, hrToken);
       const { application } = await createCandidateWithApp(request, hrToken, 'R006');
-      // Already sitting at 'Applied' from creation — no transition needed
-      // ('Resume Review' was retired as a stage).
+      // Already sitting at 'Applied and Screened' from creation — no
+      // transition needed ('Resume Review' was retired as a stage).
       await client.query(`UPDATE applications SET stage_entry_time = NOW() - INTERVAL '60 hours' WHERE id = $1`, [application.id]);
 
       const statusRes = await api.post(`/api/applications/${application.id}/status`, {
@@ -245,7 +246,7 @@ test.describe('SLA breach engine — stage/breach-type table regressions', () =>
       await runCronSlaCheck(request);
 
       const snapshot = await getSnapshot(request, hrToken);
-      expect(findCandidate(snapshot, 'Applied', application.id)).toBeUndefined();
+      expect(findCandidate(snapshot, 'Applied and Screened', application.id)).toBeUndefined();
     });
   });
 

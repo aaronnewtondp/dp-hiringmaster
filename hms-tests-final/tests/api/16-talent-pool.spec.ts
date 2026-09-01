@@ -94,7 +94,7 @@ test.describe('Talent Pool & Archival (PRD §21)', () => {
       expect(newApp.id).not.toBe(application.id);
       expect(newApp.role_id).toBe('R005');
       expect(newApp.status).toBe('Active');
-      expect(newApp.stage).toBe('Applied');
+      expect(newApp.stage).toBe('Applied and Screened');
 
       const after         = await (await api.get(`/api/candidates/${candidate.id}`)).json();
       const stillOriginal = after.applications.find((a: { id: string }) => a.id === application.id);

@@ -9,12 +9,12 @@ async function freshApp(request: Parameters<typeof authed>[0]) {
 
 test.describe('Applications — 3-field state model', () => {
 
-  test('NEW application has correct default state (Applied / Active / New)', async ({ request }) => {
+  test('NEW application has correct default state (Applied and Screened / Active / New)', async ({ request }) => {
     const { api, appId } = await freshApp(request);
     const res = await api.get(`/api/applications/${appId}`);
     expect(res.status()).toBe(200);
     const { application } = await res.json();
-    expect(application.stage).toBe('Applied');
+    expect(application.stage).toBe('Applied and Screened');
     expect(application.status).toBe('Active');
     expect(application.recruiter_screening_status).toBe('New');
   });
@@ -48,16 +48,18 @@ test.describe('Applications — 3-field state model', () => {
     expect(body.application.stage).toBe('Offer');
   });
 
-  test('SLA hours are set correctly on the Applied stage at creation (no manual Resume Review move needed)', async ({ request }) => {
+  test('SLA hours are set correctly on the Applied and Screened stage at creation (no manual Resume Review move needed)', async ({ request }) => {
     // 'Resume Review' was retired as a stage — every application starts at
-    // 'Applied' and is scored synchronously at creation time
+    // 'Applied and Screened' (renamed from plain 'Applied' — same first
+    // stage, same semantics, just a name that signals ResumeIQ has already
+    // scored the candidate) and is scored synchronously at creation time
     // (runResumeIQScoring, called inline from createCandidateWithApp's
     // POST /api/candidates), which also refines sla_hours based on the
     // resulting fit score. There's no separate transition left to trigger
     // this — it's already true by the time the application exists.
     const { api, appId } = await freshApp(request);
     const body = await (await api.get(`/api/applications/${appId}`)).json();
-    expect(body.application.stage).toBe('Applied');
+    expect(body.application.stage).toBe('Applied and Screened');
     expect(body.application.sla_hours).toBeGreaterThan(0);
     expect(body.application.stage_entry_time).toBeTruthy();
   });

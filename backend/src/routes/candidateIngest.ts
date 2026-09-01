@@ -174,7 +174,7 @@ router.post('/ingest', async (req: Request, res: Response) => {
             `INSERT INTO applications (
                candidate_id, role_id, source_channel, preferred_location, qualifications_note,
                screening_answers, stage, status, recruiter_screening_status, stage_entry_time, sla_hours
-             ) VALUES ($1,$2,'Job Application Form',$3,$4,$5,'Applied','Active','New',NOW(),48) RETURNING *`,
+             ) VALUES ($1,$2,'Job Application Form',$3,$4,$5,'Applied and Screened','Active','New',NOW(),48) RETURNING *`,
             [candidate.id, roleId, toStr(preferred_location), toStr(qualifications_note), JSON.stringify(screeningAnswers)]
           );
           application = appResult.rows[0];

@@ -34,16 +34,18 @@ Requisition Form filled
    → JD auto-generated (long-form + social, downloadable)        [DONE]
    → candidate applies via Job Application Form
    → candidate + application auto-created, linked to role,
-     application starts at "Applied"                             [DONE]
+     application starts at "Applied and Screened"                 [DONE]
    → ResumeIQ fetches resume from Drive, reads actual text,
      and scores it automatically and synchronously at Applied
-     — no manual "advance the stage" step triggers it             [DONE]
+     and Screened — no manual "advance the stage" step triggers
+     it (the stage name itself signals scoring has already
+     happened by the time a candidate sits here)                  [DONE]
    → ResumeIQ scores resume against the GENERATED JD document
      (falls back to short DB fields for a role with no JD yet)    [DONE]
    → 8-dimension results shown in candidate view                  [DONE]
    → HR (any persona, in practice usually HR/HM) shortlists
-     straight from Applied into Interview Round 1 — no separate
-     intermediate "Shortlisted" stage                             [DONE]
+     straight from Applied and Screened into Interview Round 1 —
+     no separate intermediate "Shortlisted" stage                 [DONE]
    → HR/HM screening, interviews, offer, onboarding               [PARTIAL —
                                                                      offer letter
                                                                      generation and
@@ -132,7 +134,7 @@ User Management page's role dropdown only ever offers the other three.
 (financial fields stripped), submit interview feedback for rounds they're
 actually listed in (`interview_rounds.interviewer_emails`) — enforced in
 `PATCH /interviews/:id/feedback`, not just a comment — record an Assignment
-outcome, shortlist a candidate straight from `Applied` to `Interview Round 1`
+outcome, shortlist a candidate straight from `Applied and Screened` to `Interview Round 1`
 (this one stage transition is open to every persona, not HR-tier-gated — see
 the Application state model section below), and set
 `recruiter_screening_status` specifically to `'HM Shortlisted'` (every other
@@ -166,20 +168,25 @@ is descriptive only, never branched on) but is now corrected in
 ### Application state model — three independent fields
 Every application has three separately-updatable fields, each with its own
 API endpoint — never conflate them:
-- `stage` — pipeline position (Applied → Interview Round 1 → Interview Round 2
-  → Assignment Round → Founders Round → Reference Check → Pre-Joining
-  Documents → Offer Discussion → Offer Released → Offer Accepted → Joined).
-  `Resume Review` and `Shortlisted` were retired as distinct stages — every
-  application is scored by ResumeIQ automatically and synchronously the
-  moment it's created (at `Applied`), and "shortlisting" is a direct
-  `Applied` → `Interview Round 1` move, open to **every** persona
-  specifically from `Applied` (every other transition stays HR-tier-only).
+- `stage` — pipeline position (Applied and Screened → Interview Round 1 →
+  Interview Round 2 → Assignment Round → Founders Round → Reference Check →
+  Pre-Joining Documents → Offer Discussion → Offer Released → Offer Accepted
+  → Joined). `Resume Review` and `Shortlisted` were retired as distinct
+  stages — every application is scored by ResumeIQ automatically and
+  synchronously the moment it's created (at `Applied and Screened`), and
+  "shortlisting" is a direct `Applied and Screened` → `Interview Round 1`
+  move, open to **every** persona specifically from `Applied and Screened`
+  (every other transition stays HR-tier-only). The stage was renamed from
+  plain `Applied` to `Applied and Screened` the same day (2026-09-01), so
+  the name itself signals that ResumeIQ has already run by the time a
+  candidate is here — no separate "has this been screened yet?" question.
   `STAGE_ORDER`/`STAGES` (`backend/src/types/index.ts`,
-  `frontend/src/types/index.ts`) are the single canonical array — removing a
-  value from it does **not** migrate rows already stored with the old value,
-  since `applications.stage` is plain `TEXT` with no `CHECK` constraint; the
-  retirement above required a one-time data migration on top of the type
-  change (see `schema.sql`).
+  `frontend/src/types/index.ts`) are the single canonical array — renaming
+  or removing a value in it does **not** migrate rows already stored with
+  the old value, since `applications.stage` is plain `TEXT` with no `CHECK`
+  constraint; both the stage retirement and the `Applied` rename each
+  required their own one-time data migration on top of the type change (see
+  `schema.sql`).
 - `status` — Active / On Hold / Rejected / Withdrawn / Hold for Future / Joined
 - `recruiter_screening_status` — New → Under Recruiter Review → Awaiting HM
   Review → HM Shortlisted (etc.)
@@ -203,8 +210,8 @@ Fit, Role Alignment, Trajectory, Leadership, Communication → average score,
 strengths, red flags, executive summary, recommendation.
 
 Triggered automatically the moment an application is **created** (at stage
-`Applied` — there's no later "advance to Resume Review" step, that stage was
-retired), via `runResumeIQScoring()` in
+`Applied and Screened` — there's no later "advance to Resume Review" step,
+that stage was retired), via `runResumeIQScoring()` in
 `backend/src/services/resumeIQTrigger.ts`, called from `candidates.ts`'s
 `POST /` and `POST /:id/applications` and from `candidateIngest.ts`. Guarded
 by `!app.score_avg` so it only ever runs once per application. **Synchronous

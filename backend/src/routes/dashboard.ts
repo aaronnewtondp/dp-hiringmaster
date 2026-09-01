@@ -341,9 +341,10 @@ router.get('/', async (req: Request, res: Response) => {
     // no new schema needed. Each Stage-Changed event's new_value is the
     // stage being entered at created_at; LEAD gives the timestamp of the
     // NEXT stage change for the same application, i.e. when that stage was
-    // left. The 'Applied' segment (entered at application_date, left at the
-    // application's first-ever Stage Changed event) is unioned in
-    // separately since nothing ever logs "entering Applied" as an event.
+    // left. The 'Applied and Screened' segment (entered at application_date,
+    // left at the application's first-ever Stage Changed event) is unioned
+    // in separately since nothing ever logs "entering Applied and Screened"
+    // as an event.
     // Rows with no left_at yet (still sitting in that stage) are excluded —
     // an open-ended stay isn't a turnaround time yet.
     (() => {
@@ -359,7 +360,7 @@ router.get('/', async (req: Request, res: Response) => {
           WHERE al.event_type = 'Stage Changed' AND al.application_id IS NOT NULL
         ),
         applied_segment AS (
-          SELECT a.id AS application_id, 'Applied' AS stage, a.application_date AS entered_at,
+          SELECT a.id AS application_id, 'Applied and Screened' AS stage, a.application_date AS entered_at,
                  MIN(al.created_at) AS left_at
           FROM applications a
           JOIN activity_log al ON al.application_id = a.id AND al.event_type = 'Stage Changed'

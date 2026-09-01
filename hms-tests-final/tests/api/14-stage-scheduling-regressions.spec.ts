@@ -7,7 +7,7 @@ test.describe('Stage-Driven Round Scheduling — Regression Guards', () => {
   // Historical bug: POST /api/interviews used to auto-advance an
   // application's stage as a side effect, matched off the round's free-text
   // round_name. That's fundamentally incompatible with the fixed 11-stage
-  // pipeline model (Applied → ... → Joined) — a recruiter could type any
+  // pipeline model (Applied and Screened → ... → Joined) — a recruiter could type any
   // round_name they wanted, so "advancing" the stage off it was never a
   // reliable signal. The auto-advance was removed; stage is now owned
   // exclusively by POST /api/applications/:id/stage. This guards against a
