@@ -314,8 +314,8 @@ export default function CandidateDetail() {
               buttons further down instead. */}
           {canHR && applications.length === 1 && (
             <div className="flex gap-2 shrink-0">
-              <button onClick={() => setStageModalApp(applications[0])} className="btn-secondary text-xs py-1.5 px-3">Stage</button>
-              <button onClick={() => { setSelectedAppId(applications[0].id); setStatusValue(applications[0].status); setShowStatusModal(true); }} className="btn-secondary text-xs py-1.5 px-3">Status</button>
+              <button onClick={() => setStageModalApp(applications[0])} className="btn-secondary text-sm py-2.5 px-5">Stage</button>
+              <button onClick={() => { setSelectedAppId(applications[0].id); setStatusValue(applications[0].status); setShowStatusModal(true); }} className="btn-secondary text-sm py-2.5 px-5">Status</button>
             </div>
           )}
         </div>

@@ -24,7 +24,7 @@ const CLIP_FIRST = 'polygon(0% 0%, 80% 0%, 100% 50%, 80% 100%, 0% 100%)';
 const CLIP_REST  = 'polygon(0% 0%, 80% 0%, 100% 50%, 80% 100%, 0% 100%, 20% 50%)';
 
 const STAGE_LABELS: Record<string, string> = {
-  'Applied and Screened': 'Applied',
+  'Applied and Screened': 'Applied & Screened',
   'Interview Round 1': 'Interview 1', 'Interview Round 2': 'Interview 2',
   'Assignment Round': 'Assignment', 'Founders Round': 'Founders',
   'Reference Check': 'Reference Check', 'Pre-Joining Documents': 'Pre-Joining',

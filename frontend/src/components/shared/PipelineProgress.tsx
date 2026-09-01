@@ -28,7 +28,7 @@ export const STAGE_COLORS: Record<string, string> = {
 // Shortened for the tight in-arrow label — full stage name still shows via
 // the native title tooltip on hover.
 const STAGE_LABELS: Record<string, string> = {
-  'Applied and Screened': 'Applied',
+  'Applied and Screened': 'Applied & Screened',
   'Interview Round 1': 'Interview 1',
   'Interview Round 2': 'Interview 2',
   'Assignment Round': 'Assignment',

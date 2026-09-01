@@ -5,7 +5,7 @@ import { CheckCircle, PauseCircle, XCircle, Search, ChevronUp, ChevronDown, Chev
 import toast from 'react-hot-toast';
 import { applicationsApi, rolesApi } from '../services/api.ts';
 import { Application, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
-import { Spinner, EmptyState, OverBudgetBadge } from '../components/shared/Badges.tsx';
+import { Spinner, EmptyState, OverBudgetBadge, StageBadge } from '../components/shared/Badges.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
 import RejectReasonModal from '../components/shared/RejectReasonModal.tsx';
@@ -494,11 +494,11 @@ export default function ScorecardSummary() {
                         (CTC → ECTC) rather than actually clipping. */}
                     <td className="table-td px-1.5 py-3 truncate">
                       {canLead ? (
-                        <button onClick={() => setStageModalApp(app)} className="text-xs text-gray-600 hover:text-dp-600 underline truncate block">
-                          {app.stage}
+                        <button onClick={() => setStageModalApp(app)} className="block max-w-full">
+                          <StageBadge stage={app.stage} />
                         </button>
                       ) : (
-                        <span className="text-xs text-gray-500 truncate block">{app.stage}</span>
+                        <StageBadge stage={app.stage} />
                       )}
                     </td>
                     <td className="table-td px-1.5 py-3 text-xs text-gray-500 truncate">
