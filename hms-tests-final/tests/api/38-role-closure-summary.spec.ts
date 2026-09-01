@@ -74,6 +74,12 @@ test.describe('GET /api/roles/:id/closure-summary.pdf', () => {
   });
 
   test('generates successfully with real pipeline history behind it (candidates across several stages/statuses)', async ({ request }) => {
+    // Two candidate creations below each trigger a real, synchronous
+    // ResumeIQ scoring call now (runResumeIQScoring at creation time),
+    // which didn't exist when this test was written against Playwright's
+    // 30s default — that margin is now regularly exceeded here (observed
+    // timing out mid-run under normal system load).
+    test.setTimeout(60_000);
     const { hrToken, api, role } = await createAndCloseRole(request, 'Alex', 'Closed – Filled');
 
     const { res: joinedRes } = await createCandidate(request, hrToken, { role_id: role.id });

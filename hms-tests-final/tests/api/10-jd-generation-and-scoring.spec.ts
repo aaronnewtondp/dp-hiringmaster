@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getToken, authed, createCandidateWithApp, pollUntil, uid } from '../helpers/api';
+import { getToken, authed, pollUntil, uid } from '../helpers/api';
 
 // ─── JD Generation + ResumeIQ scoring — REAL external calls ───────────────────
 // Unlike every other spec file in this suite, this file is explicitly allowed
@@ -79,23 +79,27 @@ test.describe('JD Generation + ResumeIQ scoring (real external calls)', () => {
     expect(roleWithJd.generated_jd_content).toBeTruthy();
     expect(typeof roleWithJd.generated_jd_content).toBe('object');
 
-    // 4. Create a candidate + application against THIS role
-    const { application } = await createCandidateWithApp(request, token, roleId);
-    expect(application.role_id).toBe(roleId);
-
-    // 5. Advance to Resume Review — the real ResumeIQ trigger point in
-    // applications.ts (guarded by !app.score_avg), also synchronous — the
-    // stage-change response itself carries the {scored,error} outcome.
-    const stageRes = await api.post(`/api/applications/${application.id}/stage`, {
-      new_stage: 'Resume Review',
+    // 4. Create a candidate + application against THIS role. ResumeIQ scoring
+    // is now triggered synchronously at CREATION time (runResumeIQScoring,
+    // called inline from candidates.ts's POST /) — there's no longer a
+    // separate "move to Resume Review" step to trigger it (that stage was
+    // retired — see STAGE_ORDER). The creation response itself carries the
+    // real {scored,error} outcome, same synchronous-response contract the
+    // JD-generation step above relies on.
+    const createCandRes = await api.post('/api/candidates', {
+      full_name: `Test JD Gen Candidate ${uid()}`,
+      email:     `test+${uid()}@example.com`,
+      role_id:   roleId,
     });
-    expect(stageRes.status()).toBe(200);
-    const { resumeiq } = await stageRes.json();
+    expect(createCandRes.status()).toBe(201);
+    const { application, resumeiq } = await createCandRes.json();
+    expect(application.role_id).toBe(roleId);
+    expect(application.stage).toBe('Applied');
     expect(resumeiq).toBeTruthy();
     expect(resumeiq.scored).toBe(true);
     expect(resumeiq.error).toBeUndefined();
 
-    // 6. Poll GET /api/applications/:id until scoring has completed
+    // 5. Poll GET /api/applications/:id until scoring has completed
     const scoredApp = await pollUntil(
       async () => {
         const r = await api.get(`/api/applications/${application.id}`);

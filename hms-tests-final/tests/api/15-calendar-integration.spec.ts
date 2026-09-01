@@ -76,6 +76,11 @@ test.describe('Calendar integration on POST /api/interviews', () => {
   // always populate `calendar` for a Standard round with a real, specific
   // reason instead of staying silent.
   test('Calendar sync is skipped when scheduled_date or interviewer_emails is missing', async ({ request }) => {
+    // Two candidate creations below each trigger a real, synchronous
+    // ResumeIQ scoring call now (runResumeIQScoring at creation time — see
+    // CLAUDE.md's "Pipeline stage model simplified" note), which didn't
+    // exist when this test was written against Playwright's 30s default.
+    test.setTimeout(60_000);
     const token = await getToken(request, 'hr');
     const api   = authed(request, token);
 

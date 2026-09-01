@@ -68,8 +68,13 @@ test.describe('Unlinked candidates panel + Link to role modal', () => {
     await modal.locator('select').selectOption(SEEDED.roles.senior_pm);
     await modal.getByRole('button', { name: 'Link', exact: true }).click();
 
-    // Success toast (react-hot-toast) confirms the link went through
-    await expect(page.getByText('Candidate linked to role')).toBeVisible({ timeout: 5000 });
+    // Success toast (react-hot-toast) confirms the link went through. The
+    // underlying POST /api/candidates/:id/applications now triggers a real,
+    // synchronous ResumeIQ scoring call before responding (runResumeIQScoring,
+    // called inline — see CLAUDE.md's "Pipeline stage model simplified" note)
+    // where it used to return near-instantly, so the toast can now take
+    // several seconds longer to appear than the original 5s budget allowed.
+    await expect(page.getByText('Candidate linked to role')).toBeVisible({ timeout: 15000 });
 
     // Modal closes, and this candidate's row drops out of the unlinked panel
     // (or the whole panel disappears if it was the only one left)

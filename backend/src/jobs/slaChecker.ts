@@ -9,6 +9,7 @@ export async function runSlaCheck(): Promise<void> {
 
   await Promise.all([
     resolveOrphanedActions(),
+    resolveStaleStageActionTypes(),
     checkFlatStageBreaches(),
     checkNotYetActioned(),
     checkFeedbackDue(),
@@ -248,6 +249,46 @@ export const STAGE_SLA_ACTION_TYPES = [
   ...NOT_YET_ACTIONED_STAGES.map(s => s.actionType),
   ...FEEDBACK_DUE_STAGES.map(s => s.actionType),
 ] as const;
+
+// Reverse-indexed from the check configs above: which stage(s) each
+// stage-keyed breach action_type is actually valid for right now. Feeds
+// resolveStaleStageActionTypes() below.
+const VALID_STAGES_BY_ACTION_TYPE: Record<string, string[]> = {};
+for (const cfg of FLAT_STAGE_CHECKS) VALID_STAGES_BY_ACTION_TYPE[cfg.actionType] = cfg.stages;
+for (const cfg of NOT_YET_ACTIONED_STAGES) VALID_STAGES_BY_ACTION_TYPE[cfg.actionType] = [cfg.stage];
+for (const cfg of FEEDBACK_DUE_STAGES) VALID_STAGES_BY_ACTION_TYPE[cfg.actionType] = [cfg.stage];
+
+// ─── 3.5. Safety net: resolve a stage-keyed breach action left behind by an
+// application whose stage changed via a path that skips the normal
+// resolve-on-transition step in applications.ts's POST /:id/stage (which
+// only ever resolves STAGE_SLA_ACTION_TYPES for the one application it's
+// actually mutating, in that one request). The one confirmed way this
+// happens today is a raw-SQL data migration — the 2026-09 retirement of
+// the 'Resume Review'/'Shortlisted' stages moved a batch of applications'
+// `stage` directly via UPDATE, bypassing that resolve step entirely. Any
+// application that still had an unresolved 'Idle Candidate' action from
+// when 'Idle Candidate' used to cover its old stage kept that row forever,
+// and once the migration moved its `stage` into a real STAGE_ORDER value
+// (previously it harmlessly pointed at a since-removed stage name that
+// nothing groups by), the stale row started colliding with the new,
+// legitimate 'Resume Shortlist Pending' breach at 'Applied' — surfaced by
+// hms-tests-final's "a stage never mixes breach types" regression test.
+// This sweep catches the general case, not just that one incident, so a
+// future stage/config change can't reintroduce the same class of bug.
+async function resolveStaleStageActionTypes(): Promise<void> {
+  for (const [actionType, validStages] of Object.entries(VALID_STAGES_BY_ACTION_TYPE)) {
+    await query(
+      `UPDATE pending_actions pa
+       SET resolved = true, resolved_at = NOW()
+       FROM applications a
+       WHERE pa.application_id = a.id
+         AND pa.resolved = false
+         AND pa.action_type = $1
+         AND a.stage <> ALL($2::text[])`,
+      [actionType, validStages]
+    );
+  }
+}
 
 // ─── 4. Assignment 60-hour hard submission deadline ─────────────────────────
 // Independent of "Assignment Feedback Due" above (96h, requires feedback not

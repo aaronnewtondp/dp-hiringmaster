@@ -6,7 +6,7 @@ test.describe('Stage-Driven Round Scheduling — Regression Guards', () => {
   // ─── Round scheduling must not touch application.stage ────────────────────
   // Historical bug: POST /api/interviews used to auto-advance an
   // application's stage as a side effect, matched off the round's free-text
-  // round_name. That's fundamentally incompatible with the fixed 13-stage
+  // round_name. That's fundamentally incompatible with the fixed 11-stage
   // pipeline model (Applied → ... → Joined) — a recruiter could type any
   // round_name they wanted, so "advancing" the stage off it was never a
   // reliable signal. The auto-advance was removed; stage is now owned
@@ -50,7 +50,7 @@ test.describe('Stage-Driven Round Scheduling — Regression Guards', () => {
   // Historical bug risk: the old third interview stage was literally named
   // 'Interview – Round 3', so getSlaHours()'s stage.startsWith('Interview')
   // check caught it "for free". Renaming it to 'Founders Round' as part of
-  // the 13-stage pipeline rework silently breaks that startsWith match unless
+  // the 11-stage pipeline rework silently breaks that startsWith match unless
   // 'Founders Round' gets its own explicit branch — without it, this stage
   // would quietly fall through to the 72-hour IDLE default instead of the
   // interview-feedback SLA every other interview stage gets (48h — every
@@ -117,10 +117,11 @@ test.describe('Stage-Driven Round Scheduling — Regression Guards', () => {
   // Every getSlaHours() branch that used to return 24 was widened to 48 in one
   // batch change to SLA_HOURS (types/index.ts): RESUME_REVIEW_HIGH_FIT,
   // RESUME_REVIEW_NORMAL, REF_INIT, OFFER_RELEASE, and INTERVIEW_FEEDBACK.
-  // HM_SHORTLIST (stage === 'Shortlisted') was already 48 before this batch —
-  // not a regression guard for anything that changed, so it's deliberately
-  // not covered here. 'Founders Round' is already covered by the dedicated
-  // describe block above (it needed its own explicit branch after a rename
+  // HM_SHORTLIST is now an orphaned constant — the 'Shortlisted' stage it
+  // used to key off was retired outright (see STAGE_ORDER), and
+  // getSlaHours() has no branch left that references it — so it's
+  // deliberately not covered here. 'Founders Round' is already covered by
+  // the dedicated describe block above (it needed its own explicit branch after a rename
   // broke its startsWith('Interview') match). These three cover the
   // remaining branches that would otherwise silently stay at 24h — or fall
   // through to the 72h IDLE default — if the widening were ever reverted for

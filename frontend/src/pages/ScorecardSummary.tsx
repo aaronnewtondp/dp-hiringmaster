@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
-import { CheckCircle, PauseCircle, XCircle, Search } from 'lucide-react';
+import { CheckCircle, PauseCircle, XCircle, Search, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi, rolesApi } from '../services/api.ts';
 import { Application, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
@@ -66,6 +66,11 @@ const DIMENSIONS: Array<{ key: keyof Application; label: string }> = [
 const SCORECARD_COLS_BEFORE_DIMS = 10;
 const SCORECARD_COLS_AFTER_DIMS = 4;
 
+// Same sortable-column pattern as Candidates.tsx (item #7) — Avg and
+// App. Age are this page's equivalents of Candidates' Fit and Application
+// Date (there's no Last-Updated-equivalent column here to add a third).
+type SortKey = 'avg' | 'app_age';
+
 export default function ScorecardSummary() {
   const qc = useQueryClient();
   const { canLead } = useAuth();
@@ -97,6 +102,12 @@ export default function ScorecardSummary() {
   const [rejectTargetIds, setRejectTargetIds] = useState<string[] | null>(null);
   const [budgetExceptionIds, setBudgetExceptionIds] = useState<string[] | null>(null);
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('desc'); }
+  };
 
   // Debounced free-text search — same pattern/timing as Candidates.tsx's own
   // `q` search, hitting the shared /applications route's server-side match
@@ -130,6 +141,13 @@ export default function ScorecardSummary() {
   const apps = filterInBudget
     ? allApps.filter(a => isWithinBudgetOrNear(a.candidate_expected_ctc, a.role_ctc_band))
     : allApps;
+  const sortValue = (app: Application, key: SortKey): number => {
+    if (key === 'avg') return app.score_avg != null ? Number(app.score_avg) : -Infinity;
+    return app.application_date ? new Date(app.application_date).getTime() : -Infinity;
+  };
+  const sortedApps = sortKey
+    ? [...apps].sort((a, b) => (sortDir === 'desc' ? 1 : -1) * (sortValue(b, sortKey) - sortValue(a, sortKey)))
+    : apps;
 
   const { data: filterOptionsData } = useQuery<{ data: { recruitment_modes: string[]; roles: { id: string; title: string }[] } }>({
     queryKey: ['roles', 'filter-options'],
@@ -363,26 +381,52 @@ export default function ScorecardSummary() {
                   )}
                 </th>
                 {[
-                  ['#', 'w-[32px]'], ['Candidate', 'w-[150px]'], ['Role', 'w-[120px]'], ['Stage', 'w-[100px]'],
-                  ['CTC → ECTC', 'w-[105px]'], ['Notice', 'w-[55px]'], ['Preferred Location', 'w-[110px]'],
-                  ['Company / Industry', 'w-[140px]'], ['Resume', 'w-[55px]'],
-                  ...DIMENSIONS.map(d => [d.label, 'w-[42px]'] as [string, string]),
-                  ['Avg', 'w-[45px]'], ['Verdict', 'w-[80px]'],
-                  ['App. Age', 'w-[55px]'], ['Actions', 'w-[150px]'],
-                ].map(([h, w], i) => (
-                  <th key={`${h}-${i}`} title={h} className={`table-th px-1.5 tracking-normal ${w} ${COLUMN_INFO[h] ? '' : 'truncate'}`}>
-                    {COLUMN_INFO[h] ? (
-                      <span className="inline-flex items-center gap-1 whitespace-nowrap">
-                        {h}
-                        <InfoTooltip text={COLUMN_INFO[h]} width="w-60" />
-                      </span>
-                    ) : h}
+                  { label: '#', width: 'w-[32px]' },
+                  { label: 'Candidate', width: 'w-[150px]' },
+                  { label: 'Role', width: 'w-[120px]' },
+                  { label: 'Stage', width: 'w-[100px]' },
+                  { label: 'CTC → ECTC', width: 'w-[105px]' },
+                  { label: 'Notice', width: 'w-[55px]' },
+                  { label: 'Preferred Location', width: 'w-[110px]' },
+                  { label: 'Company / Industry', width: 'w-[140px]' },
+                  { label: 'Resume', width: 'w-[55px]' },
+                  ...DIMENSIONS.map(d => ({ label: d.label, width: 'w-[42px]' })),
+                  { label: 'Avg', width: 'w-[58px]', sortKey: 'avg' as const },
+                  { label: 'Verdict', width: 'w-[80px]' },
+                  { label: 'App. Age', width: 'w-[80px]', sortKey: 'app_age' as const },
+                  { label: 'Actions', width: 'w-[150px]' },
+                ].map((col, i) => (
+                  // overflow-hidden unconditional — see Candidates.tsx's own
+                  // header cells for why (a too-wide label used to visually
+                  // bleed into the next column's header).
+                  <th key={`${col.label}-${i}`} title={col.label} className={`table-th px-1.5 tracking-normal overflow-hidden ${col.width}`}>
+                    <div className="flex items-center gap-1 min-w-0">
+                      {col.sortKey ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleSort(col.sortKey)}
+                          className="flex items-center gap-1 min-w-0 hover:text-dp-600 transition-colors group"
+                        >
+                          <span className="truncate">{col.label}</span>
+                          {sortKey === col.sortKey ? (
+                            sortDir === 'asc'
+                              ? <ChevronUp className="w-3.5 h-3.5 shrink-0 text-dp-600" strokeWidth={3} />
+                              : <ChevronDown className="w-3.5 h-3.5 shrink-0 text-dp-600" strokeWidth={3} />
+                          ) : (
+                            <ChevronsUpDown className="w-3.5 h-3.5 shrink-0 text-gray-400 group-hover:text-dp-500" strokeWidth={2.5} />
+                          )}
+                        </button>
+                      ) : (
+                        <span className="truncate">{col.label}</span>
+                      )}
+                      {COLUMN_INFO[col.label] && <InfoTooltip text={COLUMN_INFO[col.label]} width="w-60" />}
+                    </div>
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {apps.map((app, idx) => (
+              {sortedApps.map((app, idx) => (
                 <Fragment key={app.id}>
                   <tr className="hover:bg-gray-50 transition-colors">
                     <td className="table-td px-1.5 py-3">

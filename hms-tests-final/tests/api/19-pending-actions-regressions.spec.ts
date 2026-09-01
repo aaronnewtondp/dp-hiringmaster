@@ -4,9 +4,12 @@
 // Replaces the old flat "Pending Actions by Owner" model (one generic
 // idle-stage check per stage, one owner per stage) with a per-stage,
 // per-breach-type table: several stages now carry two distinct breach types
-// (an HR-owned "not yet actioned" gap and an HM-owned "feedback due" gap),
-// Resume Review's breach ownership moved from HR to the Hiring Manager, and
-// the whole "Pending Actions by Owner" board was replaced by the
+// (an HR-owned "not yet actioned" gap and an HM-owned "feedback due" gap).
+// The "Resume Shortlist Pending" breach (HM-owned, not HR) now fires at
+// 'Applied' itself — its original home was the since-retired 'Resume
+// Review' stage, retargeted straight to 'Applied' when that stage was
+// removed (see STAGE_ORDER) — and the whole "Pending Actions by Owner"
+// board was replaced by the
 // hiring_funnel_snapshot section (stage → breach_types → candidates) plus a
 // single merged sla_breach_total/sla_breach_by_owner KPI.
 //
@@ -61,6 +64,15 @@ test.describe('SLA breach engine — stage/breach-type table regressions', () =>
   // ─── Structural shape ───────────────────────────────────────────────────────
   test.describe('hiring_funnel_snapshot shape', () => {
     test('every candidate entry carries application_id, candidate_id, candidate_name, role_id, role_title, owner, stage, overdue_hours', async ({ request }) => {
+      // GET /api/dashboard opportunistically runs the full runSlaCheck()
+      // sweep (dashboard.ts's maybeRunSlaCheck, throttled to once per 3
+      // minutes per instance — see CLAUDE.md's "compute-on-read, not cron"
+      // note) whenever this is the first dashboard load outside that
+      // window. Against this suite's large, long-accumulated local dataset
+      // that sweep alone has been observed taking 25-30s — right at (or
+      // over) Playwright's 30s default — so give this generous headroom
+      // rather than risk a flaky timeout depending on suite/test ordering.
+      test.setTimeout(60_000);
       const hrToken = await getToken(request, 'hr');
       const snapshot = await getSnapshot(request, hrToken);
       const allCandidates = snapshot.flatMap(s => s.breach_types.flatMap(bt => bt.candidates));
@@ -99,21 +111,28 @@ test.describe('SLA breach engine — stage/breach-type table regressions', () =>
 
   // ─── Ownership per breach type ──────────────────────────────────────────────
   test.describe('breach ownership matches the new stage/breach-type table', () => {
-    test('Resume Review breaches ("Resume Shortlist Pending") are Hiring-Manager-owned, not HR', async ({ request }) => {
+    test('Applied breaches ("Resume Shortlist Pending") are Hiring-Manager-owned, not HR', async ({ request }) => {
       const hrToken = await getToken(request, 'hr');
-      const api = authed(request, hrToken);
       const { application } = await createCandidateWithApp(request, hrToken, 'R006');
-      await api.post(`/api/applications/${application.id}/stage`, { new_stage: 'Resume Review' });
+      // Every new application already starts at 'Applied' — no explicit
+      // transition needed. 'Resume Review' was retired as a stage; this
+      // breach now fires directly at 'Applied' (see slaChecker.ts's
+      // FLAT_STAGE_BREACHES).
       await client.query(`UPDATE applications SET stage_entry_time = NOW() - INTERVAL '50 hours' WHERE id = $1`, [application.id]);
       await runCronSlaCheck(request);
 
       const snapshot = await getSnapshot(request, hrToken);
-      const found = findCandidate(snapshot, 'Resume Review', application.id);
+      const found = findCandidate(snapshot, 'Applied', application.id);
       expect(found?.type).toBe('Resume Shortlist Pending');
       expect(found?.owner).toBe('Hiring Manager');
     });
 
     test('Assignment Round can carry both an HR-owned "Assignment Not Sent" and an HM-owned "Assignment Feedback Due" breach simultaneously, for different candidates', async ({ request }) => {
+      // Two candidate creations below each trigger a real, synchronous
+      // ResumeIQ scoring call now (runResumeIQScoring at creation time),
+      // which didn't exist when this test was written against Playwright's
+      // 30s default.
+      test.setTimeout(60_000);
       const hrToken = await getToken(request, 'hr');
       const api = authed(request, hrToken);
 
@@ -215,7 +234,8 @@ test.describe('SLA breach engine — stage/breach-type table regressions', () =>
       const hrToken = await getToken(request, 'hr');
       const api = authed(request, hrToken);
       const { application } = await createCandidateWithApp(request, hrToken, 'R006');
-      await api.post(`/api/applications/${application.id}/stage`, { new_stage: 'Resume Review' });
+      // Already sitting at 'Applied' from creation — no transition needed
+      // ('Resume Review' was retired as a stage).
       await client.query(`UPDATE applications SET stage_entry_time = NOW() - INTERVAL '60 hours' WHERE id = $1`, [application.id]);
 
       const statusRes = await api.post(`/api/applications/${application.id}/status`, {
@@ -225,7 +245,7 @@ test.describe('SLA breach engine — stage/breach-type table regressions', () =>
       await runCronSlaCheck(request);
 
       const snapshot = await getSnapshot(request, hrToken);
-      expect(findCandidate(snapshot, 'Resume Review', application.id)).toBeUndefined();
+      expect(findCandidate(snapshot, 'Applied', application.id)).toBeUndefined();
     });
   });
 

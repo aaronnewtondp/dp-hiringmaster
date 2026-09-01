@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getToken, authed } from '../helpers/api';
+import { getToken, authed, uid } from '../helpers/api';
 
 test.describe('Dashboard API', () => {
 
@@ -36,11 +36,11 @@ test.describe('Dashboard API', () => {
       expect(open_roles_count).toBeGreaterThanOrEqual(7);
     });
 
-    test('hiring_funnel_snapshot is an array of all 13 canonical stages, each with a breach_types array', async ({ request }) => {
+    test('hiring_funnel_snapshot is an array of all 11 canonical stages, each with a breach_types array', async ({ request }) => {
       const token = await getToken(request, 'hr');
       const { hiring_funnel_snapshot } = await (await authed(request, token).get('/api/dashboard')).json();
       expect(Array.isArray(hiring_funnel_snapshot)).toBe(true);
-      expect(hiring_funnel_snapshot.length).toBe(13);
+      expect(hiring_funnel_snapshot.length).toBe(11);
       for (const stage of hiring_funnel_snapshot) {
         expect(typeof stage.stage).toBe('string');
         expect(typeof stage.total).toBe('number');
@@ -85,6 +85,51 @@ test.describe('Dashboard API', () => {
       for (const role of aging_roles) {
         expect(['ok', 'yellow', 'red']).toContain(role.aging_alert);
       }
+    });
+
+    // 2026-09-01: aging_roles was widened from "only overdue Approved/Live –
+    // Sourcing roles" to "every role currently Approved, Live – Sourcing, or
+    // On Hold", each carrying its own days_open/aging_alert regardless of
+    // whether it's actually overdue (dashboard.ts's agingTableRoles). A
+    // freshly-Approved P2 role is nowhere near its 35-day yellow threshold,
+    // so under the OLD behavior it would never have appeared here at all.
+    test('a freshly-Approved role (not overdue) still appears in aging_roles, not just overdue ones', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const api   = authed(request, token);
+
+      const createRes = await api.post('/api/roles', { title: `Aging Roles Fresh ${uid()}`, priority: 'P2' });
+      expect(createRes.status()).toBe(201);
+      const { role } = await createRes.json();
+
+      const approveRes = await api.patch(`/api/roles/${role.id}`, { status: 'Approved' });
+      expect(approveRes.status()).toBe(200);
+
+      const { aging_roles } = await (await api.get('/api/dashboard')).json();
+      const found = aging_roles.find((r: { id: string }) => r.id === role.id);
+      expect(found).toBeTruthy();
+      expect(found.aging_alert).toBe('ok');
+      expect(found.days_open).toBeGreaterThanOrEqual(0);
+    });
+
+    // On Hold roles are included for reference now too, but never flagged —
+    // the aging clock isn't "running" while a role is paused, so
+    // computeAging() always returns 'ok' for On Hold regardless of days_open.
+    test('an On Hold role appears in aging_roles and always has aging_alert "ok"', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const api   = authed(request, token);
+
+      const createRes = await api.post('/api/roles', { title: `Aging Roles On Hold ${uid()}`, priority: 'P0' });
+      expect(createRes.status()).toBe(201);
+      const { role } = await createRes.json();
+
+      expect((await api.patch(`/api/roles/${role.id}`, { status: 'Approved' })).status()).toBe(200);
+      const holdRes = await api.patch(`/api/roles/${role.id}`, { status: 'On Hold' });
+      expect(holdRes.status()).toBe(200);
+
+      const { aging_roles } = await (await api.get('/api/dashboard')).json();
+      const found = aging_roles.find((r: { id: string }) => r.id === role.id);
+      expect(found).toBeTruthy();
+      expect(found.aging_alert).toBe('ok');
     });
   });
 

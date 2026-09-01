@@ -3,17 +3,20 @@ import { getToken, authed, uid } from '../helpers/api';
 
 // PATCH /api/roles/:id's approval branch (roles.ts) — "approving" is defined
 // purely as body.status === 'Approved' AND the role's CURRENT status isn't
-// already 'Approved'. That specific transition unlocks three behaviors that
+// already 'Approved'. That specific transition unlocks two behaviors that
 // don't exist for any other field edit on this route:
-//   1. A 'hiring_manager' persona is allowed through at all, but ONLY if
-//      they're the literal hiring_manager_name string on THAS role (there's
-//      no user_id FK — it's a name comparison) AND the request body contains
-//      nothing but 'status'.
-//   2. approver_name / approval_date / start_date are server-computed and
+//   1. approver_name / approval_date / start_date are server-computed and
 //      unconditionally stripped from whatever the client sent, then
 //      re-injected from the real acting user + today's date.
-//   3. A dedicated 'Role Approved' activity_log entry is written, distinct
+//   2. A dedicated 'Role Approved' activity_log entry is written, distinct
 //      from the generic 'Status Changed' entry every other status edit gets.
+//
+// The whole route is gated by a blanket isHRTier(persona) check up front —
+// as of 2026-09-01 that's unconditional, with no carve-out for a Hiring
+// Manager approving a role they're themselves listed as hiring_manager_name
+// for (the earlier isHmForThisRole exception was removed outright). A
+// hiring_manager persona therefore can't reach this route AT ALL anymore,
+// approving their own role or otherwise — see the describe block below.
 //
 // Re-approving an already-Approved role is a deliberate no-op (old status ===
 // new status means nothing lands in the update set at all), so approver_name/
@@ -123,26 +126,34 @@ test.describe('Role approval workflow (PATCH /api/roles/:id)', () => {
     });
   });
 
-  test.describe('Hiring Manager approving their own role', () => {
+  test.describe('Hiring Manager attempting to approve a role — no own-role carve-out anymore', () => {
 
-    // hiring_manager_name is a plain trimmed/lowercased string match against
-    // the acting user's own name (seed.sql: alex@digitalpaani.com's name is
-    // literally 'Alex') — no user_id FK backs this relationship.
-    test('hm_alex approves a role where hiring_manager_name is "Alex" — 200', async ({ request }) => {
+    // 2026-09-01 product decision: the earlier isHmForThisRole carve-out was
+    // removed outright. PATCH /api/roles/:id is now gated by a blanket
+    // isHRTier(persona) check with NO exception for a Hiring Manager
+    // approving a role they're themselves listed as hiring_manager_name for
+    // — every non-HR-tier PATCH gets the same generic 'HR access required'
+    // 403 the route already gave for a non-owned role, regardless of
+    // whose role it is.
+    test('hm_alex can no longer approve a role where hiring_manager_name is "Alex" — 403', async ({ request }) => {
       const hrToken = await getToken(request, 'hr');
       const role    = await createDraftRole(request, hrToken, { hiring_manager_name: 'Alex' });
 
       const hmToken = await getToken(request, 'hm_alex');
       const res     = await authed(request, hmToken).patch(`/api/roles/${role.id}`, { status: 'Approved' });
-      expect(res.status()).toBe(200);
+      expect(res.status()).toBe(403);
       const body = await res.json();
-      expect(body.role.status).toBe('Approved');
-      expect(body.role.approver_name).toBe('Alex');
+      expect(body.error).toBe('HR access required');
+
+      // Role must be untouched by the rejected attempt.
+      const getRes = await authed(request, hrToken).get(`/api/roles/${role.id}`);
+      const { role: unchanged } = await getRes.json();
+      expect(unchanged.status).toBe('Draft');
     });
 
     // Same persona, different role: hiring_manager_name deliberately does
-    // NOT match Alex's own name, so isHmForThisRole is false and the
-    // approval attempt is treated exactly like an ordinary non-HR-tier edit.
+    // NOT match Alex's own name — same 403 as the "own role" case above,
+    // since ownership is no longer even consulted by this gate.
     test('hm_alex cannot approve a role whose hiring_manager_name is someone else — 403', async ({ request }) => {
       const hrToken = await getToken(request, 'hr');
       const role    = await createDraftRole(request, hrToken, { hiring_manager_name: `Someone Else ${uid()}` });
@@ -159,12 +170,13 @@ test.describe('Role approval workflow (PATCH /api/roles/:id)', () => {
       expect(unchanged.status).toBe('Draft');
     });
 
-    // The allowed HM-approval path is a single-purpose door: 'status' and
-    // NOTHING else. Smuggling an unrelated field in the same request — even
-    // though the HM IS the correct named manager and the status value IS
-    // 'Approved' — must reject the whole request, not silently drop the
-    // extra field and approve anyway.
-    test('hm_alex approving with an extra field in the body — 403, and the role is untouched (still Draft, title unchanged)', async ({ request }) => {
+    // The old "single-purpose door" smuggling test (status-only vs. status +
+    // another field, with its own distinct error message) no longer applies
+    // — there's no partially-allowed HM path through this route left to
+    // smuggle an extra field into. Any HM PATCH, status-only or not, own
+    // role or not, is rejected identically by the same blanket check before
+    // field filtering ever runs.
+    test('hm_alex PATCHing their own role with status + an extra field is still just the generic 403, not a field-specific rejection', async ({ request }) => {
       const hrToken = await getToken(request, 'hr');
       const role    = await createDraftRole(request, hrToken, { hiring_manager_name: 'Alex' });
 
@@ -175,7 +187,7 @@ test.describe('Role approval workflow (PATCH /api/roles/:id)', () => {
       });
       expect(res.status()).toBe(403);
       const body = await res.json();
-      expect(body.error).toBe('Hiring Managers may only approve a role here, not edit other fields');
+      expect(body.error).toBe('HR access required');
 
       const getRes = await authed(request, hrToken).get(`/api/roles/${role.id}`);
       const { role: unchanged } = await getRes.json();

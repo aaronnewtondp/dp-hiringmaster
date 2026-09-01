@@ -42,6 +42,11 @@ test.describe('GET /api/candidates — Talent Pool Department/Location/Role filt
   }
 
   test('department filter narrows the candidate list and leaves the applications array intact', async ({ request }) => {
+    // makeHoldForFutureCandidate below triggers a real, synchronous
+    // ResumeIQ scoring call at creation (Applied is scored immediately now,
+    // not on a later stage move) — same reasoning as the equivalent
+    // per-test timeouts added across this suite for the same change.
+    test.setTimeout(60_000);
     const token = await getToken(request, 'hr');
     const api   = authed(request, token);
     const dept  = `TP-Dept-${uid()}`;
@@ -68,6 +73,7 @@ test.describe('GET /api/candidates — Talent Pool Department/Location/Role filt
   });
 
   test('role_id filter matches a candidate with 2 applications by EITHER role, and both applications still show', async ({ request }) => {
+    test.setTimeout(60_000);
     const token = await getToken(request, 'hr');
     const api   = authed(request, token);
     const tag   = uid();
@@ -94,6 +100,7 @@ test.describe('GET /api/candidates — Talent Pool Department/Location/Role filt
   });
 
   test('location filter (substring match) narrows results the same way it does on Roles/Dashboard', async ({ request }) => {
+    test.setTimeout(60_000);
     const token = await getToken(request, 'hr');
     const api   = authed(request, token);
     const city  = `TPCity-${uid()}`;
@@ -109,6 +116,7 @@ test.describe('GET /api/candidates — Talent Pool Department/Location/Role filt
   });
 
   test('department + role_id combine with AND semantics, matching neither excludes the candidate', async ({ request }) => {
+    test.setTimeout(60_000);
     const token = await getToken(request, 'hr');
     const api   = authed(request, token);
     const dept  = `TP-Combo-Dept-${uid()}`;
@@ -128,6 +136,7 @@ test.describe('GET /api/candidates — Talent Pool Department/Location/Role filt
   });
 
   test('works in archived mode too, not just hold_for_future', async ({ request }) => {
+    test.setTimeout(60_000);
     const token = await getToken(request, 'hr');
     const api   = authed(request, token);
     const dept  = `TP-Archived-Dept-${uid()}`;

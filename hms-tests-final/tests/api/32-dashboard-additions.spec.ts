@@ -7,7 +7,7 @@ import { getToken, authed } from '../helpers/api';
 // validate velocity.tat_by_stage's canonical-name filter; nothing else in
 // this file needs it.
 const STAGE_ORDER = [
-  'Applied', 'Resume Review', 'Shortlisted',
+  'Applied',
   'Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round',
   'Reference Check', 'Pre-Joining Documents', 'Offer Discussion',
   'Offer Released', 'Offer Accepted', 'Joined',
@@ -175,7 +175,7 @@ test.describe('Dashboard API additions', () => {
       }
     });
 
-    test('tat_by_stage is sorted slowest-first and contains only canonical 13-stage names', async ({ request }) => {
+    test('tat_by_stage is sorted slowest-first and contains only canonical 11-stage names', async ({ request }) => {
       const token = await getToken(request, 'hr');
       const res   = await authed(request, token).get('/api/dashboard');
       expect(res.status()).toBe(200);

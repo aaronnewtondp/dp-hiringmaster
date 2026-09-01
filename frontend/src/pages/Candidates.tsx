@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, ChevronsUpDown, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi, candidatesApi, rolesApi } from '../services/api.ts';
 import { Application, Candidate, STAGES, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS, REJECTION_REASONS, WITHDRAWAL_REASONS, OVER_BUDGET_SHORTLIST_REASONS } from '../types/index.ts';
@@ -539,39 +539,43 @@ export default function Candidates() {
                   { label: 'CTC → ECTC', width: 'w-[110px]' },
                   { label: 'Notice', width: 'w-[58px]' },
                   { label: 'Preferred Location', width: 'w-[110px]' },
-                  { label: 'Company / Industry', width: 'w-[130px]' },
+                  { label: 'Company / Industry', width: 'w-[155px]' },
                   { label: 'Resume Link', width: 'w-[68px]' },
-                  { label: 'Application Date', width: 'w-[100px]', sortKey: 'application_date' as const },
-                  { label: 'Last Updated', width: 'w-[100px]', sortKey: 'last_updated' as const },
+                  { label: 'Application Date', width: 'w-[122px]', sortKey: 'application_date' as const },
+                  { label: 'Last Updated', width: 'w-[108px]', sortKey: 'last_updated' as const },
                   { label: '', width: 'w-[34px]' },
                 ].map(col => (
-                  <th key={col.label} title={col.label} className={`table-th px-2 tracking-normal ${col.width} ${COLUMN_INFO[col.label] || col.sortKey ? '' : 'truncate'}`}>
-                    {col.sortKey ? (
-                      // InfoTooltip renders its own <button> internally, so it
-                      // sits OUTSIDE the sort-toggle button as a sibling here
-                      // — nesting a <button> inside a <button> is invalid HTML
-                      // (browsers/screen readers handle it unpredictably).
-                      <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
+                  // overflow-hidden is unconditional here — content that's too
+                  // wide for its fixed column now clips/ellipses inside its
+                  // own cell instead of visually bleeding into the next
+                  // column's header (a real bug hit once a couple of these
+                  // labels grew long enough to overflow a tight width).
+                  <th key={col.label} title={col.label} className={`table-th px-2 tracking-normal overflow-hidden ${col.width}`}>
+                    <div className="flex items-center gap-1 min-w-0">
+                      {col.sortKey ? (
+                        // InfoTooltip renders its own <button> internally, so it
+                        // sits OUTSIDE the sort-toggle button as a sibling here
+                        // — nesting a <button> inside a <button> is invalid HTML
+                        // (browsers/screen readers handle it unpredictably).
                         <button
                           type="button"
                           onClick={() => toggleSort(col.sortKey)}
-                          className="inline-flex items-center gap-0.5 whitespace-nowrap hover:text-dp-600 transition-colors"
+                          className="flex items-center gap-1 min-w-0 hover:text-dp-600 transition-colors group"
                         >
-                          {col.label}
+                          <span className="truncate">{col.label}</span>
                           {sortKey === col.sortKey ? (
-                            sortDir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                            sortDir === 'asc'
+                              ? <ChevronUp className="w-3.5 h-3.5 shrink-0 text-dp-600" strokeWidth={3} />
+                              : <ChevronDown className="w-3.5 h-3.5 shrink-0 text-dp-600" strokeWidth={3} />
                           ) : (
-                            <ChevronDown className="w-3 h-3 opacity-20" />
+                            <ChevronsUpDown className="w-3.5 h-3.5 shrink-0 text-gray-400 group-hover:text-dp-500" strokeWidth={2.5} />
                           )}
                         </button>
-                        {COLUMN_INFO[col.label] && <InfoTooltip text={COLUMN_INFO[col.label]} width="w-60" />}
-                      </span>
-                    ) : COLUMN_INFO[col.label] ? (
-                      <span className="inline-flex items-center gap-1 whitespace-nowrap">
-                        {col.label}
-                        <InfoTooltip text={COLUMN_INFO[col.label]} width="w-60" />
-                      </span>
-                    ) : col.label}
+                      ) : (
+                        <span className="truncate">{col.label}</span>
+                      )}
+                      {COLUMN_INFO[col.label] && <InfoTooltip text={COLUMN_INFO[col.label]} width="w-60" />}
+                    </div>
                   </th>
                 ))}
               </tr>

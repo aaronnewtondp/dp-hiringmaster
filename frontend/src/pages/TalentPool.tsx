@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Search } from 'lucide-react';
+import { Search, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { candidatesApi, rolesApi } from '../services/api.ts';
 import { Candidate, DEPARTMENTS, LOCATIONS } from '../types/index.ts';
 import { StageBadge, StatusBadge, FitScore, Spinner, EmptyState } from '../components/shared/Badges.tsx';
@@ -29,6 +29,11 @@ const COLUMN_INFO: Record<string, string> = {
 // history, not just the flagged one" behavior from the old card layout.
 type TalentPoolRow = { candidate: Candidate; app: NonNullable<Candidate['applications']>[number] };
 
+// Same three sortable columns as Candidates.tsx (item #7), applied to the
+// analogous fields here — client-side over whatever page of rows is
+// currently loaded, same reasoning as Candidates.tsx's own sort.
+type SortKey = 'fit' | 'application_date' | 'last_added';
+
 export default function TalentPool() {
   const { canHR } = useAuth();
   const qc = useQueryClient();
@@ -46,6 +51,12 @@ export default function TalentPool() {
   const [items,        setItems]        = useState<Candidate[]>([]);
   const [total,        setTotal]        = useState(0);
   const [linkCandidate, setLinkCandidate] = useState<Candidate | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('desc'); }
+  };
 
   // Debounced free-text search — this is the first filter in the app that
   // hits the backend on every keystroke rather than filtering an
@@ -94,6 +105,14 @@ export default function TalentPool() {
   const rows: TalentPoolRow[] = items.flatMap(c =>
     (c.applications || []).map(app => ({ candidate: c, app }))
   );
+  const sortValue = (row: TalentPoolRow, key: SortKey): number => {
+    if (key === 'fit') return row.app.ai_fit_score ?? -Infinity;
+    const raw = key === 'application_date' ? row.app.application_date : row.app.last_updated;
+    return raw ? new Date(raw).getTime() : -Infinity;
+  };
+  const sortedRows = sortKey
+    ? [...rows].sort((a, b) => (sortDir === 'desc' ? 1 : -1) * (sortValue(b, sortKey) - sortValue(a, sortKey)))
+    : rows;
 
   return (
     <div className="space-y-5">
@@ -177,25 +196,51 @@ export default function TalentPool() {
             <thead className="border-b border-gray-100 bg-gray-50">
               <tr>
                 {[
-                  ['Candidate', 'w-[150px]'], ['Role', 'w-[100px]'], ['Stage', 'w-[90px]'],
-                  ['Status', 'w-[90px]'], ['Fit', 'w-[56px]'], ['CTC → ECTC', 'w-[105px]'],
-                  ['Notice', 'w-[55px]'], ['Preferred Location', 'w-[110px]'], ['Company / Industry', 'w-[130px]'],
-                  ['Resume Link', 'w-[68px]'], ['Application Date', 'w-[95px]'], ['Last Added', 'w-[95px]'],
-                  ['Actions', 'w-[90px]'],
-                ].map(([h, w]) => (
-                  <th key={h} title={h} className={`table-th px-2 tracking-normal ${w} ${COLUMN_INFO[h] ? '' : 'truncate'}`}>
-                    {COLUMN_INFO[h] ? (
-                      <span className="inline-flex items-center gap-1 whitespace-nowrap">
-                        {h}
-                        <InfoTooltip text={COLUMN_INFO[h]} width="w-60" />
-                      </span>
-                    ) : h}
+                  { label: 'Candidate', width: 'w-[150px]' },
+                  { label: 'Role', width: 'w-[100px]' },
+                  { label: 'Stage', width: 'w-[90px]' },
+                  { label: 'Status', width: 'w-[90px]' },
+                  { label: 'Fit', width: 'w-[64px]', sortKey: 'fit' as const },
+                  { label: 'CTC → ECTC', width: 'w-[105px]' },
+                  { label: 'Notice', width: 'w-[55px]' },
+                  { label: 'Preferred Location', width: 'w-[110px]' },
+                  { label: 'Company / Industry', width: 'w-[150px]' },
+                  { label: 'Resume Link', width: 'w-[68px]' },
+                  { label: 'Application Date', width: 'w-[122px]', sortKey: 'application_date' as const },
+                  { label: 'Last Added', width: 'w-[100px]', sortKey: 'last_added' as const },
+                  { label: 'Actions', width: 'w-[90px]' },
+                ].map(col => (
+                  // overflow-hidden unconditional — see Candidates.tsx's own
+                  // header cells for why (a too-wide label used to visually
+                  // bleed into the next column's header).
+                  <th key={col.label} title={col.label} className={`table-th px-2 tracking-normal overflow-hidden ${col.width}`}>
+                    <div className="flex items-center gap-1 min-w-0">
+                      {col.sortKey ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleSort(col.sortKey)}
+                          className="flex items-center gap-1 min-w-0 hover:text-dp-600 transition-colors group"
+                        >
+                          <span className="truncate">{col.label}</span>
+                          {sortKey === col.sortKey ? (
+                            sortDir === 'asc'
+                              ? <ChevronUp className="w-3.5 h-3.5 shrink-0 text-dp-600" strokeWidth={3} />
+                              : <ChevronDown className="w-3.5 h-3.5 shrink-0 text-dp-600" strokeWidth={3} />
+                          ) : (
+                            <ChevronsUpDown className="w-3.5 h-3.5 shrink-0 text-gray-400 group-hover:text-dp-500" strokeWidth={2.5} />
+                          )}
+                        </button>
+                      ) : (
+                        <span className="truncate">{col.label}</span>
+                      )}
+                      {COLUMN_INFO[col.label] && <InfoTooltip text={COLUMN_INFO[col.label]} width="w-60" />}
+                    </div>
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {rows.map(({ candidate: c, app: a }) => (
+              {sortedRows.map(({ candidate: c, app: a }) => (
                 <tr key={a.id} className="hover:bg-gray-50 transition-colors">
                   <td className="table-td px-2 py-4">
                     <div className="min-w-0">

@@ -76,6 +76,11 @@ test.describe('Compensation visibility — own-role Hiring Manager + HR-tier onl
   });
 
   test('GET /api/applications and /:id — candidate CTC visible only for the HM\'s own role', async ({ request }) => {
+    // Two candidate creations below each trigger a real, synchronous
+    // ResumeIQ scoring call now (runResumeIQScoring at creation time),
+    // which didn't exist when this test was written against Playwright's
+    // 30s default.
+    test.setTimeout(60_000);
     const hrToken = await getToken(request, 'hr');
     const alexToken = await getToken(request, 'hm_alex');
 
@@ -107,20 +112,30 @@ test.describe('Compensation visibility — own-role Hiring Manager + HR-tier onl
     const alexToken = await getToken(request, 'hm_alex');
 
     // Not Alex's role, and reachable by any persona per the Shortlist-from-
-    // Resume-Review carve-out — the scenario that actually leaked before.
-    // expected_ctc kept within R002's own band (3-3.5 LPA) so this doesn't
-    // also trip the unrelated over-budget mandatory-reason gate.
+    // Applied carve-out (Applied -> Interview Round 1 is open to every
+    // persona regardless of role ownership — see applications.ts's
+    // canShortlistFromApplied) — the scenario that actually leaked before.
+    // A new application starts directly at 'Applied' now (the old
+    // intermediate 'Resume Review' stage was retired), so there's no
+    // earlier transition needed to set this up. expected_ctc kept within
+    // R002's own band (3-3.5 LPA) so this doesn't also trip the unrelated
+    // over-budget mandatory-reason gate.
     const { res } = await createCandidate(request, hrToken, { role_id: SEEDED.roles.ei_mumbai, expected_ctc: 3.2 });
     const { application } = await res.json();
-    await authed(request, hrToken).post(`/api/applications/${application.id}/stage`, { new_stage: 'Resume Review' });
+    expect(application.stage).toBe('Applied');
 
-    const stageRes = await authed(request, alexToken).post(`/api/applications/${application.id}/stage`, { new_stage: 'Shortlisted' });
+    const stageRes = await authed(request, alexToken).post(`/api/applications/${application.id}/stage`, { new_stage: 'Interview Round 1' });
     expect(stageRes.status()).toBe(200);
     const { application: updated } = await stageRes.json();
     assertStripped(updated);
   });
 
   test('GET /api/candidates and /:id — candidate profile CTC visible only when linked to the HM\'s own role', async ({ request }) => {
+    // Two candidate creations below each trigger a real, synchronous
+    // ResumeIQ scoring call now (runResumeIQScoring at creation time),
+    // which didn't exist when this test was written against Playwright's
+    // 30s default.
+    test.setTimeout(60_000);
     const hrToken = await getToken(request, 'hr');
     const alexToken = await getToken(request, 'hm_alex');
 
@@ -147,6 +162,11 @@ test.describe('Compensation visibility — own-role Hiring Manager + HR-tier onl
   });
 
   test('GET /api/roles/:id/pipeline — application rows stripped for a non-owned role, visible for the HM\'s own', async ({ request }) => {
+    // Two candidate creations below each trigger a real, synchronous
+    // ResumeIQ scoring call now (runResumeIQScoring at creation time),
+    // which didn't exist when this test was written against Playwright's
+    // 30s default.
+    test.setTimeout(60_000);
     const hrToken = await getToken(request, 'hr');
     const alexToken = await getToken(request, 'hm_alex');
 
@@ -176,7 +196,7 @@ test.describe('Compensation visibility — own-role Hiring Manager + HR-tier onl
     for (const row of otherAll) assertStripped(row);
   });
 
-  test('PATCH /api/roles/:id response — ctc_band visible in the response for the role\'s own HM approving it', async ({ request }) => {
+  test('PATCH /api/roles/:id response — hm_alex is now blocked outright even for their OWN role, closing the leak surface for good; HR still sees ctc_band in the response', async ({ request }) => {
     const hrToken = await getToken(request, 'hr');
     const alexToken = await getToken(request, 'hm_alex');
 
@@ -190,13 +210,24 @@ test.describe('Compensation visibility — own-role Hiring Manager + HR-tier onl
     const { role } = await createRes.json();
     expect(role.status).toBe('Draft'); // status isn't settable at creation — starts Draft regardless
 
-    // hm_alex approving their OWN role — allowed by the pre-existing
-    // isApprovingThisRole/isHmForThisRole carve-out (Draft -> Approved
-    // satisfies it just as well as Under Review -> Approved), and now also
-    // comp-visible in the response since it's their own role.
+    // 2026-09-01: the isApprovingThisRole/isHmForThisRole own-role carve-out
+    // was removed — PATCH /api/roles/:id is now a blanket isHRTier(persona)
+    // gate with no exception, so hm_alex can no longer approve even their
+    // own role. The 403 fires before any field processing runs, so there's
+    // no code path left where a Hiring Manager's PATCH response could leak
+    // ctc_band (or anything else) — the scenario this test used to cover no
+    // longer has a door to walk through.
     const approveRes = await authed(request, alexToken).patch(`/api/roles/${role.id}`, { status: 'Approved' });
-    expect(approveRes.status()).toBe(200);
-    expect((await approveRes.json()).role.ctc_band).toBe('10-15 LPA');
+    expect(approveRes.status()).toBe(403);
+    const approveBody = await approveRes.json();
+    expect(approveBody.error).toBe('HR access required');
+    expect(approveBody).not.toHaveProperty('role');
+
+    // HR approving the same role still works, and correctly sees ctc_band
+    // in the response, as HR-tier always does regardless of ownership.
+    const hrApproveRes = await authed(request, hrToken).patch(`/api/roles/${role.id}`, { status: 'Approved' });
+    expect(hrApproveRes.status()).toBe(200);
+    expect((await hrApproveRes.json()).role.ctc_band).toBe('10-15 LPA');
   });
 
   test('GET /api/roles/:id/edit-log — a ctc_band change is visible to the role\'s own HM, excluded for another HM', async ({ request }) => {

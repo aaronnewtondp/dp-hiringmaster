@@ -33,11 +33,11 @@ test.describe('GET /api/dashboard/funnel-snapshot', () => {
     expect(snap.hiring_funnel_snapshot).toEqual(full.hiring_funnel_snapshot);
   });
 
-  test('is an array of all 13 canonical stages, each with a breach_types array', async ({ request }) => {
+  test('is an array of all 11 canonical stages, each with a breach_types array', async ({ request }) => {
     const token = await getToken(request, 'hr');
     const { hiring_funnel_snapshot } = await (await authed(request, token).get('/api/dashboard/funnel-snapshot')).json();
     expect(Array.isArray(hiring_funnel_snapshot)).toBe(true);
-    expect(hiring_funnel_snapshot.length).toBe(13);
+    expect(hiring_funnel_snapshot.length).toBe(11);
     for (const stage of hiring_funnel_snapshot) {
       expect(typeof stage.stage).toBe('string');
       expect(typeof stage.total).toBe('number');

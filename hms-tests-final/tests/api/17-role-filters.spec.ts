@@ -137,6 +137,13 @@ test.describe('Role/Dashboard/Candidates master filters', () => {
     // needs bumping again as more tests pile more data onto them. A fresh,
     // self-owned role has a fully deterministic count with no such drift.
     test('filtering by a single role_id narrows open_roles_count and active_candidates agrees with /api/applications', async ({ request }) => {
+      // Three candidate creations below each trigger a real, synchronous
+      // ResumeIQ scoring call now (runResumeIQScoring at creation time) —
+      // free/instant when this test was written against Playwright's 30s
+      // default. Parallelizing them (order doesn't matter — every
+      // assertion below only cares about the final count) plus a generous
+      // explicit timeout keeps this fast and reliable.
+      test.setTimeout(60_000);
       const token = await getToken(request, 'hr');
       const api   = authed(request, token);
 
@@ -149,10 +156,10 @@ test.describe('Role/Dashboard/Candidates master filters', () => {
       expect(patchRes.status()).toBe(200);
 
       const APP_COUNT = 3;
-      for (let i = 0; i < APP_COUNT; i++) {
-        const { application } = await createCandidateWithApp(request, token, role.id);
-        expect(application.role_id).toBe(role.id);
-      }
+      const created = await Promise.all(
+        Array.from({ length: APP_COUNT }, () => createCandidateWithApp(request, token, role.id))
+      );
+      for (const { application } of created) expect(application.role_id).toBe(role.id);
 
       const [unfilteredRes, filteredRes] = await Promise.all([
         api.get('/api/dashboard'),
@@ -188,6 +195,17 @@ test.describe('Role/Dashboard/Candidates master filters', () => {
     // totals are exact rather than dependent on how much other tests (past
     // or future) have already piled onto a shared seeded role.
     test('role_id=X&role_id=Y returns only applications for those two roles, and counts reconcile', async ({ request }) => {
+      // Every application creation now triggers a real, synchronous
+      // ResumeIQ scoring call (Claude + optional Drive fetch) at creation
+      // time — see runResumeIQScoring, called inline from candidates.ts's
+      // POST / — where it used to be free (nothing scored an application
+      // until it was manually moved to the now-retired 'Resume Review'
+      // stage). Five sequential real scoring calls comfortably exceeded
+      // Playwright's default 30s test timeout; creating them in parallel
+      // (independent candidates/roles, safe to run concurrently) plus a
+      // generous explicit timeout keeps this fast and reliable again.
+      test.setTimeout(60_000);
+
       const token = await getToken(request, 'hr');
       const api   = authed(request, token);
       const titleTag = uid();
@@ -201,8 +219,10 @@ test.describe('Role/Dashboard/Candidates master filters', () => {
 
       const X_COUNT = 2;
       const Y_COUNT = 3;
-      for (let i = 0; i < X_COUNT; i++) await createCandidateWithApp(request, token, roleX);
-      for (let i = 0; i < Y_COUNT; i++) await createCandidateWithApp(request, token, roleY);
+      await Promise.all([
+        ...Array.from({ length: X_COUNT }, () => createCandidateWithApp(request, token, roleX)),
+        ...Array.from({ length: Y_COUNT }, () => createCandidateWithApp(request, token, roleY)),
+      ]);
 
       const [combinedRes, xOnlyRes, yOnlyRes] = await Promise.all([
         api.get(`/api/applications?role_id=${roleX}&role_id=${roleY}&limit=50`),

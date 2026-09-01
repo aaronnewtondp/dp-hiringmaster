@@ -45,63 +45,57 @@ test.describe('Hiring Funnel Snapshot', () => {
 
   test('every stage chevron is colored by default; selecting one greys out every other stage', async ({ page }) => {
     await loginViaApi(page);
+    // 'Resume Review' was retired as a stage (STAGE_ORDER now has 11 stages,
+    // not 13) — 'Interview Round 1' is the next real chevron after 'Applied'.
     const applied = page.locator('button[title="Applied"]');
-    const resumeReview = page.locator('button[title="Resume Review"]');
+    const interview1 = page.locator('button[title="Interview Round 1"]');
     await expect(applied).toBeVisible({ timeout: 15000 });
-    await expect(resumeReview).toBeVisible();
+    await expect(interview1).toBeVisible();
 
     const bgBefore = {
       applied: await applied.evaluate(el => (el as HTMLElement).style.background),
-      resumeReview: await resumeReview.evaluate(el => (el as HTMLElement).style.background),
+      interview1: await interview1.evaluate(el => (el as HTMLElement).style.background),
     };
     // Distinct stages must not already share an identical background before
     // any selection — each is lit in its own STAGE_COLORS hue by default.
-    expect(bgBefore.applied).not.toBe(bgBefore.resumeReview);
+    expect(bgBefore.applied).not.toBe(bgBefore.interview1);
 
     await applied.click();
     await page.waitForTimeout(300); // style transition/re-render settle
 
     const bgAfter = {
       applied: await applied.evaluate(el => (el as HTMLElement).style.background),
-      resumeReview: await resumeReview.evaluate(el => (el as HTMLElement).style.background),
+      interview1: await interview1.evaluate(el => (el as HTMLElement).style.background),
     };
     // The selected stage's own hue changes (brightened) but must still
     // differ from the now-shared grey the rest collapse to.
     expect(bgAfter.applied).not.toBe(bgBefore.applied);
-    expect(bgAfter.resumeReview).not.toBe(bgBefore.resumeReview);
-    expect(bgAfter.applied).not.toBe(bgAfter.resumeReview);
+    expect(bgAfter.interview1).not.toBe(bgBefore.interview1);
+    expect(bgAfter.applied).not.toBe(bgAfter.interview1);
 
     // Every OTHER stage must now share one identical (grey/UNLIT_BG) fill —
-    // not just Resume Review — confirming "grey out every other stage",
-    // not just the one checked above.
-    const otherTitles = ['Shortlisted', 'Interview Round 1', 'Founders Round', 'Joined'];
+    // not just Interview Round 1 — confirming "grey out every other stage",
+    // not just the one checked above. 'Shortlisted' was retired along with
+    // 'Resume Review' — see STAGE_ORDER — so it's dropped from this list.
+    const otherTitles = ['Interview Round 2', 'Founders Round', 'Joined'];
     const otherBgs = await Promise.all(
       otherTitles.map(t => page.locator(`button[title="${t}"]`).evaluate(el => (el as HTMLElement).style.background))
     );
-    for (const bg of otherBgs) expect(bg).toBe(bgAfter.resumeReview);
+    for (const bg of otherBgs) expect(bg).toBe(bgAfter.interview1);
   });
 
-  test('role filter rail renders full role names without CSS truncation', async ({ page }) => {
+  // The local per-section Role filter (and its rail) was retired —
+  // HiringFunnelSnapshot.tsx now relies solely on the Dashboard's own master
+  // filters, matching every other section on the page instead of carrying an
+  // independent one. This used to be a "no CSS truncation on long role
+  // names" check on that rail; now it's a regression guard that the rail
+  // (and its "Filter this section by role" trigger text) doesn't reappear.
+  test('the funnel snapshot no longer renders its own local role-filter rail', async ({ page }) => {
     await loginViaApi(page);
-    await expect(page.locator('text=Filter this section by role').first()).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('button[title="Applied"]')).toBeVisible({ timeout: 15000 });
 
-    // Rail buttons are real <button> elements inside the rail's scroll
-    // region — grab the first role option (index 0 is the "All roles"
-    // toggle, so the first real role is index 1).
-    const rail = page.locator('div.max-h-80.overflow-y-auto button');
-    const count = await rail.count();
-    expect(count).toBeGreaterThan(1);
-    const roleBtn = rail.nth(1);
-
-    const style = await roleBtn.evaluate(el => {
-      const cs = getComputedStyle(el);
-      return { whiteSpace: cs.whiteSpace, textOverflow: cs.textOverflow };
-    });
-    // Truncation requires BOTH nowrap and an ellipsis — neither should be
-    // present; the rail wraps long names onto extra lines instead of
-    // clipping them (the user's explicit "all names clearly visible" ask).
-    expect(style.whiteSpace).not.toBe('nowrap');
-    expect(style.textOverflow).not.toBe('ellipsis');
+    await expect(page.locator('text=Filter this section by role')).toHaveCount(0);
+    await expect(page.locator('div.max-h-80.overflow-y-auto button')).toHaveCount(0);
   });
 
   test('clicking a candidate breach tile navigates to that candidate\'s detail page', async ({ page }) => {

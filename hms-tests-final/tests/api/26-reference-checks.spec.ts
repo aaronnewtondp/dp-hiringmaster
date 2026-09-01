@@ -146,7 +146,7 @@ test.describe('Reference-check-required gate on POST /applications/:id/stage', (
     // Never visited Reference Check at all — moving between earlier stages
     // must not be blocked by a gate that only applies when actually sitting
     // in that stage.
-    const res = await api.post(`/api/applications/${application.id}/stage`, { new_stage: 'Resume Review' });
+    const res = await api.post(`/api/applications/${application.id}/stage`, { new_stage: 'Interview Round 1' });
     expect(res.status()).toBe(200);
   });
 });

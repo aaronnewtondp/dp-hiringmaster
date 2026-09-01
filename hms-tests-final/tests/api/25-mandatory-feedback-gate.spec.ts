@@ -111,7 +111,7 @@ test.describe('Mandatory interview/assignment feedback before stage advance', ()
     const api   = authed(request, token);
     const { application } = await createCandidateWithApp(request, token);
 
-    const res = await api.post(`/api/applications/${application.id}/stage`, { new_stage: 'Resume Review' });
+    const res = await api.post(`/api/applications/${application.id}/stage`, { new_stage: 'Interview Round 1' });
     expect(res.status()).toBe(200);
   });
 });

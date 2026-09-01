@@ -74,11 +74,15 @@ test.describe('Access Control — restricted field enforcement', () => {
     });
 
     test('cannot advance application stage — returns 403', async ({ request }) => {
+      // Applied -> Interview Round 1 is the one open-to-everyone shortlist
+      // carve-out (canShortlistFromApplied in applications.ts), so this uses
+      // a different target stage to test the general "HM cannot advance
+      // stage" rule rather than accidentally exercising that exception.
       const hrToken = await getToken(request, 'hr');
       const { application } = await createCandidateWithApp(request, hrToken);
       const hmToken = await getToken(request, 'hm_alex');
       const res = await authed(request, hmToken).post(`/api/applications/${application.id}/stage`, {
-        new_stage: 'Resume Review',
+        new_stage: 'Interview Round 2',
       });
       expect(res.status()).toBe(403);
     });

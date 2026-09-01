@@ -51,6 +51,11 @@ test.describe('GET /api/applications — master filters + candidate profile fiel
     });
 
     test('priority=P1&priority=P2 (multi-value) excludes a P3-role application', async ({ request }) => {
+      // Two candidate creations below each trigger a real, synchronous
+      // ResumeIQ scoring call now (runResumeIQScoring at creation time),
+      // which didn't exist when this test was written against Playwright's
+      // 30s default.
+      test.setTimeout(60_000);
       const token = await getToken(request, 'hr');
       const api   = authed(request, token);
       const tag    = uid();
@@ -130,6 +135,11 @@ test.describe('GET /api/applications — master filters + candidate profile fiel
     });
 
     test('role_status combined with department narrows on both dimensions at once', async ({ request }) => {
+      // createCandidateWithApp below triggers a real, synchronous ResumeIQ
+      // scoring call at creation (Applied is scored immediately now, not on
+      // a later stage move) — same reasoning as the multi-value priority
+      // test above in this file.
+      test.setTimeout(60_000);
       const token = await getToken(request, 'hr');
       const api   = authed(request, token);
       const dept  = `Dept-Combo-${uid()}`;

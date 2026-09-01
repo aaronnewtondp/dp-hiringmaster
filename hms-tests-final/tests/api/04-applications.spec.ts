@@ -21,10 +21,10 @@ test.describe('Applications — 3-field state model', () => {
 
   test('stage and status are SEPARATE endpoints and do not overwrite each other', async ({ request }) => {
     const { api, appId } = await freshApp(request);
-    await api.post(`/api/applications/${appId}/stage`, { new_stage: 'Resume Review' });
+    await api.post(`/api/applications/${appId}/stage`, { new_stage: 'Interview Round 1' });
     await api.post(`/api/applications/${appId}/status`, { new_status: 'Hold for Future' });
     const body = await (await api.get(`/api/applications/${appId}`)).json();
-    expect(body.application.stage).toBe('Resume Review');
+    expect(body.application.stage).toBe('Interview Round 1');
     expect(body.application.status).toBe('Hold for Future');
   });
 
@@ -48,10 +48,16 @@ test.describe('Applications — 3-field state model', () => {
     expect(body.application.stage).toBe('Offer');
   });
 
-  test('SLA hours are set correctly when entering Resume Review', async ({ request }) => {
+  test('SLA hours are set correctly on the Applied stage at creation (no manual Resume Review move needed)', async ({ request }) => {
+    // 'Resume Review' was retired as a stage — every application starts at
+    // 'Applied' and is scored synchronously at creation time
+    // (runResumeIQScoring, called inline from createCandidateWithApp's
+    // POST /api/candidates), which also refines sla_hours based on the
+    // resulting fit score. There's no separate transition left to trigger
+    // this — it's already true by the time the application exists.
     const { api, appId } = await freshApp(request);
-    await api.post(`/api/applications/${appId}/stage`, { new_stage: 'Resume Review' });
     const body = await (await api.get(`/api/applications/${appId}`)).json();
+    expect(body.application.stage).toBe('Applied');
     expect(body.application.sla_hours).toBeGreaterThan(0);
     expect(body.application.stage_entry_time).toBeTruthy();
   });
@@ -59,7 +65,7 @@ test.describe('Applications — 3-field state model', () => {
   test('stage change is written to activity_log', async ({ request }) => {
     const { token, api, appId } = await freshApp(request);
     const { candidate } = await (await api.get(`/api/applications/${appId}`)).json();
-    await api.post(`/api/applications/${appId}/stage`, { new_stage: 'Resume Review' });
+    await api.post(`/api/applications/${appId}/stage`, { new_stage: 'Interview Round 1' });
     const logRes = await api.get(`/api/candidates/${candidate?.id ?? (await (await api.get(`/api/applications/${appId}`)).json()).application.candidate_id}/activity`);
     const { activity: logs } = await logRes.json();
     // activity_log exists (Application Created event is always written)

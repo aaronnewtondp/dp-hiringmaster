@@ -53,10 +53,10 @@ test.describe('Dashboard audit fixes — SLA race, orphan sweep, funnel shape, s
     const api = authed(request, hrToken);
     const { application } = await createCandidateWithApp(request, hrToken);
 
-    const stageRes = await api.post(`/api/applications/${application.id}/stage`, { new_stage: 'Resume Review' });
-    expect(stageRes.status()).toBe(200);
-
-    // Push stage_entry_time back past the 48h Resume Review SLA.
+    // Already sitting at 'Applied' from creation ('Resume Review' was
+    // retired as a stage — see STAGE_ORDER) — 'Applied' carries the same
+    // 48h SLA that stage used to (see getSlaHours in applications.ts). Push
+    // stage_entry_time back past that threshold.
     await client.query(
       `UPDATE applications SET stage_entry_time = NOW() - INTERVAL '60 hours' WHERE id = $1`,
       [application.id]
@@ -159,12 +159,12 @@ test.describe('Dashboard audit fixes — SLA race, orphan sweep, funnel shape, s
     expect(dashRes.status()).toBe(200);
     const { hiring_funnel } = await dashRes.json();
 
-    // All 13 canonical stages always present, dense — this is the actual
+    // All 11 canonical stages always present, dense — this is the actual
     // fix: the funnel used to filter to status='Active' only, so a stage
     // with zero currently-active occupants (everyone since rejected/
     // withdrawn/on hold) vanished from the array entirely instead of
     // showing up with active:0 and the real rejected count.
-    expect(hiring_funnel.length).toBe(13);
+    expect(hiring_funnel.length).toBe(11);
     const entry = hiring_funnel.find((f: { stage: string }) => f.stage === 'Interview Round 2');
     expect(entry).toBeTruthy();
     expect(entry.rejected).toBeGreaterThanOrEqual(1);

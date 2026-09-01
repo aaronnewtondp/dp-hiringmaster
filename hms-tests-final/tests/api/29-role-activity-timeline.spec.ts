@@ -183,11 +183,12 @@ test.describe('Role Activity Timeline', () => {
       expect(application.role_id).toBe(role.id);
 
       // Advance stage away from the default 'Applied' so logActivity actually
-      // writes a 'Stage Changed' row against this role_id. Deliberately NOT
-      // 'Resume Review' — that stage triggers a real, synchronous ResumeIQ
-      // scoring call (Claude + Drive fetch), which is unrelated to what this
-      // test is checking and would just slow it down for no reason. Any
-      // other free-text stage string exercises the same logActivity() call.
+      // writes a 'Stage Changed' row against this role_id. Any free-text
+      // stage string exercises the same logActivity() call — there's no
+      // per-stage special-casing to dodge here anymore: ResumeIQ scoring
+      // isn't tied to a particular stage transition at all now ('Resume
+      // Review' was retired — see STAGE_ORDER), it already ran
+      // synchronously at application-creation time via createCandidateWithApp.
       const stageRes = await authed(request, token).post(`/api/applications/${application.id}/stage`, {
         new_stage: 'Screening',
       });
