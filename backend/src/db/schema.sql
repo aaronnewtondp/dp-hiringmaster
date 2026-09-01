@@ -793,6 +793,15 @@ ALTER TABLE users
 -- retirement above) — slaChecker.ts's resolveStaleStageActionTypes() sweep
 -- (added the same day) now catches this general class of staleness on
 -- every SLA check going forward, not just as a one-time patch.
+--
+-- Follow-up, same day: the CREATE TABLE text above was updated to the new
+-- DEFAULT, but the live column-level DEFAULT on both Supabase and local
+-- Docker was never actually altered to match — so any INSERT that omitted
+-- `stage` still silently fell back to the retired 'Applied' value. This
+-- produced 3 stray rows in production during a brief deploy-propagation
+-- window, re-migrated by re-running the UPDATE above. Fixed for good with:
+--   ALTER TABLE applications ALTER COLUMN stage SET DEFAULT 'Applied and Screened';
+-- applied to both Supabase and local Docker on 2026-09-01.
 
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows

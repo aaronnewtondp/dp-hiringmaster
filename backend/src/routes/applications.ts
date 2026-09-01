@@ -533,4 +533,20 @@ router.post('/:id/founder-flag', async (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+// ─── POST /api/applications/:id/retry-scoring — manually retry ResumeIQ ──────
+// Safety net for the case where the synchronous scoring call at
+// application-creation time (candidates.ts / candidateIngest.ts) threw or
+// was cut off mid-call (e.g. a Vercel function timeout) and left the
+// application permanently unscored with no record of the attempt anywhere —
+// runResumeIQScoring() only writes an activity_log entry on SUCCESS, so a
+// failed attempt is otherwise invisible. HR-tier only, matching the other
+// maintenance-style actions in this file. Idempotent — runResumeIQScoring
+// itself no-ops if score_avg is already set.
+router.post('/:id/retry-scoring', requireHR, async (req: Request, res: Response) => {
+  const app = await queryOne<Application>('SELECT id, score_avg FROM applications WHERE id=$1', [req.params.id]);
+  if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
+  const resumeiq = await runResumeIQScoring(app.id);
+  res.json({ resumeiq });
+});
+
 export default router;

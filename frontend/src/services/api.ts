@@ -87,6 +87,7 @@ export const applicationsApi = {
   updateScreening: (id: string, status: string)       => api.post(`/applications/${id}/screening`, { new_screening_status: status }),
   updateNotes:     (id: string, data: Record<string, unknown>) => api.patch(`/applications/${id}/notes`, data),
   setFounderFlag:  (id: string, set: boolean, note?: string)   => api.post(`/applications/${id}/founder-flag`, { set, note }),
+  retryScoring:    (id: string)                       => api.post(`/applications/${id}/retry-scoring`, {}),
 };
 
 export const interviewsApi = {

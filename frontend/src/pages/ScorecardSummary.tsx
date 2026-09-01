@@ -73,7 +73,7 @@ type SortKey = 'avg' | 'app_age';
 
 export default function ScorecardSummary() {
   const qc = useQueryClient();
-  const { canLead } = useAuth();
+  const { canLead, canHR } = useAuth();
   const [searchParams] = useSearchParams();
   // Filters persisted to sessionStorage (item #13) so they survive
   // navigating away and back. roleIds is the one exception on initial
@@ -117,7 +117,20 @@ export default function ScorecardSummary() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  const params: Record<string, string | string[]> = { limit: '100', scored_only: 'true' };
+  // Scoped to Applied and Screened — this page's whole reason for existing
+  // is the shortlisting decision that only applies at that one stage (see
+  // the `reviewable` filter below), so there's nothing to gain by competing
+  // for the same flat `limit` window against every other stage's scored
+  // applications too. `scored_only` was dropped deliberately: an
+  // application whose ResumeIQ scoring failed or never completed
+  // (score_avg IS NULL) still needs the exact same shortlist/reject/hold
+  // decision — hiding it here just because it has no score left it
+  // permanently invisible with no way to discover or act on it. The score
+  // columns already render '—' for a null value, so nothing breaks by
+  // including these rows. `limit: '500'` is generous headroom above any
+  // realistic Active+Applied-and-Screened backlog for a queue that's meant
+  // to be worked down to zero, not accumulate indefinitely.
+  const params: Record<string, string | string[]> = { limit: '500', stage: 'Applied and Screened' };
   if (search)              params.q = search;
   if (roleIds.length)     params.role_id = roleIds;
   if (departments.length) params.department = departments;
@@ -164,14 +177,21 @@ export default function ScorecardSummary() {
     return s;
   });
 
-  // Shortlist / Hold for Future / Reject only make sense at Applied — same
-  // precondition the backend enforces for the non-HR-tier carve-out. Every
-  // application is auto-scored right at Applied now (Resume Review was
-  // retired as its own stage), so this is the one and only "reviewable"
-  // stage.
+  // Kept as a defensive filter even though the fetch above is already
+  // stage-scoped to 'Applied and Screened' — Shortlist / Hold for Future /
+  // Reject only ever make sense at that one stage (same precondition the
+  // backend enforces for the non-HR-tier carve-out), so this stays correct
+  // even if a future edit widens what this query fetches.
   const reviewable = apps.filter(a => a.stage === 'Applied and Screened');
   const allReviewableSelected  = reviewable.length > 0 && reviewable.every(a => selectedIds.has(a.id));
   const someReviewableSelected = reviewable.some(a => selectedIds.has(a.id));
+  // Every application is meant to be auto-scored the instant it's created
+  // (resumeIQTrigger.ts) — a row that's Applied and Screened + Active with
+  // no score means that automatic pass failed or never ran (a failure
+  // leaves no trace anywhere else, since runResumeIQScoring only logs on
+  // success). Surfaced here rather than silently hidden, with a way to
+  // retry it directly.
+  const unscored = apps.filter(a => a.score_avg == null);
 
   const toggleSelected = (id: string) => setSelectedIds(prev => {
     const s = new Set(prev);
@@ -245,6 +265,7 @@ export default function ScorecardSummary() {
 
   const bulkShortlist     = () => requestShortlist(Array.from(selectedIds));
   const bulkHoldForFuture = () => runBulk(id => applicationsApi.updateStatus(id, { new_status: 'Hold for Future' }), Array.from(selectedIds), 'put on hold');
+  const retryScoring = (ids: string[]) => runBulk(id => applicationsApi.retryScoring(id), ids, 'retried');
 
   const handleBulkReject = async (reasonCat: string, reasonDetail: string) => {
     if (!rejectTargetIds) return;
@@ -288,7 +309,7 @@ export default function ScorecardSummary() {
           } />
         </div>
         <p className="text-sm text-gray-500 mt-0.5">
-          Every ResumeIQ-scored candidate, ranked and compared side by side — mirrors the
+          Every candidate at Applied and Screened, ranked and compared side by side — mirrors the
           digitalpaani-candidate-scoring skill's output format.
         </p>
         {roleIds.length === 1 && roleOptions.some(r => r.value === roleIds[0]) && (
@@ -325,6 +346,22 @@ export default function ScorecardSummary() {
           In-budget only
         </button>
       </div>
+
+      {canHR && unscored.length > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg">
+          <span className="text-xs font-medium text-amber-800">
+            {unscored.length} candidate{unscored.length === 1 ? '' : 's'} pending ResumeIQ scoring
+          </span>
+          <button
+            onClick={() => retryScoring(unscored.map(a => a.id))}
+            disabled={bulkSaving}
+            className="flex items-center gap-1.5 btn-secondary text-xs py-1 px-2.5"
+          >
+            {bulkSaving && <Spinner size="sm" />}
+            Retry scoring
+          </button>
+        </div>
+      )}
 
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-dp-50 border border-dp-100 rounded-lg">
