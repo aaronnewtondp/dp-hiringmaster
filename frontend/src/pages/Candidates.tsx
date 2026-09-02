@@ -611,7 +611,12 @@ export default function Candidates() {
                   <td className="table-td px-2 py-4"><StageBadge stage={app.stage} /></td>
                   <td className="table-td px-2 py-4"><FitScore score={app.ai_fit_score} /></td>
                   <td className="table-td px-2 py-4 text-xs text-gray-500 truncate">
-                    <div className="flex items-center gap-1.5">
+                    {/* Stacked, not side-by-side — CTC → ECTC sits directly
+                        above the Over Budget badge so the figures
+                        justifying the flag are the first thing read, not a
+                        same-line afterthought easy to miss in a narrow
+                        column. */}
+                    <div className="flex flex-col gap-0.5">
                       <span className="truncate font-mono">
                         {app.candidate_ctc_fixed ? `₹${app.candidate_ctc_fixed}L` : '—'}
                         {' → '}

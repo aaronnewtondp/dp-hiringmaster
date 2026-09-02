@@ -502,7 +502,10 @@ export default function ScorecardSummary() {
                       )}
                     </td>
                     <td className="table-td px-1.5 py-3 text-xs text-gray-500 truncate">
-                      <div className="flex items-center gap-1.5">
+                      {/* Stacked, not side-by-side — CTC → ECTC sits
+                          directly above the Over Budget badge, same
+                          reasoning as Candidates.tsx's identical cell. */}
+                      <div className="flex flex-col gap-0.5">
                         <span className="truncate">
                           {app.candidate_ctc_fixed ? `₹${app.candidate_ctc_fixed}L` : '—'}
                           {' → '}

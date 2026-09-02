@@ -470,12 +470,18 @@ export default function CandidateDetail() {
                             )}
                             <span className="text-xs text-gray-400">{app.recruiter_screening_status}</span>
                             {app.score_avg != null && <span className="text-xs font-semibold text-dp-700">ResumeIQ: {Number(app.score_avg).toFixed(1)}/10</span>}
-                            {(ctcFixed != null || ectc != null) && (
-                              <span className="text-xs font-mono text-gray-500">
-                                {ctcFixed ? `₹${ctcFixed}L` : '—'} → {ectc ? `₹${ectc}L` : '—'}
-                              </span>
+                            {/* Stacked, not side-by-side — CTC → ECTC sits
+                                directly above the Over Budget badge, same
+                                reasoning as the Candidates/Scorecard Summary
+                                table cells. */}
+                            {(ctcFixed != null || ectc != null || isOverBudget(ectc, app.role_ctc_band)) && (
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-xs font-mono text-gray-500">
+                                  {ctcFixed ? `₹${ctcFixed}L` : '—'} → {ectc ? `₹${ectc}L` : '—'}
+                                </span>
+                                <OverBudgetBadge overBudget={isOverBudget(ectc, app.role_ctc_band)} />
+                              </div>
                             )}
-                            <OverBudgetBadge overBudget={isOverBudget(ectc, app.role_ctc_band)} />
                           </div>
                           <div className="flex gap-3 mt-2 text-xs text-gray-400">
                             <span>Source: {app.source_channel || '—'}</span>
