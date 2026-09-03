@@ -187,7 +187,9 @@ API endpoint — never conflate them:
   constraint; both the stage retirement and the `Applied` rename each
   required their own one-time data migration on top of the type change (see
   `schema.sql`).
-- `status` — Active / On Hold / Rejected / Withdrawn / Hold for Future / Joined
+- `status` — Active / Rejected / Withdrawn / Hold for Future / Joined / Closed
+  (`'On Hold'` was retired and folded into `'Hold for Future'`; `'Closed'` was
+  added later — see `applications_status_check` in `schema.sql`)
 - `recruiter_screening_status` — New → Under Recruiter Review → Awaiting HM
   Review → HM Shortlisted (etc.)
 

@@ -2,12 +2,28 @@ import { query, queryOne, transaction } from '../db/index.js';
 import { Priority } from '../types/index.js';
 import { computeAging } from '../utils/aging.js';
 
+const CHECK_NAMES = [
+  'resolveOrphanedActions', 'resolveStaleStageActionTypes', 'checkFlatStageBreaches',
+  'checkNotYetActioned', 'checkFeedbackDue', 'checkAssignmentDeadlines',
+  'checkRoleAging', 'checkJoiningRisk',
+] as const;
+
 // ─── Main SLA check — called by scheduler every 15 minutes ───────────────────
 export async function runSlaCheck(): Promise<void> {
   const start = Date.now();
   console.log(`[SLA] Running check at ${new Date().toISOString()}`);
 
-  await Promise.all([
+  // Promise.allSettled, not Promise.all — these 8 checks are independent and
+  // each does its own real DB writes (not one shared transaction), so one
+  // throwing must not abandon whichever siblings are still mid-write. With
+  // Promise.all, dashboard.ts's maybeRunSlaCheck() catches the immediate
+  // rejection and returns while those siblings keep running detached; on
+  // Vercel the HTTP response going out right after makes the whole
+  // serverless function eligible for teardown before they finish — the
+  // exact "no fire-and-forget on Vercel" bug class documented at the top of
+  // this file's own CLAUDE.md entry, just one level deeper (inside a
+  // function that's itself already correctly awaited).
+  const settled = await Promise.allSettled([
     resolveOrphanedActions(),
     resolveStaleStageActionTypes(),
     checkFlatStageBreaches(),
@@ -17,6 +33,11 @@ export async function runSlaCheck(): Promise<void> {
     checkRoleAging(),
     checkJoiningRisk(),
   ]);
+  settled.forEach((result, i) => {
+    if (result.status === 'rejected') {
+      console.error(`[SLA] ${CHECK_NAMES[i]} failed:`, result.reason);
+    }
+  });
 
   console.log(`[SLA] Check complete in ${Date.now() - start}ms`);
 }
@@ -82,30 +103,39 @@ async function applyBreachBatch(
   const activeApps = apps.filter(a => stillActiveIds.has(a.id));
   if (activeApps.length === 0) return;
 
-  await query(
-    `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
-     WHERE application_id = ANY($1::text[]) AND action_type=$2 AND resolved=false`,
-    [activeApps.map(a => a.id), actionType]
-  );
+  // Resolve-then-insert has to be one transaction — as two independent
+  // auto-committed statements, a failure on the INSERT (a transient
+  // connection drop, a pool hiccup) left the resolve already committed:
+  // a still-genuinely-breaching application with its old pending_actions
+  // row closed out and no replacement, silently vanishing from every
+  // breach count until the next cycle re-evaluates it (and that retry
+  // isn't guaranteed either, if the same failure recurs).
+  await transaction(async (client) => {
+    await client.query(
+      `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
+       WHERE application_id = ANY($1::text[]) AND action_type=$2 AND resolved=false`,
+      [activeApps.map(a => a.id), actionType]
+    );
 
-  await query(
-    `INSERT INTO pending_actions
-       (owner_type, priority_level, action_type, description, application_id,
-        candidate_name, role_title, hours_overdue, role_id, responsible_person)
-     SELECT $1, 'High', $2, $2||' — '||floor(d.hours_overdue)||'h overdue',
-            d.application_id, d.candidate_name, d.role_title, d.hours_overdue, d.role_id, d.responsible_person
-     FROM unnest($3::text[], $4::text[], $5::text[], $6::numeric[], $7::text[], $8::text[])
-       AS d(application_id, candidate_name, role_title, hours_overdue, role_id, responsible_person)`,
-    [
-      ownerType, actionType,
-      activeApps.map(a => a.id),
-      activeApps.map(a => a.candidate_name || 'Unknown'),
-      activeApps.map(a => a.role_title || 'Unknown'),
-      activeApps.map(a => Math.max(0, a.hoursOverdue)),
-      activeApps.map(a => a.role_id),
-      activeApps.map(a => (ownerType === 'Hiring Manager' ? a.hiring_manager_name || null : null)),
-    ]
-  );
+    await client.query(
+      `INSERT INTO pending_actions
+         (owner_type, priority_level, action_type, description, application_id,
+          candidate_name, role_title, hours_overdue, role_id, responsible_person)
+       SELECT $1, 'High', $2, $2||' — '||floor(d.hours_overdue)||'h overdue',
+              d.application_id, d.candidate_name, d.role_title, d.hours_overdue, d.role_id, d.responsible_person
+       FROM unnest($3::text[], $4::text[], $5::text[], $6::numeric[], $7::text[], $8::text[])
+         AS d(application_id, candidate_name, role_title, hours_overdue, role_id, responsible_person)`,
+      [
+        ownerType, actionType,
+        activeApps.map(a => a.id),
+        activeApps.map(a => a.candidate_name || 'Unknown'),
+        activeApps.map(a => a.role_title || 'Unknown'),
+        activeApps.map(a => Math.max(0, a.hoursOverdue)),
+        activeApps.map(a => a.role_id),
+        activeApps.map(a => (ownerType === 'Hiring Manager' ? a.hiring_manager_name || null : null)),
+      ]
+    );
+  });
 }
 
 // ─── 1. Flat, stage-entry-time-anchored breaches (no round involved) ─────────
@@ -219,6 +249,16 @@ async function checkFeedbackDue(): Promise<void> {
   for (const cfg of FEEDBACK_DUE_STAGES) {
     const rows = await query<{ id: string; role_id: string; anchor_time: string;
              candidate_name: string; role_title: string; hiring_manager_name: string | null }>(
+      // The overdue threshold has to live IN the JOIN, not just in the JS
+      // .filter() below — DISTINCT ON picks one row per application before
+      // that filter ever runs, and "most recently anchored" (ORDER BY ...
+      // DESC) is not the same round as "actually overdue." An application
+      // with two unsubmitted rounds — one genuinely overdue, one scheduled
+      // in the future — had DISTINCT ON pick the future one (its anchor
+      // sorts later), producing a negative hoursOverdue that the JS filter
+      // then silently dropped, masking the real breach on the earlier
+      // round. Filtering to overdue rounds here means DISTINCT ON only
+      // ever has overdue candidates to choose from.
       `SELECT DISTINCT ON (a.id) a.id, a.role_id, ir.${cfg.anchorColumn} AS anchor_time,
               c.full_name AS candidate_name, r.title AS role_title, r.hiring_manager_name
        FROM applications a
@@ -229,9 +269,10 @@ async function checkFeedbackDue(): Promise<void> {
          AND ir.created_at >= a.stage_entry_time
          AND ir.${cfg.anchorColumn} IS NOT NULL
          AND ir.feedback_status != 'Submitted'
+         AND ir.${cfg.anchorColumn} < NOW() - ($3::numeric * INTERVAL '1 hour')
        WHERE a.status='Active' AND a.stage=$1
        ORDER BY a.id, ir.${cfg.anchorColumn} DESC`,
-      [cfg.stage, cfg.roundType]
+      [cfg.stage, cfg.roundType, cfg.thresholdHours]
     );
     const breached = rows
       .map(row => ({ ...row, hoursOverdue: (Date.now() - new Date(row.anchor_time).getTime()) / 3600000 - cfg.thresholdHours }))
@@ -248,6 +289,22 @@ export const STAGE_SLA_ACTION_TYPES = [
   'Idle Candidate', 'Resume Shortlist Pending',
   ...NOT_YET_ACTIONED_STAGES.map(s => s.actionType),
   ...FEEDBACK_DUE_STAGES.map(s => s.actionType),
+] as const;
+
+// Every action_type that should count as a genuine candidate-flow SLA
+// breach — the 10 stage-driven types above, plus the two independent,
+// non-stage-anchored checks (#4 checkAssignmentDeadlines, #6
+// checkJoiningRisk) that STAGE_SLA_ACTION_TYPES was never extended to
+// cover. Deliberately excludes 'Role aging alert' (role-level, owned by
+// Leadership / Founders, a different KPI) and 'Compensation change flag'
+// (not a candidate-flow SLA at all). Use this — not STAGE_SLA_ACTION_TYPES
+// — anywhere a genuine breach *count* is needed (Dashboard KPI, Hiring
+// Funnel Snapshot, role-closure summary); STAGE_SLA_ACTION_TYPES itself
+// stays scoped to its own real purpose above (stage-transition resolves).
+export const ALL_BREACH_ACTION_TYPES = [
+  ...STAGE_SLA_ACTION_TYPES,
+  'Assignment deadline breached',
+  'Joining risk — no contact',
 ] as const;
 
 // Reverse-indexed from the check configs above: which stage(s) each
@@ -276,18 +333,34 @@ for (const cfg of FEEDBACK_DUE_STAGES) VALID_STAGES_BY_ACTION_TYPE[cfg.actionTyp
 // This sweep catches the general case, not just that one incident, so a
 // future stage/config change can't reintroduce the same class of bug.
 async function resolveStaleStageActionTypes(): Promise<void> {
+  // Flatten (actionType -> validStages[]) into parallel (actionType, stage)
+  // pair arrays — was one awaited UPDATE per action type (10 sequential
+  // round trips every cycle); this is the same per-row predicate ("this
+  // row's action_type is one of ours, and its application's current stage
+  // isn't among that action_type's valid stages") evaluated in one
+  // statement via NOT EXISTS over the flattened pairs, instead of 10.
+  const actionTypes: string[] = [];
+  const stages: string[] = [];
   for (const [actionType, validStages] of Object.entries(VALID_STAGES_BY_ACTION_TYPE)) {
-    await query(
-      `UPDATE pending_actions pa
-       SET resolved = true, resolved_at = NOW()
-       FROM applications a
-       WHERE pa.application_id = a.id
-         AND pa.resolved = false
-         AND pa.action_type = $1
-         AND a.stage <> ALL($2::text[])`,
-      [actionType, validStages]
-    );
+    for (const stage of validStages) {
+      actionTypes.push(actionType);
+      stages.push(stage);
+    }
   }
+
+  await query(
+    `UPDATE pending_actions pa
+     SET resolved = true, resolved_at = NOW()
+     FROM applications a
+     WHERE pa.application_id = a.id
+       AND pa.resolved = false
+       AND pa.action_type = ANY($1::text[])
+       AND NOT EXISTS (
+         SELECT 1 FROM unnest($1::text[], $2::text[]) AS m(action_type, valid_stage)
+         WHERE m.action_type = pa.action_type AND m.valid_stage = a.stage
+       )`,
+    [actionTypes, stages]
+  );
 }
 
 // ─── 4. Assignment 60-hour hard submission deadline ─────────────────────────
@@ -295,13 +368,37 @@ async function resolveStaleStageActionTypes(): Promise<void> {
 // yet submitted) — this is a separate, harder deadline: the candidate never
 // submitted anything at all within 60h of the assignment being sent.
 async function checkAssignmentDeadlines(): Promise<void> {
+  // Resolve first — a round whose submission has since landed (even late)
+  // is no longer breaching, but nothing else in this file ever revisits an
+  // already-flagged row to notice that: resolveOrphanedActions() only
+  // catches an application leaving Active, not a late submission arriving
+  // while it's still Active. Without this, a resolved-in-practice breach
+  // stayed open (and counted) forever.
+  await query(
+    `UPDATE pending_actions pa
+     SET resolved=true, resolved_at=NOW()
+     FROM interview_rounds ir
+     WHERE pa.application_id = ir.application_id
+       AND pa.action_type='Assignment deadline breached'
+       AND pa.resolved=false
+       AND ir.round_type='Assignment'
+       AND ir.assignment_submission_date IS NOT NULL`
+  );
+
+  // status='Active' — every other breach check in this file gates on it;
+  // this one didn't, so it kept manufacturing fresh rows for applications
+  // already Rejected/Withdrawn/etc (only cleaned up afterward, and only if
+  // resolveOrphanedActions() happens to run again before anyone reads the
+  // breach count).
   const overdue = await query<{ id: string; application_id: string; assignment_deadline: string }>(`
     SELECT ir.id, ir.application_id, ir.assignment_deadline
     FROM interview_rounds ir
+    JOIN applications a ON a.id = ir.application_id
     WHERE ir.round_type = 'Assignment'
       AND ir.assignment_send_date IS NOT NULL
       AND ir.assignment_submission_date IS NULL
       AND ir.assignment_deadline < NOW()
+      AND a.status = 'Active'
   `);
 
   for (const round of overdue) {
@@ -349,29 +446,54 @@ async function checkRoleAging(): Promise<void> {
     WHERE status IN ('Approved', 'Live – Sourcing') AND start_date IS NOT NULL
   `);
 
+  // computeAging() is pure JS classification, unchanged — only the DB calls
+  // that used to follow it per-role (up to 2 round trips × N roles) are
+  // batched below into at most 3 total, regardless of how many roles.
+  const redRoles: Array<{ title: string; priority: string; role_id: string; days_overdue: number }> = [];
+  const nonRedTitles: string[] = [];
   for (const role of roles) {
     const { days_overdue, aging_alert } = computeAging(role.start_date, role.target_closure_date, role.priority as Priority, role.status);
-
     if (aging_alert === 'red') {
-      const existing = await queryOne(
-        `SELECT id FROM pending_actions WHERE role_title=$1 AND action_type='Role aging alert' AND resolved=false`,
-        [role.title]
-      );
-      if (!existing) {
-        await query(
-          `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, role_title, hours_overdue, role_id)
-           VALUES ('Leadership / Founders','High','Role aging alert',
-             $1||' ('||$2||') — '||$3||' days overdue on Close Target (Red Alert)', $1, 0, $4)`,
-          [role.title, role.priority, days_overdue, role.id]
-        );
-      }
+      redRoles.push({ title: role.title, priority: role.priority, role_id: role.id, days_overdue });
     } else {
-      // No longer overdue (Close Target pushed out, or was cleared) —
-      // resolve any lingering alert rather than leaving it stuck open.
+      nonRedTitles.push(role.title);
+    }
+  }
+
+  // No longer overdue (Close Target pushed out, or was cleared) — resolve
+  // any lingering alert rather than leaving it stuck open. Same predicate
+  // as before, just role_title = ANY(...) instead of one UPDATE per role.
+  if (nonRedTitles.length > 0) {
+    await query(
+      `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
+       WHERE role_title = ANY($1::text[]) AND action_type='Role aging alert' AND resolved=false`,
+      [nonRedTitles]
+    );
+  }
+
+  if (redRoles.length > 0) {
+    const existingRows = await query<{ role_title: string }>(
+      `SELECT DISTINCT role_title FROM pending_actions
+       WHERE role_title = ANY($1::text[]) AND action_type='Role aging alert' AND resolved=false`,
+      [redRoles.map(r => r.title)]
+    );
+    const existingTitles = new Set(existingRows.map(r => r.role_title));
+    const toInsert = redRoles.filter(r => !existingTitles.has(r.title));
+
+    if (toInsert.length > 0) {
       await query(
-        `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
-         WHERE role_title=$1 AND action_type='Role aging alert' AND resolved=false`,
-        [role.title]
+        `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, role_title, hours_overdue, role_id)
+         SELECT 'Leadership / Founders', 'High', 'Role aging alert',
+                d.title||' ('||d.priority||') — '||d.days_overdue||' days overdue on Close Target (Red Alert)',
+                d.title, 0, d.role_id
+         FROM unnest($1::text[], $2::text[], $3::int[], $4::text[])
+           AS d(title, priority, days_overdue, role_id)`,
+        [
+          toInsert.map(r => r.title),
+          toInsert.map(r => r.priority),
+          toInsert.map(r => r.days_overdue),
+          toInsert.map(r => r.role_id),
+        ]
       );
     }
   }

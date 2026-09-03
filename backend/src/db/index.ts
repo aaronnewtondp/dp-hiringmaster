@@ -5,7 +5,14 @@
  * For Vercel/Supabase: uses the POOLER connection string from Supabase dashboard.
  *
  * Important for Supabase Transaction Pooler:
- *  - max: 1  (each serverless invocation gets its own short-lived connection)
+ *  - max: 5 per serverless invocation (Supavisor's transaction-mode pooler
+ *    multiplexes many clients onto few real backend connections, so this
+ *    only grows the pooler's own client table, not the real Postgres
+ *    connection count — it's what lets routes like dashboard.ts's
+ *    Promise.all/Promise.allSettled fans achieve real DB-level concurrency
+ *    instead of serializing every "concurrent" query one at a time onto a
+ *    single connection. Was 1 — routes.ts/dashboard.ts's own already-
+ *    correct concurrent query structuring was getting no benefit from it)
  *  - SSL required for production
  *  - Statement cache disabled (Supavisor transaction mode doesn't support it)
  */
@@ -21,9 +28,9 @@ const pool = new Pool({
   // Supabase transaction pooler requires SSL in production
   ssl: isProduction ? { rejectUnauthorized: false } : false,
 
-  // Serverless: keep only 1 connection per function invocation.
-  // Local Docker: 10 is fine.
-  max: isVercel ? 1 : 10,
+  // Serverless: a few connections per function invocation — see the
+  // Supavisor note above. Local Docker: 10 is fine.
+  max: isVercel ? 5 : 10,
 
   // Avoid idle connections sitting open between serverless invocations
   idleTimeoutMillis:    isVercel ? 0    : 30000,

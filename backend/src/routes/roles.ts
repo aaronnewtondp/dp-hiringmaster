@@ -10,7 +10,7 @@ import { uploadJdPdf } from '../services/driveService.js';
 import { parseRoleFilters, buildRoleFilterSql } from '../utils/roleFilters.js';
 import { getCompBenchmark } from '../services/compBenchmark.js';
 import { computeAging } from '../utils/aging.js';
-import { STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
+import { ALL_BREACH_ACTION_TYPES } from '../jobs/slaChecker.js';
 
 const router = Router();
 router.use(authenticate);
@@ -543,14 +543,16 @@ router.get('/:id/comp-benchmark', requireHR, async (req: Request, res: Response)
 const CLOSED_STATUSES = ['Closed – Filled', 'Closed – Cancelled'];
 
 // Every action_type a retrospective should count as a genuine candidate-flow
-// SLA breach — STAGE_SLA_ACTION_TYPES (the stage/breach-type engine's full
-// set) plus the two independent checks that aren't stage-driven.
-// Deliberately excludes 'Role aging alert' (that's about the role sitting
-// open too long, already covered by Days to close above, and dashboard.ts's
-// own test suite establishes it never belongs alongside candidate breach
-// types) and 'Compensation change flag' (a comp-admin concern, not a
-// candidate-flow SLA issue).
-const CLOSURE_BREACH_TYPES = [...STAGE_SLA_ACTION_TYPES, 'Assignment deadline breached', 'Joining risk — no contact'];
+// SLA breach — same definition the Dashboard KPI and Hiring Funnel Snapshot
+// use (slaChecker.ts's ALL_BREACH_ACTION_TYPES), so a closure summary can
+// never disagree with what those surfaces called a breach while the role
+// was still open. Deliberately excludes 'Role aging alert' (that's about
+// the role sitting open too long, already covered by Days to close above,
+// and dashboard.ts's own test suite establishes it never belongs alongside
+// candidate breach types) and 'Compensation change flag' (a comp-admin
+// concern, not a candidate-flow SLA issue) — both already excluded by
+// ALL_BREACH_ACTION_TYPES itself.
+const CLOSURE_BREACH_TYPES = ALL_BREACH_ACTION_TYPES;
 
 router.get('/:id/closure-summary.pdf', async (req: Request, res: Response) => {
   const role = await queryOne<Role>('SELECT * FROM roles WHERE id = $1', [req.params.id]);

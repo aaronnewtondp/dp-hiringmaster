@@ -4,7 +4,7 @@
 // shapes, so the two can never disagree on what counts as an open breach.
 import { query } from '../db/index.js';
 import { STAGE_ORDER } from '../types/index.js';
-import { STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
+import { ALL_BREACH_ACTION_TYPES } from '../jobs/slaChecker.js';
 import { RoleFilterParams, roleIdsSubquery } from './roleFilters.js';
 
 export interface SlaBreachRow {
@@ -16,7 +16,7 @@ export interface SlaBreachRow {
 
 export async function fetchSlaBreachRows(filters: RoleFilterParams, ownerParam?: string): Promise<SlaBreachRow[]> {
   const scoped = roleIdsSubquery(filters, 2);
-  const params: unknown[] = [STAGE_SLA_ACTION_TYPES, ...(scoped?.params || [])];
+  const params: unknown[] = [ALL_BREACH_ACTION_TYPES, ...(scoped?.params || [])];
   let ownerSql = '';
   if (ownerParam) {
     params.push(ownerParam);
