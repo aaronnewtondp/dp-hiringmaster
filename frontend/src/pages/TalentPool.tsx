@@ -16,7 +16,7 @@ type Mode = 'hold_for_future' | 'archived';
 const LIMIT = 50;
 
 const COLUMN_INFO: Record<string, string> = {
-  'Status': "The application's Active/Hold for Future/Rejected/Withdrawn status — this is why the row is in Talent Pool.",
+  'Status': "The application's Active/Hold for Future/Rejected/Withdrawn status — this is why the row is in Archived Pipeline.",
   'Application Date': 'Days since the candidate applied to this specific role.',
   'Last Added': "When this candidate/application pair last had activity — same underlying data as Candidates' Last Updated, just relabeled here.",
 };
@@ -117,7 +117,7 @@ export default function TalentPool() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">Talent Pool</h1>
+        <h1 className="text-xl font-semibold text-gray-900">Archived Pipeline</h1>
         <p className="text-sm font-mono text-gray-500 mt-0.5">
           {mode === 'hold_for_future'
             ? `${total} on hold for future roles`

@@ -69,10 +69,10 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
       },
       {
         id: 'candidates',
-        question: 'What is Candidates, and what are "Unmatched Candidates"?',
+        question: 'What is Active Candidates, and what are "Unmatched Candidates"?',
         answer: (
           <>
-            <p>Candidates is the full applicant list across every role, with search and the same
+            <p>Active Candidates is the full applicant list across every role, with search and the same
             filter set as the Dashboard. Company / Industry is a merged column ("company /
             industry", both from the candidate's own profile); Application Date shows how many
             days ago the candidate applied. The Last Updated column shows a one-line subtext of
@@ -124,13 +124,13 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
       },
       {
         id: 'talent-pool',
-        question: 'What is Talent Pool for?',
+        question: 'What is Archived Pipeline for?',
         answer: (
           <>
             <p>A separate holding area for candidates who are either <strong>on hold for future
             roles</strong> (good candidates, wrong timing) or <strong>archived</strong> (rejected
-            or withdrawn). They're pulled out of the main Candidates pipeline view so they don't
-            clutter active hiring, but stay searchable and re-linkable to a new role at any time.</p>
+            or withdrawn). They're pulled out of the main Active Candidates pipeline view so they
+            don't clutter active hiring, but stay searchable and re-linkable to a new role at any time.</p>
             <p className="mt-2">It's a table, not a card grid — one row per candidate <em>and</em>
             application, so a candidate with more than one past application shows their full
             history here, not just the one that put them in this pool. Each row has its own{' '}

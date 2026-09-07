@@ -298,7 +298,7 @@ export default function Candidates() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Candidates</h1>
+          <h1 className="text-xl font-semibold text-gray-900">Active Candidates</h1>
           <p className="text-sm font-mono text-gray-500 mt-0.5">
             {filtered.length} applications
             {slaCount > 0 && <span className="ml-2 text-red-500 font-medium font-mono">{slaCount} SLA breached</span>}

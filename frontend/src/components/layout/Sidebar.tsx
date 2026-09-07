@@ -10,8 +10,8 @@ import { PERSONAS } from '../../types/index.ts';
 const NAV = [
   { to: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard',   hrOnly: false, superAdminOnly: false },
   { to: '/roles',      icon: Briefcase,       label: 'Roles',       hrOnly: false, superAdminOnly: false },
-  { to: '/candidates', icon: Users,           label: 'Candidates',  hrOnly: false, superAdminOnly: false },
-  { to: '/talent-pool',icon: Archive,         label: 'Talent Pool', hrOnly: false, superAdminOnly: false },
+  { to: '/candidates', icon: Users,           label: 'Active Candidates',  hrOnly: false, superAdminOnly: false },
+  { to: '/talent-pool',icon: Archive,         label: 'Archived Pipeline', hrOnly: false, superAdminOnly: false },
   { to: '/my-tasks',   icon: ListChecks,      label: 'My Tasks',    hrOnly: false, superAdminOnly: false },
   { to: '/agencies',   icon: Building2,       label: 'Agencies',    hrOnly: true,  superAdminOnly: false },
   { to: '/users',      icon: ShieldCheck,     label: 'User Management', hrOnly: false, superAdminOnly: true },
