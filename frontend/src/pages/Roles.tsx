@@ -29,10 +29,12 @@ export default function Roles() {
   const [locations,   setLocations]   = usePersistedState<string[]>('roles.locations', []);
   const [modes,       setModes]       = usePersistedState<string[]>('roles.modes', []);
   const [priorities,  setPriorities]  = usePersistedState<string[]>('roles.priorities', []);
-  // Defaults to the same "Active" scope the old status toggle defaulted to
-  // (Live – Sourcing only) — an empty Status filter now means "all
-  // statuses," so this preselection keeps first-load behavior unchanged.
-  const [statuses,    setStatuses]    = usePersistedState<string[]>('roles.statuses', ['Live – Sourcing']);
+  // Defaults to Approved + Live – Sourcing — a role's aging clock (and
+  // realistically, HR's attention) starts the moment it's Approved, not
+  // just once it's posted for sourcing, so both belong in the default
+  // "what needs eyes right now" view. An empty Status filter still means
+  // "all statuses."
+  const [statuses,    setStatuses]    = usePersistedState<string[]>('roles.statuses', ['Approved', 'Live – Sourcing']);
 
   const { data: filterOptionsData } = useQuery<{ data: { recruitment_modes: string[] } }>({
     queryKey: ['roles', 'filter-options'],

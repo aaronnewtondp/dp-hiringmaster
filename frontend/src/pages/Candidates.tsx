@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, ChevronsUpDown, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { applicationsApi, candidatesApi, rolesApi } from '../services/api.ts';
-import { Application, Candidate, STAGES, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS, REJECTION_REASONS, WITHDRAWAL_REASONS, OVER_BUDGET_SHORTLIST_REASONS } from '../types/index.ts';
+import { Application, STAGES, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS, REJECTION_REASONS, WITHDRAWAL_REASONS, OVER_BUDGET_SHORTLIST_REASONS } from '../types/index.ts';
 import { StageBadge, StatusBadge, FitScore, SlaBadge, OverBudgetBadge, Spinner, EmptyState, PriorityBadge } from '../components/shared/Badges.tsx';
 import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
@@ -14,7 +14,7 @@ import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { formatDistanceToNow } from 'date-fns';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 
-const UNLINKED_PAGE_SIZE = 50;
+const UNMATCHED_PAGE_SIZE = 50;
 
 const COLUMN_INFO: Record<string, string> = {
   'Fit': "ResumeIQ's AI-generated score (0-100), averaged across 8 dimensions: Technical, Experience, Industry Fit, Culture Fit, Role Alignment, Trajectory, Leadership, Communication. Computed once, automatically, as soon as a candidate applies.",
@@ -25,11 +25,16 @@ const COLUMN_INFO: Record<string, string> = {
 
 type SortKey = 'fit' | 'application_date' | 'last_updated';
 
-interface UnmatchedSubmission {
+// "Unmatched Candidates" (merged 2026-09-05 — used to be two separate
+// banners, "Unlinked candidates" and "Unmatched role submissions"; see
+// backend/src/utils/unmatchedCandidates.ts). submitted_text/suggested_role_*
+// are null for a plain candidate with zero applications who never went
+// through a Job Application Form submission at all.
+interface UnmatchedCandidate {
   candidate_id:         string;
   full_name:            string;
   email:                string | null;
-  submitted_text:       string;
+  submitted_text:       string | null;
   created_at:           string;
   suggested_role_id:    string | null;
   suggested_role_title: string | null;
@@ -51,23 +56,18 @@ export default function Candidates() {
   const [modes,       setModes]       = usePersistedState<string[]>('candidates.modes', []);
   const [priorities,  setPriorities]  = usePersistedState<string[]>('candidates.priorities', []);
   const [applicationStatuses, setApplicationStatuses] = usePersistedState<string[]>('candidates.statuses', []);
-  const [showUnlinked, setShowUnlinked] = useState(true);
-  const [linkCandidate, setLinkCandidate] = useState<Candidate | null>(null);
-  const [deleteCandidate, setDeleteCandidate] = useState<Candidate | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<{ id: string; full_name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [unlinkedOffset, setUnlinkedOffset] = useState(0);
-  const [unlinkedItems,  setUnlinkedItems]  = useState<Candidate[]>([]);
-  const [unlinkedTotal,  setUnlinkedTotal]  = useState(0);
 
-  // Job Application Form submissions whose role text never matched a role —
-  // these never got an application at all, so a candidate with OTHER
-  // existing applications doesn't show up in Unlinked Candidates above
-  // (they're not unlinked) and had no visibility anywhere before this panel.
-  const [showUnmatched,   setShowUnmatched]   = useState(false);
+  // "Unmatched Candidates" — merged panel (see backend/src/utils/
+  // unmatchedCandidates.ts): every candidate with zero applications,
+  // whether or not they came through a Job Application Form submission
+  // whose typed role text never matched a role.
+  const [showUnmatched,   setShowUnmatched]   = useState(true);
   const [unmatchedOffset, setUnmatchedOffset] = useState(0);
-  const [unmatchedItems,  setUnmatchedItems]  = useState<UnmatchedSubmission[]>([]);
+  const [unmatchedItems,  setUnmatchedItems]  = useState<UnmatchedCandidate[]>([]);
   const [unmatchedTotal,  setUnmatchedTotal]  = useState(0);
-  const [reconcileTarget, setReconcileTarget] = useState<UnmatchedSubmission | null>(null);
+  const [reconcileTarget, setReconcileTarget] = useState<UnmatchedCandidate | null>(null);
   const [resolvingId,     setResolvingId]     = useState<string | null>(null);
 
   // Bulk select + bulk stage/status change — new UI territory for this app
@@ -139,34 +139,13 @@ export default function Candidates() {
   const roleOptions = (filterOptionsData?.data?.roles || []).map(r => ({ value: r.id, label: r.title }));
 
   // Candidates.tsx's main table is application-row driven, so a candidate
-  // with zero applications (e.g. an ingested candidate whose "role applying
-  // for" answer didn't match any open role) never shows up there — surfaced
-  // separately here via GET /api/candidates?unlinked=true. Previously this
-  // fetched a flat limit:100 page of ALL candidates and filtered client-side
-  // to applications == null, so a truly-unlinked candidate only showed up if
-  // they happened to fall within the 100 most-recently-updated candidates
-  // overall — the backend now filters this at the query level, with real
-  // pagination, so the full set is reachable.
-  const { data: candidatesData, isLoading: unlinkedLoading } = useQuery<{ data: { candidates: Candidate[]; total: number } }>({
-    queryKey: ['candidates', 'unlinked', unlinkedOffset],
-    queryFn:  () => candidatesApi.list({ unlinked: 'true', limit: String(UNLINKED_PAGE_SIZE), offset: String(unlinkedOffset) }),
-  });
-
-  useEffect(() => {
-    if (!candidatesData?.data) return;
-    const page = candidatesData.data.candidates || [];
-    setUnlinkedItems(prev => (unlinkedOffset === 0 ? page : [...prev, ...page]));
-    setUnlinkedTotal(candidatesData.data.total || 0);
-  }, [candidatesData]);
-
-  const refreshUnlinked = () => {
-    setUnlinkedOffset(0);
-    qc.invalidateQueries({ queryKey: ['candidates', 'unlinked'] });
-  };
-
-  const { data: unmatchedData, isLoading: unmatchedLoading } = useQuery<{ data: { submissions: UnmatchedSubmission[]; total: number } }>({
-    queryKey: ['candidates', 'unmatched-role-submissions', unmatchedOffset],
-    queryFn:  () => candidatesApi.unmatchedRoleSubmissions({ limit: String(UNLINKED_PAGE_SIZE), offset: String(unmatchedOffset) }),
+  // with zero applications never shows up there — surfaced separately here
+  // via the merged "Unmatched Candidates" panel (GET /api/candidates/
+  // unmatched, see backend/src/utils/unmatchedCandidates.ts). Real
+  // server-side pagination, not a client-filtered flat page.
+  const { data: unmatchedData, isLoading: unmatchedLoading } = useQuery<{ data: { submissions: UnmatchedCandidate[]; total: number } }>({
+    queryKey: ['candidates', 'unmatched', unmatchedOffset],
+    queryFn:  () => candidatesApi.unmatched({ limit: String(UNMATCHED_PAGE_SIZE), offset: String(unmatchedOffset) }),
   });
 
   useEffect(() => {
@@ -176,24 +155,31 @@ export default function Candidates() {
     setUnmatchedTotal(unmatchedData.data.total || 0);
   }, [unmatchedData]);
 
+  const refreshUnmatched = () => {
+    setUnmatchedOffset(0);
+    qc.invalidateQueries({ queryKey: ['candidates', 'unmatched'] });
+  };
+
   // Optimistic local removal rather than a full refetch — the backend's own
   // "still unresolved" check only re-matches by suggested_role_id (see the
   // route's own comment on why a no-suggestion row can't be detected as
   // resolved that way), so removing it here client-side is what actually
-  // makes "Choose role" feel instant for that case specifically.
-  const removeResolvedSubmission = (sub: UnmatchedSubmission) => {
-    setUnmatchedItems(prev => prev.filter(s => !(s.candidate_id === sub.candidate_id && s.submitted_text === sub.submitted_text)));
+  // makes "Link to role" feel instant. Dedup key is candidate_id alone — the
+  // merged list can never contain the same candidate twice (see the backend
+  // helper's own dedup).
+  const removeResolvedItem = (candidateId: string) => {
+    setUnmatchedItems(prev => prev.filter(s => s.candidate_id !== candidateId));
     setUnmatchedTotal(t => Math.max(0, t - 1));
     qc.invalidateQueries({ queryKey: ['applications'] });
   };
 
-  const handleQuickResolve = async (sub: UnmatchedSubmission) => {
+  const handleQuickResolve = async (sub: UnmatchedCandidate) => {
     if (!sub.suggested_role_id) return;
     setResolvingId(sub.candidate_id);
     try {
       await candidatesApi.linkRole(sub.candidate_id, { role_id: sub.suggested_role_id, source_channel: 'Job Application Form' });
       toast.success(`${sub.full_name} linked to ${sub.suggested_role_title}`);
-      removeResolvedSubmission(sub);
+      removeResolvedItem(sub.candidate_id);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       toast.error(e.response?.data?.error || 'Failed to link candidate');
@@ -208,7 +194,7 @@ export default function Candidates() {
       await candidatesApi.remove(deleteCandidate.id);
       toast.success(`${deleteCandidate.full_name} deleted`);
       setDeleteCandidate(null);
-      refreshUnlinked();
+      refreshUnmatched();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       toast.error(e.response?.data?.error || 'Failed to delete candidate');
@@ -325,74 +311,10 @@ export default function Candidates() {
         )}
       </div>
 
-      {/* Unlinked candidates have no application, so they never belong to
-          any role — the panel is meaningless (always empty) once a Role
-          filter is active, so hide it rather than show a confusing "0". */}
-      {roleIds.length === 0 && (unlinkedTotal > 0 || unlinkedLoading) && (
-        <div className="card overflow-hidden border-amber-200">
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => setShowUnlinked(v => !v)}
-            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowUnlinked(v => !v); } }}
-            className="w-full px-5 py-3 flex items-center justify-between hover:bg-amber-50/50 transition-colors cursor-pointer"
-          >
-            <span className="inline-flex items-center gap-1">
-              <h2 className="text-sm font-semibold font-mono text-amber-800">Unlinked candidates ({unlinkedTotal})</h2>
-              <InfoTooltip align="left" text="Candidates who exist in the system but have no application to any role — usually a manually-added candidate not yet linked, or a Job Application Form submission whose role text matched a real role but hasn't been confirmed yet." />
-            </span>
-            {showUnlinked ? <ChevronUp className="w-4 h-4 text-amber-600" /> : <ChevronDown className="w-4 h-4 text-amber-600" />}
-          </div>
-          {showUnlinked && (
-            <>
-              <div className="divide-y divide-gray-50 border-t border-amber-100">
-                {unlinkedItems.map(c => (
-                  <div key={c.id} className="px-5 py-3 flex items-center justify-between gap-4">
-                    <div className="min-w-0">
-                      <Link to={`/candidates/${c.id}`} className="font-medium text-gray-900 hover:text-dp-600 text-sm">{c.full_name}</Link>
-                      <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400 flex-wrap">
-                        {c.email && <span>{c.email}</span>}
-                        {c.phone && <span>· {c.phone}</span>}
-                        <span>· added {formatDistanceToNow(new Date(c.created_at), { addSuffix: true })}</span>
-                      </div>
-                    </div>
-                    {canHR && (
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button onClick={() => setLinkCandidate(c)} className="btn-secondary text-xs py-1.5 px-3">
-                          Link to role
-                        </button>
-                        <button
-                          onClick={() => setDeleteCandidate(c)}
-                          title="Delete candidate"
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-              {unlinkedItems.length < unlinkedTotal && (
-                <div className="flex justify-center py-3 border-t border-amber-100">
-                  <button
-                    onClick={() => setUnlinkedOffset(o => o + UNLINKED_PAGE_SIZE)}
-                    className="btn-secondary text-xs py-1.5 px-3"
-                  >
-                    Load more ({unlinkedItems.length} of {unlinkedTotal})
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Job Application Form submissions whose role text never matched a
-          role — these never got an application at all, so a candidate with
-          existing applications to OTHER roles doesn't appear in Unlinked
-          Candidates above (they're not unlinked) and had zero visibility
-          anywhere before this panel. */}
+      {/* Unmatched Candidates — merged panel (a candidate with zero
+          applications never belongs to any role, so this is meaningless
+          (always empty) once a Role filter is active — hide it rather than
+          show a confusing "0", same as before the merge). */}
       {roleIds.length === 0 && (unmatchedTotal > 0 || unmatchedLoading) && (
         <div className="card overflow-hidden border-amber-200">
           <div
@@ -403,8 +325,8 @@ export default function Candidates() {
             className="w-full px-5 py-3 flex items-center justify-between hover:bg-amber-50/50 transition-colors cursor-pointer"
           >
             <span className="inline-flex items-center gap-1">
-              <h2 className="text-sm font-semibold font-mono text-amber-800">Unmatched role submissions ({unmatchedTotal})</h2>
-              <InfoTooltip align="left" text="Job Application Form submissions whose typed-in role text never matched any real role — these never became a candidate record with an application at all. Link each to the right role, or the suggested one if the system found a likely match." />
+              <h2 className="text-sm font-semibold font-mono text-amber-800">Unmatched Candidates ({unmatchedTotal})</h2>
+              <InfoTooltip align="left" text="Candidates with no application to any role — either a Job Application Form submission whose typed-in role text never matched a real role (link it to the suggested role, if the system found a likely match, or choose one yourself), or a candidate added some other way that's simply never been linked yet." />
             </span>
             {showUnmatched ? <ChevronUp className="w-4 h-4 text-amber-600" /> : <ChevronDown className="w-4 h-4 text-amber-600" />}
           </div>
@@ -412,13 +334,13 @@ export default function Candidates() {
             <>
               <div className="divide-y divide-gray-50 border-t border-amber-100">
                 {unmatchedItems.map(sub => (
-                  <div key={`${sub.candidate_id}-${sub.submitted_text}`} className="px-5 py-3 flex items-center justify-between gap-4">
+                  <div key={sub.candidate_id} className="px-5 py-3 flex items-center justify-between gap-4">
                     <div className="min-w-0">
                       <Link to={`/candidates/${sub.candidate_id}`} className="font-medium text-gray-900 hover:text-dp-600 text-sm">{sub.full_name}</Link>
                       <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400 flex-wrap">
                         {sub.email && <span>{sub.email}</span>}
-                        <span>· applied for "{sub.submitted_text}"</span>
-                        <span>· {formatDistanceToNow(new Date(sub.created_at), { addSuffix: true })}</span>
+                        {sub.submitted_text && <span>· applied for "{sub.submitted_text}"</span>}
+                        <span>· added {formatDistanceToNow(new Date(sub.created_at), { addSuffix: true })}</span>
                       </div>
                     </div>
                     {canHR && (
@@ -433,7 +355,14 @@ export default function Candidates() {
                           </button>
                         )}
                         <button onClick={() => setReconcileTarget(sub)} className="btn-secondary text-xs py-1.5 px-3 whitespace-nowrap">
-                          Choose role
+                          Link to role
+                        </button>
+                        <button
+                          onClick={() => setDeleteCandidate({ id: sub.candidate_id, full_name: sub.full_name })}
+                          title="Delete candidate"
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     )}
@@ -443,7 +372,7 @@ export default function Candidates() {
               {unmatchedItems.length < unmatchedTotal && (
                 <div className="flex justify-center py-3 border-t border-amber-100">
                   <button
-                    onClick={() => setUnmatchedOffset(o => o + UNLINKED_PAGE_SIZE)}
+                    onClick={() => setUnmatchedOffset(o => o + UNMATCHED_PAGE_SIZE)}
                     className="btn-secondary text-xs py-1.5 px-3"
                   >
                     Load more ({unmatchedItems.length} of {unmatchedTotal})
@@ -662,24 +591,12 @@ export default function Candidates() {
         )}
       </div>
 
-      {linkCandidate && (
-        <LinkToRoleModal
-          candidate={linkCandidate}
-          sourceChannel="Job Application Form"
-          onClose={() => setLinkCandidate(null)}
-          onLinked={() => {
-            refreshUnlinked();
-            qc.invalidateQueries({ queryKey: ['applications'] });
-          }}
-        />
-      )}
-
       {reconcileTarget && (
         <LinkToRoleModal
           candidate={{ id: reconcileTarget.candidate_id, full_name: reconcileTarget.full_name }}
           sourceChannel="Job Application Form"
           onClose={() => setReconcileTarget(null)}
-          onLinked={() => removeResolvedSubmission(reconcileTarget)}
+          onLinked={() => removeResolvedItem(reconcileTarget.candidate_id)}
         />
       )}
 

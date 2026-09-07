@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, Users, Building2, LogOut, Droplets, ListChecks, Archive, BarChart3, ShieldCheck, HelpCircle } from 'lucide-react';
+import { LayoutDashboard, Briefcase, Users, Building2, LogOut, Droplets, ListChecks, Archive, ShieldCheck, HelpCircle } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { PERSONAS } from '../../types/index.ts';
 
@@ -13,7 +13,6 @@ const NAV = [
   { to: '/candidates', icon: Users,           label: 'Candidates',  hrOnly: false, superAdminOnly: false },
   { to: '/talent-pool',icon: Archive,         label: 'Talent Pool', hrOnly: false, superAdminOnly: false },
   { to: '/my-tasks',   icon: ListChecks,      label: 'My Tasks',    hrOnly: false, superAdminOnly: false },
-  { to: '/scorecard',  icon: BarChart3,       label: 'Scorecard Summary', hrOnly: false, superAdminOnly: false },
   { to: '/agencies',   icon: Building2,       label: 'Agencies',    hrOnly: true,  superAdminOnly: false },
   { to: '/users',      icon: ShieldCheck,     label: 'User Management', hrOnly: false, superAdminOnly: true },
   { to: '/help',       icon: HelpCircle,      label: 'Help / FAQ',  hrOnly: false, superAdminOnly: false },

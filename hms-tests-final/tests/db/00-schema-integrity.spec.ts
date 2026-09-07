@@ -97,7 +97,10 @@ test.describe('Schema integrity (local Postgres, direct connection)', () => {
       const ids = bodies.map(b => b.question.id);
 
       for (const id of ids) {
-        expect(id).toMatch(/^Q\d{3}$/);
+        // At least 3 digits, not exactly 3 — ids grow past their pad width
+        // rather than truncating once the sequence crosses it (schema.sql's
+        // format_seq_id(), 2026-09-05).
+        expect(id).toMatch(/^Q\d{3,}$/);
       }
 
       const uniqueIds = new Set(ids);

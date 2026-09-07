@@ -25,7 +25,9 @@ test.describe('Agencies API', () => {
     });
     expect(res.status()).toBe(201);
     const { agency } = await res.json();
-    expect(agency.id).toMatch(/^AGN\d{3}$/);
+    // At least 3 digits, not exactly 3 — see schema.sql's format_seq_id()
+    // note (2026-09-05): ids grow past their pad width, never truncate.
+    expect(agency.id).toMatch(/^AGN\d{3,}$/);
   });
 
   test('PATCH updates agency fields', async ({ request }) => {
@@ -118,7 +120,9 @@ test.describe('Eval Questions API', () => {
     });
     expect(res.status()).toBe(201);
     const { question } = await res.json();
-    expect(question.id).toMatch(/^Q\d{3}$/);
+    // At least 3 digits, not exactly 3 — see schema.sql's format_seq_id()
+    // note (2026-09-05): ids grow past their pad width, never truncate.
+    expect(question.id).toMatch(/^Q\d{3,}$/);
   });
 });
 

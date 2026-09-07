@@ -1,15 +1,17 @@
 /**
- * E2E — Unlinked candidates panel + "Link to role" modal (Candidates page)
+ * E2E — Unmatched Candidates panel + "Link to role" modal (Candidates page)
  *
  * Candidates ingested via the Job Application Form webhook whose stated
  * "role applying for" didn't match any open role land with zero
  * applications (candidateIngest.ts leaves `application: null`) — the main
  * Candidates table is application-row driven, so these candidates would
- * otherwise be invisible. Candidates.tsx surfaces them separately in an
- * "Unlinked candidates" panel with a per-row "Link to role" action that
- * opens a modal to attach them to a real role. This spec covers the full
- * browser flow: panel visibility, opening the modal, submitting a link,
- * and the candidate dropping out of the unlinked list afterward.
+ * otherwise be invisible. Candidates.tsx surfaces them separately in the
+ * merged "Unmatched Candidates" panel (2026-09-05 — used to be two separate
+ * panels, "Unlinked candidates" and "Unmatched role submissions") with a
+ * per-row "Link to role" action that opens a modal to attach them to a real
+ * role. This spec covers the full browser flow: panel visibility, opening
+ * the modal, submitting a link, and the candidate dropping out of the list
+ * afterward.
  */
 import { test, expect, Page } from '@playwright/test';
 import { BASE, FRONTEND_BASE, USERS, SEEDED, CANDIDATE_INGEST_SECRET, uid } from '../helpers/api';
@@ -31,9 +33,9 @@ async function loginViaApi(page: Page, user: keyof typeof USERS = 'hr') {
   await page.waitForURL(/\/dashboard/, { timeout: 15000 });
 }
 
-test.describe('Unlinked candidates panel + Link to role modal', () => {
+test.describe('Unmatched Candidates panel + Link to role modal', () => {
 
-  test('candidate with zero applications appears in the unlinked panel and can be linked to a role', async ({ page }) => {
+  test('candidate with zero applications appears in the Unmatched Candidates panel and can be linked to a role', async ({ page }) => {
     const marker = `Unlinked E2E ${uid()}`;
 
     // Seed a candidate with ZERO applications via the ingest webhook — a
@@ -55,7 +57,7 @@ test.describe('Unlinked candidates panel + Link to role modal', () => {
     await page.goto(`${FRONTEND_BASE}/candidates`);
 
     // Panel is visible with a non-zero count, and this candidate is listed in it
-    await expect(page.getByRole('heading', { name: /Unlinked candidates \(\d+\)/ })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('heading', { name: /Unmatched Candidates \(\d+\)/ })).toBeVisible({ timeout: 15000 });
     const row = page.locator('.px-5.py-3', { hasText: marker });
     await expect(row).toBeVisible();
 
@@ -76,7 +78,7 @@ test.describe('Unlinked candidates panel + Link to role modal', () => {
     // several seconds longer to appear than the original 5s budget allowed.
     await expect(page.getByText('Candidate linked to role')).toBeVisible({ timeout: 15000 });
 
-    // Modal closes, and this candidate's row drops out of the unlinked panel
+    // Modal closes, and this candidate's row drops out of the panel
     // (or the whole panel disappears if it was the only one left)
     await expect(modal).toHaveCount(0, { timeout: 10000 });
     await expect(row).toHaveCount(0, { timeout: 10000 });

@@ -18,6 +18,11 @@ import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 // Same chunked-batching constant as Candidates.tsx / MyTasks.tsx's bulk actions.
 const BULK_CONCURRENCY = 3;
 
+// Mirrors applyHiringManagerRoleLock's backend convention (roleFilters.ts) —
+// a Hiring Manager who owns zero roles must reliably yield zero rows via
+// `role_id IN (...)` matching nothing, not "no filter" (everyone's data).
+const NO_OWNED_ROLES_SENTINEL = '__no_roles_owned__';
+
 const COLUMN_INFO: Record<string, string> = {
   'CTC → ECTC': "Candidate's current fixed CTC, then the Expected CTC they quoted for this role — both read from the candidate's own profile, not this application's legacy fields.",
 };
@@ -71,7 +76,15 @@ const SCORECARD_COLS_AFTER_DIMS = 4;
 // Date (there's no Last-Updated-equivalent column here to add a third).
 type SortKey = 'avg' | 'app_age';
 
-export default function ScorecardSummary() {
+// personaScope, when provided, is ANDed into the query regardless of what
+// the user's own Role filter picks — mirrors the scoping MyTasks.tsx's old
+// "Ready for review" section had before this page was merged into it
+// (2026-09-05): a Hiring Manager can never widen their view past their own
+// roles, and Leadership only ever sees Founder-flagged candidates.
+export default function ScorecardSummary({ personaScope, onCountChange }: {
+  personaScope?: { ownRoleIds?: string[]; founderFlagOnly?: boolean };
+  onCountChange?: (count: number) => void;
+} = {}) {
   const qc = useQueryClient();
   const { canLead, canHR } = useAuth();
   const [searchParams] = useSearchParams();
@@ -135,11 +148,24 @@ export default function ScorecardSummary() {
     limit: '500', scored_only: 'true', scored_only_exempt_stage: 'Applied and Screened',
   };
   if (search)              params.q = search;
-  if (roleIds.length)     params.role_id = roleIds;
+  // A Hiring Manager's own-roles scope intersects with whatever they've
+  // picked in the Role filter (empty selection = "all roles" from their own
+  // pool) — never a union, so they can't widen past their own roles by
+  // picking something else. NO_OWNED_ROLES_SENTINEL mirrors
+  // applyHiringManagerRoleLock's backend convention (roleFilters.ts): an HM
+  // who owns zero roles must reliably yield zero rows via `role_id IN (...)`
+  // matching nothing, not "no filter" (which would mean everyone's data).
+  if (personaScope?.ownRoleIds) {
+    const scoped = roleIds.length ? roleIds.filter(id => personaScope.ownRoleIds!.includes(id)) : personaScope.ownRoleIds;
+    params.role_id = scoped.length ? scoped : [NO_OWNED_ROLES_SENTINEL];
+  } else if (roleIds.length) {
+    params.role_id = roleIds;
+  }
   if (departments.length) params.department = departments;
   if (locations.length)   params.location = locations;
   if (modes.length)       params.recruitment_mode = modes;
   if (priorities.length)  params.priority = priorities;
+  if (personaScope?.founderFlagOnly) params.founder_flag = 'true';
   // Default to Active only — otherwise a Rejected/Hold-for-Future candidate
   // (who has already left this queue's whole reason for existing) would
   // linger here forever. The Status filter still lets anyone deliberately
@@ -148,7 +174,7 @@ export default function ScorecardSummary() {
   params.status = statuses.length ? statuses : ['Active'];
 
   const { data, isLoading } = useQuery<{ data: { applications: Application[] } }>({
-    queryKey: ['applications', 'scorecard', search, roleIds, departments, locations, modes, priorities, statuses],
+    queryKey: ['applications', 'scorecard', search, roleIds, departments, locations, modes, priorities, statuses, personaScope],
     queryFn:  () => applicationsApi.list(params),
   });
   const allApps = data?.data?.applications || [];
@@ -186,6 +212,10 @@ export default function ScorecardSummary() {
   // backend enforces for the non-HR-tier carve-out), so this stays correct
   // even if a future edit widens what this query fetches.
   const reviewable = apps.filter(a => a.stage === 'Applied and Screened');
+  // Reports the "actually actionable" count up to an embedding parent (My
+  // Tasks' Ready for Review section box) — matches what the old compact
+  // list's own "N pending" badge showed before this page was merged into it.
+  useEffect(() => { onCountChange?.(reviewable.length); }, [reviewable.length, onCountChange]);
   const allReviewableSelected  = reviewable.length > 0 && reviewable.every(a => selectedIds.has(a.id));
   const someReviewableSelected = reviewable.some(a => selectedIds.has(a.id));
   // Every application is meant to be auto-scored the instant it's created
@@ -300,28 +330,12 @@ export default function ScorecardSummary() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <div className="inline-flex items-center gap-1.5">
-          <h1 className="text-xl font-semibold text-gray-900">Scorecard Summary</h1>
-          <InfoTooltip align="left" width="w-80" text={
-            <div className="space-y-1.5">
-              <p>8 ResumeIQ dimensions, each scored 0–10: <b>Tech</b>nical, <b>Exp</b>erience, <b>Ind</b>ustry Fit, <b>Cult</b>ure Fit, <b>Role</b> Alignment, <b>Traj</b>ectory, <b>Lead</b>ership, <b>Comm</b>unication.</p>
-              <p><b>Avg</b> is the mean of all 8. <b>Verdict</b> (Strong Yes / Yes / Maybe / No) comes from the same ResumeIQ pass, not a separate rule.</p>
-              <p>Use "View Highlights and Summary" under any row for that candidate's strengths, red flags, and executive summary.</p>
-            </div>
-          } />
+      {roleIds.length === 1 && roleOptions.some(r => r.value === roleIds[0]) && (
+        <div className="inline-flex items-center gap-2 text-sm bg-dp-50 text-dp-800 px-3 py-1.5 rounded-lg">
+          Filtered to <span className="font-medium">{roleOptions.find(r => r.value === roleIds[0])?.label}</span>
+          <button onClick={() => setRoleIds([])} className="text-dp-600 hover:underline text-xs">View all roles</button>
         </div>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Every candidate at Applied and Screened, plus every other ResumeIQ-scored active candidate,
-          ranked and compared side by side — mirrors the digitalpaani-candidate-scoring skill's output format.
-        </p>
-        {roleIds.length === 1 && roleOptions.some(r => r.value === roleIds[0]) && (
-          <div className="mt-2 inline-flex items-center gap-2 text-sm bg-dp-50 text-dp-800 px-3 py-1.5 rounded-lg">
-            Filtered to <span className="font-medium">{roleOptions.find(r => r.value === roleIds[0])?.label}</span>
-            <button onClick={() => setRoleIds([])} className="text-dp-600 hover:underline text-xs">View all roles</button>
-          </div>
-        )}
-      </div>
+      )}
 
       <div className="flex gap-1.5 flex-nowrap overflow-x-auto pb-1">
         <div className="relative shrink-0">

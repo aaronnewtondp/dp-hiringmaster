@@ -103,7 +103,9 @@ test.describe('Phase 3 Inline Editing — Regression Guards', () => {
       });
       expect(createRes.status()).toBe(201);
       const { agency } = await createRes.json();
-      expect(agency.id).toMatch(/^AGN\d{3}$/);
+      // At least 3 digits, not exactly 3 — see schema.sql's format_seq_id()
+      // note (2026-09-05): ids grow past their pad width, never truncate.
+      expect(agency.id).toMatch(/^AGN\d{3,}$/);
 
       const marker         = uid();
       const newNotes       = `Regression test notes ${marker}`;

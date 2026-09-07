@@ -803,6 +803,45 @@ ALTER TABLE users
 --   ALTER TABLE applications ALTER COLUMN stage SET DEFAULT 'Applied and Screened';
 -- applied to both Supabase and local Docker on 2026-09-01.
 
+-- ── Every prefixed-sequence id default: fix LPAD truncation past its pad
+-- width (2026-09-05) ─────────────────────────────────────────────────────────
+-- Postgres LPAD(str, N, '0') TRUNCATES (keeps only the first N characters)
+-- once str is already >= N characters — it does not just skip padding. Every
+-- CREATE TABLE above using the naive `'PREFIX' || LPAD(nextval(seq)::TEXT, N,
+-- '0')` form (roles, candidates, applications, interview_rounds — N=4;
+-- agencies, assignment_repo, comp_benchmarks, eval_questions, ref_checks —
+-- N=3) silently collided every id with an earlier one sharing the same
+-- truncated prefix the instant its sequence crossed 10^N-1 — e.g. once
+-- seq_candidate passed 9999, values 10380-10389 all produced the identical
+-- id 'C1038'. Caught in local Docker after this session's testing pushed
+-- seq_candidate past 9999 (~10k real candidates accumulated): every
+-- subsequent candidate INSERT failed with "duplicate key value violates
+-- unique constraint candidates_pkey", cascading into ~180 unrelated
+-- Playwright test failures across files that transitively create a
+-- candidate. Confirmed the same class of bug existed (dormant, not yet
+-- triggered) on every other id column listed above, including the ALTER
+-- just above at line ~709 that widened roles from 3 to 4 digits without
+-- fixing the actual truncation mechanism, just deferring it.
+--
+-- format_seq_id() calls nextval() exactly once and only pads when the
+-- number is still narrower than pad_width, otherwise uses it as-is;
+-- existing already-generated ids are completely unaffected either way.
+-- Applied to Supabase, then local Docker, then here, 2026-09-05.
+CREATE OR REPLACE FUNCTION format_seq_id(seq regclass, prefix TEXT, pad_width INT) RETURNS TEXT AS $$
+  SELECT prefix || (CASE WHEN LENGTH(v::TEXT) >= pad_width THEN v::TEXT ELSE LPAD(v::TEXT, pad_width, '0') END)
+  FROM (SELECT nextval(seq) AS v) s;
+$$ LANGUAGE SQL;
+
+ALTER TABLE roles             ALTER COLUMN id SET DEFAULT format_seq_id('seq_role', 'R', 4);
+ALTER TABLE candidates        ALTER COLUMN id SET DEFAULT format_seq_id('seq_candidate', 'C', 4);
+ALTER TABLE applications      ALTER COLUMN id SET DEFAULT format_seq_id('seq_application', 'A', 4);
+ALTER TABLE interview_rounds  ALTER COLUMN id SET DEFAULT format_seq_id('seq_interview', 'IR', 4);
+ALTER TABLE agencies          ALTER COLUMN id SET DEFAULT format_seq_id('seq_agency', 'AGN', 3);
+ALTER TABLE assignment_repo   ALTER COLUMN id SET DEFAULT format_seq_id('seq_assignment', 'ASN', 3);
+ALTER TABLE comp_benchmarks   ALTER COLUMN id SET DEFAULT format_seq_id('seq_comp_benchmark', 'BEN', 3);
+ALTER TABLE eval_questions    ALTER COLUMN id SET DEFAULT format_seq_id('seq_eval_question', 'Q', 3);
+ALTER TABLE ref_checks        ALTER COLUMN id SET DEFAULT format_seq_id('seq_refcheck', 'RC', 3);
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows
 -- ═════════════════════════════════════════════════════════════════════════════

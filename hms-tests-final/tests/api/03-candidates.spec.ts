@@ -14,7 +14,13 @@ test.describe('Candidates API', () => {
       });
       expect(res.status()).toBe(201);
       const { candidate } = await res.json();
-      expect(candidate.id).toMatch(/^C\d{4}$/);
+      // At least 4 digits, not exactly 4 — once seq_candidate crosses 9999,
+      // ids correctly grow to 5+ digits rather than padding (see schema.sql's
+      // format_seq_id() and CLAUDE.md's ID scheme note on the LPAD-truncation
+      // fix, 2026-09-05). A stricter {4} here would fail forever once real
+      // usage (or, as happened locally, a very large accumulated test corpus)
+      // pushes the sequence past that point.
+      expect(candidate.id).toMatch(/^C\d{4,}$/);
     });
 
     test('candidate created WITH role_id also creates an application', async ({ request }) => {
@@ -27,7 +33,9 @@ test.describe('Candidates API', () => {
       expect(res.status()).toBe(201);
       const body = await res.json();
       expect(body.application).toBeDefined();
-      expect(body.application.id).toMatch(/^A\d{4}$/);
+      // At least 4 digits, not exactly 4 — see schema.sql's format_seq_id()
+      // note (2026-09-05): ids grow past their pad width, never truncate.
+      expect(body.application.id).toMatch(/^A\d{4,}$/);
       expect(body.application.stage).toBe('Applied and Screened');
       expect(body.application.status).toBe('Active');
       expect(body.application.recruiter_screening_status).toBe('New');
@@ -100,7 +108,11 @@ test.describe('Candidates API', () => {
 
     test('returns 404 for non-existent candidate', async ({ request }) => {
       const token = await getToken(request, 'hr');
-      const res   = await authed(request, token).get('/api/candidates/C9999');
+      // A random-suffixed id, not a small fixed number like C9999 — this
+      // local dataset accumulates enough test candidates over time that a
+      // fixed low id eventually stops being guaranteed-nonexistent (same
+      // reasoning as 02-roles.spec.ts's RNONEXISTENT pattern).
+      const res   = await authed(request, token).get(`/api/candidates/CNONEXISTENT${uid()}`);
       expect(res.status()).toBe(404);
     });
   });

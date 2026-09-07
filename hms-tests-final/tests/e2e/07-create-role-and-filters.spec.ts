@@ -19,8 +19,8 @@
  * 3) MultiSelectFilter.tsx — shared by Dashboard/Roles/Candidates: a button
  *    showing the filter's label, a checkbox-driven dropdown panel, and a
  *    count badge once anything is selected. Candidates.tsx additionally
- *    auto-hides its "Unlinked candidates" panel whenever any Role filter is
- *    active (unlinked candidates, by definition, have no role).
+ *    auto-hides its "Unmatched Candidates" panel whenever any Role filter is
+ *    active (unmatched candidates, by definition, have no role).
  *
  * Tests 2, 3 and 6 below reuse the role created by test 1 (rather than an
  * API-created fixture) since the point is specifically to exercise
@@ -238,13 +238,13 @@ test.describe('Create Role form + RoleDetail parity + master filters', () => {
     await expect(departmentFilter.locator('span.bg-dp-600')).toHaveCount(0);
   });
 
-  test('Candidates Role filter hides the Unlinked candidates panel', async ({ page }) => {
+  test('Candidates Role filter hides the Unmatched Candidates panel', async ({ page }) => {
     test.skip(!createdRoleId, 'depends on the role created by the first test');
 
-    // Seed a genuinely unlinked candidate (zero applications, same pattern
+    // Seed a genuinely unmatched candidate (zero applications, same pattern
     // as 05-unlinked-candidates.spec.ts) so the panel is guaranteed visible
     // before filtering — otherwise "the panel disappears after filtering"
-    // could pass vacuously on an environment with no unlinked candidates.
+    // could pass vacuously on an environment with no unmatched candidates.
     const marker = `E2E Unlinked ${uid()}`;
     const ingestRes = await page.request.post(`${BASE}/api/candidates/ingest`, {
       headers: { 'x-ingest-secret': CANDIDATE_INGEST_SECRET },
@@ -258,7 +258,7 @@ test.describe('Create Role form + RoleDetail parity + master filters', () => {
 
     await loginViaApi(page, 'hr');
     await page.goto(`${FRONTEND_BASE}/candidates`);
-    await expect(page.getByRole('heading', { name: /Unlinked candidates \(\d+\)/ })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('heading', { name: /Unmatched Candidates \(\d+\)/ })).toBeVisible({ timeout: 15000 });
 
     const roleFilter = masterFilter(page, 'Role');
     await roleFilter.locator('button').first().click();
@@ -279,6 +279,6 @@ test.describe('Create Role form + RoleDetail parity + master filters', () => {
     const targetCheckbox = panel.locator('label', { hasText: createdRoleTitle! }).locator('input[type=checkbox]');
     await targetCheckbox.dispatchEvent('click');
 
-    await expect(page.getByRole('heading', { name: /Unlinked candidates/ })).not.toBeVisible();
+    await expect(page.getByRole('heading', { name: /Unmatched Candidates/ })).not.toBeVisible();
   });
 });

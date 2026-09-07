@@ -167,21 +167,21 @@ export default function Dashboard() {
 
       {/* KPI row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <KpiCard icon={Briefcase} label="Open roles" value={metrics.open_roles_count} accent="text-dp-600"
-          info="Roles currently Live – Sourcing, Approved, or Under Review — Draft and Closed roles don't count. Avg. active role age is the mean days since each open role's approval date; Avg. time to fill is the mean days from a role's approval to its first accepted offer, across all-time history."
+        <KpiCard icon={Briefcase} label="Roles Snapshot" value={metrics.open_roles_count} accent="text-dp-600"
+          info="Roles currently Live – Sourcing, Approved, or Under Review — Draft and Closed roles don't count. Avg. active role age is the mean days since each open role's approval date; Avg. time to fill is the mean days from a role's approval to its first accepted offer, across all-time history. Filled (30D) reads from Closed roles, which no role filter can coherently describe — it shows N/A whenever any master filter is active."
           sub={[
             ['P0+P1 roles', metrics.open_roles_by_priority.P0 + metrics.open_roles_by_priority.P1],
             ['Avg. active role age', metrics.avg_active_role_age_days != null ? `${metrics.avg_active_role_age_days}d` : '—'],
             ['Avg. time to fill', metrics.avg_time_to_fill_days != null ? `${metrics.avg_time_to_fill_days}d` : '—'],
-            ['Filled (30D)', metrics.roles_filled_last_30d],
+            ['Filled (30D)', hasActiveFilters ? 'N/A' : metrics.roles_filled_last_30d],
           ]} />
         <KpiCard icon={Users} label="Active candidates" value={metrics.active_candidates} accent="text-green-600"
-          info="Every application with status = Active (i.e. not Rejected, Withdrawn, Hold for Future, or Joined). Score ≥75/≤45 are ResumeIQ fit-score bands; ≥Interview 1 counts candidates currently sitting at Interview Round 1 or later; Unmatched is Job Application Form submissions that never matched an open role."
+          info="Every application with status = Active (i.e. not Rejected, Withdrawn, Hold for Future, or Joined). Score ≥75/≤45 are ResumeIQ fit-score bands; ≥Interview 1 counts candidates currently sitting at Interview Round 1 or later; Unmatched is Job Application Form submissions that never matched an open role, plus any candidate never linked to a role at all — since these have no role_id, this shows N/A whenever any master filter is active."
           sub={[
             ['Score ≥75', metrics.candidates_score_ge_75],
             ['Score ≤45', metrics.candidates_score_le_45],
             ['≥Interview 1', metrics.candidates_at_interview1_plus],
-            ['Unmatched', metrics.candidates_unmatched],
+            ['Unmatched', hasActiveFilters ? 'N/A' : metrics.candidates_unmatched],
           ]} />
         <KpiCard icon={AlertTriangle} label="SLA breaches" value={metrics.sla_breach_total}
           accent={metrics.sla_breach_total > 0 ? 'text-red-500' : 'text-gray-400'}
@@ -345,9 +345,9 @@ export default function Dashboard() {
             <div className="px-5 py-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-semibold text-gray-900">Low pipeline roles</h2>
-                <InfoTooltip align="left" text="Open roles that are already showing a yellow or red aging alert (past Close Target) AND currently have fewer than 3 Active candidates in their pipeline — a signal that sourcing, not process, may be the actual bottleneck." />
+                <InfoTooltip align="left" text="Open roles (Approved, Live – Sourcing, or On Hold) currently showing fewer than 5 Active candidates in their pipeline — a signal that sourcing, not process, may be the actual bottleneck, regardless of whether the role is also past its Close Target." />
               </div>
-              <p className="text-xs text-gray-400 mt-0.5">Open, aging roles with fewer than 3 active candidates</p>
+              <p className="text-xs text-gray-400 mt-0.5">Open roles with fewer than 5 active candidates</p>
             </div>
             {low_pipeline.length === 0 ? (
               <div className="p-5"><EmptyState title="No low-pipeline roles ✓" /></div>

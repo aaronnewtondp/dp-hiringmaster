@@ -13,7 +13,6 @@ import TalentPool from './pages/TalentPool.tsx';
 import Agencies from './pages/Agencies.tsx';
 import AgencyDetail from './pages/AgencyDetail.tsx';
 import MyTasks from './pages/MyTasks.tsx';
-import ScorecardSummary from './pages/ScorecardSummary.tsx';
 import UserManagement from './pages/UserManagement.tsx';
 import Help from './pages/Help.tsx';
 import RequireSuperAdmin from './components/shared/RequireSuperAdmin.tsx';
@@ -54,7 +53,6 @@ function AppRoutes() {
         <Route path="/agencies"                element={<Agencies />} />
         <Route path="/agencies/:id"            element={<AgencyDetail />} />
         <Route path="/my-tasks"                element={<MyTasks />} />
-        <Route path="/scorecard"               element={<ScorecardSummary />} />
         <Route path="/users"                   element={<RequireSuperAdmin><UserManagement /></RequireSuperAdmin>} />
         <Route path="/help"                    element={<Help />} />
         <Route path="*"                        element={<Navigate to="/dashboard" replace />} />

@@ -40,7 +40,12 @@ test.describe('Candidate-Role Linking API', () => {
 
     test('returns 404 for a non-existent candidate', async ({ request }) => {
       const token = await getToken(request, 'hr');
-      const res = await authed(request, token).post('/api/candidates/C9999/applications', {
+      // A random-suffixed id, not a small fixed number like C9999 — same
+      // reasoning as the role_id case below and 02-roles.spec.ts's
+      // RNONEXISTENT pattern: this dataset accumulates enough test
+      // candidates over time that a fixed low id eventually stops being
+      // guaranteed-nonexistent.
+      const res = await authed(request, token).post(`/api/candidates/CNONEXISTENT${uid()}/applications`, {
         role_id: SEEDED.roles.backend_dev,
       });
       expect(res.status()).toBe(404);

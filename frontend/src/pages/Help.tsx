@@ -69,7 +69,7 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
       },
       {
         id: 'candidates',
-        question: 'What is Candidates, and what are "Unlinked" and "Unmatched" candidates?',
+        question: 'What is Candidates, and what are "Unmatched Candidates"?',
         answer: (
           <>
             <p>Candidates is the full applicant list across every role, with search and the same
@@ -80,15 +80,13 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             just when. Click the <strong>Fit</strong>, <strong>Application Date</strong>, or{' '}
             <strong>Last Updated</strong> column headers to sort by that column — click again to
             flip direction (starts descending); sorting only reorders whatever rows are currently
-            visible after your filters. Two amber banners can appear above the table:</p>
-            <ul className="list-disc pl-5 mt-1.5 space-y-1">
-              <li><strong>Unlinked candidates</strong> — a candidate record exists but has no
-              application to any role yet (e.g. a resume was added directly, or an old
-              application was removed).</li>
-              <li><strong>Unmatched role submissions</strong> — a candidate applied via the Job
-              Application Form, but the role name they typed didn't match any role in the
-              system closely enough to auto-link. HR can link it manually or discard it.</li>
-            </ul>
+            visible after your filters. An amber <strong>Unmatched Candidates</strong> banner can
+            appear above the table — every candidate with no application to any role yet, for
+            either reason: a resume was added directly (or an old application was removed), or a
+            candidate applied via the Job Application Form but the role name they typed didn't
+            match any role in the system closely enough to auto-link. HR can link each one
+            manually, use the suggested-role quick link when the system found a likely match, or
+            delete the candidate outright.</p>
           </>
         ),
       },

@@ -6,6 +6,7 @@ import { runSlaCheck } from '../jobs/slaChecker.js';
 import { parseRoleFilters, buildRoleFilterSql, roleIdsSubquery, applyHiringManagerRoleLock } from '../utils/roleFilters.js';
 import { computeAging } from '../utils/aging.js';
 import { fetchSlaBreachRows, buildHiringFunnelSnapshot } from '../utils/hiringFunnelSnapshot.js';
+import { countUnmatchedCandidates } from '../utils/unmatchedCandidates.js';
 
 // ─── Compute-on-read SLA trigger ──────────────────────────────────────────────
 // Vercel Hobby tier only supports daily cron, not the 15-min interval the SLA
@@ -86,7 +87,7 @@ router.get('/', async (req: Request, res: Response) => {
 
   // Run all aggregate queries in parallel
   const [
-    roleStats, candidateStats, activeCandidatesByStage, rolesFilledRow, unmatchedCountRow,
+    roleStats, candidateStats, activeCandidatesByStage, rolesFilledRow, candidatesUnmatched,
     slaBreachRows, founderReviewCount,
     agingRoles, funnelRows, joiningRisk,
     sourceQualityRows, timeToFillRows,
@@ -155,29 +156,13 @@ router.get('/', async (req: Request, res: Response) => {
       `, f.params);
     })(),
 
-    // Unmatched candidates (KPI redesign) — reuses candidates.ts's
-    // /unmatched-role-submissions CTE verbatim (COUNT-only): a Job
-    // Application Form submission whose role text never matched a role,
-    // dropped the moment a real application resolves it. Not scoped by the
-    // master role filters — these candidates have no role_id by definition.
-    queryOne<{ count: string }>(`
-      WITH latest AS (
-        SELECT DISTINCT ON (al.candidate_id, al.event_detail)
-          al.candidate_id, al.event_detail AS submitted_text,
-          (SELECT r.id FROM roles r
-             WHERE lower(regexp_replace(translate(trim(r.title), '–—', '--'), '\\s+', ' ', 'g'))
-                 = lower(regexp_replace(translate(trim(al.event_detail), '–—', '--'), '\\s+', ' ', 'g'))
-               AND r.status NOT IN ('Closed – Filled', 'Closed – Cancelled')
-             LIMIT 1) AS suggested_role_id
-        FROM activity_log al
-        WHERE al.event_type = 'Unmatched Role — Manual Reconciliation'
-        ORDER BY al.candidate_id, al.event_detail, al.created_at DESC
-      )
-      SELECT COUNT(*) as count FROM latest l
-      WHERE NOT EXISTS (
-        SELECT 1 FROM applications a2 WHERE a2.candidate_id = l.candidate_id AND a2.role_id = l.suggested_role_id
-      )
-    `),
+    // Unmatched candidates (KPI redesign; merged 2026-09-05 with the
+    // Candidates page's old separate "Unlinked candidates" banner — see
+    // utils/unmatchedCandidates.ts) — count-only. Not scoped by the master
+    // role filters — these candidates have no role_id by definition, so any
+    // active filter makes this number incoherent; the frontend shows N/A in
+    // that case rather than sending a filter this query can't honor.
+    countUnmatchedCandidates(),
 
     // SLA breach rows — every unresolved pending_actions row produced by the
     // stage-driven breach engine (slaChecker.ts's STAGE_SLA_ACTION_TYPES),
@@ -407,7 +392,6 @@ router.get('/', async (req: Request, res: Response) => {
   }
 
   const rolesFilledLast30d = parseInt(rolesFilledRow?.count || '0');
-  const candidatesUnmatched = parseInt(unmatchedCountRow?.count || '0');
 
   // ── Compute aging for each role ─────────────────────────────────────────────
   const rolesWithAging = agingRoles.map(r => {
@@ -418,7 +402,7 @@ router.get('/', async (req: Request, res: Response) => {
   });
 
   const redAlertRoles   = rolesWithAging.filter(r => r.aging_alert === 'red').length;
-  const lowPipelineRoles = rolesWithAging.filter(r => r.active_count < 3 && r.aging_alert !== 'ok');
+  const lowPipelineRoles = rolesWithAging.filter(r => r.active_count < 5);
 
   // Average active role age (KPI redesign) — mean days_open over the "open
   // roles" set (Live – Sourcing/Approved/Under Review), a deliberately

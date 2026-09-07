@@ -204,6 +204,51 @@ questions, `BEN###` comp benchmarks, `RC###` reference checks.
 tables sharing one sequence caused duplicate-key crashes in production before;
 never let two tables share a sequence again.
 
+**A second, related failure mode (2026-09-05)**: `backend/src/db/seed.sql`'s
+sequence-advance block at the bottom hardcoded `setval('seq_candidate', 1)`
+(and the same for `seq_application`/`seq_interview`/`seq_refcheck`) instead
+of computing it from `MAX(...)`, the way `seq_role`/`seq_agency`/
+`seq_assignment` correctly do. Harmless against a genuinely empty database
+(where those four tables have zero rows anyway), but re-running seed.sql
+against a database that already has real data — e.g. `npm run db:reset`
+without a full `docker-compose down -v` volume wipe — resets the counter
+straight back to 1 while the table still holds thousands of existing rows,
+so every subsequent INSERT collides on the primary key until the counter
+climbs back past the old max. Fixed to use the same `MAX(...)` pattern
+(wrapped in `COALESCE(...,0)`, since these four specifically can be
+genuinely empty on a fresh DB, unlike roles/agencies/assignments which this
+same script just seeded moments earlier). If a similar "everything's
+failing with duplicate key on `<table>_pkey`" symptom ever recurs, check
+`SELECT last_value, is_called FROM seq_<name>` against the table's actual
+`MAX(id)` first — a stuck-low sequence is the same class of bug.
+
+**A third, more severe failure mode, same day — every prefixed id was one
+`LPAD` call away from silently colliding once its sequence grew large
+enough.** `LPAD(str, N, '0')` **truncates** (keeps only the first N
+characters) once `str` is already >= N characters long — it does not just
+skip padding, the way you'd naively expect. Every `'PREFIX' ||
+LPAD(nextval(seq)::TEXT, N, '0')` id default in `schema.sql` (`R####`
+roles, `C####` candidates, `A####` applications, `IR####` interview
+rounds — N=4; `AGN###` agencies, `ASN###` assignments, `BEN###` comp
+benchmarks, `Q###` eval questions, `RC###` reference checks — N=3) was
+exposed to this: the instant a sequence crossed `10^N - 1`, every following
+id collided with an earlier one sharing the same truncated prefix (e.g.
+once `seq_candidate` passed 9999, values 10380-10389 all produced the
+identical id `'C1038'`). This is exactly what happened in local Docker
+after months of this project's own testing pushed `seq_candidate` past
+9999 — every subsequent candidate INSERT started failing with "duplicate
+key value violates unique constraint candidates_pkey", cascading into
+~180 unrelated Playwright failures across every test file that
+transitively creates a candidate. `seq_application`/`seq_eval_question`
+were both closing in on their own caps too (8880/9999 and 914/999) when
+this was caught. Fixed everywhere (Supabase, local Docker, `schema.sql`)
+with a shared `format_seq_id(seq, prefix, pad_width)` SQL function that
+calls `nextval()` exactly once and only pads when the number is still
+narrower than `pad_width` — see `schema.sql`'s own note next to it for the
+full ALTER list. If a table's real row count ever gets anywhere near its
+pad width again, this is already handled — ids just stop padding and read
+one digit longer, no truncation possible.
+
 ### ResumeIQ — 8-dimension scoring
 Located in `backend/src/services/resumeIQ.ts` and
 `backend/src/services/driveService.ts`. Mirrors the `digitalpaani-candidate-

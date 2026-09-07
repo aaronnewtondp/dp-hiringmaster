@@ -335,7 +335,7 @@ export default function RoleDetail() {
             <Users className="w-4 h-4 text-gray-400" />
             Pipeline
           </h2>
-          <Link to={`/scorecard?role_id=${role.id}`} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5">
+          <Link to={`/my-tasks?role_id=${role.id}`} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5">
             <BarChart3 className="w-3.5 h-3.5" />
             Scorecard Summary
           </Link>

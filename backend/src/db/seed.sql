@@ -188,10 +188,23 @@ INSERT INTO assignment_repo (id, name, role_category, experience_level, skills_c
 COMMIT;
 
 -- ─── Advance sequences past seeded data so next INSERT gets a fresh ID ────────
+-- candidates/applications/interview_rounds/ref_checks are never seeded with
+-- real rows by this script (unlike roles/agencies/assignment_repo above),
+-- but this script can be re-run against a DATABASE THAT ALREADY HAS DATA
+-- (e.g. `npm run db:reset` without a full `docker-compose down -v` wipe) —
+-- a bare `setval(seq, 1)` used to reset these four straight back to 1
+-- regardless of how much real data already existed, guaranteeing every
+-- subsequent INSERT collided on the primary key until the counter climbed
+-- back past the old max (confirmed in production-of-a-sort: this exact bug
+-- took down a huge fraction of a local Playwright run, 2026-09-05, with
+-- "duplicate key value violates unique constraint" on candidates_pkey once
+-- seq_candidate got reset under a DB already holding ~10k real candidates).
+-- COALESCE(...,0) covers the genuinely-fresh-DB case, where these four
+-- tables really are empty and MAX() is NULL.
 SELECT setval('seq_role',       (SELECT MAX(CAST(REPLACE(id,'R','') AS INTEGER)) FROM roles));
-SELECT setval('seq_candidate',  1);
-SELECT setval('seq_application',1);
-SELECT setval('seq_interview',  1);
+SELECT setval('seq_candidate',   COALESCE((SELECT MAX(CAST(REPLACE(id,'C','')  AS INTEGER)) FROM candidates), 0));
+SELECT setval('seq_application', COALESCE((SELECT MAX(CAST(REPLACE(id,'A','')  AS INTEGER)) FROM applications), 0));
+SELECT setval('seq_interview',   COALESCE((SELECT MAX(CAST(REPLACE(id,'IR','') AS INTEGER)) FROM interview_rounds), 0));
 SELECT setval('seq_agency',     (SELECT MAX(CAST(REPLACE(id,'AGN','') AS INTEGER)) FROM agencies));
 SELECT setval('seq_assignment', (SELECT MAX(CAST(REPLACE(id,'ASN','') AS INTEGER)) FROM assignment_repo));
-SELECT setval('seq_refcheck',   1);
+SELECT setval('seq_refcheck',    COALESCE((SELECT MAX(CAST(REPLACE(id,'RC','') AS INTEGER)) FROM ref_checks), 0));

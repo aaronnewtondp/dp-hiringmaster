@@ -25,7 +25,9 @@ test.describe('Candidate Ingestion Webhook', () => {
       });
       expect(res.status()).toBe(201);
       const body = await res.json();
-      expect(body.candidate.id).toMatch(/^C\d{4}$/);
+      // At least 4 digits, not exactly 4 — see schema.sql's format_seq_id()
+      // note (2026-09-05): ids grow past their pad width, never truncate.
+      expect(body.candidate.id).toMatch(/^C\d{4,}$/);
       expect(body.application).not.toBeNull();
       expect(body.application.role_id).toBe(SEEDED.roles.qa_eng);
       expect(body.application.source_channel).toBe('Job Application Form');
@@ -112,7 +114,9 @@ test.describe('Candidate Ingestion Webhook', () => {
       });
       expect(res.status()).toBe(201);
       const body = await res.json();
-      expect(body.candidate.id).toMatch(/^C\d{4}$/);
+      // At least 4 digits, not exactly 4 — see schema.sql's format_seq_id()
+      // note (2026-09-05): ids grow past their pad width, never truncate.
+      expect(body.candidate.id).toMatch(/^C\d{4,}$/);
       expect(body.application).toBeNull();
       expect(body.warning).toBe(`No open role matched "${roleQuery}"`);
     });

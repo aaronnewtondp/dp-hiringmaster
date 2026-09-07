@@ -96,11 +96,13 @@ test.describe('Dashboard API additions', () => {
   // ─── low_pipeline ──────────────────────────────────────────────────────────
   // Not new this batch — it existed before — but is now actually rendered on
   // the frontend, which makes a shape regression here worth guarding. Built
-  // from rolesWithAging.filter(active_count < 3 && aging_alert !== 'ok'), so
-  // by construction every entry is 'yellow' or 'red', never 'ok'.
+  // from rolesWithAging.filter(active_count < 5) (threshold widened from 3
+  // to 5, and the aging_alert condition dropped entirely, both 2026-09-05) —
+  // a role no longer needs to also be past its Close Target to show up here,
+  // so an 'ok' aging_alert is a perfectly valid entry now.
   test.describe('low_pipeline', () => {
 
-    test('is an array; every entry has active_count < 3 and a non-"ok" aging_alert', async ({ request }) => {
+    test('is an array; every entry has active_count < 5', async ({ request }) => {
       const token = await getToken(request, 'hr');
       const res   = await authed(request, token).get('/api/dashboard');
       expect(res.status()).toBe(200);
@@ -109,8 +111,7 @@ test.describe('Dashboard API additions', () => {
       expect(Array.isArray(low_pipeline)).toBe(true);
       for (const role of low_pipeline) {
         expect(typeof role.active_count).toBe('number');
-        expect(role.active_count).toBeLessThan(3);
-        expect(['yellow', 'red']).toContain(role.aging_alert);
+        expect(role.active_count).toBeLessThan(5);
       }
     });
   });

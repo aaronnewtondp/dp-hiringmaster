@@ -78,7 +78,9 @@ test.describe('Interviews API', () => {
       });
       expect(res.status()).toBe(201);
       const { round } = await res.json();
-      expect(round.id).toMatch(/^IR\d{4}$/);
+      // At least 4 digits, not exactly 4 — see schema.sql's format_seq_id()
+      // note (2026-09-05): ids grow past their pad width, never truncate.
+      expect(round.id).toMatch(/^IR\d{4,}$/);
       expect(round.feedback_status).toBe('Pending');
     });
 
