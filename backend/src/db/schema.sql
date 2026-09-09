@@ -853,6 +853,73 @@ ALTER TABLE applications
   ADD COLUMN IF NOT EXISTS rejection_email_sent_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS rejection_email_error   TEXT;
 
+-- ── pending_actions: orphaned pre-rewrite action_type cleanup (2026-09-09) ──
+-- Two action_type strings from a since-rewritten SLA engine (pre-dating
+-- 2026-09-01's stage-simplification rewrite, before per-round action types
+-- like 'Interview 1 Feedback Due' existed) were invisible to
+-- resolveStaleStageActionTypes()'s own `action_type = ANY(...)` cleanup
+-- sweep — that sweep only ever recognizes CURRENTLY-known action_types to
+-- begin with, so a historical rename's old name was never "one of ours" to
+-- clean up, and sat unresolved forever no matter how stale.
+--
+-- 'Interview feedback due' — fully dead, no current code path creates it
+-- (superseded by the per-round 'Interview 1/2 Feedback Due'/'Founders Round
+-- Feedback Due' types). Verified via direct query before applying: every
+-- unresolved row either (a) had a current-style pending_actions row already
+-- covering the same application, or (b) pointed at an interview scheduled
+-- in the future (not actually overdue under today's rules) — zero genuine
+-- breaches were masked. Applied to local Docker (1060 rows) and Supabase
+-- (0 rows — production never carried this pre-rewrite engine's data) on
+-- 2026-09-09:
+--   UPDATE pending_actions SET resolved=true, resolved_at=NOW()
+--     WHERE action_type='Interview feedback due' AND resolved=false;
+--
+-- 'HM shortlist review' — still actively created today
+-- (applications.ts, on Applied and Screened -> Interview Round 1), but
+-- until this same date was only ever resolved via the separate
+-- recruiter_screening_status -> 'HM Shortlisted' transition — never by the
+-- application's stage simply moving on again (unlike every other
+-- stage-keyed action type). Any application that reached a LATER stage
+-- without that specific screening-status update stayed stuck open forever.
+-- This one-time cleanup only resolves that already-stuck subset (stage <>
+-- 'Interview Round 1' — i.e. the pipeline has unambiguously already moved
+-- past the point this row was raised for); a row still open for an
+-- application genuinely AT Interview Round 1 is left untouched (real,
+-- possibly-still-pending HM work, not proven stale). Applied to local
+-- Docker (43 rows) and Supabase (5 rows) on 2026-09-09:
+--   UPDATE pending_actions pa SET resolved=true, resolved_at=NOW()
+--     FROM applications a
+--     WHERE pa.application_id=a.id AND pa.action_type='HM shortlist review'
+--       AND pa.resolved=false AND a.stage <> 'Interview Round 1';
+--
+-- Fixed for good, same day, three ways (see slaChecker.ts/applications.ts/
+-- interviews.ts): (1) 'HM shortlist review' now also resolves on ANY stage
+-- change via applications.ts's existing per-application stage-SLA sweep,
+-- not just the recruiter_screening_status path; (2) 'Schedule interview'
+-- (applications.ts, raised for HR on reaching 'HM Shortlisted' — found to
+-- have NO resolve path at all, not even a partial one) now resolves in
+-- interviews.ts alongside NOT_SCHEDULED_ACTION_TYPES once a round is
+-- actually scheduled; (3) a new resolveUnknownActionTypes() sweep in
+-- slaChecker.ts now resolves any pending_actions row whose action_type
+-- isn't in ANY currently-recognized set at all — the general form of the
+-- 'Interview feedback due' case above — so a future full rename/retirement
+-- self-heals instead of needing another manual cleanup pass like this one.
+-- 'HM shortlist review' and 'Schedule interview' aren't included in that
+-- sweep's blocklist since they're still actively created; only a string no
+-- current code path produces at all — like 'Interview feedback due' was —
+-- ever qualifies.
+--
+-- That general sweep immediately proved its worth the first time it ran in
+-- local Docker: it caught FOUR more pre-rewrite action_type strings beyond
+-- the two manually cleaned up above, none reachable from any current code
+-- path (confirmed by grep) and none requiring their own manual UPDATE —
+-- 'Idle candidate' (lowercase — a stray casing variant of today's 'Idle
+-- Candidate', 3359 rows), 'Resume to triage' (206), 'Reference check to
+-- initiate' (48), and 'Offer follow-up' (15), all from the same pre-2026-09
+-- SLA engine as 'Interview feedback due'/'HM shortlist review' above. Left
+-- undocumented here individually on purpose — the whole point of this sweep
+-- is that a class of bug like this no longer needs a bespoke writeup.
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows
 -- ═════════════════════════════════════════════════════════════════════════════

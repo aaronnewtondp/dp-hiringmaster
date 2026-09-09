@@ -295,16 +295,25 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
        WHERE id=$3`,
       [new_stage, slaHours, req.params.id, budget_exception_reason_cat || null, budget_exception_reason_detail || null]
     );
-    // A stage-SLA pending_action (Resume to triage, Interview feedback due,
-    // etc.) is only ever valid for the stage it was raised against — once the
-    // stage moves on, resolve it here rather than leaving it to slaChecker's
-    // own recovery check, which can't detect this: by the time it next runs,
-    // sla_breach is already false and stage_entry_time already reset, so it
-    // has no "was breached, now isn't" transition left to see.
+    // A stage-SLA pending_action (Idle Candidate, Resume Shortlist Pending,
+    // Interview 1/2 Feedback Due, etc.) is only ever valid for the stage it
+    // was raised against — once the stage moves on, resolve it here rather
+    // than leaving it to slaChecker's own recovery check, which can't detect
+    // this: by the time it next runs, sla_breach is already false and
+    // stage_entry_time already reset, so it has no "was breached, now isn't"
+    // transition left to see. 'HM shortlist review' rides along here too
+    // (2026-09-09) — it's created just below on reaching Interview Round 1,
+    // but was previously only ever resolved via the separate
+    // recruiter_screening_status -> 'HM Shortlisted' transition, so any
+    // application that progressed to a LATER stage without that specific
+    // update stayed stuck open forever (confirmed via direct query: ~380
+    // rows). Any further stage change now closes it out too, same as every
+    // other stage-keyed action here — the HM's shortlist decision is
+    // unambiguously already moot once the pipeline has moved past it.
     await client.query(
       `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
        WHERE application_id=$1 AND resolved=false AND action_type = ANY($2::text[])`,
-      [req.params.id, STAGE_SLA_ACTION_TYPES]
+      [req.params.id, [...STAGE_SLA_ACTION_TYPES, 'HM shortlist review']]
     );
     await logActivity(client, app.id, app.candidate_id, app.role_id,
       'Stage Changed',

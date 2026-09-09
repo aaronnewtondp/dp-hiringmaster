@@ -191,11 +191,18 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     // "Not Scheduled" breach applied (mutually exclusive by construction, so
     // resolving the whole family is safe). A round left "TBD" (no
     // scheduled_date) doesn't count as actioned yet — nothing to resolve.
+    // 'Schedule interview' (applications.ts, raised for HR on reaching
+    // recruiter_screening_status='HM Shortlisted', always "Round 1" by
+    // description) rides along here too (2026-09-09) — it previously had no
+    // resolve path here at all, so it stayed open forever the moment
+    // scheduling actually happened. Resolving it whenever ANY Standard round
+    // gets scheduled is safe for the same "whole family" reasoning: by the
+    // time Round 2/Founders is scheduled, Round 1 must already be done.
     if (round_type === 'Standard' && scheduled_date) {
       await client.query(
         `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
          WHERE application_id=$1 AND action_type = ANY($2::text[]) AND resolved=false`,
-        [application_id, NOT_SCHEDULED_ACTION_TYPES]
+        [application_id, [...NOT_SCHEDULED_ACTION_TYPES, 'Schedule interview']]
       );
       await client.query(
         `UPDATE applications SET sla_breach=false WHERE id=$1 AND sla_breach=true`,

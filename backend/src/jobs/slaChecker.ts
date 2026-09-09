@@ -3,8 +3,8 @@ import { Priority } from '../types/index.js';
 import { computeAging } from '../utils/aging.js';
 
 const CHECK_NAMES = [
-  'resolveOrphanedActions', 'resolveStaleStageActionTypes', 'checkFlatStageBreaches',
-  'checkNotYetActioned', 'checkFeedbackDue', 'checkAssignmentDeadlines',
+  'resolveOrphanedActions', 'resolveStaleStageActionTypes', 'resolveUnknownActionTypes',
+  'checkFlatStageBreaches', 'checkNotYetActioned', 'checkFeedbackDue', 'checkAssignmentDeadlines',
   'checkRoleAging', 'checkJoiningRisk',
 ] as const;
 
@@ -13,7 +13,7 @@ export async function runSlaCheck(): Promise<void> {
   const start = Date.now();
   console.log(`[SLA] Running check at ${new Date().toISOString()}`);
 
-  // Promise.allSettled, not Promise.all — these 8 checks are independent and
+  // Promise.allSettled, not Promise.all — these 9 checks are independent and
   // each does its own real DB writes (not one shared transaction), so one
   // throwing must not abandon whichever siblings are still mid-write. With
   // Promise.all, dashboard.ts's maybeRunSlaCheck() catches the immediate
@@ -26,6 +26,7 @@ export async function runSlaCheck(): Promise<void> {
   const settled = await Promise.allSettled([
     resolveOrphanedActions(),
     resolveStaleStageActionTypes(),
+    resolveUnknownActionTypes(),
     checkFlatStageBreaches(),
     checkNotYetActioned(),
     checkFeedbackDue(),
@@ -336,6 +337,22 @@ export const ALL_BREACH_ACTION_TYPES = [
 // to 0" set) from a separate, honestly-labeled alerts feed.
 export const NON_ACTIONABLE_ALERT_TYPES = ['Role aging alert', 'Compensation change flag'] as const;
 
+// Every action_type inserted by code OUTSIDE this file's own stage-driven
+// engine — applications.ts (shortlist/screening-status/founder-flag routes)
+// — none of these are declared in FLAT_STAGE_CHECKS/NOT_YET_ACTIONED_STAGES/
+// FEEDBACK_DUE_STAGES, so VALID_STAGES_BY_ACTION_TYPE knows nothing about
+// them and resolveStaleStageActionTypes() below can't help clean them up.
+// Each has (or, as of 2026-09-09, now has) its own explicit resolve call at
+// its real origin — see applications.ts (Founder Review, HM shortlist
+// review) and interviews.ts (Schedule interview) — this array's only job is
+// letting resolveUnknownActionTypes() below recognize them as legitimate.
+export const EXTERNAL_ACTION_TYPES = ['Founder Review', 'HM shortlist review', 'Schedule interview'] as const;
+
+// The full universe of action_type values ANY current code path can
+// produce today. Used only by resolveUnknownActionTypes() below — nothing
+// else needs "every type that exists" in one place.
+const ALL_KNOWN_ACTION_TYPES = [...ALL_BREACH_ACTION_TYPES, ...NON_ACTIONABLE_ALERT_TYPES, ...EXTERNAL_ACTION_TYPES];
+
 // Reverse-indexed from the check configs above: which stage(s) each
 // stage-keyed breach action_type is actually valid for right now. Feeds
 // resolveStaleStageActionTypes() below.
@@ -389,6 +406,28 @@ async function resolveStaleStageActionTypes(): Promise<void> {
          WHERE m.action_type = pa.action_type AND m.valid_stage = a.stage
        )`,
     [actionTypes, stages]
+  );
+}
+
+// ─── 3.6. Safety net: resolve any row whose action_type isn't produced by
+// ANY current code path at all (2026-09-09) ───────────────────────────────
+// resolveStaleStageActionTypes() above only ever recognizes action_types it
+// already knows about (VALID_STAGES_BY_ACTION_TYPE's keys) — a historical
+// rename's OLD name is invisible to that sweep's own `action_type = ANY(...)`
+// clause, since it was never "one of ours" to begin with, so it sat
+// unresolved forever. This is exactly what happened to 'Interview feedback
+// due' (superseded 2026-09-01 by the per-round 'Interview 1/2 Feedback Due'/
+// 'Founders Round Feedback Due' types) — a fully-retired string with zero
+// current INSERT site, orphaned across ~1060 rows before this fix, cleaned
+// up as a one-time migration (see schema.sql's own dated note). This sweep
+// catches the *general* case going forward: any future full rename/removal
+// of an action_type self-heals here instead of needing another manual
+// cleanup pass.
+async function resolveUnknownActionTypes(): Promise<void> {
+  await query(
+    `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
+     WHERE resolved=false AND NOT (action_type = ANY($1::text[]))`,
+    [ALL_KNOWN_ACTION_TYPES]
   );
 }
 
