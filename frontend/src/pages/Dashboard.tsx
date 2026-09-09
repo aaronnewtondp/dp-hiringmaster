@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { AlertTriangle, Briefcase, Users, TrendingUp, TrendingDown, Radio, Gauge, Lock } from 'lucide-react';
 import { dashboardApi, rolesApi } from '../services/api.ts';
 import { DashboardData, Priority, STAGES, PRIORITIES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
-import { PriorityBadge, AgingBadge, StageBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import { PriorityBadge, AgingBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import HiringFunnelSnapshot from '../components/shared/HiringFunnelSnapshot.tsx';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
@@ -215,7 +215,6 @@ export default function Dashboard() {
                     <th className="table-th">Role</th>
                     <th className="table-th">P</th>
                     <th className="table-th">HM</th>
-                    <th className="table-th">Status</th>
                     <th className="table-th">Age</th>
                   </tr>
                 </thead>
@@ -229,7 +228,6 @@ export default function Dashboard() {
                       </td>
                       <td className="table-td"><PriorityBadge priority={r.priority as Priority} /></td>
                       <td className="table-td text-gray-500 text-xs">{r.hiring_manager_name}</td>
-                      <td className="table-td"><StageBadge stage={r.status} /></td>
                       <td className="table-td">
                         <AgingBadge alert={r.aging_alert} daysOpen={r.days_open} daysOverdue={r.days_overdue} />
                       </td>

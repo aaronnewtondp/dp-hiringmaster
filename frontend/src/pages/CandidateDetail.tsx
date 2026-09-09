@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ExternalLink, Star, ChevronDown, ChevronUp, CalendarPlus, MessageSquare, FileText, Send, Link2, Plus } from 'lucide-react';
+import { ExternalLink, Star, ChevronDown, ChevronUp, CalendarPlus, MessageSquare, FileText, Send, Link2, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { candidatesApi, applicationsApi, interviewsApi, refChecksApi, agenciesApi } from '../services/api.ts';
 import { Candidate, Application, InterviewRound, ReferenceCheck, Agency, REJECTION_REASONS, WITHDRAWAL_REASONS, RECRUITMENT_CHANNELS } from '../types/index.ts';
 import { StageBadge, StatusBadge, PriorityBadge, OverBudgetBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import PipelineProgress from '../components/shared/PipelineProgress.tsx';
+import RejectionEmailDraft, { RejectionEmailState } from '../components/shared/RejectionEmailDraft.tsx';
+import BackButton from '../components/shared/BackButton.tsx';
 import { isOverBudget } from '../utils/budget.ts';
 import EditableSection from '../components/shared/EditableSection.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
@@ -90,6 +92,7 @@ export default function CandidateDetail() {
   const [statusValue, setStatusValue] = useState('');
   const [rejectionCat, setRejectionCat] = useState('');
   const [rejectionDetail, setRejectionDetail] = useState('');
+  const [rejectionEmail, setRejectionEmail] = useState<RejectionEmailState>({ enabled: false, subject: '', body: '' });
   const [viewingRejection, setViewingRejection] = useState<{ cat?: string; detail?: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -254,11 +257,20 @@ export default function CandidateDetail() {
     }
     setSaving(true);
     try {
-      await applicationsApi.updateStatus(selectedAppId, {
+      const sendEmail = statusValue === 'Rejected' && rejectionEmail.enabled;
+      const res = await applicationsApi.updateStatus(selectedAppId, {
         new_status: statusValue,
         rejection_reason_cat: rejectionCat || undefined,
         rejection_reason_detail: rejectionDetail || undefined,
+        send_rejection_email: sendEmail || undefined,
+        rejection_email_subject: sendEmail ? rejectionEmail.subject : undefined,
+        rejection_email_body: sendEmail ? rejectionEmail.body : undefined,
       });
+      if (sendEmail) {
+        const email = res.data?.email;
+        if (email?.sent) toast.success('Rejection email sent');
+        else if (email) toast.error(email.error || 'Rejection email failed to send');
+      }
       toast.success(`Status updated to ${statusValue}`);
       setShowStatusModal(false);
       qc.invalidateQueries({ queryKey: ['candidate', id] });
@@ -275,9 +287,7 @@ export default function CandidateDetail() {
   return (
     <div className="space-y-6">
       <div>
-        <Link to="/candidates" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3">
-          <ArrowLeft className="w-4 h-4" /> Candidates
-        </Link>
+        <BackButton fallback="/candidates" label="Candidates" />
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-4">
             <div className="w-12 h-12 rounded-full bg-dp-100 flex items-center justify-center text-dp-700 font-semibold text-lg">
@@ -467,6 +477,12 @@ export default function CandidateDetail() {
                               </button>
                             ) : (
                               <StatusBadge status={app.status} />
+                            )}
+                            {app.rejection_email_error && (
+                              <span className="text-xs text-amber-600" title={app.rejection_email_error}>⚠ Rejection email failed to send</span>
+                            )}
+                            {app.rejection_email_sent_at && (
+                              <span className="text-xs text-gray-400">✓ Rejection email sent</span>
                             )}
                             <span className="text-xs text-gray-400">{app.recruiter_screening_status}</span>
                             {app.score_avg != null && <span className="text-xs font-semibold text-dp-700">ResumeIQ: {Number(app.score_avg).toFixed(1)}/10</span>}
@@ -883,6 +899,15 @@ export default function CandidateDetail() {
                 </select>
                 <textarea placeholder="Additional detail (optional)" value={rejectionDetail} onChange={e => setRejectionDetail(e.target.value)} className="input h-20 resize-none" />
               </>
+            )}
+            {statusValue === 'Rejected' && (
+              <RejectionEmailDraft
+                reasonCat={rejectionCat}
+                recipientEmail={candidate.email}
+                candidateName={candidate.full_name}
+                roleTitle={applications.find(a => a.id === selectedAppId)?.role_title}
+                onChange={setRejectionEmail}
+              />
             )}
             <div className="flex gap-2 justify-end">
               <button onClick={() => setShowStatusModal(false)} className="btn-secondary">Cancel</button>

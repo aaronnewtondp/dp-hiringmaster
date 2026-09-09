@@ -6,6 +6,7 @@ import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
 import { parseRoleFilters, buildRoleFilterSql, toArray } from '../utils/roleFilters.js';
 import { STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
 import { isSeverelyOverBudget } from '../utils/budget.js';
+import { sendAssignmentEmail } from '../services/gmailService.js';
 
 const router = Router();
 router.use(authenticate);
@@ -364,11 +365,55 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
   res.json({ application: updated, resumeiq });
 });
 
+// Mirrors interviews.ts's attemptAssignmentEmail exactly — reuses the same
+// generic Gmail sender (nothing assignment-specific in it), never throws,
+// never blocks or rolls back the status change that already committed by
+// the time this runs. Candidate email lives on `candidates`, not
+// `applications` (see CLAUDE.md's candidate-profile-fields rule).
+async function attemptRejectionEmail(
+  app: { id: string; candidate_id: string; role_id: string },
+  candidateEmail: string | null,
+  subject: string,
+  body: string,
+  user: { userId: string; name: string }
+): Promise<{ sent: boolean; error?: string }> {
+  if (!candidateEmail) {
+    await query(`UPDATE applications SET rejection_email_error=$1 WHERE id=$2`,
+      ['Candidate has no email on file.', app.id]);
+    return { sent: false, error: 'Candidate has no email on file — cannot send rejection email.' };
+  }
+
+  try {
+    await sendAssignmentEmail({ to: candidateEmail, subject, text: body });
+    await query(
+      `UPDATE applications SET rejection_email_sent_at=NOW(), rejection_email_error=NULL WHERE id=$1`,
+      [app.id]
+    );
+    await query(
+      `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [app.id, app.candidate_id, app.role_id, 'Rejection Email Sent', `Sent to ${candidateEmail}`, null, user.userId, user.name]
+    );
+    return { sent: true };
+  } catch (err) {
+    const message = (err as Error).message;
+    console.error(`[Gmail] Failed to send rejection email for application ${app.id}:`, message);
+    await query(`UPDATE applications SET rejection_email_error=$1 WHERE id=$2`, [message.slice(0, 500), app.id]);
+    await query(
+      `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [app.id, app.candidate_id, app.role_id, 'Rejection Email Failed', message.slice(0, 500), null, user.userId, user.name]
+    );
+    return { sent: false, error: 'Candidate rejected, but the email failed to send — you can retry from this candidate\'s page.' };
+  }
+}
+
 // ─── POST /api/applications/:id/status — change status (Reject/Withdraw/Hold)
 // PRD Section 9.1: status changes are SEPARATE from stage
 router.post('/:id/status', async (req: Request, res: Response) => {
   const { new_status, rejection_reason_cat, rejection_reason_detail,
-          withdrawal_reason_cat, withdrawal_reason_detail } = req.body;
+          withdrawal_reason_cat, withdrawal_reason_detail,
+          send_rejection_email, rejection_email_subject, rejection_email_body } = req.body;
 
   if (!new_status) { res.status(400).json({ error: 'new_status required' }); return; }
 
@@ -389,6 +434,21 @@ router.post('/:id/status', async (req: Request, res: Response) => {
   if ((new_status === 'Rejected' || new_status === 'Withdrawn') && !rejection_reason_cat && !withdrawal_reason_cat) {
     res.status(400).json({ error: 'A reason is required when rejecting or withdrawing a candidate' });
     return;
+  }
+
+  // send_rejection_email only ever makes sense alongside an actual rejection
+  // — the client composes/edits the final subject+body, this route just
+  // sends verbatim what it's given (same "await it inline, never fire-and-
+  // forget" rule as every other background-work route in this codebase).
+  if (send_rejection_email) {
+    if (new_status !== 'Rejected') {
+      res.status(400).json({ error: 'send_rejection_email is only valid when new_status is Rejected' });
+      return;
+    }
+    if (!rejection_email_subject || !rejection_email_body) {
+      res.status(400).json({ error: 'rejection_email_subject and rejection_email_body are required to send a rejection email' });
+      return;
+    }
   }
 
   // Same write-once problem as pending_actions: joining_risk_auto_flag is
@@ -419,7 +479,17 @@ router.post('/:id/status', async (req: Request, res: Response) => {
     );
   });
 
-  res.json({ success: true, new_status });
+  let email: { sent: boolean; error?: string } | undefined;
+  if (send_rejection_email) {
+    const candidate = await queryOne<{ email: string | null }>('SELECT email FROM candidates WHERE id=$1', [app.candidate_id]);
+    email = await attemptRejectionEmail(
+      { id: app.id, candidate_id: app.candidate_id, role_id: app.role_id },
+      candidate?.email || null, rejection_email_subject, rejection_email_body,
+      { userId: req.user!.userId, name: req.user!.name }
+    );
+  }
+
+  res.json({ success: true, new_status, email });
 });
 
 // ─── POST /api/applications/:id/screening — update recruiter screening status ──

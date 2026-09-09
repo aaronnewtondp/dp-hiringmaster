@@ -1,10 +1,10 @@
-import { useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react';
 import { agenciesApi } from '../services/api.ts';
 import { Agency } from '../types/index.ts';
 import { Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
+import BackButton from '../components/shared/BackButton.tsx';
 
 export default function AgencyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -28,9 +28,7 @@ export default function AgencyDetail() {
   return (
     <div className="space-y-6">
       <div>
-        <Link to="/agencies" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3">
-          <ArrowLeft className="w-4 h-4" /> Agencies
-        </Link>
+        <BackButton fallback="/agencies" label="Agencies" />
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold text-gray-900">{agency.name}</h1>
           <span className={`inline-flex px-2 py-0.5 rounded-md text-xs font-medium ${

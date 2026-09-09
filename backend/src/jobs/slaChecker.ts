@@ -248,7 +248,7 @@ export const NOT_SCHEDULED_ACTION_TYPES = NOT_YET_ACTIONED_STAGES
 async function checkFeedbackDue(): Promise<void> {
   for (const cfg of FEEDBACK_DUE_STAGES) {
     const rows = await query<{ id: string; role_id: string; anchor_time: string;
-             candidate_name: string; role_title: string; hiring_manager_name: string | null }>(
+             candidate_name: string; role_title: string; hiring_manager_name: string | null; interviewer_names: string | null }>(
       // The overdue threshold has to live IN the JOIN, not just in the JS
       // .filter() below — DISTINCT ON picks one row per application before
       // that filter ever runs, and "most recently anchored" (ORDER BY ...
@@ -259,8 +259,21 @@ async function checkFeedbackDue(): Promise<void> {
       // then silently dropped, masking the real breach on the earlier
       // round. Filtering to overdue rounds here means DISTINCT ON only
       // ever has overdue candidates to choose from.
+      //
+      // interviewer_names resolves the round's actual interviewer_emails to
+      // display name(s) via users — this, not the role's hiring_manager_name,
+      // is who the feedback-submission permission check (PATCH
+      // /interviews/:id/feedback) actually gates on. Attributing the
+      // pending_actions row by role-HM name instead let a Hiring Manager see
+      // a "Feedback Due" item in their own count that 403s the moment they
+      // try to act on it whenever a round's real interviewer differs from
+      // the role's named HM (e.g. a panel interview). NULL when the round
+      // has no interviewer_emails set at all — falls back to the role's HM
+      // name below, same as this app's existing "no assignee to check,
+      // stays open to any persona" rule.
       `SELECT DISTINCT ON (a.id) a.id, a.role_id, ir.${cfg.anchorColumn} AS anchor_time,
-              c.full_name AS candidate_name, r.title AS role_title, r.hiring_manager_name
+              c.full_name AS candidate_name, r.title AS role_title, r.hiring_manager_name,
+              (SELECT string_agg(u.name, ', ') FROM users u WHERE u.email = ANY(ir.interviewer_emails)) AS interviewer_names
        FROM applications a
        JOIN candidates c ON c.id = a.candidate_id
        JOIN roles r ON r.id = a.role_id
@@ -275,7 +288,11 @@ async function checkFeedbackDue(): Promise<void> {
       [cfg.stage, cfg.roundType, cfg.thresholdHours]
     );
     const breached = rows
-      .map(row => ({ ...row, hoursOverdue: (Date.now() - new Date(row.anchor_time).getTime()) / 3600000 - cfg.thresholdHours }))
+      .map(row => ({
+        ...row,
+        hiring_manager_name: row.interviewer_names || row.hiring_manager_name,
+        hoursOverdue: (Date.now() - new Date(row.anchor_time).getTime()) / 3600000 - cfg.thresholdHours,
+      }))
       .filter(row => row.hoursOverdue > 0);
     await applyBreachBatch(breached, cfg.actionType, 'Hiring Manager');
   }
@@ -306,6 +323,18 @@ export const ALL_BREACH_ACTION_TYPES = [
   'Assignment deadline breached',
   'Joining risk — no contact',
 ] as const;
+
+// The only two pending_actions action_types with no individual attribution
+// and no in-app resolve action at all — checkRoleAging() and the
+// flag_ctc_change DB trigger never set responsible_person, unlike every
+// other owner_type='Leadership / Founders' row. 'Founder Review' (set via
+// PATCH /applications/:id/founder-flag) shares that same owner_type but is
+// genuinely actionable — it's exactly what feeds a Leadership user's own
+// "Ready for Review" founder-flagged queue — so the distinction has to be
+// made on action_type, not owner_type. Used by dashboard.ts's GET /pending
+// to split "Other Pending Actions" (this list's complement — the "get this
+// to 0" set) from a separate, honestly-labeled alerts feed.
+export const NON_ACTIONABLE_ALERT_TYPES = ['Role aging alert', 'Compensation change flag'] as const;
 
 // Reverse-indexed from the check configs above: which stage(s) each
 // stage-keyed breach action_type is actually valid for right now. Feeds

@@ -9,6 +9,8 @@ import { StageBadge, StatusBadge, FitScore, SlaBadge, OverBudgetBadge, Spinner, 
 import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
+import RejectionEmailDraft, { RejectionEmailState } from '../components/shared/RejectionEmailDraft.tsx';
+import { interpolateRejectionDraft } from '../utils/rejectionEmailTemplates.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { formatDistanceToNow } from 'date-fns';
@@ -63,7 +65,7 @@ export default function Candidates() {
   // unmatchedCandidates.ts): every candidate with zero applications,
   // whether or not they came through a Job Application Form submission
   // whose typed role text never matched a role.
-  const [showUnmatched,   setShowUnmatched]   = useState(true);
+  const [showUnmatched,   setShowUnmatched]   = useState(false);
   const [unmatchedOffset, setUnmatchedOffset] = useState(0);
   const [unmatchedItems,  setUnmatchedItems]  = useState<UnmatchedCandidate[]>([]);
   const [unmatchedTotal,  setUnmatchedTotal]  = useState(0);
@@ -80,6 +82,7 @@ export default function Candidates() {
   const [bulkStatusValue,   setBulkStatusValue]   = useState('Active');
   const [bulkRejectionCat,  setBulkRejectionCat]  = useState('');
   const [bulkRejectionDetail, setBulkRejectionDetail] = useState('');
+  const [bulkRejectionEmail, setBulkRejectionEmail] = useState<RejectionEmailState>({ enabled: false, subject: '', body: '' });
   const [bulkBudgetReasonCat,    setBulkBudgetReasonCat]    = useState('');
   const [bulkBudgetReasonDetail, setBulkBudgetReasonDetail] = useState('');
   const [bulkSaving,        setBulkSaving]        = useState(false);
@@ -281,13 +284,30 @@ export default function Candidates() {
     }
     setBulkSaving(true);
     const ids = Array.from(selectedIds);
-    const settled = await Promise.allSettled(ids.map(id => applicationsApi.updateStatus(id, {
-      new_status: bulkStatusValue,
-      rejection_reason_cat: bulkRejectionCat || undefined,
-      rejection_reason_detail: bulkRejectionDetail || undefined,
-    })));
+    const sendEmail = bulkStatusValue === 'Rejected' && bulkRejectionEmail.enabled;
+    const settled = await Promise.allSettled(ids.map(id => {
+      // Bulk shares one edited template across N different candidates —
+      // interpolate the real name/role per recipient right before send.
+      const app = all.find(a => a.id === id);
+      const perRecipient = sendEmail && app
+        ? interpolateRejectionDraft(bulkRejectionEmail, app.candidate_name, app.role_title)
+        : null;
+      return applicationsApi.updateStatus(id, {
+        new_status: bulkStatusValue,
+        rejection_reason_cat: bulkRejectionCat || undefined,
+        rejection_reason_detail: bulkRejectionDetail || undefined,
+        send_rejection_email: perRecipient ? true : undefined,
+        rejection_email_subject: perRecipient?.subject,
+        rejection_email_body: perRecipient?.body,
+      });
+    }));
     const succeeded = settled.filter(r => r.status === 'fulfilled').length;
-    toast[succeeded === ids.length ? 'success' : 'error'](`${succeeded} of ${ids.length} updated to ${bulkStatusValue}`);
+    let msg = `${succeeded} of ${ids.length} updated to ${bulkStatusValue}`;
+    if (sendEmail) {
+      const emailsSent = settled.filter(r => r.status === 'fulfilled' && r.value.data?.email?.sent).length;
+      msg += ` — ${emailsSent} of ${ids.length} emails sent`;
+    }
+    toast[succeeded === ids.length ? 'success' : 'error'](msg);
     setShowBulkStatusModal(false);
     setSelectedIds(new Set());
     qc.invalidateQueries({ queryKey: ['applications'] });
@@ -678,6 +698,13 @@ export default function Candidates() {
                 </select>
                 <textarea placeholder="Additional detail (optional)" value={bulkRejectionDetail} onChange={e => setBulkRejectionDetail(e.target.value)} className="input h-20 resize-none" />
               </>
+            )}
+            {bulkStatusValue === 'Rejected' && (
+              <RejectionEmailDraft
+                reasonCat={bulkRejectionCat}
+                bulkCount={selectedIds.size}
+                onChange={setBulkRejectionEmail}
+              />
             )}
             <div className="flex gap-2 justify-end">
               <button onClick={() => setShowBulkStatusModal(false)} className="btn-secondary">Cancel</button>

@@ -9,6 +9,8 @@ import { Spinner, EmptyState, OverBudgetBadge, StageBadge } from '../components/
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
 import RejectReasonModal from '../components/shared/RejectReasonModal.tsx';
+import { RejectionEmailState } from '../components/shared/RejectionEmailDraft.tsx';
+import { interpolateRejectionDraft } from '../utils/rejectionEmailTemplates.ts';
 import BudgetExceptionModal from '../components/shared/BudgetExceptionModal.tsx';
 import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -300,18 +302,34 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   const bulkHoldForFuture = () => runBulk(id => applicationsApi.updateStatus(id, { new_status: 'Hold for Future' }), Array.from(selectedIds), 'put on hold');
   const retryScoring = (ids: string[]) => runBulk(id => applicationsApi.retryScoring(id), ids, 'retried');
 
-  const handleBulkReject = async (reasonCat: string, reasonDetail: string) => {
+  const handleBulkReject = async (reasonCat: string, reasonDetail: string, email: RejectionEmailState) => {
     if (!rejectTargetIds) return;
     setBulkSaving(true);
     let succeeded = 0;
+    let emailsSent = 0;
     for (let i = 0; i < rejectTargetIds.length; i += BULK_CONCURRENCY) {
       const batch = rejectTargetIds.slice(i, i + BULK_CONCURRENCY);
-      const settled = await Promise.allSettled(batch.map(id => applicationsApi.updateStatus(id, {
-        new_status: 'Rejected', rejection_reason_cat: reasonCat, rejection_reason_detail: reasonDetail || undefined,
-      })));
-      succeeded += settled.filter(r => r.status === 'fulfilled').length;
+      const settled = await Promise.allSettled(batch.map(id => {
+        // Bulk shares one edited template across N different candidates —
+        // interpolate the real name/role per recipient right before send.
+        const app = apps.find(a => a.id === id);
+        const perRecipient = email.enabled && app
+          ? interpolateRejectionDraft(email, app.candidate_name, app.role_title)
+          : null;
+        return applicationsApi.updateStatus(id, {
+          new_status: 'Rejected', rejection_reason_cat: reasonCat, rejection_reason_detail: reasonDetail || undefined,
+          send_rejection_email: perRecipient ? true : undefined,
+          rejection_email_subject: perRecipient?.subject,
+          rejection_email_body: perRecipient?.body,
+        });
+      }));
+      const fulfilled = settled.filter(r => r.status === 'fulfilled') as PromiseFulfilledResult<{ data?: { email?: { sent?: boolean } } }>[];
+      succeeded += fulfilled.length;
+      emailsSent += fulfilled.filter(r => r.value.data?.email?.sent).length;
     }
-    toast[succeeded === rejectTargetIds.length ? 'success' : 'error'](`${succeeded} of ${rejectTargetIds.length} rejected`);
+    let msg = `${succeeded} of ${rejectTargetIds.length} rejected`;
+    if (email.enabled) msg += ` — ${emailsSent} of ${rejectTargetIds.length} emails sent`;
+    toast[succeeded === rejectTargetIds.length ? 'success' : 'error'](msg);
     setBulkSaving(false);
     setRejectTargetIds(null);
     refreshApps();

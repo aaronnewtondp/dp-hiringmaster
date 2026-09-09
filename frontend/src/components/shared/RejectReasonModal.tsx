@@ -2,13 +2,16 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 import { REJECTION_REASONS } from '../../types/index.ts';
 import { Spinner } from './Badges.tsx';
+import RejectionEmailDraft, { RejectionEmailState } from './RejectionEmailDraft.tsx';
 
 interface Props {
   count:      number;
   saving:     boolean;
-  onConfirm:  (reasonCat: string, reasonDetail: string) => void;
+  onConfirm:  (reasonCat: string, reasonDetail: string, email: RejectionEmailState) => void;
   onClose:    () => void;
 }
+
+const EMPTY_EMAIL: RejectionEmailState = { enabled: false, subject: '', body: '' };
 
 // Shared by ScorecardSummary.tsx and MyTasks.tsx — Reject is the only one
 // of the three HM-facing actions (Shortlist / Hold for Future / Reject)
@@ -17,10 +20,11 @@ interface Props {
 export default function RejectReasonModal({ count, saving, onConfirm, onClose }: Props) {
   const [reasonCat,    setReasonCat]    = useState('');
   const [reasonDetail, setReasonDetail] = useState('');
+  const [email,        setEmail]        = useState<RejectionEmailState>(EMPTY_EMAIL);
 
   const handleSubmit = () => {
     if (!reasonCat) return;
-    onConfirm(reasonCat, reasonDetail.trim());
+    onConfirm(reasonCat, reasonDetail.trim(), email);
   };
 
   return (
@@ -47,6 +51,7 @@ export default function RejectReasonModal({ count, saving, onConfirm, onClose }:
               className="input text-sm h-20 resize-none"
             />
           </div>
+          <RejectionEmailDraft reasonCat={reasonCat} bulkCount={count} onChange={setEmail} />
         </div>
         <div className="flex gap-3 justify-end px-5 py-4 border-t border-gray-100">
           <button onClick={onClose} className="btn-secondary text-sm">Cancel</button>

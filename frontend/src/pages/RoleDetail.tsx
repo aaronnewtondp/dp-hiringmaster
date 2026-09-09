@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Users, ChevronRight, BarChart3, Pencil } from 'lucide-react';
+import { Users, ChevronRight, BarChart3, Pencil } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../services/api.ts';
 import { Role, Application, STAGES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS, EMPLOYMENT_TYPES, VACANCY_REASONS, RECRUITMENT_CHANNELS, PRIORITIES } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, FitScore, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
+import BackButton from '../components/shared/BackButton.tsx';
 import CompBenchmarkPanel from '../components/CompBenchmarkPanel.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { format } from 'date-fns';
@@ -154,9 +155,7 @@ export default function RoleDetail() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <Link to="/roles" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3">
-          <ArrowLeft className="w-4 h-4" /> Roles
-        </Link>
+        <BackButton fallback="/roles" label="Roles" />
         <div className="flex items-start gap-4">
           <div className="flex-1">
             <div className="flex items-center gap-3">

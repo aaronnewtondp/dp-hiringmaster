@@ -842,6 +842,17 @@ ALTER TABLE comp_benchmarks   ALTER COLUMN id SET DEFAULT format_seq_id('seq_com
 ALTER TABLE eval_questions    ALTER COLUMN id SET DEFAULT format_seq_id('seq_eval_question', 'Q', 3);
 ALTER TABLE ref_checks        ALTER COLUMN id SET DEFAULT format_seq_id('seq_refcheck', 'RC', 3);
 
+-- ── applications: rejection-email support (2026-09-09) ──────────────────────
+-- Mirrors interview_rounds.assignment_send_date/assignment_email_error's own
+-- graceful-degradation pattern exactly — the "send rejection email" checkbox
+-- on the reject flow composes/edits the draft client-side and submits the
+-- final subject/body verbatim in the same POST /applications/:id/status
+-- request that changes status; a failed send never blocks or rolls back the
+-- rejection, it just persists here for visibility instead.
+ALTER TABLE applications
+  ADD COLUMN IF NOT EXISTS rejection_email_sent_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS rejection_email_error   TEXT;
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows
 -- ═════════════════════════════════════════════════════════════════════════════

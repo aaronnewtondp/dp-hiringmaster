@@ -174,6 +174,8 @@ export interface Application {
   rejection_reason_detail?:    string;
   withdrawal_reason_cat?:      string;
   withdrawal_reason_detail?:   string;
+  rejection_email_sent_at?:    string;
+  rejection_email_error?:      string;
 
   // ── ResumeIQ 8-dimension scoring (matches digitalpaani-candidate-scoring skill) ──
   score_technical?:            number;
@@ -443,6 +445,17 @@ export const REJECTION_REASONS = [
   'Compensation mismatch', 'Short average tenure',
   'Cultural / values concern', 'Role filled — other candidate preferred',
   'Role cancelled / on hold',
+];
+
+// Mirrors backend/src/jobs/slaChecker.ts's own exported FEEDBACK_DUE_ACTION_TYPES
+// exactly (frontend/backend are separate packages, so this can't be a shared
+// import) — used by MyTasks.tsx to split "Feedback Due" from "Other Pending
+// Actions" by exact action_type instead of a fragile substring match (which
+// used to wrongly bucket "Interview 1/2 Not Scheduled" as feedback-due, even
+// though nothing has been interviewed yet).
+export const FEEDBACK_DUE_ACTION_TYPES = [
+  'Interview 1 Feedback Due', 'Interview 2 Feedback Due',
+  'Founders Round Feedback Due', 'Assignment Feedback Due',
 ];
 
 export const WITHDRAWAL_REASONS = [

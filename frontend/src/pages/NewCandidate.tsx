@@ -1,11 +1,11 @@
 import { useState, FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useQuery } from '@tanstack/react-query';
 import { candidatesApi, rolesApi, agenciesApi } from '../services/api.ts';
 import { Role, Agency, RECRUITMENT_CHANNELS } from '../types/index.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import BackButton from '../components/shared/BackButton.tsx';
 
 type FormState = {
   full_name: string; email: string; phone: string; linkedin_url: string;
@@ -112,9 +112,7 @@ export default function NewCandidate() {
 
   return (
     <div className="max-w-2xl">
-      <Link to="/candidates" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-4">
-        <ArrowLeft className="w-4 h-4" /> Candidates
-      </Link>
+      <BackButton fallback="/candidates" label="Candidates" className="mb-4" />
       <h1 className="text-xl font-semibold text-gray-900 mb-6">Add candidate</h1>
 
       <form onSubmit={handleSubmit} className="space-y-5">

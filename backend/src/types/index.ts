@@ -189,6 +189,8 @@ export interface Application {
   rejection_reason_detail?:     string;
   withdrawal_reason_cat?:       string;
   withdrawal_reason_detail?:    string;
+  rejection_email_sent_at?:     string;
+  rejection_email_error?:       string;
   budget_exception_reason_cat?:    string;
   budget_exception_reason_detail?: string;
   offer_stage?:                 string;

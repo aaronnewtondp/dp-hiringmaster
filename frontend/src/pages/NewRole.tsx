@@ -1,10 +1,10 @@
 import { useState, FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../services/api.ts';
 import { LOCATIONS, VACANCY_REASONS, DEPARTMENTS, EMPLOYMENT_TYPES, RECRUITMENT_CHANNELS, PRIORITIES } from '../types/index.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import BackButton from '../components/shared/BackButton.tsx';
 
 type FormState = {
   title: string; department: string; hiring_manager_name: string; priority: string;
@@ -83,9 +83,7 @@ export default function NewRole() {
 
   return (
     <div className="max-w-3xl">
-      <Link to="/roles" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-4">
-        <ArrowLeft className="w-4 h-4" /> Roles
-      </Link>
+      <BackButton fallback="/roles" label="Roles" className="mb-4" />
       <h1 className="text-xl font-semibold text-gray-900 mb-6">{isRequesting ? 'Request new role' : 'Create new role'}</h1>
 
       <form onSubmit={handleSubmit} className="space-y-6">

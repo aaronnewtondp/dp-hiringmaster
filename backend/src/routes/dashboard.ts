@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query, queryOne } from '../db/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { Priority, STAGE_ORDER } from '../types/index.js';
-import { runSlaCheck } from '../jobs/slaChecker.js';
+import { runSlaCheck, NON_ACTIONABLE_ALERT_TYPES } from '../jobs/slaChecker.js';
 import { parseRoleFilters, buildRoleFilterSql, roleIdsSubquery, applyHiringManagerRoleLock } from '../utils/roleFilters.js';
 import { computeAging } from '../utils/aging.js';
 import { fetchSlaBreachRows, buildHiringFunnelSnapshot } from '../utils/hiringFunnelSnapshot.js';
@@ -667,18 +667,39 @@ router.get('/pending', async (req: Request, res: Response) => {
   // further scoped to responsible_person matching their own name — owner_type
   // alone only isolates the HM queue as a whole, not which specific HM each
   // row belongs to, which previously showed every HM every other HM's items.
+  // A substring match, not exact equality: checkFeedbackDue (slaChecker.ts)
+  // attributes "*Feedback Due" rows to the round's actual interviewer_emails
+  // (comma-joined display names when a round has more than one), not the
+  // role's single hiring_manager_name — an exact match would never fire for
+  // a multi-interviewer round. 'Resume Shortlist Pending' rows are still a
+  // single role-HM name, which a substring check also matches safely.
   if (persona === 'hiring_manager') {
-    ownerFilter = `AND owner_type='Hiring Manager' AND lower(trim(responsible_person))=lower(trim($1))`;
+    ownerFilter = `AND owner_type='Hiring Manager' AND position(lower(trim($1)) IN lower(coalesce(responsible_person,''))) > 0`;
     params.push(req.user!.name);
   }
   if (persona === 'leadership')     ownerFilter = `AND owner_type='Leadership / Founders'`;
 
-  const actions = await query(
-    `SELECT * FROM pending_actions WHERE resolved=false ${ownerFilter}
-     ORDER BY priority_level DESC, created_at ASC LIMIT 100`,
+  const rows = await query<{ action_type: string; candidate_id: string | null }>(
+    `SELECT pa.*, a.candidate_id
+     FROM pending_actions pa
+     LEFT JOIN applications a ON a.id = pa.application_id
+     WHERE pa.resolved=false ${ownerFilter}
+     ORDER BY pa.priority_level DESC, pa.created_at ASC LIMIT 100`,
     params
   );
-  res.json({ actions });
+
+  // NON_ACTIONABLE_ALERT_TYPES (role-aging/comp-change notices) have no
+  // individual attribution and no in-app action at all — split them into
+  // their own `alerts` array so "Other Pending Actions" only ever counts
+  // genuinely resolvable work (the "get this to 0" set). This has to key on
+  // action_type, not owner_type — 'Founder Review' shares owner_type
+  // 'Leadership / Founders' with those two but is genuinely actionable
+  // (feeds a Leadership user's own founder-flagged Ready-for-Review queue).
+  // Nothing is hidden — MyTasks.tsx still renders `alerts` in full, just
+  // under a box labeled for what it actually is, per persona.
+  const actions = rows.filter(r => !(NON_ACTIONABLE_ALERT_TYPES as readonly string[]).includes(r.action_type));
+  const alerts  = rows.filter(r => (NON_ACTIONABLE_ALERT_TYPES as readonly string[]).includes(r.action_type));
+  res.json({ actions, alerts });
 });
 
 export default router;

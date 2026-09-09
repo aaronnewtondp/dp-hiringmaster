@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, MessageSquare, Clock, AlertCircle, ListChecks } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { ClipboardList, MessageSquare, Clock, AlertCircle, ListChecks, Megaphone } from 'lucide-react';
 import { dashboardApi, rolesApi } from '../services/api.ts';
-import { PendingAction, InterviewRound, Role } from '../types/index.ts';
+import { PendingAction, InterviewRound, Role, FEEDBACK_DUE_ACTION_TYPES } from '../types/index.ts';
 import { Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import InterviewFeedbackModal from '../components/InterviewFeedbackModal.tsx';
 import ScorecardSummary from './ScorecardSummary.tsx';
@@ -107,6 +106,7 @@ function FeedbackRow({
 // time via the boxes above, instead of all three always stacked).
 export default function MyTasks() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const isHiringManager = user?.persona === 'hiring_manager';
@@ -148,25 +148,27 @@ export default function MyTasks() {
     : undefined;
 
   // Pending actions for the current user (feedback due etc.) — already
-  // persona-scoped server-side (see GET /dashboard/pending).
+  // persona-scoped server-side (see GET /dashboard/pending). `alerts` are
+  // company-wide role-aging/comp-change notices with no individual owner and
+  // no in-app action — kept visible, just split out so they're never
+  // miscounted as a resolvable task (see that route's own comment).
   const { data: pendingData, isLoading: loadingPending, refetch: refetchPending } =
-    useQuery<{ data: { actions: PendingAction[] } }>({
+    useQuery<{ data: { actions: PendingAction[]; alerts: PendingAction[] } }>({
       queryKey: ['my-tasks-pending'],
       queryFn:  () => dashboardApi.pending(),
     });
 
   const allPending  = pendingData?.data?.actions || [];
-  const feedbackDue = allPending.filter(a =>
-    a.action_type.toLowerCase().includes('feedback') ||
-    a.action_type.toLowerCase().includes('interview')
-  );
-  const otherPending = allPending.filter(a => !feedbackDue.includes(a));
+  const alerts      = pendingData?.data?.alerts  || [];
+  // Exact action_type match, not a substring test — "Interview 1/2 Not
+  // Scheduled" used to wrongly land here too (it contains "interview"), even
+  // though nothing has been interviewed yet and there's no feedback to give.
+  const feedbackDue  = allPending.filter(a => FEEDBACK_DUE_ACTION_TYPES.includes(a.action_type));
+  const otherPending = allPending.filter(a => !FEEDBACK_DUE_ACTION_TYPES.includes(a.action_type));
 
   const handleFeedbackAction = (action: PendingAction) => {
-    if (!action.application_id) return;
-    toast('Opening candidate profile — submit feedback from the interview rounds section', {
-      icon: 'ℹ️',
-    });
+    if (!action.candidate_id) return;
+    navigate(`/candidates/${action.candidate_id}`);
   };
 
   return (
@@ -200,11 +202,11 @@ export default function MyTasks() {
           accent={feedbackDue.some(a => a.hours_overdue > 0) ? 'text-red-500' : 'text-amber-500'}
         />
         <SectionBox
-          label="Other Pending Actions"
-          count={otherPending.length}
+          label={isLeadership ? 'Leadership Alerts' : 'Other Pending Actions'}
+          count={isLeadership ? alerts.length + otherPending.length : otherPending.length}
           active={section === 'other'}
           onClick={() => setSection('other')}
-          icon={ListChecks}
+          icon={isLeadership ? Megaphone : ListChecks}
         />
       </div>
 
@@ -251,24 +253,83 @@ export default function MyTasks() {
       {section === 'other' && (
         loadingPending ? (
           <div className="flex justify-center p-12"><Spinner size="lg" /></div>
-        ) : (
+        ) : isLeadership ? (
+          // Leadership never had an operational HR/HM queue here — this box
+          // has mostly shown role-aging/comp-change notices, renamed
+          // "Leadership Alerts" since there's no in-app action on those.
+          // It can also include a rare genuinely-actionable item (e.g.
+          // 'Founder Review', which shares this same owner_type but isn't
+          // one of the two no-attribution alert types — see GET /pending's
+          // own comment) for a founder-flagged candidate who's since moved
+          // past the stage "Ready for Review" covers; act on those from the
+          // candidate's own page.
           <div className="card overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100">
-              <h2 className="text-sm font-semibold text-gray-900">Other pending actions</h2>
+              <h2 className="text-sm font-semibold text-gray-900">Leadership Alerts</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Role-aging/compensation notices and any other Leadership-owned items — mostly visibility only, no action button here.</p>
             </div>
-            {otherPending.length === 0 ? (
-              <div className="p-8"><EmptyState title="Nothing else pending ✓" /></div>
+            {(alerts.length + otherPending.length) === 0 ? (
+              <div className="p-8"><EmptyState title="No alerts ✓" /></div>
             ) : (
               <div className="divide-y divide-gray-50">
-                {otherPending.map(action => (
+                {[...otherPending, ...alerts].map(action => (
                   <div key={action.id} className="px-5 py-3 flex items-start gap-3">
-                    <div className="w-1.5 h-1.5 rounded-full bg-gray-300 mt-2 shrink-0" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-purple-300 mt-2 shrink-0" />
                     <div>
                       <p className="text-xs font-medium text-gray-700">{action.action_type}</p>
                       <p className="text-xs text-gray-400 mt-0.5">{action.description}</p>
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="card overflow-hidden">
+              <div className="px-5 py-3 border-b border-gray-100">
+                <h2 className="text-sm font-semibold text-gray-900">Other pending actions</h2>
+              </div>
+              {otherPending.length === 0 ? (
+                <div className="p-8"><EmptyState title="Nothing else pending ✓" /></div>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {otherPending.map(action => (
+                    <div key={action.id} className="px-5 py-3 flex items-start gap-3">
+                      <div className="w-1.5 h-1.5 rounded-full bg-gray-300 mt-2 shrink-0" />
+                      <div>
+                        <p className="text-xs font-medium text-gray-700">{action.action_type}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{action.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Role-aging/comp-change notices — visible, not hidden, just kept
+                out of the count above since nobody can individually resolve
+                them here (see GET /dashboard/pending's own comment). */}
+            {alerts.length > 0 && (
+              <div className="card overflow-hidden border-purple-200 bg-purple-50/40">
+                <div className="px-5 py-3 border-b border-purple-100 flex items-center gap-2">
+                  <Megaphone className="w-4 h-4 text-purple-500 shrink-0" />
+                  <div>
+                    <h2 className="text-sm font-semibold text-purple-900">Leadership Alerts ({alerts.length})</h2>
+                    <p className="text-xs text-purple-400 mt-0.5">Company-wide role-aging/compensation notices — shown for visibility, not counted above.</p>
+                  </div>
+                </div>
+                <div className="divide-y divide-purple-100/60">
+                  {alerts.map(action => (
+                    <div key={action.id} className="px-5 py-3 flex items-start gap-3">
+                      <div className="w-1.5 h-1.5 rounded-full bg-purple-300 mt-2 shrink-0" />
+                      <div>
+                        <p className="text-xs font-medium text-gray-700">{action.action_type}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{action.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
