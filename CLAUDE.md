@@ -349,8 +349,38 @@ outside this repo, in the Google Sheet's own Script editor — there is no local
 copy to keep in sync beyond the reference version kept in
 `docs/RequisitionFormTrigger.gs.js` (if present).
 
-Candidate ingestion via the Job Application Form follows the same pattern but
-is **not yet built** — see `ROADMAP.md` Phase 4.
+Candidate ingestion via the Job Application Form follows the same pattern
+(`POST /api/candidates/ingest`, `backend/src/routes/candidateIngest.ts`,
+shared-secret auth) and **is built** — this doc previously said otherwise,
+which was stale.
+
+### Naukri bulk import (no live webhook — Naukri has no self-serve API)
+Naukri.com offers no public/self-serve API for pulling applicant data out of
+an employer account — every real integration (Greenhouse, Zoho Recruit,
+Keka, etc.) routes through a separate, commercially-negotiated, account-
+manager-gated product ("Zwayam Amplify"), and even that has broken outright
+for other vendors when Naukri changed its backend (Freshteam dropped its
+Naukri integration entirely in 2023 for exactly this reason). Not worth
+building against for this system.
+
+The practical path instead: Naukri's own recruiter portal supports a manual
+bulk export (Resdex/eApps → Excel, 500-2000 rows per download).
+`backend/src/scripts/importNaukriExcel.ts` imports that export format
+directly — `npx tsx src/scripts/importNaukriExcel.ts <path-to-excel>
+<role-id> [--dry-run] [--skip-scoring]`. Reuses the same `candidates`/
+`applications`/`activity_log` insert shape and `runResumeIQScoring()` call
+as `candidateIngest.ts`, so an imported candidate behaves identically to one
+that arrived through any other channel — same fill-null-only update for a
+repeat email, same synchronous scoring at creation, same idempotency (safe
+to re-run the same export). `role_id` is a required, explicit argument, not
+auto-matched from the Excel's own "Job Title" text — a real export's title
+("Process & Proposal Manager") didn't match this system's actual role title
+("Manager – Process & Proposals") even after whitespace/dash normalization,
+so guessing here risks silently linking to the wrong role. Doesn't populate
+`resume_drive_link` (the export's candidate-profile link points at Naukri's
+own portal page, not a fetchable resume file) or `expected_ctc` (the export
+only has current salary) — ResumeIQ scores these candidates on profile
+fields only, same graceful fallback as any candidate with no resume on file.
 
 ### SLA / aging checks — compute-on-read, not cron
 Vercel Hobby tier does not support sub-hourly cron, so the SLA checker

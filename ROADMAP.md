@@ -129,6 +129,22 @@ live.
       in both Docker and Supabase, just never reflected in the type, which
       is what was causing several pre-existing `npx tsc --noEmit` errors in
       `resumeIQ.ts`/`applications.ts`.
+- [x] **Naukri bulk-import script.** Naukri has no self-serve API (confirmed
+      by research — every real vendor integration routes through a paid,
+      account-manager-gated product, and it's broken outright for other
+      vendors before). `backend/src/scripts/importNaukriExcel.ts` imports
+      Naukri's own recruiter-portal bulk Excel export directly instead —
+      same insert shape and `runResumeIQScoring()` call as
+      `candidateIngest.ts` above, explicit required `role_id` argument (not
+      auto-matched from Naukri's own job-title text, which doesn't reliably
+      match this system's role titles), `--dry-run`/`--skip-scoring` flags,
+      idempotent on re-run. Doesn't populate `resume_drive_link` (the
+      export's own "candidate profile" link points at Naukri's portal, not
+      a fetchable resume) or `expected_ctc` (not in the export). Verified
+      end-to-end against local Docker: parse, dedup (exact-duplicate rows,
+      comma-joined duplicate/ambiguous email cells), fill-null-only update
+      for a repeat email, idempotent re-run (0 new rows), and a real
+      `runResumeIQScoring()` call landing a real score.
 - [x] **ResumeIQ scores against the generated JD document.** Live. The
       structured content `jdContent.ts` generates for the JD PDFs (narrative,
       condensed key responsibilities, must-haves/good-to-haves, tags) was
