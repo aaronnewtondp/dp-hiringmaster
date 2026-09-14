@@ -429,8 +429,8 @@ export async function renderSocialJd(role: Role, content: JdContent): Promise<Bu
   // completely unaffected (this whole block is a no-op for them).
   const hasContinuityNote = !!content.roleContinuityNote;
   if (content.roleContinuityNote) {
-    const fontSize = 13;
-    const lineGap = 2;
+    const fontSize = 17;
+    const lineGap = 6;
     const noteWidth = PAGE_WIDTH - 2 * 70;
     doc.font('Helvetica').fontSize(fontSize).fillColor(SOCIAL_JD_COLORS.footerLine1);
 
@@ -444,9 +444,9 @@ export async function renderSocialJd(role: Role, content: JdContent): Promise<Bu
         lineGap,
         align: 'left',
       });
-      y -= h + 6;
+      y -= h + 18;
     }
-    y -= 8;
+    y -= 10;
   }
 
   // ── Two columns: "About the role:" / "About you:" ──────────────────────
