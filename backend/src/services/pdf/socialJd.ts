@@ -423,6 +423,32 @@ export async function renderSocialJd(role: Role, content: JdContent): Promise<Bu
     y = tagYUp - 60;
   }
 
+  // ── Role continuity note (optional) ─────────────────────────────────────
+  // Hand-authored context paragraph(s), shown above the two columns only
+  // when content.roleContinuityNote is set — every other role's render is
+  // completely unaffected (this whole block is a no-op for them).
+  const hasContinuityNote = !!content.roleContinuityNote;
+  if (content.roleContinuityNote) {
+    const fontSize = 13;
+    const lineGap = 2;
+    const noteWidth = PAGE_WIDTH - 2 * 70;
+    doc.font('Helvetica').fontSize(fontSize).fillColor(SOCIAL_JD_COLORS.footerLine1);
+
+    const paragraphs = content.roleContinuityNote.split('\n\n').filter(Boolean);
+    y -= 4;
+    for (const para of paragraphs) {
+      const h = doc.heightOfString(para, { width: noteWidth, lineGap, align: 'left' });
+      const topYUp = y;
+      doc.text(para, 70, flipY(topYUp) - fontSize * ASCENT_RATIO, {
+        width: noteWidth,
+        lineGap,
+        align: 'left',
+      });
+      y -= h + 6;
+    }
+    y -= 8;
+  }
+
   // ── Two columns: "About the role:" / "About you:" ──────────────────────
   const colMargin = 70;
   const colGap = 60;
@@ -455,15 +481,19 @@ export async function renderSocialJd(role: Role, content: JdContent): Promise<Bu
   }
 
   // ── Bullets ──────────────────────────────────────────────────────────────
-  const bulletFontSize = 18;
-  const bulletLeading = 25;
+  // Slightly tighter when a continuity note pushed the columns down —
+  // keeps the (already space-tight) bullet flow clear of the fixed-position
+  // footer without changing anything for a role with no note at all.
+  const bulletFontSize = hasContinuityNote ? 15 : 18;
+  const bulletLeading = hasContinuityNote ? 20 : 25;
+  const bulletGap = hasContinuityNote ? 10 : 20;
   doc.font('Helvetica').fontSize(bulletFontSize);
   const naturalLineHeight = doc.currentLineHeight();
   const bulletLineGap = bulletLeading - naturalLineHeight;
   const bulletWidth = colW - 25;
 
   function renderBulletColumn(items: string[], x: number): number {
-    let bulletYUp = y - 50;
+    let bulletYUp = y - (hasContinuityNote ? 40 : 50);
     for (const raw of items) {
       // Conservative height measurement: uses the wider (Bold) font for the
       // whole plain string so wrapping never comes out narrower than the
@@ -495,7 +525,7 @@ export async function renderSocialJd(role: Role, content: JdContent): Promise<Bu
       const dotYUp = bulletYUp + 6;
       doc.circle(x - 14, flipY(dotYUp), 5).fill(SOCIAL_JD_COLORS.teal);
 
-      bulletYUp -= h + 20;
+      bulletYUp -= h + bulletGap;
     }
     return bulletYUp;
   }

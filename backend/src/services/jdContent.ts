@@ -28,6 +28,12 @@ export interface JdContent {
   whyJoinUs: WhyJoinUsItem[];
   socialAboutRole: string[];
   socialAboutYou: string[];
+  // Optional, never AI-generated (unlike every other field here) — a
+  // hand-authored paragraph of team/system continuity context, shown above
+  // the "About the role/About you" columns on the Social JD only, for a role
+  // where that context matters enough to spell out. Left undefined for
+  // every other role, which renders identically to before this field existed.
+  roleContinuityNote?: string;
 }
 
 const MAX_KEY_RESPONSIBILITIES = 7;

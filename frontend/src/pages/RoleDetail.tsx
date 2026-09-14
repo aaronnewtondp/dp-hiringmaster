@@ -316,16 +316,6 @@ export default function RoleDetail() {
               Discard role
             </button>
           )}
-          {canHR && role.status === 'Approved' && role.jd_drive_link && (
-            <button
-              onClick={handleRegenerateJd}
-              disabled={regeneratingJd}
-              className="btn-secondary text-xs py-1.5 px-3 w-full"
-              title="Re-runs JD content generation and PDF rendering, overwriting the current Long-form and Social JD links"
-            >
-              {regeneratingJd ? 'Regenerating…' : 'Regenerate JD'}
-            </button>
-          )}
           {canApproveThisRole && (role.status === 'Closed – Filled' || role.status === 'Closed – Cancelled') && (
             <button
               onClick={handleDownloadSummary}
@@ -337,20 +327,34 @@ export default function RoleDetail() {
             </button>
           )}
         </div>
-        <EditableSection
-          title="Links & Assets"
-          data={role}
-          onSave={saveRoleFields}
-          pendingLabels={role.status === 'Approved' ? {
-            jd_drive_link: 'Generating JD…',
-            social_jd_drive_link: 'Generating social JD…',
-          } : undefined}
-          fields={[
-            { key: 'jd_drive_link', label: 'Long-form JD', type: 'text', linkify: true },
-            { key: 'social_jd_drive_link', label: 'Social JD', type: 'text', linkify: true },
-            { key: 'approval_summary_link', label: 'Assignment Link', type: 'text', linkify: true },
-          ]}
-        />
+        <div className="space-y-2">
+          <EditableSection
+            title="Links & Assets"
+            data={role}
+            onSave={saveRoleFields}
+            pendingLabels={role.status === 'Approved' ? {
+              jd_drive_link: 'Generating JD…',
+              social_jd_drive_link: 'Generating social JD…',
+            } : undefined}
+            fields={[
+              { key: 'jd_drive_link', label: 'Long-form JD', type: 'text', linkify: true },
+              { key: 'social_jd_drive_link', label: 'Social JD', type: 'text', linkify: true },
+              { key: 'approval_summary_link', label: 'Assignment Link', type: 'text', linkify: true },
+            ]}
+          />
+          {canHR && role.status === 'Approved' && role.jd_drive_link && (
+            <div className="flex justify-end">
+              <button
+                onClick={handleRegenerateJd}
+                disabled={regeneratingJd}
+                className="btn-secondary text-xs py-1.5 px-3"
+                title="Re-runs JD content generation and PDF rendering, overwriting the current Long-form and Social JD links"
+              >
+                {regeneratingJd ? 'Regenerating…' : 'Regenerate JD'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
       <div className="text-xs text-gray-400 -mt-2">
         Openings: {role.num_openings}
