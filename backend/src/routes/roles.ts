@@ -211,6 +211,79 @@ router.delete('/:id', requireHR, async (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+// ─── JD generation — shared by the auto-trigger-on-Approved below and the
+// standalone POST /:id/regenerate-jd route. Synchronous (awaited), NOT
+// fire-and-forget — see the Vercel serverless async rule in CLAUDE.md.
+// Mutates `role` in place with the fresh links/content so a caller building
+// an immediate HTTP response doesn't have to re-SELECT it.
+type JdGenerationResult = { generated: boolean; error?: string };
+
+async function generateAndSaveJd(role: Role): Promise<JdGenerationResult> {
+  try {
+    const content = await generateJdContent(role);
+    if (!content) {
+      console.error(`[JD-Gen] Skipping ${role.id} — content generation failed`);
+      return { generated: false, error: 'JD content generation failed' };
+    }
+    const folderId = process.env.DRIVE_JD_FOLDER_ID;
+    if (!folderId) {
+      console.error(`[JD-Gen] DRIVE_JD_FOLDER_ID not set — skipping upload for ${role.id}`);
+      return { generated: false, error: 'DRIVE_JD_FOLDER_ID not configured' };
+    }
+
+    const [longFormBuffer, socialBuffer] = await Promise.all([
+      renderLongFormJd(role, content),
+      renderSocialJd(role, content),
+    ]);
+
+    const safeTitle = role.title.replace(/[^a-zA-Z0-9]+/g, '_');
+    const [longFormUpload, socialUpload] = await Promise.all([
+      uploadJdPdf(longFormBuffer, `DP_JD_${role.id}_${safeTitle}.pdf`, folderId),
+      uploadJdPdf(socialBuffer, `Social_${role.id}_${safeTitle}.pdf`, folderId),
+    ]);
+
+    // Only write the links once every step above has succeeded — a partial
+    // failure leaves both columns untouched.
+    await query(
+      'UPDATE roles SET jd_drive_link=$1, social_jd_drive_link=$2, generated_jd_content=$3 WHERE id=$4',
+      [longFormUpload.webViewLink, socialUpload.webViewLink, JSON.stringify(content), role.id]
+    );
+    await query(
+      `INSERT INTO activity_log (role_id, event_type, event_detail, performed_by_name)
+       VALUES ($1, 'JD Generated', $2, 'System')`,
+      [role.id, `Long-form + social JD generated for ${role.title}`]
+    );
+    console.log(`[JD-Gen] Generated JDs for ${role.id}`);
+
+    role.jd_drive_link = longFormUpload.webViewLink;
+    role.social_jd_drive_link = socialUpload.webViewLink;
+    role.generated_jd_content = content as unknown as Record<string, unknown>;
+    return { generated: true };
+  } catch (err) {
+    console.error(`[JD-Gen] Generation failed for ${role.id}:`, err);
+    return { generated: false, error: 'JD generation failed — will retry automatically the next time this role is approved' };
+  }
+}
+
+// ─── POST /api/roles/:id/regenerate-jd — force-regenerate an already-
+// Approved role's JDs on demand (content edit, layout fix, etc.) — the
+// auto-trigger below only ever fires once per role (guarded on the Approved
+// *transition* plus !jd_drive_link), by design, so it can't be used to
+// refresh an already-generated JD. This route has no such guard: it always
+// re-runs generation and overwrites whatever links/content were there
+// before. HR-tier only, matching the Approve gate itself.
+router.post('/:id/regenerate-jd', requireHR, async (req: Request, res: Response) => {
+  const role = await queryOne<Role>('SELECT * FROM roles WHERE id = $1', [req.params.id]);
+  if (!role) { res.status(404).json({ error: 'Role not found' }); return; }
+  if (role.status !== 'Approved') {
+    res.status(400).json({ error: 'Only an Approved role has a JD to regenerate.' });
+    return;
+  }
+
+  const jdGeneration = await generateAndSaveJd(role);
+  res.json({ role: enrichRole(role), jdGeneration });
+});
+
 // ─── PATCH /api/roles/:id — update role fields with edit log ─────────────────
 router.patch('/:id', async (req: Request, res: Response) => {
   const existing = await queryOne<Role>('SELECT * FROM roles WHERE id = $1', [req.params.id]);
@@ -352,59 +425,9 @@ router.patch('/:id', async (req: Request, res: Response) => {
   // to accommodate this. Guarded on the transition itself (not just current
   // status) plus !existing.jd_drive_link, so a role PATCHed with status
   // already 'Approved' (e.g. an unrelated field edit) never regenerates.
-  let jdGeneration: { generated: boolean; error?: string } | undefined;
+  let jdGeneration: JdGenerationResult | undefined;
   if (updatedRole.status === 'Approved' && existing.status !== 'Approved' && !existing.jd_drive_link) {
-    try {
-      const content = await generateJdContent(updatedRole);
-      if (!content) {
-        console.error(`[JD-Gen] Skipping ${updatedRole.id} — content generation failed`);
-        jdGeneration = { generated: false, error: 'JD content generation failed' };
-      } else {
-        const folderId = process.env.DRIVE_JD_FOLDER_ID;
-        if (!folderId) {
-          console.error(`[JD-Gen] DRIVE_JD_FOLDER_ID not set — skipping upload for ${updatedRole.id}`);
-          jdGeneration = { generated: false, error: 'DRIVE_JD_FOLDER_ID not configured' };
-        } else {
-          const [longFormBuffer, socialBuffer] = await Promise.all([
-            renderLongFormJd(updatedRole, content),
-            renderSocialJd(updatedRole, content),
-          ]);
-
-          const safeTitle = updatedRole.title.replace(/[^a-zA-Z0-9]+/g, '_');
-          const [longFormUpload, socialUpload] = await Promise.all([
-            uploadJdPdf(longFormBuffer, `DP_JD_${updatedRole.id}_${safeTitle}.pdf`, folderId),
-            uploadJdPdf(socialBuffer, `Social_${updatedRole.id}_${safeTitle}.pdf`, folderId),
-          ]);
-
-          // Only write the links once every step above has succeeded — a
-          // partial failure leaves both columns untouched so the guard above
-          // allows a clean retry on the next role edit. generated_jd_content
-          // persists the structured content itself (not just the rendered
-          // PDFs) so ResumeIQ can score against it directly instead of
-          // re-deriving structure from PDF text later.
-          await query(
-            'UPDATE roles SET jd_drive_link=$1, social_jd_drive_link=$2, generated_jd_content=$3 WHERE id=$4',
-            [longFormUpload.webViewLink, socialUpload.webViewLink, JSON.stringify(content), updatedRole.id]
-          );
-          await query(
-            `INSERT INTO activity_log (role_id, event_type, event_detail, performed_by_name)
-             VALUES ($1, 'JD Generated', $2, 'System')`,
-            [updatedRole.id, `Long-form + social JD generated for ${updatedRole.title}`]
-          );
-          console.log(`[JD-Gen] Generated JDs for ${updatedRole.id}`);
-
-          // Reflect the fresh links immediately in this response, rather
-          // than making the caller poll for a value that's already known.
-          updatedRole.jd_drive_link = longFormUpload.webViewLink;
-          updatedRole.social_jd_drive_link = socialUpload.webViewLink;
-          updatedRole.generated_jd_content = content as unknown as Record<string, unknown>;
-          jdGeneration = { generated: true };
-        }
-      }
-    } catch (err) {
-      console.error(`[JD-Gen] Generation failed for ${updatedRole.id}:`, err);
-      jdGeneration = { generated: false, error: 'JD generation failed — will retry automatically the next time this role is approved' };
-    }
+    jdGeneration = await generateAndSaveJd(updatedRole);
   }
 
   const canSeeComp = canSeeCompForRole(req.user!.persona, req.user!.name, updatedRole.hiring_manager_name);

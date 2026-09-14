@@ -29,6 +29,7 @@ export default function RoleDetail() {
   const [showDiscardModal, setShowDiscardModal] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [downloadingSummary, setDownloadingSummary] = useState(false);
+  const [regeneratingJd, setRegeneratingJd] = useState(false);
 
   const { data: roleData, isLoading: roleLoading } = useQuery<{ data: { role: Role } }>({
     queryKey: ['role', id],
@@ -90,6 +91,24 @@ export default function RoleDetail() {
       toast.error('Failed to generate closure summary');
     }
     setDownloadingSummary(false);
+  };
+
+  const handleRegenerateJd = async () => {
+    setRegeneratingJd(true);
+    try {
+      const res = await rolesApi.regenerateJd(id!);
+      const jdGeneration = res.data?.jdGeneration;
+      if (jdGeneration?.generated) {
+        toast.success('Long-form and social JDs regenerated');
+      } else {
+        toast.error(`JD regeneration failed: ${jdGeneration?.error || 'Unknown error'}`);
+      }
+      qc.invalidateQueries({ queryKey: ['role', id] });
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(msg || 'Failed to regenerate JD');
+    }
+    setRegeneratingJd(false);
   };
 
   const handleSaveNote = async () => {
@@ -295,6 +314,16 @@ export default function RoleDetail() {
               className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg py-1.5 px-3 w-full transition-colors"
             >
               Discard role
+            </button>
+          )}
+          {canHR && role.status === 'Approved' && role.jd_drive_link && (
+            <button
+              onClick={handleRegenerateJd}
+              disabled={regeneratingJd}
+              className="btn-secondary text-xs py-1.5 px-3 w-full"
+              title="Re-runs JD content generation and PDF rendering, overwriting the current Long-form and Social JD links"
+            >
+              {regeneratingJd ? 'Regenerating…' : 'Regenerate JD'}
             </button>
           )}
           {canApproveThisRole && (role.status === 'Closed – Filled' || role.status === 'Closed – Cancelled') && (

@@ -56,6 +56,7 @@ export const rolesApi = {
   // Binary PDF response — responseType 'blob' is required for axios to hand
   // back a real Blob instead of trying (and failing) to parse it as JSON/text.
   closureSummaryPdf: (id: string)                  => api.get(`/roles/${id}/closure-summary.pdf`, { responseType: 'blob' }),
+  regenerateJd:  (id: string)                       => api.post(`/roles/${id}/regenerate-jd`, {}),
 };
 
 export const candidatesApi = {

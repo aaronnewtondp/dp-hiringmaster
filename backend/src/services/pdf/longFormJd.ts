@@ -274,9 +274,13 @@ function bulletMarkerCanvas(style: BulletStyle): unknown[] {
     }];
   }
   if (style === 'good') {
+    // Same shape as 'must' (just teal, not navy) — this used to be 2pt wider
+    // (x: 2-10 vs 'must''s x: 3-9), filling its marker column edge-to-edge
+    // with no buffer before the text column's columnGap, so the "Good to
+    // Have" bullets sat visibly closer to their text than "Must Haves" did.
     return [{
       type: 'polyline', closePath: true, color: C.teal,
-      points: [{ x: 6, y: 1 }, { x: 10, y: 4 }, { x: 6, y: 7 }, { x: 2, y: 4 }],
+      points: [{ x: 6, y: 1 }, { x: 9, y: 4 }, { x: 6, y: 7 }, { x: 3, y: 4 }],
     }];
   }
   return [{
@@ -549,7 +553,17 @@ function highlightBox(quote: string, width: number = FRAME_W) {
         ],
       },
       {
-        margin: [10, -boxH + 8, 8, 0],
+        // Bottom margin of 8 (mirroring the box's own 8pt bottom padding)
+        // is load-bearing, not cosmetic: pdfmake sums a negative top margin
+        // straight into the stack's cumulative height (it doesn't just shift
+        // where this node renders), so with bottom:0 the whole stack's
+        // reported height came out 8pt SHORTER than the box actually draws —
+        // the next section's heading started 8pt too early and rendered
+        // its first few pixels underneath the box's own bottom edge (a
+        // "Key Responsibilities" heading with its "K" clipped off, in
+        // practice). Restoring the 8pt here makes the stack's bookkeeping
+        // height equal the real visual boxH again.
+        margin: [10, -boxH + 8, 8, 8],
         text: [{ text: '"' }, ...parseInlineBold(quote), { text: '"' }],
         font: 'Helvetica', italics: true, fontSize: 9, color: C.highlightText, lineHeight: 1.3,
       },
@@ -678,9 +692,15 @@ function footerNote(): unknown {
     stack: [
       { canvas: [{ type: 'line', x1: 0, y1: 0, x2: FRAME_W, y2: 0, lineWidth: 0.5, lineColor: C.border }] },
       {
+        // Bold + bigger + centered + more space above, so the apply CTA
+        // reads as a call to action rather than fine print — the URL
+        // portion was already bold via parseInlineBold's <b> spans; the
+        // outer bold:true here extends that to the whole line (spans with
+        // no explicit `bold` of their own inherit the parent's).
         text: parseInlineBold(LONG_JD_FOOTER_NOTE),
-        font: 'Helvetica', italics: true, fontSize: 8, color: C.muted, lineHeight: 1.44,
-        margin: [0, 6, 0, 0],
+        font: 'Helvetica', bold: true, fontSize: 11, color: C.muted, lineHeight: 1.3,
+        alignment: 'center',
+        margin: [0, 18, 0, 0],
       },
     ],
   };

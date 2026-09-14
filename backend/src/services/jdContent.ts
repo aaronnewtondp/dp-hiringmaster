@@ -31,7 +31,14 @@ export interface JdContent {
 }
 
 const MAX_KEY_RESPONSIBILITIES = 7;
-const MAX_REQUIREMENT_BULLETS = 7;
+// 8, not 7 — a role whose raw must_have_skills/nice_to_have_skills fields
+// genuinely list 8+ distinct qualifications was losing one every time to fit
+// the old cap, non-deterministically (whichever bullet the model condensed
+// away that run), which read as "my content just vanished" to whoever wrote
+// it. One extra slot gives real multi-section input room to survive intact
+// without forcing every role down to exactly 7 regardless of how much it
+// actually has to say.
+const MAX_REQUIREMENT_BULLETS = 8;
 const MAX_SOCIAL_BULLETS = 5;
 const MAX_SOCIAL_BULLET_CHARS = 90; // hard cap on the description portion, generous over the "~60 chars" style guide
 
