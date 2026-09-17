@@ -418,6 +418,24 @@ export default function Help() {
         </a>
       </div>
 
+      <div className="card p-5 flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <div className="text-sm font-medium text-gray-900">Hiring SOP</div>
+          <div className="text-xs text-gray-500 mt-0.5">
+            The standard operating procedure every HR/Admin, Hiring Manager, Leadership, and Super Admin follows —
+            stage-by-stage ownership and the SLAs each persona is held to.
+          </div>
+        </div>
+        <a
+          href="/DigitalPaani_Hiring_SOP.pdf"
+          target="_blank"
+          rel="noreferrer"
+          className="text-dp-600 hover:underline text-sm font-medium flex items-center gap-1.5 shrink-0"
+        >
+          Open SOP <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+      </div>
+
       {GROUPS.map(group => (
         <div key={group.title} className="card p-5">
           <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wide mb-1">{group.title}</h2>
