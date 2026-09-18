@@ -343,9 +343,9 @@ export default function Dashboard() {
             <div className="px-5 py-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-semibold text-gray-900">Low pipeline roles</h2>
-                <InfoTooltip align="left" text="Open roles (Approved, Live – Sourcing, or On Hold) currently showing fewer than 5 Active candidates in their pipeline — a signal that sourcing, not process, may be the actual bottleneck, regardless of whether the role is also past its Close Target." />
+                <InfoTooltip align="left" text="Open roles (Approved, Live – Sourcing, or On Hold) currently showing fewer than 3 candidates who have both been shortlisted (past Applied and Screened) and scored above 60 on ResumeIQ — a signal that sourcing quality, not just process, may be the actual bottleneck, regardless of whether the role is also past its Close Target." />
               </div>
-              <p className="text-xs text-gray-400 mt-0.5">Open roles with fewer than 5 active candidates</p>
+              <p className="text-xs text-gray-400 mt-0.5">Open roles with fewer than 3 shortlisted candidates scoring above 60</p>
             </div>
             {low_pipeline.length === 0 ? (
               <div className="p-5"><EmptyState title="No low-pipeline roles ✓" /></div>
@@ -356,7 +356,7 @@ export default function Dashboard() {
                     <th className="table-th">Role</th>
                     <th className="table-th">P</th>
                     <th className="table-th">HM</th>
-                    <th className="table-th">Active candidates</th>
+                    <th className="table-th">Shortlisted &gt;60</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -367,7 +367,7 @@ export default function Dashboard() {
                       </td>
                       <td className="table-td"><PriorityBadge priority={r.priority as Priority} /></td>
                       <td className="table-td text-gray-500 text-xs">{r.hiring_manager_name}</td>
-                      <td className="table-td font-mono text-sm text-gray-700">{r.active_count}</td>
+                      <td className="table-td font-mono text-sm text-gray-700">{r.shortlisted_scored_count}</td>
                     </tr>
                   ))}
                 </tbody>

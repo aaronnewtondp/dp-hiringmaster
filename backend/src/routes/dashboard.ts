@@ -198,10 +198,11 @@ router.get('/', async (req: Request, res: Response) => {
       const f = buildRoleFilterSql(filters, 1);
       return query<{ id: string; title: string; priority: string; hiring_manager_name: string;
                start_date: string; target_closure_date: string; status: string;
-               active_count: string }>(`
+               active_count: string; shortlisted_scored_count: string }>(`
         SELECT r.id, r.title, r.priority, r.hiring_manager_name,
                r.start_date, r.target_closure_date, r.status,
-               COUNT(a.id) FILTER (WHERE a.status='Active') AS active_count
+               COUNT(a.id) FILTER (WHERE a.status='Active') AS active_count,
+               COUNT(a.id) FILTER (WHERE a.status='Active' AND a.stage <> 'Applied and Screened' AND a.ai_fit_score > 60) AS shortlisted_scored_count
         FROM roles r
         LEFT JOIN applications a ON a.role_id = r.id
         WHERE r.status IN ('Approved','Live – Sourcing','Under Review','On Hold')
@@ -398,11 +399,17 @@ router.get('/', async (req: Request, res: Response) => {
     const { days_open, days_overdue, aging_alert } = computeAging(
       r.start_date || null, r.target_closure_date || null, r.priority as Priority, r.status
     );
-    return { ...r, days_open, days_overdue, aging_alert, active_count: parseInt(r.active_count || '0') };
+    return { ...r, days_open, days_overdue, aging_alert, active_count: parseInt(r.active_count || '0'), shortlisted_scored_count: parseInt(r.shortlisted_scored_count || '0') };
   });
 
   const redAlertRoles   = rolesWithAging.filter(r => r.aging_alert === 'red').length;
-  const lowPipelineRoles = rolesWithAging.filter(r => r.active_count < 5);
+  // Hiring SOP v2.1 §4.2: fewer than 3 candidates who have both been
+  // shortlisted (past Applied and Screened) AND scored above 60 —
+  // replaces the earlier "< 5 active candidates" rule, which counted every
+  // active application regardless of stage or score and so couldn't tell a
+  // healthy-looking pipeline of unqualified applicants from a genuinely
+  // thin one.
+  const lowPipelineRoles = rolesWithAging.filter(r => r.shortlisted_scored_count < 3);
 
   // Average active role age (KPI redesign) — mean days_open over the "open
   // roles" set (Live – Sourcing/Approved/Under Review), a deliberately

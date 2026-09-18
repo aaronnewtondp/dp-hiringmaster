@@ -391,6 +391,34 @@ instance. `runSlaCheck()` itself is a pure, idempotent function safe to call
 anytime — if you ever need to trigger it manually or from a different route,
 just call it directly; it doesn't assume it's running on a timer.
 
+**Score-tiered thresholds (Hiring SOP v2.1, 2026-09-18):** at Applied and
+Screened, Interview Round 1/2, Founders Round, and Assignment Round, the
+standard 48h SLA drops to 24h for a high-scored candidate
+(`ai_fit_score >= 75`) — both the HR-facing side (shortlist/scheduling/send)
+and the Hiring-Manager-facing side (feedback due). `slaChecker.ts`'s
+`tieredStandardHours()` is the single place this branches; `BREACH_IDLE_HOURS`
+(Idle Candidate) and `BREACH_ASSIGNMENT_FEEDBACK_HOURS` (Assignment Feedback
+Due, 96h) are deliberately untouched — the SOP frames this as a 48h->24h
+change for five named stages, not a blanket halving. Role aging thresholds
+(`AGING_THRESHOLDS`, `backend/src/types/index.ts`) were also revised in the
+same SOP update — see that constant's own comment for the exact per-priority
+numbers and the reasoning Aaron confirmed for them.
+
+**Leadership escalation on stale feedback:** if a Standard-round (Interview
+1/2, Founders) "Feedback Due" breach is still open 96h after the interview —
+independent of whether it was a 24h or 48h breach to begin with — HMS raises
+a second, Leadership-owned flag (`'Feedback Overdue — Leadership Escalation'`,
+`NON_ACTIONABLE_ALERT_TYPES`) alongside the original Hiring-Manager-owned one,
+which stays open until feedback is actually submitted. This is additional
+visibility, not a replacement.
+
+**Low Pipeline Roles redefined:** was "fewer than 5 Active applications,
+any stage/score" — now "fewer than 3 applications that have both been
+shortlisted (stage past Applied and Screened) **and** scored above 60 on
+ResumeIQ" (`shortlisted_scored_count` in `dashboard.ts`), so a pipeline full
+of unqualified applicants no longer reads as healthy just because it's
+numerous.
+
 ### Environment variables / secrets
 - `GOOGLE_APPLICATION_CREDENTIALS` (local, file path) or
   `GOOGLE_APPLICATION_CREDENTIALS_JSON` (Vercel, full JSON as a string) — the

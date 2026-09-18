@@ -200,6 +200,11 @@ test.describe('SLA breach engine — stage/breach-type table regressions', () =>
       const api = authed(request, hrToken);
       const { application } = await createCandidateWithApp(request, hrToken, 'R006');
       await api.post(`/api/applications/${application.id}/stage`, { new_stage: 'Interview Round 1', skip_reason: 'test setup' });
+      // Pin ai_fit_score below the Hiring SOP v2.1 high-score tier (>=75
+      // gets a 24h threshold instead of 48h) — real, synchronous ResumeIQ
+      // scoring at creation is otherwise non-deterministic, and this test's
+      // overdue_hours assertion below is only correct against the 48h tier.
+      await client.query(`UPDATE applications SET ai_fit_score = 50 WHERE id = $1`, [application.id]);
 
       const past = new Date(Date.now() - 72 * 3600 * 1000).toISOString();
       const roundRes = await api.post('/api/interviews', {

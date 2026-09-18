@@ -71,6 +71,25 @@ const BREACH_IDLE_HOURS = 48;
 const BREACH_STANDARD_HOURS = 48;              // Applied / Not-Scheduled / Feedback-Due
 const BREACH_ASSIGNMENT_FEEDBACK_HOURS = 96;
 
+// Hiring SOP v2.1 (2026-09-18): a high-scored candidate (ai_fit_score >= 75)
+// gets the standard 48h SLA halved to 24h at five named stages — Applied
+// and Screened, Interview Round 1/2, Founders Round, Assignment Round —
+// both the HR-facing "not yet actioned" side and the Hiring-Manager-facing
+// "feedback due" side. Wired per call site below (checkFlatStageBreaches'
+// 'Resume Shortlist Pending' branch, checkNotYetActioned unconditionally,
+// FEEDBACK_DUE_STAGES' scoreTiered flag), not one shared list, since each
+// site already has its own actionType/stage filtering. A lower/unscored
+// candidate keeps the standard 48h. Deliberately does NOT touch
+// BREACH_IDLE_HOURS (Idle Candidate) or BREACH_ASSIGNMENT_FEEDBACK_HOURS
+// (Assignment Feedback Due, 96h) — the SOP frames this as "48h -> 24h" for
+// five named stages, not a general halving of every threshold.
+const HIGH_SCORE_THRESHOLD = 75;
+const BREACH_HIGH_SCORE_HOURS = 24;
+
+function tieredStandardHours(aiFitScore: number | null): number {
+  return aiFitScore != null && aiFitScore >= HIGH_SCORE_THRESHOLD ? BREACH_HIGH_SCORE_HOURS : BREACH_STANDARD_HOURS;
+}
+
 type Owner = 'HR / Recruiter' | 'Hiring Manager';
 
 // Shared tail for every breach-type check below — batched across ALL
@@ -160,8 +179,8 @@ const FLAT_STAGE_CHECKS: Array<{ stages: string[]; actionType: string; owner: Ow
 async function checkFlatStageBreaches(): Promise<void> {
   for (const cfg of FLAT_STAGE_CHECKS) {
     const apps = await query<{ id: string; role_id: string; stage_entry_time: string;
-             candidate_name: string; role_title: string; hiring_manager_name: string | null }>(
-      `SELECT a.id, a.role_id, a.stage_entry_time,
+             candidate_name: string; role_title: string; hiring_manager_name: string | null; ai_fit_score: number | null }>(
+      `SELECT a.id, a.role_id, a.stage_entry_time, a.ai_fit_score,
               c.full_name AS candidate_name, r.title AS role_title, r.hiring_manager_name
        FROM applications a
        JOIN candidates c ON c.id = a.candidate_id
@@ -169,9 +188,15 @@ async function checkFlatStageBreaches(): Promise<void> {
        WHERE a.status='Active' AND a.stage = ANY($1) AND a.stage_entry_time IS NOT NULL`,
       [cfg.stages]
     );
-    const thresholdHours = cfg.actionType === 'Idle Candidate' ? BREACH_IDLE_HOURS : BREACH_STANDARD_HOURS;
+    // 'Resume Shortlist Pending' is score-tiered (Hiring SOP v2.1); 'Idle
+    // Candidate' (Reference Check/Pre-Joining/Offer Discussion/Offer
+    // Released) is not one of the five named stages and stays flat.
     const breached = apps
-      .map(app => ({ ...app, hoursOverdue: (Date.now() - new Date(app.stage_entry_time).getTime()) / 3600000 - thresholdHours }))
+      .map(app => ({
+        ...app,
+        hoursOverdue: (Date.now() - new Date(app.stage_entry_time).getTime()) / 3600000
+          - (cfg.actionType === 'Idle Candidate' ? BREACH_IDLE_HOURS : tieredStandardHours(app.ai_fit_score)),
+      }))
       .filter(app => app.hoursOverdue > 0);
     await applyBreachBatch(breached, cfg.actionType, cfg.owner);
   }
@@ -201,8 +226,8 @@ async function checkNotYetActioned(): Promise<void> {
     // identifier rather than a bound parameter (Postgres can't parameterize
     // column names).
     const apps = await query<{ id: string; role_id: string; stage_entry_time: string;
-             candidate_name: string; role_title: string; hiring_manager_name: string | null }>(
-      `SELECT a.id, a.role_id, a.stage_entry_time,
+             candidate_name: string; role_title: string; hiring_manager_name: string | null; ai_fit_score: number | null }>(
+      `SELECT a.id, a.role_id, a.stage_entry_time, a.ai_fit_score,
               c.full_name AS candidate_name, r.title AS role_title, r.hiring_manager_name
        FROM applications a
        JOIN candidates c ON c.id = a.candidate_id
@@ -215,8 +240,9 @@ async function checkNotYetActioned(): Promise<void> {
          )`,
       [cfg.stage, cfg.roundType]
     );
+    // Score-tiered (Hiring SOP v2.1) — all four of these stages are named.
     const breached = apps
-      .map(app => ({ ...app, hoursOverdue: (Date.now() - new Date(app.stage_entry_time).getTime()) / 3600000 - BREACH_STANDARD_HOURS }))
+      .map(app => ({ ...app, hoursOverdue: (Date.now() - new Date(app.stage_entry_time).getTime()) / 3600000 - tieredStandardHours(app.ai_fit_score) }))
       .filter(app => app.hoursOverdue > 0);
     await applyBreachBatch(breached, cfg.actionType, 'HR / Recruiter');
   }
@@ -233,13 +259,29 @@ type FeedbackDueConfig = {
   stage: string; roundType: 'Standard' | 'Assignment';
   anchorColumn: 'scheduled_date' | 'assignment_send_date';
   thresholdHours: number; actionType: string;
+  // Hiring SOP v2.1: the three Standard-round feedback types are
+  // score-tiered (48h -> 24h for ai_fit_score >= 75) and additionally
+  // escalate to a Leadership flag if still open 96h after the interview.
+  // Assignment Feedback Due keeps its own flat 96h and no escalation —
+  // the SOP names this rule as being about "interview feedback."
+  scoreTiered: boolean;
 };
 const FEEDBACK_DUE_STAGES: FeedbackDueConfig[] = [
-  { stage: 'Interview Round 1', roundType: 'Standard', anchorColumn: 'scheduled_date', thresholdHours: BREACH_STANDARD_HOURS, actionType: 'Interview 1 Feedback Due' },
-  { stage: 'Interview Round 2', roundType: 'Standard', anchorColumn: 'scheduled_date', thresholdHours: BREACH_STANDARD_HOURS, actionType: 'Interview 2 Feedback Due' },
-  { stage: 'Founders Round', roundType: 'Standard', anchorColumn: 'scheduled_date', thresholdHours: BREACH_STANDARD_HOURS, actionType: 'Founders Round Feedback Due' },
-  { stage: 'Assignment Round', roundType: 'Assignment', anchorColumn: 'assignment_send_date', thresholdHours: BREACH_ASSIGNMENT_FEEDBACK_HOURS, actionType: 'Assignment Feedback Due' },
+  { stage: 'Interview Round 1', roundType: 'Standard', anchorColumn: 'scheduled_date', thresholdHours: BREACH_STANDARD_HOURS, actionType: 'Interview 1 Feedback Due', scoreTiered: true },
+  { stage: 'Interview Round 2', roundType: 'Standard', anchorColumn: 'scheduled_date', thresholdHours: BREACH_STANDARD_HOURS, actionType: 'Interview 2 Feedback Due', scoreTiered: true },
+  { stage: 'Founders Round', roundType: 'Standard', anchorColumn: 'scheduled_date', thresholdHours: BREACH_STANDARD_HOURS, actionType: 'Founders Round Feedback Due', scoreTiered: true },
+  { stage: 'Assignment Round', roundType: 'Assignment', anchorColumn: 'assignment_send_date', thresholdHours: BREACH_ASSIGNMENT_FEEDBACK_HOURS, actionType: 'Assignment Feedback Due', scoreTiered: false },
 ];
+
+// Hiring SOP v2.1 §4.2(2): if a Standard-round "Feedback Due" breach is
+// still open 96h after the interview itself (independent of the 24/48h
+// tier that made it a breach in the first place), HMS raises an additional
+// Leadership-owned flag — visibility, not a replacement for the original
+// Hiring-Manager-owned action, which stays open until feedback is actually
+// submitted.
+const LEADERSHIP_ESCALATION_HOURS = 96;
+const LEADERSHIP_ESCALATION_ACTION_TYPE = 'Feedback Overdue — Leadership Escalation';
+export const LEADERSHIP_ESCALATION_ACTION_TYPES = [LEADERSHIP_ESCALATION_ACTION_TYPE] as const;
 
 export const FEEDBACK_DUE_ACTION_TYPES = FEEDBACK_DUE_STAGES.map(s => s.actionType);
 export const NOT_SCHEDULED_ACTION_TYPES = NOT_YET_ACTIONED_STAGES
@@ -247,8 +289,19 @@ export const NOT_SCHEDULED_ACTION_TYPES = NOT_YET_ACTIONED_STAGES
   .map(s => s.actionType);
 
 async function checkFeedbackDue(): Promise<void> {
+  // Applications whose Standard-round feedback is still outstanding 96h+
+  // after the interview — collected across all three scoreTiered configs
+  // as we go, then reconciled into the Leadership escalation flag once at
+  // the end (one resolve + one insert pass, not per-config).
+  const leadershipEscalations: Array<{ id: string; role_id: string; candidate_name: string; role_title: string; hoursOverdue: number }> = [];
+
   for (const cfg of FEEDBACK_DUE_STAGES) {
-    const rows = await query<{ id: string; role_id: string; anchor_time: string;
+    // The DB-side pre-filter has to use the LOWEST threshold that could
+    // possibly apply (24h for a scoreTiered config) so a high-scorer who
+    // breaches at 24h isn't excluded before the real per-row tiered check
+    // below ever runs — the JS filter narrows it back down precisely.
+    const prefilterHours = cfg.scoreTiered ? BREACH_HIGH_SCORE_HOURS : cfg.thresholdHours;
+    const rows = await query<{ id: string; role_id: string; anchor_time: string; ai_fit_score: number | null;
              candidate_name: string; role_title: string; hiring_manager_name: string | null; interviewer_names: string | null }>(
       // The overdue threshold has to live IN the JOIN, not just in the JS
       // .filter() below — DISTINCT ON picks one row per application before
@@ -272,7 +325,7 @@ async function checkFeedbackDue(): Promise<void> {
       // has no interviewer_emails set at all — falls back to the role's HM
       // name below, same as this app's existing "no assignee to check,
       // stays open to any persona" rule.
-      `SELECT DISTINCT ON (a.id) a.id, a.role_id, ir.${cfg.anchorColumn} AS anchor_time,
+      `SELECT DISTINCT ON (a.id) a.id, a.role_id, ir.${cfg.anchorColumn} AS anchor_time, a.ai_fit_score,
               c.full_name AS candidate_name, r.title AS role_title, r.hiring_manager_name,
               (SELECT string_agg(u.name, ', ') FROM users u WHERE u.email = ANY(ir.interviewer_emails)) AS interviewer_names
        FROM applications a
@@ -286,16 +339,69 @@ async function checkFeedbackDue(): Promise<void> {
          AND ir.${cfg.anchorColumn} < NOW() - ($3::numeric * INTERVAL '1 hour')
        WHERE a.status='Active' AND a.stage=$1
        ORDER BY a.id, ir.${cfg.anchorColumn} DESC`,
-      [cfg.stage, cfg.roundType, cfg.thresholdHours]
+      [cfg.stage, cfg.roundType, prefilterHours]
     );
     const breached = rows
-      .map(row => ({
-        ...row,
-        hiring_manager_name: row.interviewer_names || row.hiring_manager_name,
-        hoursOverdue: (Date.now() - new Date(row.anchor_time).getTime()) / 3600000 - cfg.thresholdHours,
-      }))
+      .map(row => {
+        const thresholdHours = cfg.scoreTiered ? tieredStandardHours(row.ai_fit_score) : cfg.thresholdHours;
+        const hoursSinceAnchor = (Date.now() - new Date(row.anchor_time).getTime()) / 3600000;
+        return {
+          ...row,
+          hiring_manager_name: row.interviewer_names || row.hiring_manager_name,
+          hoursOverdue: hoursSinceAnchor - thresholdHours,
+          hoursSinceAnchor,
+        };
+      })
       .filter(row => row.hoursOverdue > 0);
     await applyBreachBatch(breached, cfg.actionType, 'Hiring Manager');
+
+    if (cfg.scoreTiered) {
+      for (const row of breached) {
+        if (row.hoursSinceAnchor > LEADERSHIP_ESCALATION_HOURS) {
+          leadershipEscalations.push({ id: row.id, role_id: row.role_id, candidate_name: row.candidate_name, role_title: row.role_title, hoursOverdue: row.hoursSinceAnchor - LEADERSHIP_ESCALATION_HOURS });
+        }
+      }
+    }
+  }
+
+  // Reconcile the Leadership escalation flag: resolve any open one whose
+  // application no longer qualifies (feedback got submitted, or it hasn't
+  // been 96h yet after a stage/round change), then insert fresh ones for
+  // applications that qualify now but don't already have one open —
+  // same idempotent resolve-then-insert shape as checkRoleAging() below.
+  const qualifyingIds = leadershipEscalations.map(e => e.id);
+  await query(
+    `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
+     WHERE action_type=$1 AND resolved=false AND NOT (application_id = ANY($2::text[]))`,
+    [LEADERSHIP_ESCALATION_ACTION_TYPE, qualifyingIds]
+  );
+  if (qualifyingIds.length > 0) {
+    const existingRows = await query<{ application_id: string }>(
+      `SELECT application_id FROM pending_actions WHERE action_type=$1 AND resolved=false AND application_id = ANY($2::text[])`,
+      [LEADERSHIP_ESCALATION_ACTION_TYPE, qualifyingIds]
+    );
+    const existingIds = new Set(existingRows.map(r => r.application_id));
+    const toInsert = leadershipEscalations.filter(e => !existingIds.has(e.id));
+    if (toInsert.length > 0) {
+      await query(
+        `INSERT INTO pending_actions
+           (owner_type, priority_level, action_type, description, application_id,
+            candidate_name, role_title, hours_overdue, role_id)
+         SELECT 'Leadership / Founders', 'High', $1,
+                'Interview feedback still outstanding 96h+ for '||d.candidate_name||' — '||d.role_title,
+                d.application_id, d.candidate_name, d.role_title, d.hours_overdue, d.role_id
+         FROM unnest($2::text[], $3::text[], $4::text[], $5::numeric[], $6::text[])
+           AS d(application_id, candidate_name, role_title, hours_overdue, role_id)`,
+        [
+          LEADERSHIP_ESCALATION_ACTION_TYPE,
+          toInsert.map(e => e.id),
+          toInsert.map(e => e.candidate_name || 'Unknown'),
+          toInsert.map(e => e.role_title || 'Unknown'),
+          toInsert.map(e => Math.max(0, e.hoursOverdue)),
+          toInsert.map(e => e.role_id),
+        ]
+      );
+    }
   }
 }
 
@@ -335,7 +441,7 @@ export const ALL_BREACH_ACTION_TYPES = [
 // made on action_type, not owner_type. Used by dashboard.ts's GET /pending
 // to split "Other Pending Actions" (this list's complement — the "get this
 // to 0" set) from a separate, honestly-labeled alerts feed.
-export const NON_ACTIONABLE_ALERT_TYPES = ['Role aging alert', 'Compensation change flag'] as const;
+export const NON_ACTIONABLE_ALERT_TYPES = ['Role aging alert', 'Compensation change flag', LEADERSHIP_ESCALATION_ACTION_TYPE] as const;
 
 // Every action_type inserted by code OUTSIDE this file's own stage-driven
 // engine — applications.ts (shortlist/screening-status/founder-flag routes)

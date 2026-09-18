@@ -95,14 +95,16 @@ test.describe('Dashboard API additions', () => {
 
   // ─── low_pipeline ──────────────────────────────────────────────────────────
   // Not new this batch — it existed before — but is now actually rendered on
-  // the frontend, which makes a shape regression here worth guarding. Built
-  // from rolesWithAging.filter(active_count < 5) (threshold widened from 3
-  // to 5, and the aging_alert condition dropped entirely, both 2026-09-05) —
-  // a role no longer needs to also be past its Close Target to show up here,
-  // so an 'ok' aging_alert is a perfectly valid entry now.
+  // the frontend, which makes a shape regression here worth guarding. Hiring
+  // SOP v2.1 (2026-09-18) redefined this from rolesWithAging.filter(active_count
+  // < 5) (any active application, any stage/score) to
+  // shortlisted_scored_count < 3 — active applications that have both been
+  // shortlisted (stage past Applied and Screened) AND scored above 60 on
+  // ResumeIQ — so a pipeline full of unqualified applicants no longer reads
+  // as "healthy" just because it's numerous.
   test.describe('low_pipeline', () => {
 
-    test('is an array; every entry has active_count < 5', async ({ request }) => {
+    test('is an array; every entry has shortlisted_scored_count < 3', async ({ request }) => {
       const token = await getToken(request, 'hr');
       const res   = await authed(request, token).get('/api/dashboard');
       expect(res.status()).toBe(200);
@@ -110,8 +112,8 @@ test.describe('Dashboard API additions', () => {
 
       expect(Array.isArray(low_pipeline)).toBe(true);
       for (const role of low_pipeline) {
-        expect(typeof role.active_count).toBe('number');
-        expect(role.active_count).toBeLessThan(5);
+        expect(typeof role.shortlisted_scored_count).toBe('number');
+        expect(role.shortlisted_scored_count).toBeLessThan(3);
       }
     });
   });

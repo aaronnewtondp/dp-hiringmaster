@@ -345,9 +345,19 @@ export const SLA_HOURS: Record<string, number> = {
   JOINING_CONTACT:       120,  // 5 days
 };
 
+// Hiring SOP v2.1 (2026-09-18) revised these — yellow/red are still days
+// past a role's Close Target (or days-open with no target set — see
+// computeAging()). Each priority's target-closure figure (P0 15 / P1 30 /
+// P2 45 / P3 60 days) is documented in the SOP's own Section 4.1 table
+// rather than duplicated as a separate constant here, since nothing in
+// code actually branches on it directly — yellow/red below are the only
+// two numbers computeAging() needs. Red = 1.5x that target-closure figure,
+// per Aaron's confirmation; P2 and P3 sharing the same yellow (30) is
+// intentional, also per Aaron's confirmation, despite P3 being "least
+// urgent" — not a typo to "fix" if this is ever revisited.
 export const AGING_THRESHOLDS: Record<Priority, { yellow: number; red: number }> = {
-  P0: { yellow: 10, red: 15 },
-  P1: { yellow: 21, red: 30 },
-  P2: { yellow: 35, red: 45 },
-  P3: { yellow: 50, red: 60 },
+  P0: { yellow: 10, red: 23 },
+  P1: { yellow: 15, red: 45 },
+  P2: { yellow: 30, red: 68 },
+  P3: { yellow: 30, red: 90 },
 };
