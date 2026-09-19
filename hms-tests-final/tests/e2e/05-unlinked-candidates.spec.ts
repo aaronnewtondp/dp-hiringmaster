@@ -56,8 +56,13 @@ test.describe('Unmatched Candidates panel + Link to role modal', () => {
     await loginViaApi(page, 'hr');
     await page.goto(`${FRONTEND_BASE}/candidates`);
 
-    // Panel is visible with a non-zero count, and this candidate is listed in it
-    await expect(page.getByRole('heading', { name: /Unmatched Candidates \(\d+\)/ })).toBeVisible({ timeout: 15000 });
+    // Panel header is visible with a non-zero count, but the row list below
+    // it now starts collapsed by default (Candidates.tsx's showUnmatched
+    // useState — 2026-09 fix) — click the header to expand before looking
+    // for this candidate's row.
+    const panelHeading = page.getByRole('heading', { name: /Unmatched Candidates \(\d+\)/ });
+    await expect(panelHeading).toBeVisible({ timeout: 15000 });
+    await panelHeading.click();
     const row = page.locator('.px-5.py-3', { hasText: marker });
     await expect(row).toBeVisible();
 

@@ -153,8 +153,13 @@ test.describe('Roles API', () => {
       const newBand = `${uid()} LPA`;
       await api.patch(`/api/roles/${SEEDED.roles.backend_dev}`, { ctc_band: newBand });
       const pendRes = await api.get('/api/dashboard/pending');
-      const { actions } = await pendRes.json();
-      const ctcAction = actions?.find(
+      // 'Compensation change flag' is one of NON_ACTIONABLE_ALERT_TYPES
+      // (slaChecker.ts) — dashboard.ts's GET /pending splits those into a
+      // separate `alerts` array (no individual attribution, no in-app
+      // resolve action), not `actions`. This test checked `actions` and so
+      // silently broke the moment that actions/alerts split shipped.
+      const { alerts } = await pendRes.json();
+      const ctcAction = alerts?.find(
         (a: { action_type: string; owner_type: string }) =>
           a.action_type === 'Compensation change flag' && a.owner_type === 'Leadership / Founders'
       );
