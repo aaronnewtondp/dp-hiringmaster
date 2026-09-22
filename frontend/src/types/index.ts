@@ -57,6 +57,7 @@ export interface Role {
   approval_note?:           string;
   jd_drive_link?:           string;
   social_jd_drive_link?:    string;
+  jd_source?:               'generated' | 'manual';
   whatsapp_forward_link?:   string;
   referral_message_link?:   string;
   approval_summary_link?:   string;

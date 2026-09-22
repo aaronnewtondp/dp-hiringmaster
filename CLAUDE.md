@@ -283,6 +283,25 @@ fields (`must_have_skills`/`nice_to_have_skills`/`kpi_expectations`). Falls
 back to those same three fields, unchanged, for any role that hasn't been
 through the Approved+JD-generation flow yet. See `ROADMAP.md` Phase 4.
 
+**Externally-authored long-form JDs.** Not every role's JD is written by the
+system — `roles.jd_source` (`'generated'` default, or `'manual'`) marks a
+role whose long-form JD was drafted by hand outside HMS (a founder/HM-written
+PDF) and imported via `backend/src/scripts/importManualJd.ts <pdf-path>
+<role-id>`. That script uploads the source PDF as-is to Drive
+(`jd_drive_link` points AT that exact file, never a system-rendered one),
+extracts its text and runs it through `jdContent.ts`'s
+`extractJdContentFromText()` — same target JSON shape and validation as the
+normal `generateJdContent()`, but explicitly told to extract/condense only
+what's in the source text, never invent — to populate
+`generated_jd_content` (so ResumeIQ scores against the real external JD, not
+short DB fields), then renders and uploads ONLY the social JD from that
+content (the long-form PDF is never system-rendered for a manual role).
+`jd_source='manual'` is checked in two places so this is never silently
+overwritten: `roles.ts`'s auto-generate-on-Approve trigger skips entirely,
+and `POST /:id/regenerate-jd` refuses with a 400. RoleDetail.tsx hides the
+"Regenerate JD" button and shows an explanatory note instead, for the same
+reason.
+
 ### Assignment emails (Gmail API)
 "Send Assignment" (on a candidate's `Assignment Round` stage) composes and
 sends a real email to the candidate from `hr@digitalpaani.com` — mail body,

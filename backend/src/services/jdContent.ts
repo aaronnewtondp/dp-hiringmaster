@@ -105,6 +105,68 @@ Rules:
     messages: [{ role: 'user', content: prompt }],
   });
 
+  return finalizeJdContent(response, role);
+}
+
+const EXTRACTION_RULES = `Rules:
+- tags: 4-8 short chips (1-3 words each, e.g. "Node.js", "PLC / HMI / SCADA"). isGreen=true for nice-to-have-derived tags, false for must-have-derived tags.
+- aboutRoleParagraph: 2-3 sentences introducing the role, written in second person ("You'll...").
+- highlightQuote: an optional one-sentence pull-quote emphasizing impact/mission; use null if nothing genuinely stands out — do not force one.
+- keyResponsibilities: ${MAX_KEY_RESPONSIBILITIES} bullets max, one sentence each, no trailing period style consistency required.
+- mustHaves / goodToHaves: ${MAX_REQUIREMENT_BULLETS} bullets max each, condensed from the source's requirements.
+- goodToHaveLabel: use "Who You Are" for field/site-execution-heavy roles (personality/soft-skill framing), "Good to Have" for skill-heavy roles (technical/nice-to-have framing) — pick whichever fits this role.
+- whyJoinUs: EXACTLY 4 items. iconKey must be one of: ${WHY_ICON_KEYS.join(', ')}. title is 2-4 words, description is one short sentence. Pick 4 distinct icon keys that fit this specific role (don't always default to the same 4).
+- socialAboutRole / socialAboutYou: ${MAX_SOCIAL_BULLETS} bullets max each, format exactly "<b>Label:</b> Description" with description under 60 characters — these are for a space-constrained social graphic, keep them terse.`;
+
+/**
+ * Same target JSON shape as generateJdContent(), but for a role whose
+ * long-form JD was authored entirely outside the system (a PDF/doc HR wrote
+ * by hand) rather than condensed from this role's raw DB fields. Used to
+ * populate generated_jd_content — the same column both PDF renderers AND
+ * resumeIQ.ts's buildRoleRequirementsSection() read from — so ResumeIQ scores
+ * against the externally-authored JD's real content, and the social JD (still
+ * system-rendered) reflects it too. Unlike generateJdContent(), this is
+ * explicitly told to extract/condense only what's in sourceText, never to
+ * invent qualifications the external author didn't write.
+ */
+export async function extractJdContentFromText(role: Role, sourceText: string): Promise<JdContent | null> {
+  const prompt = `You are structuring an EXTERNALLY-AUTHORED job description for DigitalPaani, a water-tech AI company, into the exact structured JSON shape requested below. This JD was written by hand outside this system — extract and condense only what's actually present in the source text. Do not invent, embellish, or add any responsibility, qualification, or claim that isn't grounded in the source.
+
+ROLE TITLE: ${role.title}
+DEPARTMENT: ${role.department || 'Not specified'}
+LOCATION: ${role.location || 'Not specified'}
+EMPLOYMENT TYPE: ${role.employment_type || 'Not specified'}
+EXPERIENCE REQUIRED: ${role.yoe_required || 'Not specified'}
+
+SOURCE JOB DESCRIPTION (verbatim — extract from this, do not add content not present here):
+${sourceText}
+
+Return ONLY valid JSON, no markdown, no code fences, matching exactly this shape:
+{
+  "tags": [{"text": "", "isGreen": false}],
+  "aboutRoleParagraph": "",
+  "highlightQuote": null,
+  "keyResponsibilities": [""],
+  "mustHaves": [""],
+  "goodToHaves": [""],
+  "goodToHaveLabel": "Good to Have",
+  "whyJoinUs": [{"iconKey": "", "title": "", "description": "", "isGreen": false}],
+  "socialAboutRole": [""],
+  "socialAboutYou": [""]
+}
+
+${EXTRACTION_RULES}`;
+
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-5',
+    max_tokens: 2048,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  return finalizeJdContent(response, role);
+}
+
+function finalizeJdContent(response: Anthropic.Message, role: Role): JdContent | null {
   const textBlock = response.content.find(b => b.type === 'text');
   const rawText = textBlock && 'text' in textBlock ? textBlock.text : '';
   const cleaned = rawText.replace(/```json|```/g, '').trim();

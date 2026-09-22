@@ -54,6 +54,7 @@ export interface Role {
   jd_drive_link?:           string;
   social_jd_drive_link?:    string;
   generated_jd_content?:    Record<string, unknown> | null;
+  jd_source?:               'generated' | 'manual';
   whatsapp_forward_link?:   string;
   referral_message_link?:   string;
   approval_summary_link?:   string;

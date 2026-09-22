@@ -66,6 +66,11 @@ CREATE TABLE roles (
   jd_drive_link            TEXT,
   social_jd_drive_link     TEXT,
   generated_jd_content     JSONB,
+  -- 'manual' = long-form JD authored outside this system (imported via
+  -- src/scripts/importManualJd.ts) — roles.ts's auto-generate-on-Approve
+  -- trigger and POST /:id/regenerate-jd both skip/refuse for these, so an
+  -- externally-authored JD is never silently overwritten with an AI one.
+  jd_source                TEXT NOT NULL DEFAULT 'generated' CHECK (jd_source IN ('generated','manual')),
   whatsapp_forward_link    TEXT,
   referral_message_link    TEXT,
   approval_summary_link    TEXT,

@@ -342,7 +342,10 @@ export default function RoleDetail() {
               { key: 'approval_summary_link', label: 'Assignment Link', type: 'text', linkify: true },
             ]}
           />
-          {canHR && role.status === 'Approved' && role.jd_drive_link && (
+          {role.jd_source === 'manual' && (
+            <p className="text-xs text-gray-400 text-right">Long-form JD manually provided — not system-generated or regenerable here.</p>
+          )}
+          {canHR && role.status === 'Approved' && role.jd_drive_link && role.jd_source !== 'manual' && (
             <div className="flex justify-end">
               <button
                 onClick={handleRegenerateJd}

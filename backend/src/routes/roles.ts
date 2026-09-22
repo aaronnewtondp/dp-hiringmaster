@@ -279,6 +279,10 @@ router.post('/:id/regenerate-jd', requireHR, async (req: Request, res: Response)
     res.status(400).json({ error: 'Only an Approved role has a JD to regenerate.' });
     return;
   }
+  if (role.jd_source === 'manual') {
+    res.status(400).json({ error: "This role's long-form JD was manually provided and can't be regenerated — re-run importManualJd.ts with an updated source PDF instead." });
+    return;
+  }
 
   const jdGeneration = await generateAndSaveJd(role);
   res.json({ role: enrichRole(role), jdGeneration });
@@ -425,8 +429,13 @@ router.patch('/:id', async (req: Request, res: Response) => {
   // to accommodate this. Guarded on the transition itself (not just current
   // status) plus !existing.jd_drive_link, so a role PATCHed with status
   // already 'Approved' (e.g. an unrelated field edit) never regenerates.
+  // Also skipped outright for jd_source='manual' — that role's long-form JD
+  // was authored outside this system and its Drive link/generated_jd_content
+  // were set by importManualJd.ts, not this trigger; auto-generation must
+  // never overwrite it, even on a role that somehow reaches Approved with no
+  // jd_drive_link yet (e.g. the manual JD import happens after approval).
   let jdGeneration: JdGenerationResult | undefined;
-  if (updatedRole.status === 'Approved' && existing.status !== 'Approved' && !existing.jd_drive_link) {
+  if (updatedRole.status === 'Approved' && existing.status !== 'Approved' && !existing.jd_drive_link && existing.jd_source !== 'manual') {
     jdGeneration = await generateAndSaveJd(updatedRole);
   }
 

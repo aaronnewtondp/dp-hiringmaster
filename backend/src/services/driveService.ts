@@ -270,7 +270,7 @@ async function installCanvasPolyfills(): Promise<void> {
   if (!g.ImageData) g.ImageData = native?.ImageData || ImageDataPolyfill;
 }
 
-async function extractPdfText(buffer: Buffer): Promise<string> {
+export async function extractPdfText(buffer: Buffer): Promise<string> {
   await installCanvasPolyfills();
   // pdf-parse (via pdfjs-dist) resolves its worker script from a relative
   // "./pdf.worker.mjs" default, internal to its own module — that file
