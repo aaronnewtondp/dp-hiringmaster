@@ -213,6 +213,7 @@ export default function Dashboard() {
                 <thead className="sticky top-0 bg-white">
                   <tr className="border-b border-gray-100">
                     <th className="table-th">Role</th>
+                    <th className="table-th w-8"></th>
                     <th className="table-th">P</th>
                     <th className="table-th">HM</th>
                     <th className="table-th">Age</th>
@@ -224,14 +225,14 @@ export default function Dashboard() {
                     .map(r => (
                     <tr key={r.id} className={r.aging_alert === 'red' ? 'bg-red-50' : r.aging_alert === 'yellow' ? 'bg-amber-50' : ''}>
                       <td className="table-td font-medium text-gray-900">
-                        <div className="flex items-center gap-1.5">
-                          <Link to={`/roles/${r.id}`} className="hover:text-dp-600">{r.title}</Link>
-                          {r.no_recent_candidate_activity && (
-                            <span title="No candidate movement in 3+ days (new applications don't count)">
-                              <AlertTriangle className="w-4 h-4 text-red-600 fill-red-100 shrink-0" strokeWidth={2.5} />
-                            </span>
-                          )}
-                        </div>
+                        <Link to={`/roles/${r.id}`} className="hover:text-dp-600">{r.title}</Link>
+                      </td>
+                      <td className="table-td">
+                        {r.no_recent_candidate_activity && (
+                          <span title="No candidate movement in 3+ days (new applications don't count)">
+                            <AlertTriangle className="w-4 h-4 text-red-600 fill-red-100 shrink-0" strokeWidth={2.5} />
+                          </span>
+                        )}
                       </td>
                       <td className="table-td"><PriorityBadge priority={r.priority as Priority} /></td>
                       <td className="table-td text-gray-500 text-xs">{r.hiring_manager_name}</td>
