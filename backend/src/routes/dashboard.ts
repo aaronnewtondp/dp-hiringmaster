@@ -33,6 +33,13 @@ router.use(authenticate);
 const FIRST_INTERVIEW_IDX = STAGE_ORDER.indexOf('Interview Round 1');
 const FIRST_OFFER_IDX     = STAGE_ORDER.indexOf('Offer Released');
 
+// Aging Roles' "no recent candidate movement" flag (2026-09-22 — a role can
+// be silently stalling one candidate at a time even while it isn't yet past
+// its own Close Target, which the aging_alert red/yellow coloring alone
+// won't surface). See last_candidate_activity's own query comment above for
+// exactly what counts as "movement" and why a fresh application never does.
+const NO_MOVEMENT_DAYS = 3;
+
 // Source Quality's Pass Rate / Hire Rate stage sets (KPI redesign) — derived
 // from STAGE_ORDER rather than hardcoded stage-name lists, so a future
 // change to the canonical stage order can't silently desync these from the
@@ -198,11 +205,33 @@ router.get('/', async (req: Request, res: Response) => {
       const f = buildRoleFilterSql(filters, 1);
       return query<{ id: string; title: string; priority: string; hiring_manager_name: string;
                start_date: string; target_closure_date: string; status: string;
-               active_count: string; shortlisted_scored_count: string }>(`
+               active_count: string; shortlisted_scored_count: string; last_candidate_activity: string | null }>(`
         SELECT r.id, r.title, r.priority, r.hiring_manager_name,
                r.start_date, r.target_closure_date, r.status,
                COUNT(a.id) FILTER (WHERE a.status='Active') AS active_count,
-               COUNT(a.id) FILTER (WHERE a.status='Active' AND a.stage <> 'Applied and Screened' AND a.ai_fit_score > 60) AS shortlisted_scored_count
+               COUNT(a.id) FILTER (WHERE a.status='Active' AND a.stage <> 'Applied and Screened' AND a.ai_fit_score > 60) AS shortlisted_scored_count,
+               -- "No recent candidate movement" flag input: the latest
+               -- activity_log row actually tied to an application under this
+               -- role (application_id IS NOT NULL excludes role-metadata-only
+               -- rows like 'Role Updated'/'JD Generated'), minus the two
+               -- event_types that fire purely from a NEW application arriving
+               -- rather than someone acting on an existing one.
+               --
+               -- Deliberately NOT applications.last_updated/updated_at — both
+               -- get bumped by the automatic, synchronous ResumeIQ-scoring
+               -- UPDATE that fires once per application at creation (updated_at
+               -- via applications_updated_at's BEFORE UPDATE trigger, which
+               -- fires on literally any UPDATE with no way to exclude one) and
+               -- neither is safely comparable against application_date either,
+               -- since Naukri-imported rows deliberately backdate
+               -- application_date to the candidate's real Naukri apply date —
+               -- sometimes days before the row is actually inserted here — so
+               -- "last_updated > application_date" would already be true the
+               -- instant such a row is created, with zero real activity yet.
+               (SELECT MAX(al.created_at) FROM activity_log al
+                WHERE al.role_id = r.id AND al.application_id IS NOT NULL
+                  AND al.event_type NOT IN ('Application Created', 'ResumeIQ Scoring Completed')
+               ) AS last_candidate_activity
         FROM roles r
         LEFT JOIN applications a ON a.role_id = r.id
         WHERE r.status IN ('Approved','Live – Sourcing','Under Review','On Hold')
@@ -399,7 +428,18 @@ router.get('/', async (req: Request, res: Response) => {
     const { days_open, days_overdue, aging_alert } = computeAging(
       r.start_date || null, r.target_closure_date || null, r.priority as Priority, r.status
     );
-    return { ...r, days_open, days_overdue, aging_alert, active_count: parseInt(r.active_count || '0'), shortlisted_scored_count: parseInt(r.shortlisted_scored_count || '0') };
+    // No qualifying activity ever, or the most recent one is more than
+    // NO_MOVEMENT_DAYS old — independent of aging_alert, since a role can be
+    // stalled at the candidate level regardless of where it sits against its
+    // own Close Target.
+    const no_recent_candidate_activity = !r.last_candidate_activity
+      || (Date.now() - new Date(r.last_candidate_activity).getTime()) > NO_MOVEMENT_DAYS * 86400000;
+    return {
+      ...r, days_open, days_overdue, aging_alert,
+      active_count: parseInt(r.active_count || '0'),
+      shortlisted_scored_count: parseInt(r.shortlisted_scored_count || '0'),
+      no_recent_candidate_activity,
+    };
   });
 
   const redAlertRoles   = rolesWithAging.filter(r => r.aging_alert === 'red').length;

@@ -203,7 +203,7 @@ export default function Dashboard() {
         <div className="card overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
             <h2 className="text-sm font-semibold text-gray-900">Aging roles</h2>
-            <InfoTooltip align="left" text="Every role currently Approved, Live – Sourcing, or On Hold, with how long it's been open. Only an Approved or Live – Sourcing role that's actually passed its own Close Target gets highlighted — yellow then red, thresholds set per priority — a role with no Close Target set falls back to flagging on days-since-opened instead. On Hold roles are shown for reference (how long they've been open) but never get an aging alert, since the clock isn't really running while a role is paused." />
+            <InfoTooltip align="left" text="Every role currently Approved, Live – Sourcing, or On Hold, with how long it's been open. Only an Approved or Live – Sourcing role that's actually passed its own Close Target gets highlighted — yellow then red, thresholds set per priority — a role with no Close Target set falls back to flagging on days-since-opened instead. On Hold roles are shown for reference (how long they've been open) but never get an aging alert, since the clock isn't really running while a role is paused. A red ! next to a role's name means no candidate on that role has had any real movement (stage/status change, HR note, feedback, etc.) in 3+ days — new applications arriving don't count, so a role can't look 'active' just because people are still applying to it." />
           </div>
           {aging_roles.length === 0 ? (
             <div className="p-5"><EmptyState title="No open roles" /></div>
@@ -224,7 +224,14 @@ export default function Dashboard() {
                     .map(r => (
                     <tr key={r.id} className={r.aging_alert === 'red' ? 'bg-red-50' : r.aging_alert === 'yellow' ? 'bg-amber-50' : ''}>
                       <td className="table-td font-medium text-gray-900">
-                        <Link to={`/roles/${r.id}`} className="hover:text-dp-600">{r.title}</Link>
+                        <div className="flex items-center gap-1.5">
+                          <Link to={`/roles/${r.id}`} className="hover:text-dp-600">{r.title}</Link>
+                          {r.no_recent_candidate_activity && (
+                            <span title="No candidate movement in 3+ days (new applications don't count)">
+                              <AlertTriangle className="w-4 h-4 text-red-600 fill-red-100 shrink-0" strokeWidth={2.5} />
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="table-td"><PriorityBadge priority={r.priority as Priority} /></td>
                       <td className="table-td text-gray-500 text-xs">{r.hiring_manager_name}</td>
