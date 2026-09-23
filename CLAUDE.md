@@ -103,6 +103,26 @@ order, every time. Skipping the third step means the next `docker-compose down
 - Backend runs via `tsx watch src/server.ts` — no build step, no `dist/`
   folder. TypeScript runs directly.
 
+### Testing — two separate layers, don't confuse them
+- **`hms-tests-final/`** (Playwright) — exercises the app through its real
+  API/UI surface: `npm run test:local` (api+db+e2e, LOCAL ONLY — mutates
+  data) or `npm run test:prod` (read-only smoke tests, safe against the live
+  Vercel deployment). See that directory's own `README.md` for the full
+  per-file breakdown and conventions (fresh test data via `uid()`, direct-
+  Postgres `tests/db/*` specs for state no API can set, e.g. backdating a
+  timestamp).
+- **`backend/src/**/*.test.ts` and `frontend/src/**/*.test.{ts,tsx}`**
+  (Vitest) — unit/module-level tests for pure logic and small components,
+  run with `npm test` from `backend/` or `frontend/` respectively. This is
+  where edge cases for a pure function (`computeAging`, persona gating,
+  JD-content validation, SLA tiering, etc.) get enumerated directly, rather
+  than indirectly through a real HTTP round trip. New pure logic worth
+  testing this way should be `export`ed even if only used internally
+  elsewhere in its own module — see `jobs/slaChecker.ts`'s
+  `tieredStandardHours` or `services/jdContent.ts`'s `finalizeJdContent` for
+  the pattern (both were private until exported specifically to unit-test
+  them).
+
 ### Access control model
 Four personas: `hr_recruiter` (displayed as "HR/Admin" — same DB value, just
 relabeled), `hiring_manager`, `leadership`, `super_admin`. (A fifth,

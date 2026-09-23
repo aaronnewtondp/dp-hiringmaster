@@ -166,7 +166,7 @@ ${EXTRACTION_RULES}`;
   return finalizeJdContent(response, role);
 }
 
-function finalizeJdContent(response: Anthropic.Message, role: Role): JdContent | null {
+export function finalizeJdContent(response: Anthropic.Message, role: Role): JdContent | null {
   const textBlock = response.content.find(b => b.type === 'text');
   const rawText = textBlock && 'text' in textBlock ? textBlock.text : '';
   const cleaned = rawText.replace(/```json|```/g, '').trim();
@@ -205,7 +205,7 @@ function finalizeJdContent(response: Anthropic.Message, role: Role): JdContent |
   };
 }
 
-function truncateSocialBullets(bullets: string[] | undefined): string[] {
+export function truncateSocialBullets(bullets: string[] | undefined): string[] {
   return (bullets || []).slice(0, MAX_SOCIAL_BULLETS).map(b => {
     if (b.length <= MAX_SOCIAL_BULLET_CHARS) return b;
     return b.slice(0, MAX_SOCIAL_BULLET_CHARS - 1).trimEnd() + '…';

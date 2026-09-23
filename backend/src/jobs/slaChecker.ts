@@ -86,7 +86,7 @@ const BREACH_ASSIGNMENT_FEEDBACK_HOURS = 96;
 const HIGH_SCORE_THRESHOLD = 75;
 const BREACH_HIGH_SCORE_HOURS = 24;
 
-function tieredStandardHours(aiFitScore: number | null): number {
+export function tieredStandardHours(aiFitScore: number | null): number {
   return aiFitScore != null && aiFitScore >= HIGH_SCORE_THRESHOLD ? BREACH_HIGH_SCORE_HOURS : BREACH_STANDARD_HOURS;
 }
 

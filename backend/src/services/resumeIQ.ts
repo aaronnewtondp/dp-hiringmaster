@@ -157,11 +157,11 @@ interface GeneratedJdContentForScoring {
   tags?: Array<{ text: string }>;
 }
 
-function bulletList(items?: string[]): string {
+export function bulletList(items?: string[]): string {
   return items && items.length ? items.map(i => `- ${i}`).join('\n') : 'Not specified';
 }
 
-function buildRoleRequirementsSection(role: Role): string {
+export function buildRoleRequirementsSection(role: Role): string {
   const content = role.generated_jd_content as GeneratedJdContentForScoring | null | undefined;
 
   if (!content) {
