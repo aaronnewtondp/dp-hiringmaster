@@ -421,23 +421,65 @@ own portal page, not a fetchable resume file) or `expected_ctc` (the export
 only has current salary) — ResumeIQ scores these candidates on profile
 fields only, same graceful fallback as any candidate with no resume on file.
 
-### Candidate gender auto-tagging (2026-09-28)
+### Candidate gender auto-tagging (2026-09-28, dictionary rebuilt same day)
 `candidates.gender` (`'M'` / `'F'` / `NULL`) is auto-computed server-side from
 `full_name` at every candidate-creation code path (`candidates.ts`'s
 `POST /`, `candidateIngest.ts`'s new-candidate branch, `importNaukriExcel.ts`'s
-`findOrCreateCandidate()`), via `backend/src/utils/genderClassifier.ts` — a
-dictionary (several hundred common Indian first names, organized by
-region/community) plus a small, high-confidence suffix-heuristic fallback.
+`findOrCreateCandidate()`), via `backend/src/utils/genderClassifier.ts`.
 **`NULL` means "Unknown," a real and deliberate result** — an unrecognized
 name, or a known unisex/ambiguous Indian name (Kiran, Simran, Manpreet, and
 similar), is never force-guessed; gender is a sensitive attribute, and a
-wrong tag is worse than an honest "don't know." Real-world spot-check against
-a random production sample: ~60% tagged, effectively zero visible false
-positives among the tagged set — recall over precision was the deliberate
-tradeoff. The existing-candidate `UPDATE` branches in `candidateIngest.ts`/
-`importNaukriExcel.ts` also backfill `gender` fill-null-only (same pattern as
-every other profile field there), so a repeat applicant or re-run Naukri
-import can still pick up a tag it missed the first time.
+wrong tag is worse than an honest "don't know." The existing-candidate
+`UPDATE` branches in `candidateIngest.ts`/`importNaukriExcel.ts` also
+backfill `gender` fill-null-only (same pattern as every other profile field
+there), so a repeat applicant or re-run Naukri import can still pick up a tag
+it missed the first time.
+
+**Dictionary**: `backend/src/data/indian{Male,Female,Ambiguous}Names.json`
+(~3,860 / ~3,230 / ~300 first names) — built from two public real-world
+datasets (github.com/mbejda's "Indian-Male-Names.csv" / "Indian-Female-
+Names.csv", ~14.8k/~15.4k full-name rows) merged with this module's own
+original hand-curated dictionary (Parsi/Christian/Anglo-Indian names
+especially are underrepresented in an India-scraped dataset, so the curated
+list stays a permanent additional source, not a one-time seed). A name
+appearing under both genders in the source data is resolved by strong
+majority (5x+, 5+ total occurrences) or else filed as ambiguous rather than
+guessed — this is where the "genuinely unisex" exclusions come from, not
+just this module's own hand-picked list. **Re-run
+`npx tsx src/scripts/rebuildGenderNameData.ts`** to regenerate the three
+JSON files if either source dataset is ever updated, or to fold in another
+one (add its URL to that script's `SOURCES` array) — it's a full rebuild
+from source each run, so a one-off manual correction to a specific name
+needs to go in that script's own `MANUAL_OVERRIDES`, not a direct edit to
+the generated JSON (which won't survive the next rebuild).
+
+**"Kaur" surname signal**: checked first, ahead of even the dictionary —
+Sikh women take it specifically and deliberately to signal their own gender
+(paired with "Singh" for men), closer to a first-person declaration than a
+name-frequency guess. Found via real production records this dictionary got
+wrong otherwise: "Amritpal Kaur"/"Kulvinder Kaur" are genuinely unisex Sikh
+first names the dictionary (reasonably) defaults to male from thin source
+data, but the person's own "Kaur" says otherwise. Checked against real data
+for a counter-example and found none — the rare "Kaur" rows in the source
+male-names dataset were garbled artifacts, not genuine male bearers.
+**Deliberately does NOT do the mirror-image "Singh → male"** — checked
+against this system's own real candidate data and found genuine, clean
+counter-examples ("Monika Singh", "Ankita Singh", "Pooja Singh", "Akanksha
+Singh" are real women in production). Unlike "Kaur", "Singh" is ALSO an
+ordinary hereditary family surname across Hindu Rajput/Kshatriya communities,
+carried by sons and daughters alike, completely independent of the Sikh
+gender-marking convention — not a safe signal on its own despite the
+tempting parallel. A handful of genuinely unisex low-sample-size Sikh names
+without a "Kaur" to disambiguate them (e.g. a male "Daljit Singh", where the
+dictionary alone defaults to female from a single source sighting) remain a
+known, accepted, HR-correctable limitation at this scale.
+
+Real-world validation: sampled 300 random production candidate names and ran
+the classifier directly before/after each change, cross-checking suspicious
+results against the raw source CSVs rather than assuming a dataset label was
+correct — this is how the Kaur-vs-Singh asymmetry above was discovered, not
+guessed at. Production backfill (`backfillGender.ts`): 1093 candidates,
+823 tagged (~75%) / 270 Unknown after all of the above.
 
 Plain, HR-editable field via `PATCH /api/candidates/:id` (not read-only) —
 the auto-tag is best-effort, and HR can always correct it. Filterable via

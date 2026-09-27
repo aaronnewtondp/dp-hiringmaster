@@ -43,10 +43,33 @@ describe('classifyGender', () => {
     expect(classifyGender('Dr. Amit Kumar')).toBe('M');
   });
 
-  it('returns null for known-ambiguous/unisex Indian names rather than guessing', () => {
-    for (const name of ['Kiran Patel', 'Simran Kaur', 'Manpreet Singh']) {
+  it('returns null for a known-ambiguous/unisex first name with no disambiguating surname', () => {
+    for (const name of ['Kiran Patel', 'Manpreet Verma', 'Amandeep Gupta']) {
       expect(classifyGender(name), name).toBeNull();
     }
+  });
+
+  it('a "Kaur" surname resolves an otherwise-ambiguous/unrecognized first name to female', () => {
+    expect(classifyGender('Manpreet Kaur')).toBe('F');
+    expect(classifyGender('Simran Kaur')).toBe('F');
+    expect(classifyGender('Gurpreet Kaur')).toBe('F');
+    // "Chandra" alone is in KNOWN_AMBIGUOUS; Kaur still resolves it.
+    expect(classifyGender('Chandra Kaur')).toBe('F');
+  });
+
+  it('never treats "Singh" as a male signal — it is also an ordinary Hindu hereditary surname carried by women', () => {
+    // Real production records this guards against: all genuinely female.
+    for (const name of ['Monika Singh', 'Ankita Singh', 'Pooja Singh', 'Akanksha Singh']) {
+      expect(classifyGender(name), name).toBe('F');
+    }
+  });
+
+  it('a "Kaur" surname takes priority even over a confident dictionary hit for a genuinely unisex Sikh first name', () => {
+    // Real production case this was added for: "amritpal" is a genuinely
+    // unisex Sikh first name this dictionary defaults to male, but
+    // "Amritpal Kaur" is a real, correctly-female record — the surname is
+    // a stronger, first-person signal than a name-frequency dictionary.
+    expect(classifyGender('Amritpal Kaur')).toBe('F');
   });
 
   it('returns null for a name not in the dictionary and not matching a suffix rule', () => {
