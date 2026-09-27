@@ -117,8 +117,16 @@ router.get('/', async (req: Request, res: Response) => {
     params.push(`%${q}%`); i++;
   }
   if (gender) {
-    sql += ` AND c.gender = ANY($${i++}::text[])`;
-    params.push(toArray(gender));
+    // 'UNKNOWN' is a frontend-only sentinel for "no gender tag" — c.gender
+    // IS NULL can't be expressed via = ANY($n::text[]) since SQL NULL never
+    // equals anything, including itself, inside an array match.
+    const genderValues = toArray(gender);
+    const wantsUnknown = genderValues.includes('UNKNOWN');
+    const knownValues = genderValues.filter(g => g !== 'UNKNOWN');
+    const genderConditions: string[] = [];
+    if (knownValues.length) { genderConditions.push(`c.gender = ANY($${i++}::text[])`); params.push(knownValues); }
+    if (wantsUnknown)       { genderConditions.push(`c.gender IS NULL`); }
+    if (genderConditions.length) sql += ` AND (${genderConditions.join(' OR ')})`;
   }
 
   // Master filters (department/location/recruitment_mode/priority/role_id +

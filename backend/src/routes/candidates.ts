@@ -50,8 +50,15 @@ router.get('/', async (req: Request, res: Response) => {
     params.push(tag);
   }
   if (gender) {
-    sql += ` AND c.gender = ANY($${i++}::text[])`;
-    params.push(Array.isArray(gender) ? gender : [gender]);
+    // 'UNKNOWN' is a frontend-only sentinel for "no gender tag" — mirrors
+    // applications.ts's own gender-filter handling (see its comment).
+    const genderValues = Array.isArray(gender) ? gender as string[] : [gender as string];
+    const wantsUnknown = genderValues.includes('UNKNOWN');
+    const knownValues = genderValues.filter(g => g !== 'UNKNOWN');
+    const genderConditions: string[] = [];
+    if (knownValues.length) { genderConditions.push(`c.gender = ANY($${i++}::text[])`); params.push(knownValues); }
+    if (wantsUnknown)       { genderConditions.push(`c.gender IS NULL`); }
+    if (genderConditions.length) sql += ` AND (${genderConditions.join(' OR ')})`;
   }
   // Talent Pool / Archival (PRD §21) — the PRD's own suggested query
   // (?tag=Hold+for+Future) doesn't actually work: nothing auto-tags hr_tags

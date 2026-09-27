@@ -78,6 +78,35 @@ test.describe('Candidate gender auto-tagging', () => {
     }
   });
 
+  test('GET /api/candidates?gender=UNKNOWN returns only untagged candidates, and mixes with a real value via OR', async ({ request }) => {
+    const token = await getToken(request, 'hr');
+    const marker = uid();
+    const untaggedRes = await authed(request, token).post('/api/candidates', {
+      full_name: `Xzqrtnomatch Filter Test ${marker}`, email: `gendertest+${marker}a@example.com`,
+    });
+    const { candidate: untagged } = await untaggedRes.json();
+    expect(untagged.gender).toBeNull();
+    const maleRes = await authed(request, token).post('/api/candidates', {
+      full_name: `Rahul Filter Test ${marker}`, email: `gendertest+${marker}b@example.com`,
+    });
+    const { candidate: male } = await maleRes.json();
+    expect(male.gender).toBe('M');
+
+    const unknownOnly = await authed(request, token).get(`/api/candidates?q=Filter Test ${marker}&gender=UNKNOWN`);
+    expect(unknownOnly.status()).toBe(200);
+    const { candidates: unknownCandidates } = await unknownOnly.json();
+    expect(unknownCandidates.map((c: { id: string }) => c.id)).toContain(untagged.id);
+    expect(unknownCandidates.map((c: { id: string }) => c.id)).not.toContain(male.id);
+    for (const c of unknownCandidates) expect(c.gender).toBeNull();
+
+    const combined = await authed(request, token).get(`/api/candidates?q=Filter Test ${marker}&gender=UNKNOWN&gender=M`);
+    expect(combined.status()).toBe(200);
+    const { candidates: combinedCandidates } = await combined.json();
+    const combinedIds = combinedCandidates.map((c: { id: string }) => c.id);
+    expect(combinedIds).toContain(untagged.id);
+    expect(combinedIds).toContain(male.id);
+  });
+
   test('GET /api/applications?gender=F only returns applications whose candidate is tagged female', async ({ request }) => {
     const token = await getToken(request, 'hr');
     const marker = uid();

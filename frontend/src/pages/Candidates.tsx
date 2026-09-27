@@ -430,7 +430,7 @@ export default function Candidates() {
         <div className="shrink-0"><MultiSelectFilter label="Location"         options={LOCATIONS}     selected={locations}    onChange={setLocations} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Recruitment Mode" options={modeOptions}   selected={modes}         onChange={setModes} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Priority"         options={PRIORITIES}    selected={priorities}   onChange={setPriorities} /></div>
-        <div className="shrink-0"><MultiSelectFilter label="Gender" options={[{ value: 'M', label: 'Male' }, { value: 'F', label: 'Female' }]} selected={genders} onChange={setGenders} /></div>
+        <div className="shrink-0"><MultiSelectFilter label="Gender" options={[{ value: 'M', label: 'Male' }, { value: 'F', label: 'Female' }, { value: 'UNKNOWN', label: 'Not tagged' }]} selected={genders} onChange={setGenders} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Status"           options={APPLICATION_STATUSES} selected={applicationStatuses} onChange={setApplicationStatuses} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Role" options={roleOptions} selected={roleIds} onChange={setRoleIds} /></div>
         <button

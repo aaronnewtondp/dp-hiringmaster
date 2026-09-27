@@ -487,7 +487,14 @@ the auto-tag is best-effort, and HR can always correct it. Filterable via
 (candidates.ts/applications.ts, same hand-rolled `AND c.gender = ANY($n)`
 pattern as their existing `q`/`skills`/`tag` filters — this is a
 candidate-level filter, not a role-level one, so it does NOT live in
-`roleFilters.ts`). Shown as a "Gender" column (via the shared `GenderBadge`
+`roleFilters.ts`). The Gender filter dropdown (all 3 pages below) also
+offers a third option, **"Not tagged"** — sent to the API as the literal
+string `gender=UNKNOWN`, a frontend-only sentinel with no matching DB value.
+Both routes special-case it to `c.gender IS NULL` OR'd alongside the normal
+`= ANY(...)` match on any other selected values, since `x = ANY(array)` can
+never match a SQL NULL no matter what's in the array — selecting Male +
+"Not tagged" together correctly returns the union of both, not neither.
+Shown as a "Gender" column (via the shared `GenderBadge`
 component, `components/shared/Badges.tsx` — plain M/F, or a dash for
 Unknown) immediately after the candidate-name column on every page that
 lists candidates: Active Candidates (`Candidates.tsx`), Archived Pipeline

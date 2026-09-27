@@ -176,7 +176,7 @@ export default function TalentPool() {
         <MultiSelectFilter label="Department" options={DEPARTMENTS} selected={departments} onChange={resetAndSet<string[]>(setDepartments)} />
         <MultiSelectFilter label="Location"   options={LOCATIONS}   selected={locations}   onChange={resetAndSet<string[]>(setLocations)} />
         <MultiSelectFilter label="Role"       options={roleOptions} selected={roleIds}     onChange={resetAndSet<string[]>(setRoleIds)} />
-        <MultiSelectFilter label="Gender" options={[{ value: 'M', label: 'Male' }, { value: 'F', label: 'Female' }]} selected={genders} onChange={resetAndSet<string[]>(setGenders)} />
+        <MultiSelectFilter label="Gender" options={[{ value: 'M', label: 'Male' }, { value: 'F', label: 'Female' }, { value: 'UNKNOWN', label: 'Not tagged' }]} selected={genders} onChange={resetAndSet<string[]>(setGenders)} />
       </div>
 
       {/* Results — table, same column model as Candidates.tsx (item #8.2):
