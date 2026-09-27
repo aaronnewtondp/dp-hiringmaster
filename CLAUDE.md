@@ -509,6 +509,60 @@ One-time backfill for existing candidates missing the tag:
 overwrites an already-set value, whether auto-tagged or HR-corrected), safe
 to re-run.
 
+### PWA installability (2026-09-28) — installable icon only, NOT offline-first
+`vite-plugin-pwa` (`frontend/vite.config.ts`) adds a web manifest + a minimal
+Workbox service worker so the app can be added to a phone/desktop home screen
+and launch full-screen with no browser chrome. This is **installability
+only** — it does not make the app work offline, and deliberately never will:
+there is no scenario where an HR user needs live candidate/role data with no
+internet, and caching an API response at all risks a lost/shared/logged-out
+device still showing stale candidate PII (CTC, scores) offline. Every
+`/api/*` GET is an explicit `NetworkOnly` Workbox route (`vite.config.ts`'s
+`workbox.runtimeCaching`) — never intercepted or served from cache, always a
+real network round-trip; only the built JS/CSS/HTML app shell + icons are
+precached. `registerType: 'autoUpdate'` (`skipWaiting`+`clientsClaim`, wired
+via `main.tsx`'s `registerSW({ immediate: true })` from
+`virtual:pwa-register`) means a new deploy takes over silently on next load —
+no "update available" prompt UI — since a stuck-on-stale-bundle install would
+be a worse failure than an unannounced refresh for an internal tool.
+
+**This does NOT fix mobile/tablet usability by itself** — that's a separate,
+still-open problem (`Layout.tsx`/`Sidebar.tsx` have no responsive breakpoint
+logic at all today, and 5 of 15 pages handle dense HR tables purely via
+horizontal scroll). PWA-ness and responsive layout are independent; an
+installed non-responsive app is still a non-responsive app, just in a window
+with no back button.
+
+**Known real risk, not yet resolved**: this app's Google sign-in
+(`Login.tsx`'s inline Google Identity Services button/popup pattern) has a
+documented compatibility problem running inside an installed/standalone-mode
+PWA on iOS — the OAuth popup can hang because the app can't receive its
+response in that display mode. Fixing this needs the login page to detect
+standalone mode (`navigator.standalone` / `(display-mode: standalone)`) and
+fall back to a redirect-based flow there instead of the popup — **not yet
+implemented**, and must be verified on a real iPhone (not Chrome DevTools
+device emulation) before telling any HR user to install the app on iOS.
+
+Icons (`frontend/public/icons/icon-{192,512}.png`,
+`frontend/public/apple-touch-icon.png`) are cropped from the existing
+`backend/src/assets/dp_logo_white.png` droplet+recycle glyph on the brand's
+navy-800 (`#002454`) background — iOS ignores manifest icons entirely and
+needs its own `<link rel="apple-touch-icon">` in `index.html`, which is
+separate from the three manifest.json entries.
+
+Verification note: the plugin's dev-mode service worker registration
+(`devOptions.enabled`) was deliberately left off (default) so local `npm run
+dev` is unaffected; the manifest/service-worker were verified via a real
+`npm run build && npm run preview` production build (manifest.webmanifest
+content, generated `sw.js`'s precache list, and its `NetworkOnly` `/api/`
+route were all inspected directly) — actual browser install-prompt/service-
+worker-registration behavior could not be observed inside this session's own
+sandboxed Browser-pane Chromium build specifically (service worker
+registration fails there even for a trivial one-line test worker, on every
+origin, which points to that pane disabling Service Workers entirely rather
+than anything specific to this app) — verify registration in a real desktop
+Chrome tab or on a real device before relying on it.
+
 ### SLA / aging checks — compute-on-read, not cron
 Vercel Hobby tier does not support sub-hourly cron, so the SLA checker
 (`backend/src/jobs/slaChecker.ts`) does **not** rely on a scheduler in
