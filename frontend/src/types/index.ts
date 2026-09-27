@@ -141,6 +141,11 @@ export interface Candidate {
   // GET /api/candidates/:id only (LEFT JOIN) — the agency's name, for
   // read-mode display since sourced_by_agency_id is just the id.
   sourced_by_agency_name?: string;
+  // Auto-tagged from full_name at creation (backend genderClassifier.ts) —
+  // null means "Unknown" (unrecognized or a deliberately-excluded
+  // ambiguous/unisex name), a real, filterable, displayable state, never
+  // coerced to M or F. HR-editable like any other field.
+  gender?:                'M' | 'F' | null;
 
   // Present on GET /api/candidates (LEFT JOIN) — null when the candidate has
   // no applications yet (e.g. an ingested candidate whose "role applying
@@ -223,6 +228,7 @@ export interface Application {
 
   // Joined from backend
   candidate_name?:             string;
+  candidate_gender?:           'M' | 'F' | null;
   email?:                      string;
   role_title?:                 string;
   role_priority?:              Priority;

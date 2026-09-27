@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { ReactNode, useState } from 'react';
 import { Pencil, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Spinner } from './Badges.tsx';
+import InfoTooltip from './InfoTooltip.tsx';
 
 export type FieldType = 'text' | 'textarea' | 'number' | 'select' | 'multiselect' | 'boolean' | 'date' | 'tags' | 'json';
 
@@ -34,6 +35,13 @@ interface EditableSectionProps {
   onSave: (changes: Record<string, unknown>) => Promise<void>;
   /** key -> label shown (with a spinner, in place of "—") while the field is empty — e.g. "Generating JD…" for a Drive link an async job is about to fill in. Purely a read-mode display hint; the field is still fully editable by hand at any time. */
   pendingLabels?: Record<string, string>;
+  /** Optional info tooltip rendered next to the section title — for a
+      section whose fields have non-obvious behavior worth a one-line
+      explanation (e.g. Links & Assets on RoleDetail, where the JD links may
+      be auto-generated or a manually-provided document depending on the
+      role). Omitted entirely (no visual change) for every caller that
+      doesn't pass it. */
+  tooltip?: ReactNode;
 }
 
 type DraftValue = string | boolean | string[];
@@ -97,7 +105,7 @@ function fromDraftValue(draft: DraftValue, type: FieldType): unknown {
  * per-section, matching ROADMAP.md's "per field or per section" scope for
  * Roles/Candidates/Agencies inline editing).
  */
-export default function EditableSection({ title, data: rawData, fields, onSave, pendingLabels }: EditableSectionProps) {
+export default function EditableSection({ title, data: rawData, fields, onSave, pendingLabels, tooltip }: EditableSectionProps) {
   const data = rawData as Record<string, unknown>;
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState<Record<string, DraftValue>>({});
@@ -163,7 +171,10 @@ export default function EditableSection({ title, data: rawData, fields, onSave, 
   return (
     <div className="card p-5 space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+        <div className="flex items-center gap-1.5">
+          <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+          {tooltip && <InfoTooltip align="left" text={tooltip} />}
+        </div>
         {!isEditing && (
           <button onClick={startEdit} className="text-gray-400 hover:text-dp-600 p-1" title={`Edit ${title}`}>
             <Pencil className="w-3.5 h-3.5" />

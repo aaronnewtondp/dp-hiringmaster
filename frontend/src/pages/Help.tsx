@@ -33,7 +33,11 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             <p className="mt-2">Further down: <strong>Aging roles</strong> (every role currently
             Approved, Live – Sourcing, or On Hold, with days-open shown for all of them — only
             ones actually past their Close Target get a red/yellow flag, sorted to the top; On
-            Hold roles are listed for reference but never flagged), the <strong>Hiring
+            Hold roles are listed for reference but never flagged. A red <strong>!</strong> next to
+            a role's name means no candidate on that role has had any real movement — a stage/
+            status change, an HR note, feedback — in 3+ days; new applications arriving don't
+            count toward this, so a role can't look active just because people are still applying
+            to it while nobody's actually working the pipeline), the <strong>Hiring
             funnel</strong> chart
             (every stage, broken into Active/Rejected/Withdrawn/Hold for Future so a stage never
             silently disappears just because nobody's currently sitting there), Source Quality,
@@ -87,6 +91,11 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             match any role in the system closely enough to auto-link. HR can link each one
             manually, use the suggested-role quick link when the system found a likely match, or
             delete the candidate outright.</p>
+            <p className="mt-2">Every candidate also carries a best-effort <strong>Gender</strong>{' '}
+            tag (M/F), auto-computed from their first name — an unrecognized or genuinely
+            ambiguous name is left blank rather than guessed, and it's editable like any other
+            field if the auto-tag is wrong. Filterable alongside every other master filter,
+            here and on Archived Pipeline and My Tasks' Ready for Review.</p>
           </>
         ),
       },
@@ -108,6 +117,17 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
           already has notes on it. If it's empty, click <strong>+ Add HR Screening Notes</strong>{' '}
           to reveal the fields and start one — this keeps the page from showing an empty panel on
           every application that's never needed one.</p>
+        ),
+      },
+      {
+        id: 'reference-checks',
+        question: 'Where do I record a reference check?',
+        answer: (
+          <p>On a candidate's page, add a reference check with the reference's name, phone
+          number, and relationship to the candidate, plus the feedback they gave and optional
+          call notes. Each one is logged individually — a candidate can have more than one
+          reference check on record, and each stays attached to the specific application it was
+          taken for.</p>
         ),
       },
       {
@@ -143,12 +163,19 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
         question: 'What\'s the difference between My Tasks and Scorecard Summary?',
         answer: (
           <>
-            <p><strong>My Tasks</strong> is your own personal worklist, scoped to what's actually
-            yours to act on: a <strong>Ready for review</strong> section (candidates who've
-            applied and are awaiting a shortlist decision — HR/Admin and Super Admin see everyone,
-            a Hiring Manager sees only their own role's candidates, and Leadership sees only candidates
-            flagged for Founder Review, since day-to-day shortlisting is HR/HM's job rather than
-            a leadership task), plus any interview or assignment feedback you personally owe.</p>
+            <p><strong>My Tasks</strong> is your own personal worklist, split into three tabs: a{' '}
+            <strong>Ready for review</strong> tab (candidates who've applied and are awaiting a
+            shortlist decision — HR/Admin and Super Admin see everyone, a Hiring Manager sees only
+            their own role's candidates, and Leadership sees only candidates flagged for Founder
+            Review, since day-to-day shortlisting is HR/HM's job rather than a leadership task),
+            a <strong>Feedback Due</strong> tab (interview/assignment feedback you personally
+            owe), and a third tab that differs by persona: HR/Admin and Super Admin see{' '}
+            <strong>Other Pending Actions</strong> (everything else actually theirs to resolve,
+            plus a separate <strong>Leadership Alerts</strong> panel — company-wide notices like
+            role-aging flags or the Feedback-Overdue escalation that nobody individually owns, kept
+            visible but not counted toward the actionable badge); Leadership sees that same
+            content directly as <strong>Leadership Alerts</strong>, since it's the whole point of
+            their tab, not an aside.</p>
             <p className="mt-1.5"><strong>Scorecard Summary</strong> is the full, org-wide table
             of every ResumeIQ-scored candidate side by side, with all 8 dimension scores and
             verdict — built for comparing candidates against each other, not just working through
@@ -168,6 +195,17 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
           be reviewed against what they've actually delivered. Hires are counted from a
           candidate's own Source field (set to Agency) reaching Offer Accepted or later, not from
           an older per-application field.</p>
+        ),
+      },
+      {
+        id: 'comp-benchmark',
+        question: 'What is the "Run benchmark" button on a role\'s page? (HR/Admin only)',
+        answer: (
+          <p>Compensation benchmarking for that specific role, based on its own requirements
+          (experience level, must-have skills, etc.) — not tied to any one candidate. It checks
+          this system's own internal comp-benchmark records first, and only falls back to general
+          market knowledge when there's no internal data for a role like this one. Same
+          visibility rule as every other compensation field: HR-tier only.</p>
         ),
       },
       {
@@ -231,6 +269,30 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
         ),
       },
       {
+        id: 'interview-scheduling',
+        question: 'What happens when I schedule an interview round?',
+        answer: (
+          <p>Setting a date/time and interviewer email(s) on a Standard round (Interview Round
+          1/2, Founders Round) sends a real Google Calendar invite to those interviewers — you'll
+          see a confirmation toast once it goes out. If the invite fails to send for any reason,
+          the round itself is still created (scheduling isn't blocked on it) and a warning shows
+          on the round instead, with a retry available. Assignment rounds don't go through
+          Calendar at all — see the Assignment email question above for how those work instead.</p>
+        ),
+      },
+      {
+        id: 'rejection-email',
+        question: 'Does rejecting a candidate notify them?',
+        answer: (
+          <p>Optionally, yes — after picking a rejection reason, an editable draft email is
+          generated for you (tone matched to the reason, but never exposing the literal internal
+          reason category to the candidate). Review or edit it, then send it in the same action
+          that marks the candidate Rejected — available both for a single candidate and for a
+          bulk rejection. Sending is optional; leaving it unchecked just rejects the candidate
+          with no email.</p>
+        ),
+      },
+      {
         id: 'sla-pending',
         question: 'What triggers a "pending action" or an "SLA breach"?',
         answer: (
@@ -249,6 +311,18 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             whenever the Dashboard loads — there's no separate button to trigger them, and a
             breach resolves itself the moment its underlying condition is actually addressed
             (not just on the next scheduled check).</p>
+            <p className="mt-2"><strong>Hiring SOP v2.1 — score-tiered windows:</strong> at Applied
+            and Screened, Interview Round 1/2, Founders Round, and Assignment Round, a high-scored
+            candidate (ResumeIQ fit score 75+) gets a tighter 24h window instead of the standard
+            48h — on both the HR-facing side (shortlist/schedule/send) and the Hiring-Manager-facing
+            "Feedback Due" side. Idle Candidate and Assignment Feedback Due (96h) are untouched by
+            this — it's a targeted change for five named stages, not a blanket halving.</p>
+            <p className="mt-2"><strong>Leadership escalation:</strong> if a Standard-round
+            (Interview 1/2, Founders) Feedback Due breach is still open 96h after the interview,
+            HMS raises a second, Leadership-owned flag — <strong>Feedback Overdue — Leadership
+            Escalation</strong>, shown under My Tasks' Leadership Alerts — alongside the original
+            Hiring-Manager-owned one, which stays open in parallel until feedback is actually
+            submitted. This is additional visibility, not a replacement for the original flag.</p>
           </>
         ),
       },
@@ -298,9 +372,20 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
         id: 'jd-gen',
         question: 'Where do generated job descriptions come from?',
         answer: (
-          <p>Once a role is approved, the Hiring Master System can generate both a long-form JD (2-page PDF) and a
-          social-sharable graphic version directly from the role's data, and store both on
-          Drive with links surfaced on the role's detail page.</p>
+          <>
+            <p>Once a role is approved, the Hiring Master System can generate both a long-form JD (2-page PDF) and a
+            social-sharable graphic version directly from the role's data, and store both on
+            Drive with links surfaced on the role's detail page. A <strong>Regenerate JD</strong>{' '}
+            button lets HR re-run generation later (content edit, layout fix) — this always
+            overwrites both the long-form and social JD.</p>
+            <p className="mt-2">Some roles have a long-form JD written entirely outside the
+            system instead (a founder- or hiring-manager-authored PDF). For those, the role's
+            long-form JD link points directly at that original document rather than a
+            system-generated one, the Regenerate JD button doesn't appear (there's nothing here
+            for it to regenerate), and ResumeIQ scores candidates against the real content of
+            that externally-authored JD, not a short fallback. The social JD is still
+            auto-generated from it as usual.</p>
+          </>
         ),
       },
       {

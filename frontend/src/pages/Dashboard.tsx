@@ -24,11 +24,11 @@ const SLA_BREACH_TYPES_INFO = (
     <div className="font-medium text-white">SLA breach types</div>
     <ul className="space-y-1">
       <li><b>Idle Candidate</b> — no stage change in 48h+ (Reference Check, Pre-Joining Docs, Offer Discussion, Offer Released)</li>
-      <li><b>Resume Shortlist Pending</b> — HM hasn't shortlisted within 48h of Applied</li>
+      <li><b>Resume Shortlist Pending</b> — HM hasn't shortlisted within 48h of Applied (24h if fit score ≥75)</li>
       <li><b>Interview/Founders Round Not Scheduled</b> — no round booked within 48h of entering that stage</li>
       <li><b>Assignment Not Sent</b> — assignment not sent within 48h of entering Assignment Round</li>
-      <li><b>Interview/Founders Feedback Due</b> — HM hasn't submitted feedback within 48h of the interview</li>
-      <li><b>Assignment Feedback Due</b> — HM hasn't submitted feedback within 96h of the assignment being sent</li>
+      <li><b>Interview/Founders Feedback Due</b> — HM hasn't submitted feedback within 48h of the interview (24h if fit score ≥75); still open 96h later also raises a Leadership-owned "Feedback Overdue — Leadership Escalation" alert alongside it</li>
+      <li><b>Assignment Feedback Due</b> — HM hasn't submitted feedback within 96h of the assignment being sent (untouched by the score-tiering above)</li>
       <li><b>Joining risk — no contact</b> — no HR contact logged in 5+ days after Offer Accepted</li>
     </ul>
   </div>

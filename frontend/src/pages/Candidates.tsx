@@ -5,7 +5,7 @@ import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, ChevronsUpDown, Tra
 import toast from 'react-hot-toast';
 import { applicationsApi, candidatesApi, rolesApi } from '../services/api.ts';
 import { Application, STAGES, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS, REJECTION_REASONS, WITHDRAWAL_REASONS, OVER_BUDGET_SHORTLIST_REASONS } from '../types/index.ts';
-import { StageBadge, StatusBadge, FitScore, SlaBadge, OverBudgetBadge, Spinner, EmptyState, PriorityBadge } from '../components/shared/Badges.tsx';
+import { StageBadge, StatusBadge, FitScore, SlaBadge, OverBudgetBadge, Spinner, EmptyState, PriorityBadge, GenderBadge } from '../components/shared/Badges.tsx';
 import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
@@ -57,6 +57,7 @@ export default function Candidates() {
   const [locations,   setLocations]   = usePersistedState<string[]>('candidates.locations', []);
   const [modes,       setModes]       = usePersistedState<string[]>('candidates.modes', []);
   const [priorities,  setPriorities]  = usePersistedState<string[]>('candidates.priorities', []);
+  const [genders,     setGenders]     = usePersistedState<string[]>('candidates.genders', []);
   const [applicationStatuses, setApplicationStatuses] = usePersistedState<string[]>('candidates.statuses', []);
   const [deleteCandidate, setDeleteCandidate] = useState<{ id: string; full_name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -120,6 +121,7 @@ export default function Candidates() {
   if (locations.length)        params.location = locations;
   if (modes.length)            params.recruitment_mode = modes;
   if (priorities.length)       params.priority = priorities;
+  if (genders.length)          params.gender = genders;
   // This page's "Status" filter means the APPLICATION's own status
   // (Active/Rejected/etc) — unlike Dashboard/Roles, where "Status" means
   // role status (Draft/Approved/etc, sent as role_status). Sent as this
@@ -127,7 +129,7 @@ export default function Candidates() {
   if (applicationStatuses.length) params.status = applicationStatuses;
 
   const { data, isLoading } = useQuery<{ data: { applications: Application[] } }>({
-    queryKey: ['applications', search, filterStage, filterSla, roleIds, departments, locations, modes, priorities, applicationStatuses],
+    queryKey: ['applications', search, filterStage, filterSla, roleIds, departments, locations, modes, priorities, genders, applicationStatuses],
     queryFn:  () => applicationsApi.list(params),
   });
 
@@ -428,6 +430,7 @@ export default function Candidates() {
         <div className="shrink-0"><MultiSelectFilter label="Location"         options={LOCATIONS}     selected={locations}    onChange={setLocations} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Recruitment Mode" options={modeOptions}   selected={modes}         onChange={setModes} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Priority"         options={PRIORITIES}    selected={priorities}   onChange={setPriorities} /></div>
+        <div className="shrink-0"><MultiSelectFilter label="Gender" options={[{ value: 'M', label: 'Male' }, { value: 'F', label: 'Female' }]} selected={genders} onChange={setGenders} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Status"           options={APPLICATION_STATUSES} selected={applicationStatuses} onChange={setApplicationStatuses} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Role" options={roleOptions} selected={roleIds} onChange={setRoleIds} /></div>
         <button
@@ -482,6 +485,7 @@ export default function Candidates() {
                 )}
                 {[
                   { label: 'Candidate', width: 'w-[140px]' },
+                  { label: 'Gender', width: 'w-[48px]' },
                   { label: 'Role', width: 'w-[100px]' },
                   { label: 'Stage', width: 'w-[90px]' },
                   { label: 'Fit', width: 'w-[64px]', sortKey: 'fit' as const },
@@ -551,6 +555,7 @@ export default function Candidates() {
                       </div>
                     </div>
                   </td>
+                  <td className="table-td px-2 py-4"><GenderBadge gender={app.candidate_gender} /></td>
                   <td className="table-td px-2 py-4 truncate">
                     <Link to={`/roles/${app.role_id}`} className="text-sm text-gray-700 hover:text-dp-600 block truncate">
                       {app.role_title}

@@ -1,4 +1,5 @@
 import { Application } from '../types/index.ts';
+import InfoTooltip from './shared/InfoTooltip.tsx';
 
 // ─── 8-dimension ResumeIQ table — mirrors digitalpaani-candidate-scoring output exactly
 export default function ResumeIQPanel({ app }: { app: Application }) {
@@ -39,7 +40,10 @@ export default function ResumeIQPanel({ app }: { app: Application }) {
   return (
     <div className="border-t border-gray-100 pt-3 mt-3">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">ResumeIQ Analysis</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">ResumeIQ Analysis</span>
+          <InfoTooltip align="left" text="Scored automatically the moment this candidate applied, across 8 dimensions — averaged into the score shown here. Reads the actual resume text from Drive when it can; falls back to scoring from profile fields alone if the resume can't be fetched (see the 'No resume read' tag when that happens), rather than failing outright." />
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-lg font-bold text-gray-900">{Number(app.score_avg).toFixed(1)}</span>
           <span className="text-xs text-gray-400">/10</span>

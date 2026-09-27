@@ -34,6 +34,7 @@ import 'dotenv/config';
 import * as XLSX from 'xlsx';
 import { query, queryOne, pool } from '../db/index.js';
 import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
+import { classifyGender } from '../utils/genderClassifier.js';
 import { Candidate } from '../types/index.js';
 
 interface ParsedRow {
@@ -188,6 +189,12 @@ async function findOrCreateCandidate(row: ParsedRow, dryRun: boolean): Promise<{
         values.push(fieldValues[field]);
       }
     }
+    // Same fill-null-only treatment for gender, auto-tagged from name —
+    // not one of PROFILE_FIELDS since it's derived, not a Naukri export column.
+    if (candidateAsRecord.gender == null) {
+      const gender = classifyGender(row.name);
+      if (gender) { updates.push(`gender = $${i++}`); values.push(gender); }
+    }
     if (updates.length && !dryRun) {
       values.push(existing.id);
       await query(`UPDATE candidates SET ${updates.join(', ')} WHERE id = $${i}`, values);
@@ -200,10 +207,11 @@ async function findOrCreateCandidate(row: ParsedRow, dryRun: boolean): Promise<{
   const created = await queryOne<{ id: string }>(
     `INSERT INTO candidates (
        full_name, email, phone, current_location, years_of_experience,
-       current_company, current_designation, current_ctc_fixed, notice_period_days, source
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Naukri/IIMjobs') RETURNING id`,
+       current_company, current_designation, current_ctc_fixed, notice_period_days, source, gender
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Naukri/IIMjobs',$10) RETURNING id`,
     [row.name, row.email, row.phone, row.currentLocation, row.yearsOfExperience,
-     row.currentCompany, row.currentDesignation, row.currentCtcFixed, row.noticePeriodDays]
+     row.currentCompany, row.currentDesignation, row.currentCtcFixed, row.noticePeriodDays,
+     classifyGender(row.name)]
   );
   return { id: created!.id, isNew: true };
 }

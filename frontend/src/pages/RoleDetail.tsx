@@ -330,6 +330,7 @@ export default function RoleDetail() {
         <div className="space-y-2">
           <EditableSection
             title="Links & Assets"
+            tooltip="Long-form and Social JD are normally auto-generated once a role is Approved, and can be re-run any time via Regenerate JD below. Some roles instead have a long-form JD written entirely outside the system — for those, this link points directly at that original document, Regenerate JD doesn't appear, and ResumeIQ scores against that document's real content."
             data={role}
             onSave={saveRoleFields}
             pendingLabels={role.status === 'Approved' ? {

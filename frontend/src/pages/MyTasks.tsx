@@ -10,6 +10,7 @@ import ScorecardSummary from './ScorecardSummary.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { formatDistanceToNow } from 'date-fns';
+import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 
 // Sentinel role_id used when a Hiring Manager owns no roles at all — mirrors
 // applyHiringManagerRoleLock's own backend convention (roleFilters.ts) so an
@@ -175,7 +176,15 @@ export default function MyTasks() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">My Tasks</h1>
+        <div className="flex items-center gap-1.5">
+          <h1 className="text-xl font-semibold text-gray-900">My Tasks</h1>
+          <InfoTooltip
+            align="left"
+            text={isLeadership
+              ? "Leadership Alerts is company-wide role-aging/compensation notices and the Feedback-Overdue escalation — visibility, not a personal to-do list, since nobody individually resolves these here."
+              : "Other Pending Actions only counts what's genuinely yours to resolve. Role-aging/compensation notices nobody can individually act on show separately in a Leadership Alerts panel below it — visible, never hidden, just not counted toward the badge."}
+          />
+        </div>
         <p className="text-sm text-gray-400 mt-1">
           {isLeadership
             ? 'Founder-flagged candidates awaiting a shortlist decision, feedback due from you, and everything else pending'

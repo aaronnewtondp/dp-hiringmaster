@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { PriorityBadge, StageBadge, StatusBadge, AgingBadge, FitScore, SlaBadge, OverBudgetBadge } from './Badges.tsx';
+import { PriorityBadge, StageBadge, StatusBadge, AgingBadge, FitScore, SlaBadge, OverBudgetBadge, GenderBadge } from './Badges.tsx';
 
 describe('PriorityBadge', () => {
   it('renders the priority label', () => {
@@ -54,6 +54,18 @@ describe('FitScore', () => {
   it('renders the numeric score when present', () => {
     render(<FitScore score={82} />);
     expect(screen.getByText('82')).toBeInTheDocument();
+  });
+});
+
+describe('GenderBadge', () => {
+  it('renders M/F as-is', () => {
+    render(<GenderBadge gender="M" />);
+    expect(screen.getByText('M')).toBeInTheDocument();
+  });
+
+  it('renders a dash (not a guess) for null/undefined gender', () => {
+    render(<GenderBadge gender={null} />);
+    expect(screen.getByText('—')).toBeInTheDocument();
   });
 });
 

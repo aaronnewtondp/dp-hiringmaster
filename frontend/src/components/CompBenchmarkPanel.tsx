@@ -3,6 +3,7 @@ import { Calculator } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../services/api.ts';
 import { Spinner } from './shared/Badges.tsx';
+import InfoTooltip from './shared/InfoTooltip.tsx';
 
 interface BenchmarkResult {
   source:        'internal_data' | 'ai_estimate';
@@ -37,6 +38,7 @@ export default function CompBenchmarkPanel({ roleId }: { roleId: string }) {
     <div className="card p-5 space-y-3">
       <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
         <Calculator className="w-4 h-4 text-gray-400" /> Internal Compensation Benchmarking
+        <InfoTooltip align="left" text="Benchmarks this role itself (its experience level, must-have skills, etc.), not any one candidate. Checks this system's own internal comp-benchmark records first, and only falls back to general market knowledge when there's no internal data for a role like this one." />
       </h2>
       <button onClick={run} disabled={loading} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
         {loading && <Spinner size="sm" />} Run benchmark

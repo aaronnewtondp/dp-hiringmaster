@@ -421,6 +421,45 @@ own portal page, not a fetchable resume file) or `expected_ctc` (the export
 only has current salary) — ResumeIQ scores these candidates on profile
 fields only, same graceful fallback as any candidate with no resume on file.
 
+### Candidate gender auto-tagging (2026-09-28)
+`candidates.gender` (`'M'` / `'F'` / `NULL`) is auto-computed server-side from
+`full_name` at every candidate-creation code path (`candidates.ts`'s
+`POST /`, `candidateIngest.ts`'s new-candidate branch, `importNaukriExcel.ts`'s
+`findOrCreateCandidate()`), via `backend/src/utils/genderClassifier.ts` — a
+dictionary (several hundred common Indian first names, organized by
+region/community) plus a small, high-confidence suffix-heuristic fallback.
+**`NULL` means "Unknown," a real and deliberate result** — an unrecognized
+name, or a known unisex/ambiguous Indian name (Kiran, Simran, Manpreet, and
+similar), is never force-guessed; gender is a sensitive attribute, and a
+wrong tag is worse than an honest "don't know." Real-world spot-check against
+a random production sample: ~60% tagged, effectively zero visible false
+positives among the tagged set — recall over precision was the deliberate
+tradeoff. The existing-candidate `UPDATE` branches in `candidateIngest.ts`/
+`importNaukriExcel.ts` also backfill `gender` fill-null-only (same pattern as
+every other profile field there), so a repeat applicant or re-run Naukri
+import can still pick up a tag it missed the first time.
+
+Plain, HR-editable field via `PATCH /api/candidates/:id` (not read-only) —
+the auto-tag is best-effort, and HR can always correct it. Filterable via
+`?gender=M/F` on both `GET /api/candidates` and `GET /api/applications`
+(candidates.ts/applications.ts, same hand-rolled `AND c.gender = ANY($n)`
+pattern as their existing `q`/`skills`/`tag` filters — this is a
+candidate-level filter, not a role-level one, so it does NOT live in
+`roleFilters.ts`). Shown as a "Gender" column (via the shared `GenderBadge`
+component, `components/shared/Badges.tsx` — plain M/F, or a dash for
+Unknown) immediately after the candidate-name column on every page that
+lists candidates: Active Candidates (`Candidates.tsx`), Archived Pipeline
+(`TalentPool.tsx`), and My Tasks' "Ready for Review" (embedded
+`ScorecardSummary.tsx` — note its `SCORECARD_COLS_BEFORE_DIMS` colSpan
+constant had to bump from 10 to 11 to account for the new column). These are
+three fully independent hand-written JSX tables, not a shared component —
+a future column/filter addition needs the same edit made three times.
+
+One-time backfill for existing candidates missing the tag:
+`npx tsx src/scripts/backfillGender.ts [--dry-run]` — fill-null-only (never
+overwrites an already-set value, whether auto-tagged or HR-corrected), safe
+to re-run.
+
 ### SLA / aging checks — compute-on-read, not cron
 Vercel Hobby tier does not support sub-hourly cron, so the SLA checker
 (`backend/src/jobs/slaChecker.ts`) does **not** rely on a scheduler in

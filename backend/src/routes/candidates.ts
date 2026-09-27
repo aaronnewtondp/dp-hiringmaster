@@ -6,6 +6,7 @@ import { parseRoleFilters, buildRoleFilterSql, hasActiveFilters } from '../utils
 import { isSeverelyOverBudget } from '../utils/budget.js';
 import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
 import { fetchUnmatchedCandidates } from '../utils/unmatchedCandidates.js';
+import { classifyGender } from '../utils/genderClassifier.js';
 
 const router = Router();
 router.use(authenticate);
@@ -14,7 +15,7 @@ router.use(authenticate);
 
 // ─── GET /api/candidates — search across all candidates ──────────────────────
 router.get('/', async (req: Request, res: Response) => {
-  const { q, skills, industry, tag, hold_for_future, archived, unlinked, limit = '50', offset = '0' } = req.query;
+  const { q, skills, industry, tag, gender, hold_for_future, archived, unlinked, limit = '50', offset = '0' } = req.query;
 
   let sql = `
     SELECT c.*,
@@ -47,6 +48,10 @@ router.get('/', async (req: Request, res: Response) => {
   if (tag) {
     sql += ` AND $${i++} = ANY(c.hr_tags)`;
     params.push(tag);
+  }
+  if (gender) {
+    sql += ` AND c.gender = ANY($${i++}::text[])`;
+    params.push(Array.isArray(gender) ? gender : [gender]);
   }
   // Talent Pool / Archival (PRD §21) — the PRD's own suggested query
   // (?tag=Hold+for+Future) doesn't actually work: nothing auto-tags hr_tags
@@ -222,6 +227,12 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
 
   if (!full_name) { res.status(400).json({ error: 'full_name required' }); return; }
 
+  // Auto-tagged from full_name — see genderClassifier.ts's own header for
+  // methodology and why an unrecognized/ambiguous name deliberately stays
+  // null ("Unknown") rather than being guessed. req.body.gender lets a
+  // caller (e.g. a future form field) override this outright.
+  const gender = req.body.gender ?? classifyGender(full_name);
+
   // Same gate as PATCH /:id — 'source' is optional, but 'Agency' requires
   // naming which agency sourced this candidate.
   if (source === 'Agency' && !sourced_by_agency_id) {
@@ -253,15 +264,15 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
          current_ctc_fixed, current_ctc_variable, current_esops, expected_ctc,
          notice_period_days, current_company, current_industry, current_designation,
          current_location, years_of_experience, resume_drive_link, languages_known,
-         source, sourced_by_agency_id
+         source, sourced_by_agency_id, gender
        )
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
       [
         full_name, email?.toLowerCase(), phone, linkedin_url,
         current_ctc_fixed ?? null, current_ctc_variable ?? null, current_esops ?? null, expected_ctc ?? null,
         notice_period_days ?? null, current_company ?? null, current_industry ?? null, current_designation ?? null,
         current_location ?? null, years_of_experience ?? null, resume_drive_link ?? null, languages_known ?? null,
-        source || null, source === 'Agency' ? sourced_by_agency_id : null,
+        source || null, source === 'Agency' ? sourced_by_agency_id : null, gender,
       ]
     );
     const candidate = cand.rows[0] as Candidate;
@@ -387,7 +398,7 @@ router.patch('/:id', requireHR, async (req: Request, res: Response) => {
     'current_ctc_fixed','current_ctc_variable','current_esops','expected_ctc',
     'notice_period_days','current_company','current_industry','current_designation',
     'current_location','years_of_experience','resume_drive_link','languages_known',
-    'source','sourced_by_agency_id',
+    'source','sourced_by_agency_id','gender',
   ];
 
   const updates: string[] = [];

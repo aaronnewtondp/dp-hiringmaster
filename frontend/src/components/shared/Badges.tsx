@@ -65,6 +65,13 @@ export function AgingBadge({ alert, daysOpen, daysOverdue }: { alert: AgingAlert
   return <span className="text-xs font-mono text-gray-500">{daysOpen}d open</span>;
 }
 
+// ─── Gender tag — 'M'/'F' shown as-is, unrecognized/ambiguous names show a
+// plain dash rather than guessing (see backend genderClassifier.ts) ─────────
+export function GenderBadge({ gender }: { gender?: 'M' | 'F' | null }) {
+  if (!gender) return <span className="text-xs text-gray-400" title="Unknown">—</span>;
+  return <span className="text-xs font-medium text-gray-600">{gender}</span>;
+}
+
 // ─── Fit score ────────────────────────────────────────────────────────────────
 export function FitScore({ score }: { score?: number | null }) {
   if (score == null) return <span className="text-xs text-gray-400">—</span>;

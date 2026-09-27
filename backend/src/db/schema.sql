@@ -935,3 +935,14 @@ ALTER TABLE applications
 --   OR (table_name='roles' AND column_name IN ('new_or_replacement','vacancy_reason','appointment_type','qualification_required','requisition_source_row'))
 --   OR (table_name='users' AND column_name IN ('google_id','avatar_url','auth_provider'))
 -- ) ORDER BY table_name, column_name;
+
+-- ─── Candidate gender auto-tag (2026-09-28) ───────────────────────────────────
+-- Best-effort M/F tag, auto-computed server-side from full_name at candidate
+-- creation via backend/src/utils/genderClassifier.ts (dictionary + suffix
+-- heuristics, India-focused — see that file's own header for the research
+-- and the deliberate choice to return NULL rather than force a guess on an
+-- unrecognized or genuinely unisex name). NULL means "Unknown", a real,
+-- filterable state, not an error — never coerced to M or F anywhere this is
+-- read. Plain nullable/editable like any other candidate field, not a
+-- read-only computed column, since HR can always correct a wrong auto-tag.
+ALTER TABLE candidates ADD COLUMN gender TEXT CHECK (gender IN ('M','F'));

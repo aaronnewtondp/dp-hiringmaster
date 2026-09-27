@@ -103,6 +103,11 @@ export interface Candidate {
   // Application.source_channel (how one specific application arrived).
   source?:                'Naukri/IIMjobs' | 'LinkedIn' | 'Internal Referral' | 'Agency' | 'Direct Outreach';
   sourced_by_agency_id?:  string;
+  // Auto-tagged from full_name at creation (genderClassifier.ts) — null means
+  // "Unknown" (unrecognized or a deliberately-excluded ambiguous/unisex
+  // name), a real, filterable state, never coerced to M or F. Plain,
+  // HR-editable field, not read-only, since the auto-tag is best-effort.
+  gender?:                'M' | 'F' | null;
   created_at:             string;
   updated_at:             string;
 }

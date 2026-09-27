@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { Search, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { candidatesApi, rolesApi } from '../services/api.ts';
 import { Candidate, DEPARTMENTS, LOCATIONS } from '../types/index.ts';
-import { StageBadge, StatusBadge, FitScore, Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import { StageBadge, StatusBadge, FitScore, Spinner, EmptyState, GenderBadge } from '../components/shared/Badges.tsx';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -47,6 +47,7 @@ export default function TalentPool() {
   const [departments,  setDepartments]  = usePersistedState<string[]>('talentpool.departments', []);
   const [locations,    setLocations]    = usePersistedState<string[]>('talentpool.locations', []);
   const [roleIds,      setRoleIds]      = usePersistedState<string[]>('talentpool.roleIds', []);
+  const [genders,      setGenders]      = usePersistedState<string[]>('talentpool.genders', []);
   const [offset,       setOffset]       = useState(0);
   const [items,        setItems]        = useState<Candidate[]>([]);
   const [total,        setTotal]        = useState(0);
@@ -81,9 +82,10 @@ export default function TalentPool() {
   if (departments.length) params.department = departments;
   if (locations.length)   params.location = locations;
   if (roleIds.length)      params.role_id = roleIds;
+  if (genders.length)      params.gender = genders;
 
   const { data, isLoading } = useQuery<{ data: { candidates: Candidate[]; total: number } }>({
-    queryKey: ['talent-pool', mode, search, tag, skills, industry, departments, locations, roleIds, offset],
+    queryKey: ['talent-pool', mode, search, tag, skills, industry, departments, locations, roleIds, genders, offset],
     queryFn:  () => candidatesApi.list(params),
   });
 
@@ -174,6 +176,7 @@ export default function TalentPool() {
         <MultiSelectFilter label="Department" options={DEPARTMENTS} selected={departments} onChange={resetAndSet<string[]>(setDepartments)} />
         <MultiSelectFilter label="Location"   options={LOCATIONS}   selected={locations}   onChange={resetAndSet<string[]>(setLocations)} />
         <MultiSelectFilter label="Role"       options={roleOptions} selected={roleIds}     onChange={resetAndSet<string[]>(setRoleIds)} />
+        <MultiSelectFilter label="Gender" options={[{ value: 'M', label: 'Male' }, { value: 'F', label: 'Female' }]} selected={genders} onChange={resetAndSet<string[]>(setGenders)} />
       </div>
 
       {/* Results — table, same column model as Candidates.tsx (item #8.2):
@@ -197,6 +200,7 @@ export default function TalentPool() {
               <tr>
                 {[
                   { label: 'Candidate', width: 'w-[150px]' },
+                  { label: 'Gender', width: 'w-[48px]' },
                   { label: 'Role', width: 'w-[100px]' },
                   { label: 'Stage', width: 'w-[90px]' },
                   { label: 'Status', width: 'w-[90px]' },
@@ -256,6 +260,7 @@ export default function TalentPool() {
                       )}
                     </div>
                   </td>
+                  <td className="table-td px-2 py-4"><GenderBadge gender={c.gender} /></td>
                   <td className="table-td px-2 py-4 truncate">
                     <Link to={`/roles/${a.role_id}`} className="text-sm text-gray-700 hover:text-dp-600 block truncate">
                       {a.role_title}

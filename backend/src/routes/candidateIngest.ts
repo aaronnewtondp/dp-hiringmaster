@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { transaction } from '../db/index.js';
 import { Candidate } from '../types/index.js';
 import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
+import { classifyGender } from '../utils/genderClassifier.js';
 
 const router = Router();
 
@@ -111,6 +112,15 @@ router.post('/ingest', async (req: Request, res: Response) => {
         setClauses.push(`source = $${idx++}`);
         values.push('LinkedIn');
       }
+      // Same fill-null-only treatment for gender — not a submitted field
+      // either, auto-tagged from the (possibly just-refreshed) full_name.
+      if ((existing as unknown as { gender?: string }).gender == null) {
+        const gender = classifyGender(full_name);
+        if (gender) {
+          setClauses.push(`gender = $${idx++}`);
+          values.push(gender);
+        }
+      }
       values.push(existing.id);
       const updateResult = await client.query(
         `UPDATE candidates SET ${setClauses.join(', ')} WHERE id = $${idx} RETURNING *`,
@@ -123,14 +133,15 @@ router.post('/ingest', async (req: Request, res: Response) => {
            full_name, email, phone, linkedin_url,
            current_ctc_fixed, current_ctc_variable, current_esops, expected_ctc,
            notice_period_days, current_company, current_industry, current_designation,
-           current_location, years_of_experience, resume_drive_link, languages_known, source
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'LinkedIn') RETURNING *`,
+           current_location, years_of_experience, resume_drive_link, languages_known, source, gender
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'LinkedIn',$17) RETURNING *`,
         [
           full_name, normEmail, submitted.phone, submitted.linkedin_url,
           submitted.current_ctc_fixed, submitted.current_ctc_variable, submitted.current_esops,
           submitted.expected_ctc, submitted.notice_period_days, submitted.current_company,
           submitted.current_industry, submitted.current_designation, submitted.current_location,
           submitted.years_of_experience, submitted.resume_drive_link, submitted.languages_known,
+          classifyGender(full_name),
         ]
       );
       candidate = insertResult.rows[0] as Candidate;

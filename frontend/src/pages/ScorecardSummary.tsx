@@ -5,7 +5,7 @@ import { CheckCircle, PauseCircle, XCircle, Search, ChevronUp, ChevronDown, Chev
 import toast from 'react-hot-toast';
 import { applicationsApi, rolesApi } from '../services/api.ts';
 import { Application, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
-import { Spinner, EmptyState, OverBudgetBadge, StageBadge } from '../components/shared/Badges.tsx';
+import { Spinner, EmptyState, OverBudgetBadge, StageBadge, GenderBadge } from '../components/shared/Badges.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
 import RejectReasonModal from '../components/shared/RejectReasonModal.tsx';
@@ -70,7 +70,7 @@ const DIMENSIONS: Array<{ key: keyof Application; label: string }> = [
 // Before: checkbox, #, Candidate, Role, Stage, CTC→ECTC, Notice,
 // Preferred Location, Company/Industry, Resume. After: Avg, Verdict,
 // App. Age, Actions.
-const SCORECARD_COLS_BEFORE_DIMS = 10;
+const SCORECARD_COLS_BEFORE_DIMS = 11; // checkbox + 10 array columns (incl. Gender) before DIMENSIONS
 const SCORECARD_COLS_AFTER_DIMS = 4;
 
 // Same sortable-column pattern as Candidates.tsx (item #7) — Avg and
@@ -103,6 +103,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   const [locations,   setLocations]   = usePersistedState<string[]>('scorecard.locations', []);
   const [modes,       setModes]       = usePersistedState<string[]>('scorecard.modes', []);
   const [priorities,  setPriorities]  = usePersistedState<string[]>('scorecard.priorities', []);
+  const [genders,     setGenders]     = usePersistedState<string[]>('scorecard.genders', []);
   const [statuses,    setStatuses]    = usePersistedState<string[]>('scorecard.statuses', []);
   const [filterInBudget, setFilterInBudget] = usePersistedState('scorecard.inBudget', false);
 
@@ -167,6 +168,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   if (locations.length)   params.location = locations;
   if (modes.length)       params.recruitment_mode = modes;
   if (priorities.length)  params.priority = priorities;
+  if (genders.length)     params.gender = genders;
   if (personaScope?.founderFlagOnly) params.founder_flag = 'true';
   // Default to Active only — otherwise a Rejected/Hold-for-Future candidate
   // (who has already left this queue's whole reason for existing) would
@@ -176,7 +178,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   params.status = statuses.length ? statuses : ['Active'];
 
   const { data, isLoading } = useQuery<{ data: { applications: Application[] } }>({
-    queryKey: ['applications', 'scorecard', search, roleIds, departments, locations, modes, priorities, statuses, personaScope],
+    queryKey: ['applications', 'scorecard', search, roleIds, departments, locations, modes, priorities, genders, statuses, personaScope],
     queryFn:  () => applicationsApi.list(params),
   });
   const allApps = data?.data?.applications || [];
@@ -370,6 +372,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
         <div className="shrink-0"><MultiSelectFilter label="Location"         options={LOCATIONS}            selected={locations}   onChange={setLocations} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Recruitment Mode" options={modeOptions}          selected={modes}        onChange={setModes} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Priority"         options={PRIORITIES}           selected={priorities}  onChange={setPriorities} /></div>
+        <div className="shrink-0"><MultiSelectFilter label="Gender" options={[{ value: 'M', label: 'Male' }, { value: 'F', label: 'Female' }]} selected={genders} onChange={setGenders} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Status"           options={APPLICATION_STATUSES} selected={statuses}     onChange={setStatuses} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Role"             options={roleOptions}          selected={roleIds}      onChange={setRoleIds} /></div>
         <button
@@ -455,6 +458,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                 {[
                   { label: '#', width: 'w-[32px]' },
                   { label: 'Candidate', width: 'w-[150px]' },
+                  { label: 'Gender', width: 'w-[48px]' },
                   { label: 'Role', width: 'w-[120px]' },
                   { label: 'Stage', width: 'w-[100px]' },
                   { label: 'CTC → ECTC', width: 'w-[105px]' },
@@ -513,6 +517,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                       </Link>
                       <div className="text-xs text-gray-400 truncate">{app.email}</div>
                     </td>
+                    <td className="table-td px-1.5 py-3"><GenderBadge gender={app.candidate_gender} /></td>
                     <td className="table-td px-1.5 py-3 truncate">
                       <Link to={`/roles/${app.role_id}`} className="text-xs text-gray-700 hover:text-dp-600 block truncate">
                         {app.role_title}

@@ -47,10 +47,10 @@ async function logActivity(
 // ─── GET /api/applications — list with filters ────────────────────────────────
 router.get('/', async (req: Request, res: Response) => {
   const { stage, status, screening_status, sla_breach, founder_flag,
-          exclude_stale_archived, scored_only, scored_only_exempt_stage, q, limit = '50', offset = '0' } = req.query;
+          exclude_stale_archived, scored_only, scored_only_exempt_stage, q, gender, limit = '50', offset = '0' } = req.query;
 
   let sql = `
-    SELECT a.*, c.full_name AS candidate_name, c.email, c.phone,
+    SELECT a.*, c.full_name AS candidate_name, c.email, c.phone, c.gender AS candidate_gender,
            c.current_ctc_fixed AS candidate_ctc_fixed,
            c.current_ctc_variable AS candidate_ctc_variable,
            c.expected_ctc AS candidate_expected_ctc,
@@ -115,6 +115,10 @@ router.get('/', async (req: Request, res: Response) => {
   if (q) {
     sql += ` AND (c.full_name ILIKE $${i} OR c.email ILIKE $${i} OR r.title ILIKE $${i})`;
     params.push(`%${q}%`); i++;
+  }
+  if (gender) {
+    sql += ` AND c.gender = ANY($${i++}::text[])`;
+    params.push(toArray(gender));
   }
 
   // Master filters (department/location/recruitment_mode/priority/role_id +

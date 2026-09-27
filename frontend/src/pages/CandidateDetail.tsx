@@ -18,6 +18,7 @@ import ScheduleRoundModal from '../components/ScheduleRoundModal.tsx';
 import SendAssignmentModal from '../components/SendAssignmentModal.tsx';
 import AssignmentOutcomeModal from '../components/AssignmentOutcomeModal.tsx';
 import AddReferenceCheckModal from '../components/AddReferenceCheckModal.tsx';
+import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -740,7 +741,10 @@ export default function CandidateDetail() {
 
                         <div className="border-t border-gray-100 pt-3 mt-3">
                           <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Reference Checks</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Reference Checks</span>
+                              <InfoTooltip align="left" text="Records a reference's name, phone, relationship to the candidate, and the feedback/notes from the call. A candidate can have more than one on record. Add Reference Check only appears once this application has actually reached the Reference Check stage." />
+                            </div>
                             {canHR && app.stage === 'Reference Check' && (
                               <button
                                 onClick={() => setAddRefCheckAppId(app.id)}

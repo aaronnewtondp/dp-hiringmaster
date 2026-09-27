@@ -80,7 +80,7 @@ tests/
 │   └── calendar.ts       # real Google Calendar helper (get/delete event, credential
 │                          # detection) — used by the one real-round-trip Calendar test
 │                          # and its e2e counterpart, see below
-├── api/  (39 files)
+├── api/  (40 files)
 │   ├── 01-auth.spec.ts
 │   ├── 02-roles.spec.ts
 │   ├── 03-candidates.spec.ts
@@ -121,7 +121,8 @@ tests/
 │   ├── 36-hm-dashboard-lock.spec.ts                # Hiring Manager dashboard scoping
 │   ├── 37-auto-advance-positive-feedback.spec.ts   # positive interview feedback auto-advances stage
 │   ├── 38-role-closure-summary.spec.ts             # role closure summary PDF/route
-│   └── 39-dashboard-funnel-snapshot-endpoint.spec.ts # GET /api/dashboard/funnel-snapshot
+│   ├── 39-dashboard-funnel-snapshot-endpoint.spec.ts # GET /api/dashboard/funnel-snapshot
+│   └── 40-candidate-gender.spec.ts                 # auto-tag from name, manual correction, gender filter
 ├── db/  (7 files — direct Postgres via `pg`, LOCAL ONLY, never prod)
 │   ├── 00-schema-integrity.spec.ts        # dedicated sequences, GIN indexes
 │   ├── 01-talent-pool-archival.spec.ts    # 90-day archival threshold (backdates last_updated directly)
