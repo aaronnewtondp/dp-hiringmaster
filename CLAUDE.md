@@ -526,12 +526,33 @@ via `main.tsx`'s `registerSW({ immediate: true })` from
 no "update available" prompt UI — since a stuck-on-stale-bundle install would
 be a worse failure than an unannounced refresh for an internal tool.
 
-**This does NOT fix mobile/tablet usability by itself** — that's a separate,
-still-open problem (`Layout.tsx`/`Sidebar.tsx` have no responsive breakpoint
-logic at all today, and 5 of 15 pages handle dense HR tables purely via
-horizontal scroll). PWA-ness and responsive layout are independent; an
-installed non-responsive app is still a non-responsive app, just in a window
-with no back button.
+**PWA-ness alone doesn't fix mobile/tablet usability** — that's a separate
+concern. The sidebar half of it is now fixed (below, 2026-09-28): `Layout.tsx`/
+`Sidebar.tsx` collapse to a hamburger-triggered overlay drawer below `lg:`
+(1024px — deliberately not `md:`/768px, since an iPad portrait at 768-834px
+still needs to collapse too; "mobile and tablet" both sit below `lg:`, only
+real desktop/laptop widths stay above it). **Still open**: 5 of 15 pages
+still handle dense HR tables purely via horizontal scroll rather than a
+narrow-width card reflow — an installed app with a working sidebar but an
+unreadable 10-column table on a phone is still only half fixed.
+
+### Sidebar mobile/tablet collapse (2026-09-28)
+`Sidebar.tsx` takes `open`/`onClose` props (owned by `Layout.tsx`'s
+`sidebarOpen` state, defaulting to closed) instead of rendering unconditionally.
+Below `lg:`, it's `fixed` + translated off-screen by default (a real overlay,
+outside document flow, so it doesn't reserve any width when closed) and
+slides in over a `bg-black/40` backdrop when opened via `Layout.tsx`'s
+hamburger button (only rendered below `lg:`); at `lg:`+ it reverts to the
+original `sticky`, always-visible, in-flow behavior via a `lg:` breakpoint
+override on the same `position` utility, and `open` has no visible effect.
+Backdrop click, Escape, and clicking any nav link (`onClick={onClose}` on
+every `NavLink`) all close the drawer; body scroll is locked via
+`document.body.style.overflow` only while the drawer is open below `lg:`.
+Hand-rolled rather than pulling in a Headless-UI-style dialog primitive
+(this codebase has none today) — deliberately scoped to exactly the
+"sidebar eats the whole phone screen" complaint that prompted it, not a
+general modal/dialog abstraction speculatively built ahead of a second use
+case.
 
 **Known real risk, not yet resolved**: this app's Google sign-in
 (`Login.tsx`'s inline Google Identity Services button/popup pattern) has a
