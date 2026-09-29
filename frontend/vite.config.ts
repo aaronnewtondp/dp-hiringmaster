@@ -41,7 +41,15 @@ export default defineConfig({
         // belt-and-suspenders documentation of that intent, not a fix for
         // an actual leak.
         globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2}'],
-        navigateFallbackDenylist: [/^\/api\//],
+        // A real top-level navigation (e.g. a plain <a href target="_blank">
+        // to a static file, not a client-side <Link>) also matches
+        // Workbox's NavigationRoute below — without this second entry, a
+        // direct link straight to a public/ file (the PDFs Help.tsx links
+        // to) got served the cached SPA index.html instead of the actual
+        // file, and the router's own catch-all route then redirected it to
+        // /dashboard. Any path with a dotted extension is never a real SPA
+        // route in this app, so exclude those from the fallback outright.
+        navigateFallbackDenylist: [/^\/api\//, /\.[a-zA-Z0-9]+$/],
         runtimeCaching: [
           {
             urlPattern: /\/api\/.*/,

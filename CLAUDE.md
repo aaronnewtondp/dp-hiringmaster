@@ -564,6 +564,25 @@ fall back to a redirect-based flow there instead of the popup — **not yet
 implemented**, and must be verified on a real iPhone (not Chrome DevTools
 device emulation) before telling any HR user to install the app on iOS.
 
+**Real bug hit and fixed the same day**: `Help.tsx` links straight to two
+static PDFs in `public/` (`DigitalPaani_HMS_User_Access_Guide.pdf`,
+`DigitalPaani_Hiring_SOP.pdf`) via a plain `<a href="/....pdf" target=
+"_blank">` — a real top-level browser navigation, not client-side routing.
+Workbox's `NavigationRoute` (registered by `generateSW` to make the SPA's
+own client-side routes work offline) intercepts **every** navigation request
+and serves the cached `index.html` app shell instead, unless the path is on
+`navigateFallbackDenylist` — the original config only excluded `/api/`, so
+clicking either PDF link served the cached SPA shell instead of the actual
+file, and the router's own `path="*"` catch-all then redirected straight to
+`/dashboard` — a silent, confusing bounce for something that looked, and
+tested via curl, completely fine (a plain `curl` request bypasses the
+service worker entirely, so it never reproduced this). Fixed by adding
+`/\.[a-zA-Z0-9]+$/` to `navigateFallbackDenylist` alongside `/^\/api\//` —
+any path with a dotted extension is never a real SPA route in this app, so
+it's excluded from the fallback outright. Any *future* direct link to a
+static file in `public/` needs no special handling — this fix already
+covers it.
+
 Icons (`frontend/public/icons/icon-{192,512}.png`,
 `frontend/public/apple-touch-icon.png`) are cropped from the existing
 `backend/src/assets/dp_logo_white.png` droplet+recycle glyph on the brand's
