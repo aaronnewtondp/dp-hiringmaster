@@ -11,7 +11,13 @@ export const PORTFOLIO_TOPIC = 'portfolio-analysis';
 export async function enqueuePortfolioAnalysis(applicationId: string): Promise<{ enqueued: boolean; error?: string }> {
   try {
     const { send } = await import('@vercel/queue');
-    await send(PORTFOLIO_TOPIC, { applicationId });
+    // Queueing runs inside the applicant-facing scoring request (and the Job
+    // Application webhook). A slow or hung queue service must degrade to "not
+    // queued, use Re-run" — never stall the request that already saved a score.
+    await Promise.race([
+      send(PORTFOLIO_TOPIC, { applicationId }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('queue did not respond within 8s')), 8000)),
+    ]);
     return { enqueued: true };
   } catch (err) {
     const error = (err as Error).message.slice(0, 300);
