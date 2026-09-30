@@ -55,6 +55,7 @@ export interface Role {
   social_jd_drive_link?:    string;
   generated_jd_content?:    Record<string, unknown> | null;
   jd_source?:               'generated' | 'manual';
+  portfolio_analysis_enabled?: boolean;
   whatsapp_forward_link?:   string;
   referral_message_link?:   string;
   approval_summary_link?:   string;
@@ -180,6 +181,15 @@ export interface Application {
   score_recommendation?:        Recommendation;
   score_resume_read?:           boolean;
   score_computed_at?:           string;
+  // Portfolio review — the 9th ResumeIQ dimension, only for roles with
+  // roles.portfolio_analysis_enabled (see services/portfolio/).
+  portfolio_urls?:              Array<{ url: string; host: string; platform: string }> | null;
+  portfolio_analysis_status?:   'pending' | 'running' | 'completed' | 'failed' | 'no_portfolio' | 'inaccessible' | null;
+  portfolio_analysis_error?:    string | null;
+  portfolio_started_at?:        string | null;
+  portfolio_analyzed_at?:       string | null;
+  score_portfolio?:             number | null;
+  score_portfolio_note?:        string | null;
   hr_recruiter_summary?:        string;
   hr_key_positives?:            string;
   hr_key_concerns?:             string;

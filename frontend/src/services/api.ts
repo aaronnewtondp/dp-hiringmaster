@@ -89,6 +89,8 @@ export const applicationsApi = {
   updateNotes:     (id: string, data: Record<string, unknown>) => api.patch(`/applications/${id}/notes`, data),
   setFounderFlag:  (id: string, set: boolean, note?: string)   => api.post(`/applications/${id}/founder-flag`, { set, note }),
   retryScoring:    (id: string)                       => api.post(`/applications/${id}/retry-scoring`, {}),
+  portfolioReview: (id: string)                       => api.get(`/applications/${id}/portfolio-analysis`),
+  rerunPortfolio:  (id: string)                       => api.post(`/applications/${id}/portfolio-analysis`, {}),
 };
 
 export const interviewsApi = {

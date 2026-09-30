@@ -3,7 +3,7 @@
   "outputDirectory": "public",
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!api/portfolio-worker).*)",
       "destination": "/api/index.ts"
     }
   ],
@@ -11,6 +11,17 @@
     "api/index.ts": {
       "maxDuration": 60,
       "includeFiles": "node_modules/pdf-parse/dist/pdf-parse/cjs/pdf.worker.mjs"
+    },
+    "api/portfolio-worker.ts": {
+      "maxDuration": 300,
+      "includeFiles": "node_modules/@sparticuz/chromium/bin/**",
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "portfolio-analysis",
+          "retryAfterSeconds": 120
+        }
+      ]
     }
   },
   "crons": [

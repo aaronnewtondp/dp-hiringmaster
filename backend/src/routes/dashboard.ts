@@ -230,7 +230,7 @@ router.get('/', async (req: Request, res: Response) => {
                -- instant such a row is created, with zero real activity yet.
                (SELECT MAX(al.created_at) FROM activity_log al
                 WHERE al.role_id = r.id AND al.application_id IS NOT NULL
-                  AND al.event_type NOT IN ('Application Created', 'ResumeIQ Scoring Completed')
+                  AND al.event_type NOT IN ('Application Created', 'ResumeIQ Scoring Completed', 'Portfolio Review Completed')
                ) AS last_candidate_activity
         FROM roles r
         LEFT JOIN applications a ON a.role_id = r.id

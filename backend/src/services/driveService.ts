@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import { Readable } from 'stream';
 import { getGoogleCredentials } from './googleAuth.js';
+import { extractUrlsFromText, mergeResumeLinks, LinkInput } from './portfolio/links.js';
 
 let driveClient: ReturnType<typeof google.drive> | null = null;
 
@@ -118,10 +119,24 @@ export function extractDriveFileId(url: string): string | null {
 
 // Returns null on any failure — scoring should degrade gracefully rather than crash.
 export async function fetchResumeText(driveUrl: string): Promise<string | null> {
+  return (await loadResume(driveUrl, false)).text;
+}
+
+// Same download, plus every hyperlink destination embedded in the file (real
+// PDF link annotations, DOCX hyperlink relationships, Google Docs anchors) —
+// text extraction alone silently drops any link whose visible text isn't the
+// URL itself (e.g. the word "Portfolio" hyperlinked to a site). Only callers
+// that need links (portfolio review) pay for the extra parse.
+export async function fetchResumeTextAndLinks(driveUrl: string): Promise<{ text: string | null; links: LinkInput[]; linksError?: boolean }> {
+  return loadResume(driveUrl, true);
+}
+
+async function loadResume(driveUrl: string, withLinks: boolean): Promise<{ text: string | null; links: LinkInput[]; linksError?: boolean }> {
+  const empty = { text: null as string | null, links: [] as LinkInput[] };
   const fileId = extractDriveFileId(driveUrl);
   if (!fileId) {
     console.warn(`[Drive] Could not extract file ID from: ${driveUrl}`);
-    return null;
+    return empty;
   }
 
   try {
@@ -134,7 +149,19 @@ export async function fetchResumeText(driveUrl: string): Promise<string | null> 
         { fileId, mimeType: 'text/plain' },
         { responseType: 'text' }
       );
-      return res.data as unknown as string;
+      const text = res.data as unknown as string;
+      let links: LinkInput[] = [];
+      let linksError = false;
+      if (withLinks) {
+        try {
+          const html = await drive.files.export({ fileId, mimeType: 'text/html' }, { responseType: 'text' });
+          links = extractHrefs(String(html.data));
+        } catch (err) {
+          linksError = true;
+          console.warn(`[Drive] Google Doc link extraction failed for ${fileId}:`, (err as Error).message);
+        }
+      }
+      return { text, links: withLinks ? finishLinks(links, text) : [], ...(linksError ? { linksError } : {}) };
     }
 
     if (mimeType === 'application/pdf' || mimeType.includes('wordprocessingml')) {
@@ -143,17 +170,47 @@ export async function fetchResumeText(driveUrl: string): Promise<string | null> 
         { responseType: 'arraybuffer' }
       );
       const buffer = Buffer.from(res.data as ArrayBuffer);
-      return mimeType === 'application/pdf'
-        ? await extractPdfText(buffer)
-        : await extractDocxText(buffer);
+      const isPdf = mimeType === 'application/pdf';
+      const text = isPdf ? await extractPdfText(buffer) : await extractDocxText(buffer);
+      let links: LinkInput[] = [];
+      // A failed extraction must be distinguishable from "the resume has no
+      // links": the caller scores the second against the candidate, never the first.
+      let linksError = false;
+      if (withLinks) {
+        try {
+          links = isPdf ? await extractPdfLinks(buffer) : await extractDocxLinks(buffer);
+        } catch (err) {
+          linksError = true;
+          console.warn(`[Drive] Link extraction failed for ${fileId}:`, (err as Error).message);
+        }
+      }
+      return { text, links: withLinks ? finishLinks(links, text) : [], ...(linksError ? { linksError } : {}) };
     }
 
     console.warn(`[Drive] Unsupported mime type for resume: ${mimeType}`);
-    return null;
+    return empty;
   } catch (err) {
     console.error(`[Drive] Failed to fetch resume ${fileId}:`, (err as Error).message);
-    return null;
+    return empty;
   }
+}
+
+// Union of structural hyperlinks and URLs typed as visible text, normalized
+// and de-duplicated (structural first — a real destination beats a regex hit).
+function finishLinks(structural: LinkInput[], text: string): LinkInput[] {
+  return mergeResumeLinks(structural, extractUrlsFromText(text));
+}
+
+function extractHrefs(html: string): LinkInput[] {
+  const out: LinkInput[] = [];
+  for (const m of html.matchAll(/<a\b[^>]*?href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const href = m[1].replace(/&amp;/g, '&');
+    // Same-document bookmarks (table of contents etc.) aren't external links.
+    if (href.startsWith('#')) continue;
+    const label = m[2].replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+    out.push({ url: href, ...(label ? { label } : {}) });
+  }
+  return out;
 }
 
 // pdf-parse v2 wraps pdfjs-dist, which tries to polyfill the browser globals
@@ -294,4 +351,33 @@ async function extractDocxText(buffer: Buffer): Promise<string> {
   const mammoth = await import('mammoth');
   const result = await mammoth.extractRawText({ buffer });
   return result.value;
+}
+
+// Real hyperlink destinations from a PDF's Link annotations. Uses the same
+// PDFParse class (and therefore the same polyfills / worker bundling) as
+// extractPdfText — no new dependency.
+async function extractPdfLinks(buffer: Buffer): Promise<LinkInput[]> {
+  await installCanvasPolyfills();
+  const { PDFParse } = await import('pdf-parse');
+  const parser = new PDFParse({ data: buffer });
+  try {
+    const info = await parser.getInfo({ parsePageInfo: true } as never) as unknown as {
+      pages?: Array<{ links?: Array<{ url?: string; text?: string }> }>;
+    };
+    const urls: LinkInput[] = [];
+    for (const page of info.pages || []) for (const l of page.links || []) {
+      if (l.url) urls.push({ url: l.url, ...(l.text?.trim() ? { label: l.text.trim().slice(0, 80) } : {}) });
+    }
+    return urls;
+  } finally {
+    await (parser as unknown as { destroy?: () => Promise<void> }).destroy?.().catch(() => {});
+  }
+}
+
+// mammoth.extractRawText (used for the scoring text) discards hyperlink
+// destinations; convertToHtml keeps them as <a href>.
+async function extractDocxLinks(buffer: Buffer): Promise<LinkInput[]> {
+  const mammoth = await import('mammoth');
+  const result = await mammoth.convertToHtml({ buffer });
+  return extractHrefs(result.value);
 }

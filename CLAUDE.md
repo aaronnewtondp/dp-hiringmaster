@@ -603,6 +603,158 @@ origin, which points to that pane disabling Service Workers entirely rather
 than anything specific to this app) — verify registration in a real desktop
 Chrome tab or on a real device before relying on it.
 
+### Portfolio review — the 9th ResumeIQ dimension (2026-09-30, Senior UX/Product Designer)
+For roles with `roles.portfolio_analysis_enabled = true` (**R007 only**, set by
+SQL — deliberately no API/UI toggle), a candidate's portfolio site(s) are opened in
+a real browser and reviewed by a vision model against the JD and the hiring
+manager's 15 criteria (`backend/src/services/portfolio/rubric.ts`,
+`DESIGNER_CRITERIA`). The result is a 9th dimension, `applications.score_portfolio`
+(0-10), **folded into `score_avg`/`ai_fit_score`** (so it moves SLA tiering and the
+75+ 24h threshold for this role — chosen deliberately, not informational-only), plus a
+stored structured review shown in the highlights.
+
+**Never inline in the scoring request** — a review takes ~35-140s. Flow:
+1. `runResumeIQScoring()` (unchanged 8-dimension score, written first) → for an
+   enabled role it fetches the resume with `fetchResumeTextAndLinks()` (same single
+   Drive download) → `pickPortfolioLinks()` → `preparePortfolioReview()`
+   (`portfolio/enqueue.ts`): stores `portfolio_urls`, status `pending`, and
+   `send()`s `{applicationId}` to the Vercel Queue topic `portfolio-analysis`. A
+   resume with no portfolio link settles instantly as `no_portfolio` with a
+   dimension score of 0 (and a red flag) — but only if the resume was readable;
+   an unreadable resume applies no dimension at all.
+2. **`backend/api/portfolio-worker.ts`** — a separate Vercel function (300s, its
+   own ~80 MB bundle with Chromium; `vercel.json` `experimentalTriggers`
+   `queue/v2beta`) runs `runPortfolioAnalysis()` (`portfolio/run.ts`): atomically
+   *claims* the row (a redelivered message can't run twice), captures with
+   `puppeteer-core` + `@sparticuz/chromium`, calls Claude with screenshots, writes
+   via `applyPortfolioOutcome()` (`portfolio/scoring.ts`). It also accepts a direct
+   POST with `x-ingest-secret` — the fallback if the queue misbehaves, and how the
+   deployed function is verified independently of the queue.
+3. Status `portfolio_analysis_status`: `pending | running | completed | failed |
+   no_portfolio | inaccessible`. **`inaccessible` (dead/private link) is held against
+   the candidate; `failed` (our timeout/crash) never is** — `capture.ts`
+   distinguishes them, using an independent plain request to tell "site is dead"
+   from "site refused our browser".
+
+**Import boundary that must not be crossed:** `browser.ts`, `capture.ts`, `analyze.ts`,
+`run.ts` are WORKER-ONLY. The main API imports only `links.ts`, `enqueue.ts`,
+`scoring.ts`, `rubric.ts`, `types.ts` — verified with `@vercel/nft` that the main
+bundle (~64 MB) contains no Chromium/puppeteer. Importing a worker module from the
+Express app would drag 70 MB of Chromium into every request's function.
+
+**Recovery and retry semantics (added after an adversarial review):**
+- `STALE_RUNNING_SECONDS = 310` (`portfolio/jobState.ts`) is the single definition of "this job is
+  dead". It sits deliberately between the function's 300s hard limit and the queue's 330s
+  visibility timeout: a killed function never runs its `finally`, so its row would say `running`
+  forever — the redelivered message (>330s) and an HR Re-run (route checks the same threshold)
+  can both reclaim it, while a live job (<300s) is never stolen. The status reset in
+  `preparePortfolioReview` is a *conditional SQL UPDATE*, not a read-then-write, so a worker
+  claiming the row between the two can't have its state stomped.
+- Only OUR transient failures are retried: `run.ts` `isTransient()` (browser busy/launch, model
+  429/529/timeouts) hands the job back to `pending` and THROWS on attempts 1-2 so the queue
+  redelivers (120s later, fresh invocation + budget); attempt 3 (`MAX_ATTEMPTS`) or a direct
+  run records `failed`. Settled outcomes (completed/inaccessible/no_portfolio) return normally
+  = acknowledged, so a dead portfolio site is never retried. A review that would conclude
+  "no usable portfolio" while another link *errored on our side* fails (retryable) instead of
+  scoring the candidate down on an incomplete look.
+- One Chromium per process (`browser.ts` `acquireBrowserSlot`): Fluid compute packs concurrent
+  invocations onto one instance and `@sparticuz/chromium` treats "/tmp/chromium exists" as
+  "extracted" (upstream Sparticuz/chromium#507), so a second cold-start invocation could launch a
+  half-written binary. A waiter that can't get in within 45s throws `BrowserBusyError` (transient
+  → queue redelivers). `/tmp/.chromium-ready` marks a finished extraction; a truncated leftover
+  is wiped. `--disable-web-security` is filtered out of the Lambda launch args (a hostile page's
+  script could otherwise read cross-origin responses).
+- `POST /:id/portfolio-analysis` never changes state when the resume can't be read right now
+  (502): a transient Drive failure used to look like "no links", wiping stored links and turning a
+  good review into `no_portfolio` with the old score still in the average. Likewise a failed
+  *link extraction* (`fetchResumeTextAndLinks().linksError`) records `failed`, never a 0.
+- Backfill paging steps over rows that stay eligible (`next_offset = offset + left_unchanged`), and
+  refuses a role that doesn't exist or isn't flagged — a naive "same offset again" loops forever.
+- The automatic `Portfolio Review Completed` event is excluded from the dashboard's "no recent
+  candidate movement" flag (`dashboard.ts`), like `ResumeIQ Scoring Completed` — otherwise every
+  auto-review would make R007 look active.
+
+**SSRF (`urlSafety.ts`):** every fetch of a resume-supplied URL goes through `safeFetch` (each
+redirect hop re-validated), and every browser request through `makeHostChecker` (DNS-resolved, cached
+per crawl) — not just a string check. The first version missed IPv4-mapped IPv6 (`new URL()` rewrites
+`[::ffff:127.0.0.1]` to HEX `::ffff:7f00:1`, which a dotted-quad regex never matches) and trailing-dot
+names (`localhost.`); `isPrivateIp` now expands IPv6 fully (mapped, NAT64, 6to4, Teredo, ULA, link-local).
+Residual risk: a DNS-rebinding attacker can still race the lookup. **Also `normalizeUrl` is length-capped
+(2048) with a linear trim — a 100 KB punctuation run used to freeze the API for ~15s (quadratic regex),
+and that path runs for every role's scoring, not just designers.**
+
+**Things learned the hard way (each caught by testing on real data / a real runtime, not by reasoning):**
+- `@sparticuz/chromium` runs **single-process** on Lambda — `browser.createBrowserContext()`
+  crashes it ("Target closed"). Use `browser.newPage()`. Found only by running the
+  capture code in the `public.ecr.aws/lambda/nodejs:22` image with
+  `AWS_EXECUTION_ENV=AWS_Lambda_nodejs22.x` set (without that variable the package never
+  unpacks its bundled system libs).
+- It's ESM-only; the backend compiles to CommonJS. `require()` of it works on Node
+  >= 22.17 (its `engines` floor), so `backend/package.json` pins `"node": "22.x"` and
+  `src/types/sparticuz-chromium.d.ts` declares the surface we use.
+- Every browser step has a hard cap (`protocolTimeout` 45s, screenshot 20s, 100s per
+  portfolio, 270s job budget). Puppeteer's default is 180s *per CDP call*; one stalled
+  Figma WebGL screenshot once consumed a 9-minute test run.
+- A server-side link check gives false "broken" results (Figma answers `HEAD` with 404, bot
+  walls, JS-only apps). Suspects are re-checked with `GET`, then confirmed in the real
+  browser before counting. Do not weaken this — a false positive caps the "portfolio UX"
+  criterion for an innocent candidate.
+- Resumes link employers, universities, SSO pages and resume builders next to the real
+  portfolio. `pickPortfolioLinks()` uses candidate-name-in-host, the hyperlink's own
+  label ("Portfolio"), and a penalty list (`.ac.in`, `sso.`, IP hosts, resume builders).
+- Real hyperlinks are the majority signal: in a 30-resume sample, ~39% of resumes with a
+  portfolio had it *only* as a hyperlink (invisible to text extraction).
+  `fetchResumeTextAndLinks()` reads PDF Link annotations (`pdf-parse` `getInfo`), DOCX
+  hyperlinks (`mammoth.convertToHtml`), Google Docs HTML export, and regex-scans the text.
+
+**Trust boundary:** portfolio pages are attacker-controlled. Page text/titles/URLs are
+escaped (`escUntrusted`, angle brackets swapped) so a page can't forge a closing
+`</portfolio_content>` tag; the system prompt forbids following in-page instructions;
+prompt-injection detection is a separate boolean (`attemptsToInfluenceReviewer`) that
+*code* turns into a red flag (the model once reused the wording to accuse a candidate of
+injection for a name mismatch). `urlSafety.ts` blocks private/loopback/metadata addresses
+for every URL we fetch or the browser requests. The reviewer also checks the portfolio
+belongs to the candidate (`belongsToCandidate`) — a resume linking someone else's work is
+an integrity flag. Verified with a live adversarial test (a page containing a fake
+`SYSTEM OVERRIDE` + tag breakout scored 0 and was flagged).
+
+**Scoring math:** the model's holistic 0-10 and a checklist score (strong 1 / partial 0.6 /
+not_evidenced 0.2 / concern 0, over the 15 criteria) are averaged — steadier run to run than
+either alone. `html_based` is decided from the platform (own domain / Framer / Webflow strong;
+template builders partial; Behance / Figma file / PDF a concern) and `portfolio_ux` is capped
+by measured broken links and mobile overflow, whatever the model said. `computeAvg()` always
+derives the average from the 8 stored base scores + this run's portfolio score, so a re-run
+can never double-count. The `score_summary` gets ` Portfolio review: …` appended and
+red flags get a `Portfolio: ` prefix; both are stripped and rewritten on each run.
+
+**Storage:** the review JSON lives in its own table `portfolio_analyses` (not on
+`applications`) so `SELECT a.*` list queries stay light; fetched lazily by
+`GET /api/applications/:id/portfolio-analysis`. Screenshots are not stored.
+
+**Ops:** `POST /api/applications/:id/portfolio-analysis` (HR-tier) re-extracts links and
+re-queues (also the way to pick up a link the first pass missed).
+`POST /api/applications/portfolio-backfill` (`x-ingest-secret` = `ROLE_INGEST_SECRET`,
+body `{role_id, statuses, limit<=10, offset, dry_run}`) queues existing applicants that
+were never reviewed, a few per call (each re-reads a resume from Drive); loop until
+`next_offset` is null — or just run `backend/src/scripts/backfillPortfolioReviews.ts`
+(`HMS_API_URL=<backend url> ROLE_INGEST_SECRET=... npx tsx src/scripts/backfillPortfolioReviews.ts
+--role R007 [--statuses Active] [--dry-run]`), which does that loop and only *queues* (the
+reviews then run on the worker, ~1-2 min each). Env: `PORTFOLIO_ANALYSIS_MODEL` (default `claude-sonnet-4-5`),
+`PORTFOLIO_BROWSER_WS_ENDPOINT` (attach to a hosted/remote Chrome over CDP instead of
+embedded Chromium — the escape hatch if Chromium proves unreliable on Vercel, e.g.
+Browserbase), `PORTFOLIO_CHROME_PATH` (local dev). Local dev needs a Chrome/Chromium on
+the machine; the Docker backend container has none and never needs one (it only queues).
+Local `@vercel/queue` `send()` fails outside Vercel by design → the row stays `pending`
+with a visible "Could not be queued" message; run a review locally by calling
+`runPortfolioAnalysis(applicationId)` from a `tsx` script with `DATABASE_URL` set.
+
+**Known limits:** Figma *file* links are canvas-rendered — one overview screenshot only,
+and private files are reported as inaccessible, not scored; PDF/slide-deck links are not
+opened (flagged for manual review); criteria like field visits or business outcomes can
+only be judged from what the site states, so absence is "not evidenced", never a concern.
+R007's `generated_jd_content` is null, so JD alignment uses its short must/nice-to-have
+DB fields rather than the fuller published JD text.
+
 ### SLA / aging checks — compute-on-read, not cron
 Vercel Hobby tier does not support sub-hourly cron, so the SLA checker
 (`backend/src/jobs/slaChecker.ts`) does **not** rely on a scheduler in

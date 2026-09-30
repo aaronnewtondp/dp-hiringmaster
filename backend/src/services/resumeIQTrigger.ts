@@ -9,11 +9,15 @@
 import { query, queryOne } from '../db/index.js';
 import { Application, Candidate, Role, SLA_HOURS } from '../types/index.js';
 import { scoreCandidate, priorityBucketFromScore } from './resumeIQ.js';
-import { fetchResumeText } from './driveService.js';
+import { fetchResumeText, fetchResumeTextAndLinks } from './driveService.js';
+import { LinkInput, pickPortfolioLinks } from './portfolio/links.js';
+import { markPortfolioFailed, preparePortfolioReview } from './portfolio/enqueue.js';
 
 export interface ResumeIqTriggerResult {
   scored: boolean;
   error?: string;
+  /** Set for roles with portfolio review enabled: what happened to the queued review. */
+  portfolio?: { status: 'pending' | 'no_portfolio' | 'busy' | 'failed'; queued: boolean; links: number };
 }
 
 // Guarded by !app.score_avg by the caller (or here, redundantly, since a
@@ -32,8 +36,19 @@ export async function runResumeIQScoring(applicationId: string): Promise<ResumeI
     // Fetch actual resume text from Drive if a link is on file. Falls back
     // gracefully to profile-fields-only scoring on any failure.
     let resumeText: string | null = null;
+    let resumeLinks: LinkInput[] = [];
+    let linksError = false;
     if (candidate.resume_drive_link) {
-      resumeText = await fetchResumeText(candidate.resume_drive_link);
+      // Roles with portfolio review also need every hyperlink in the file —
+      // fetched in the same download, so it costs no extra Drive round trip.
+      if (role.portfolio_analysis_enabled) {
+        const fetched = await fetchResumeTextAndLinks(candidate.resume_drive_link);
+        resumeText = fetched.text;
+        resumeLinks = fetched.links;
+        linksError = !!fetched.linksError;
+      } else {
+        resumeText = await fetchResumeText(candidate.resume_drive_link);
+      }
       if (resumeText) {
         console.log(`[ResumeIQ] Resume text fetched for ${candidate.id} (${resumeText.length} chars)`);
       } else {
@@ -87,6 +102,28 @@ export async function runResumeIQScoring(applicationId: string): Promise<ResumeI
        `Score: ${aiFitScore}/100 (${aiPriorityBucket})`,
        aiPriorityBucket]
     );
+
+    // The 8-dimension score above is final and already saved. For designer
+    // roles the portfolio review is a separate, slower job (35-140s) that
+    // later adds the 9th dimension — queue it (or settle it right away if the
+    // resume has no portfolio link). A failure here must never undo the score.
+    if (role.portfolio_analysis_enabled) {
+      try {
+        if (linksError) {
+          // We could read the resume but not its hyperlinks. "No links found"
+          // here would be a false verdict against the candidate — record it as
+          // our failure instead, with a Re-run action.
+          await markPortfolioFailed(app.id, 'The resume\'s links could not be read. Use Re-run to retry.');
+          return { scored: true, portfolio: { status: 'failed', queued: false, links: 0 } };
+        }
+        const links = pickPortfolioLinks(resumeLinks, 3, { candidateName: candidate.full_name });
+        const prepared = await preparePortfolioReview({ applicationId: app.id, links, resumeRead: result.resumeRead });
+        return { scored: true, portfolio: { status: prepared.status, queued: prepared.queued, links: prepared.links.length } };
+      } catch (err) {
+        console.error('[ResumeIQ] Portfolio preparation failed for', app.id, err);
+        return { scored: true };
+      }
+    }
     return { scored: true };
   } catch (err) {
     console.error('[ResumeIQ] Scoring failed for', app.id, err);

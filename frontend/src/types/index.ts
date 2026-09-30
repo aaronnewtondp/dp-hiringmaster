@@ -58,6 +58,7 @@ export interface Role {
   jd_drive_link?:           string;
   social_jd_drive_link?:    string;
   jd_source?:               'generated' | 'manual';
+  portfolio_analysis_enabled?: boolean;
   whatsapp_forward_link?:   string;
   referral_message_link?:   string;
   approval_summary_link?:   string;
@@ -207,6 +208,12 @@ export interface Application {
   score_recommendation?:       Recommendation;
   score_resume_read?:          boolean;
   score_computed_at?:          string;
+  // Portfolio review — the 9th ResumeIQ dimension; only set for roles with
+  // portfolio review enabled (Senior UX/Product Designer).
+  portfolio_analysis_status?:  PortfolioStatus | null;
+  portfolio_analysis_error?:   string | null;
+  score_portfolio?:            number | null;
+  score_portfolio_note?:       string | null;
 
   // HR notes
   hr_recruiter_summary?:       string;
@@ -510,3 +517,50 @@ export const PRIORITY_COLORS: Record<Priority, string> = {
   P2: 'bg-blue-100 text-blue-800',
   P3: 'bg-gray-100 text-gray-600',
 };
+
+// ─── Portfolio review (mirrors backend/src/services/portfolio/types.ts) ──────
+export type PortfolioStatus = 'pending' | 'running' | 'completed' | 'failed' | 'no_portfolio' | 'inaccessible';
+export type CriterionVerdict = 'strong' | 'partial' | 'not_evidenced' | 'concern';
+
+export interface PortfolioCriterion { id: string; label: string; verdict: CriterionVerdict; evidence: string }
+export interface PortfolioAlignmentItem { item: string; verdict: CriterionVerdict; evidence: string }
+export interface PortfolioReviewedSite {
+  url: string;
+  platform: string;
+  isPortfolio: boolean;
+  belongsToCandidate: boolean | null;
+  accessible: boolean;
+  accessKind?: 'ok' | 'blocked' | 'error' | 'skipped';
+  accessNote?: string;
+  pagesReviewed: number;
+  pageTitles: string[];
+  signals: {
+    brokenLinksChecked: number; brokenLinks: number; consoleErrors: number;
+    mobileOverflow: boolean | null; loadMs: number | null; truncated: boolean;
+  };
+  note?: string;
+}
+export interface PortfolioAnalysis {
+  version: 1;
+  analyzedAt: string;
+  model: string;
+  portfolios: PortfolioReviewedSite[];
+  criteria: PortfolioCriterion[];
+  jdAlignment: { mustHaves: PortfolioAlignmentItem[]; niceToHaves: PortfolioAlignmentItem[] };
+  modelScore: number;
+  checklistScore: number;
+  score: number;
+  scoreNote: string;
+  highlights: string[];
+  redFlags: string[];
+  summary: string;
+}
+export interface PortfolioReviewResponse {
+  status: PortfolioStatus | null;
+  message: string | null;
+  urls: Array<{ url: string; host: string; platform: string }>;
+  analyzed_at: string | null;
+  score: number | null;
+  note: string | null;
+  analysis: PortfolioAnalysis | null;
+}

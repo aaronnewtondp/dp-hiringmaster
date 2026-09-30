@@ -130,7 +130,8 @@ tests/
 │   ├── 03-dashboard-audit-fixes.spec.ts
 │   ├── 04-role-aging-close-target.spec.ts # aging_alert anchored to target_closure_date, not days-open
 │   ├── 05-aging-roles-no-movement.spec.ts # no_recent_candidate_activity flag (backdates activity_log)
-│   └── 06-manual-jd-source.spec.ts        # roles.jd_source='manual' guard on auto-gen + regenerate-jd
+│   ├── 06-manual-jd-source.spec.ts        # roles.jd_source='manual' guard on auto-gen + regenerate-jd
+│   └── 07-portfolio-review.spec.ts        # portfolio review (9th ResumeIQ dimension): schema, route gating, killed-job recovery, backfill guards — no browser/model calls
 ├── smoke/
 │   └── production.spec.ts   # safe for live Vercel — read-only + auth-rejection checks only
 └── e2e/  (7 files)
