@@ -86,18 +86,6 @@ test.describe('Portfolio review (local Postgres + API)', () => {
       const wrong = await request.post(`${BASE}/api/applications/portfolio-backfill`, { data: { role_id: 'R007', dry_run: true }, headers: { 'x-ingest-secret': 'nope' } });
       expect(wrong.status()).toBe(401);
     });
-
-    test('the batch backfill route dry-run reports eligible applications without changing anything', async ({ request }) => {
-      const res = await request.post(`${BASE}/api/applications/portfolio-backfill`, {
-        data: { role_id: 'R007', statuses: ['Active'], limit: 3, dry_run: true },
-        headers: { 'x-ingest-secret': ROLE_INGEST_SECRET },
-      });
-      expect(res.status()).toBe(200);
-      const body = await res.json();
-      expect(body.dry_run).toBe(true);
-      expect(body.processed).toBe(0);
-      expect(body.results).toEqual([]);
-    });
   });
 
   test.describe('creation-time hook on a portfolio-enabled role', () => {
@@ -108,6 +96,18 @@ test.describe('Portfolio review (local Postgres + API)', () => {
       const res = await authed(request, hr).post('/api/roles', { title: `Portfolio Role ${uid()}`, priority: 'P2' });
       roleId = (await res.json()).role.id;
       await db.query(`UPDATE roles SET portfolio_analysis_enabled=true WHERE id=$1`, [roleId]);
+    });
+
+    test('the batch backfill route dry-run reports eligible applications without changing anything', async ({ request }) => {
+      const res = await request.post(`${BASE}/api/applications/portfolio-backfill`, {
+        data: { role_id: roleId, statuses: ['Active'], limit: 3, dry_run: true },
+        headers: { 'x-ingest-secret': ROLE_INGEST_SECRET },
+      });
+      expect(res.status()).toBe(200);
+      const body = await res.json();
+      expect(body.dry_run).toBe(true);
+      expect(body.processed).toBe(0);
+      expect(body.results).toEqual([]);
     });
 
     test('a candidate with NO readable resume gets the base score untouched and no portfolio penalty', async ({ request }) => {
