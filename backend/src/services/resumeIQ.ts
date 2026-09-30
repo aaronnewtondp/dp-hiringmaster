@@ -45,7 +45,14 @@ export async function scoreCandidate(
         .join('\n\n')}`
     : '';
 
+  // Without an explicit date the model assumes "today" is near its own training
+  // cutoff and flags legitimately recent resume dates as "future date" errors.
+  const today = new Date().toISOString().slice(0, 10);
+
   const prompt = `You are a senior HR analyst for DigitalPaani, a water-tech AI company.
+
+TODAY'S DATE: ${today}
+Dates up to and including today are in the past and must not be flagged as future dates; only flag a date that is genuinely after today.
 
 ROLE: ${role.title}
 
