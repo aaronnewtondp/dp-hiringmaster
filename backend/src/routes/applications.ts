@@ -7,6 +7,7 @@ import { parseRoleFilters, buildRoleFilterSql, toArray } from '../utils/roleFilt
 import { STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
 import { isSeverelyOverBudget } from '../utils/budget.js';
 import { sendAssignmentEmail } from '../services/gmailService.js';
+import { joinReasons, normalizeReasons } from '../utils/rejectionReasons.js';
 
 const router = Router();
 router.use(authenticate);
@@ -432,9 +433,15 @@ async function attemptRejectionEmail(
 // ─── POST /api/applications/:id/status — change status (Reject/Withdraw/Hold)
 // PRD Section 9.1: status changes are SEPARATE from stage
 router.post('/:id/status', async (req: Request, res: Response) => {
-  const { new_status, rejection_reason_cat, rejection_reason_detail,
+  const { new_status, rejection_reason_cat, rejection_reason_cats, rejection_reason_detail,
           withdrawal_reason_cat, withdrawal_reason_detail,
           send_rejection_email, rejection_email_subject, rejection_email_body } = req.body;
+
+  // A rejection may carry several reasons (`rejection_reason_cats: string[]`); the older
+  // single `rejection_reason_cat` string still works. Either way they are stored as one
+  // delimited string in the existing column — see utils/rejectionReasons.ts.
+  const rejectionReasons = normalizeReasons(rejection_reason_cats, rejection_reason_cat);
+  const rejectionReasonText = rejectionReasons.length ? joinReasons(rejectionReasons) : null;
 
   if (!new_status) { res.status(400).json({ error: 'new_status required' }); return; }
 
@@ -452,7 +459,7 @@ router.post('/:id/status', async (req: Request, res: Response) => {
   }
 
   // Rejection and withdrawal require a reason
-  if ((new_status === 'Rejected' || new_status === 'Withdrawn') && !rejection_reason_cat && !withdrawal_reason_cat) {
+  if ((new_status === 'Rejected' || new_status === 'Withdrawn') && !rejectionReasonText && !withdrawal_reason_cat) {
     res.status(400).json({ error: 'A reason is required when rejecting or withdrawing a candidate' });
     return;
   }
@@ -485,12 +492,12 @@ router.post('/:id/status', async (req: Request, res: Response) => {
        rejection_reason_cat=$2, rejection_reason_detail=$3,
        withdrawal_reason_cat=$4, withdrawal_reason_detail=$5,
        last_updated=NOW()${clearJoiningRisk} WHERE id=$6`,
-      [new_status, rejection_reason_cat || null, rejection_reason_detail || null,
+      [new_status, rejectionReasonText, rejection_reason_detail || null,
        withdrawal_reason_cat || null, withdrawal_reason_detail || null, req.params.id]
     );
     await logActivity(client, app.id, app.candidate_id, app.role_id,
       'Status Changed',
-      `Status → ${new_status}${rejection_reason_cat ? ` (${rejection_reason_cat})` : ''}`,
+      `Status → ${new_status}${rejectionReasonText ? ` (${rejectionReasonText})` : ''}`,
       app.status, new_status, req.user!.userId, req.user!.name
     );
     // Resolve any open SLA breach for this application

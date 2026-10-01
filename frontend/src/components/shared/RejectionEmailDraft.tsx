@@ -9,7 +9,7 @@ export interface RejectionEmailState {
 }
 
 interface RejectionEmailDraftProps {
-  reasonCat:       string;             // '' — not yet selected, nothing renders
+  reasons:         string[];           // [] — none selected yet, nothing renders
   recipientEmail?: string;             // single-candidate mode only (shown in the To: preview)
   candidateName?:  string;             // real name (single mode) — omit for bulk (uses {{candidate_name}})
   roleTitle?:      string;             // real role title (single mode) — omit for bulk (uses {{role_title}})
@@ -24,7 +24,7 @@ interface RejectionEmailDraftProps {
 // backend/src/routes/applications.ts's POST /:id/status, which accepts the
 // final edited subject/body verbatim.
 export default function RejectionEmailDraft({
-  reasonCat, recipientEmail, candidateName, roleTitle, bulkCount, onChange,
+  reasons, recipientEmail, candidateName, roleTitle, bulkCount, onChange,
 }: RejectionEmailDraftProps) {
   const isBulk = (bulkCount ?? 1) > 1;
   const [enabled, setEnabled] = useState(false);
@@ -32,24 +32,24 @@ export default function RejectionEmailDraft({
   const [body, setBody]       = useState('');
   const [touched, setTouched] = useState(false);
 
-  // Regenerate the draft whenever the reason changes, unless the user has
+  // Regenerate the draft whenever the reasons change, unless the user has
   // already started editing this specific draft — same "don't clobber user
   // typing" rule SendAssignmentModal.tsx follows for its own autofilled
   // Assignment Link.
   useEffect(() => {
-    if (!reasonCat || touched) return;
-    const draft = buildRejectionDraft(reasonCat, candidateName || '{{candidate_name}}', roleTitle || '{{role_title}}');
+    if (!reasons.length || touched) return;
+    const draft = buildRejectionDraft(reasons, candidateName || '{{candidate_name}}', roleTitle || '{{role_title}}');
     setSubject(draft.subject);
     setBody(draft.body);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reasonCat]);
+  }, [reasons.join('|')]);
 
   useEffect(() => {
     onChange({ enabled, subject, body });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, subject, body]);
 
-  if (!reasonCat) return null;
+  if (!reasons.length) return null;
 
   return (
     <div className="space-y-2">

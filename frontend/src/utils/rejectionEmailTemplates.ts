@@ -23,11 +23,19 @@ export interface RejectionDraft {
   body: string;
 }
 
+// With several reasons selected there is no single honest "because X" line, and the
+// per-reason openers can contradict each other (e.g. "unrelated to your candidacy"
+// next to a skills gap) — so use one neutral multi-factor line instead. Like every
+// opener, it never names the internal reasons.
+const MULTI_REASON_OPENER = "after weighing several factors together, we've decided to move forward with other candidates whose experience more closely matches what we need for this role right now";
+const GENERIC_OPENER = "after careful consideration, we've decided not to move forward with your application for this role";
+
 // candidateName is either the real name (single-candidate flow) or the
 // literal '{{candidate_name}}' token (bulk flow — interpolated per-recipient
 // right before send); same for roleTitle.
-export function buildRejectionDraft(reasonCat: string, candidateName: string, roleTitle: string): RejectionDraft {
-  const opener = REASON_OPENERS[reasonCat] || "after careful consideration, we've decided not to move forward with your application for this role";
+export function buildRejectionDraft(reasons: string | string[], candidateName: string, roleTitle: string): RejectionDraft {
+  const list = (Array.isArray(reasons) ? reasons : [reasons]).filter(Boolean);
+  const opener = list.length > 1 ? MULTI_REASON_OPENER : (REASON_OPENERS[list[0]] || GENERIC_OPENER);
   return {
     subject: `Update on your application — ${roleTitle}`,
     body: `Hi ${candidateName},\n\n` +

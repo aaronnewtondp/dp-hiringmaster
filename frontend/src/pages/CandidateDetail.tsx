@@ -8,6 +8,8 @@ import { Candidate, Application, InterviewRound, ReferenceCheck, Agency, REJECTI
 import { StageBadge, StatusBadge, PriorityBadge, OverBudgetBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import PipelineProgress from '../components/shared/PipelineProgress.tsx';
 import RejectionEmailDraft, { RejectionEmailState } from '../components/shared/RejectionEmailDraft.tsx';
+import ReasonCheckboxList from '../components/shared/ReasonCheckboxList.tsx';
+import { splitReasons } from '../utils/rejectionReasons.ts';
 import BackButton from '../components/shared/BackButton.tsx';
 import { isOverBudget } from '../utils/budget.ts';
 import EditableSection from '../components/shared/EditableSection.tsx';
@@ -91,7 +93,8 @@ export default function CandidateDetail() {
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [selectedAppId, setSelectedAppId] = useState('');
   const [statusValue, setStatusValue] = useState('');
-  const [rejectionCat, setRejectionCat] = useState('');
+  const [rejectionCat, setRejectionCat] = useState('');          // Withdrawn: one reason
+  const [rejectionCats, setRejectionCats] = useState<string[]>([]); // Rejected: one or more
   const [rejectionDetail, setRejectionDetail] = useState('');
   const [rejectionEmail, setRejectionEmail] = useState<RejectionEmailState>({ enabled: false, subject: '', body: '' });
   const [viewingRejection, setViewingRejection] = useState<{ cat?: string; detail?: string } | null>(null);
@@ -253,15 +256,19 @@ export default function CandidateDetail() {
 
   const handleStatusUpdate = async () => {
     if (!selectedAppId || !statusValue) return;
-    if ((statusValue === 'Rejected' || statusValue === 'Withdrawn') && !rejectionCat) {
-      toast.error('A reason is required'); return;
+    // Only Rejected/Withdrawn carry reasons — don't let a selection left over from an
+    // earlier open of this modal ride along on, say, a Hold for Future.
+    const needsReason = statusValue === 'Rejected' || statusValue === 'Withdrawn';
+    const reasons = !needsReason ? [] : statusValue === 'Rejected' ? rejectionCats : (rejectionCat ? [rejectionCat] : []);
+    if (needsReason && !reasons.length) {
+      toast.error('Select at least one reason'); return;
     }
     setSaving(true);
     try {
       const sendEmail = statusValue === 'Rejected' && rejectionEmail.enabled;
       const res = await applicationsApi.updateStatus(selectedAppId, {
         new_status: statusValue,
-        rejection_reason_cat: rejectionCat || undefined,
+        rejection_reason_cats: reasons.length ? reasons : undefined,
         rejection_reason_detail: rejectionDetail || undefined,
         send_rejection_email: sendEmail || undefined,
         rejection_email_subject: sendEmail ? rejectionEmail.subject : undefined,
@@ -274,6 +281,7 @@ export default function CandidateDetail() {
       }
       toast.success(`Status updated to ${statusValue}`);
       setShowStatusModal(false);
+      setRejectionCats([]);
       qc.invalidateQueries({ queryKey: ['candidate', id] });
       // Status drives inclusion on Scorecard Summary/My Tasks/Talent Pool —
       // those live on the shared 'applications' key, not this page's own.
@@ -879,7 +887,13 @@ export default function CandidateDetail() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setViewingRejection(null)}>
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-3" onClick={e => e.stopPropagation()}>
             <h3 className="text-base font-semibold">Rejection reason</h3>
-            <p className="text-sm text-gray-900">{viewingRejection.cat || 'No reason logged'}</p>
+            {splitReasons(viewingRejection.cat).length > 1 ? (
+              <ul className="text-sm text-gray-900 list-disc pl-5 space-y-0.5">
+                {splitReasons(viewingRejection.cat).map(r => <li key={r}>{r}</li>)}
+              </ul>
+            ) : (
+              <p className="text-sm text-gray-900">{viewingRejection.cat || 'No reason logged'}</p>
+            )}
             {viewingRejection.detail && <p className="text-sm text-gray-500">{viewingRejection.detail}</p>}
             <div className="flex justify-end">
               <button onClick={() => setViewingRejection(null)} className="btn-secondary">Close</button>
@@ -897,16 +911,20 @@ export default function CandidateDetail() {
             </select>
             {(statusValue === 'Rejected' || statusValue === 'Withdrawn') && (
               <>
-                <select value={rejectionCat} onChange={e => setRejectionCat(e.target.value)} className="select">
-                  <option value="">Select reason *</option>
-                  {(statusValue === 'Rejected' ? REJECTION_REASONS : WITHDRAWAL_REASONS).map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
+                {statusValue === 'Rejected' ? (
+                  <ReasonCheckboxList label="Reasons" required options={REJECTION_REASONS} selected={rejectionCats} onChange={setRejectionCats} />
+                ) : (
+                  <select value={rejectionCat} onChange={e => setRejectionCat(e.target.value)} className="select">
+                    <option value="">Select reason *</option>
+                    {WITHDRAWAL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                )}
                 <textarea placeholder="Additional detail (optional)" value={rejectionDetail} onChange={e => setRejectionDetail(e.target.value)} className="input h-20 resize-none" />
               </>
             )}
             {statusValue === 'Rejected' && (
               <RejectionEmailDraft
-                reasonCat={rejectionCat}
+                reasons={rejectionCats}
                 recipientEmail={candidate.email}
                 candidateName={candidate.full_name}
                 roleTitle={applications.find(a => a.id === selectedAppId)?.role_title}

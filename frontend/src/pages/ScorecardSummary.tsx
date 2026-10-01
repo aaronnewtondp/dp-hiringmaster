@@ -310,7 +310,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   const bulkHoldForFuture = () => runBulk(id => applicationsApi.updateStatus(id, { new_status: 'Hold for Future' }), Array.from(selectedIds), 'put on hold');
   const retryScoring = (ids: string[]) => runBulk(id => applicationsApi.retryScoring(id), ids, 'retried');
 
-  const handleBulkReject = async (reasonCat: string, reasonDetail: string, email: RejectionEmailState) => {
+  const handleBulkReject = async (reasons: string[], reasonDetail: string, email: RejectionEmailState) => {
     if (!rejectTargetIds) return;
     setBulkSaving(true);
     let succeeded = 0;
@@ -325,7 +325,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
           ? interpolateRejectionDraft(email, app.candidate_name, app.role_title)
           : null;
         return applicationsApi.updateStatus(id, {
-          new_status: 'Rejected', rejection_reason_cat: reasonCat, rejection_reason_detail: reasonDetail || undefined,
+          new_status: 'Rejected', rejection_reason_cats: reasons, rejection_reason_detail: reasonDetail || undefined,
           send_rejection_email: perRecipient ? true : undefined,
           rejection_email_subject: perRecipient?.subject,
           rejection_email_body: perRecipient?.body,
