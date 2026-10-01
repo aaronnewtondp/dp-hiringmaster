@@ -205,11 +205,18 @@ router.get('/', async (req: Request, res: Response) => {
       const f = buildRoleFilterSql(filters, 1);
       return query<{ id: string; title: string; priority: string; hiring_manager_name: string;
                start_date: string; target_closure_date: string; status: string;
-               active_count: string; shortlisted_scored_count: string; last_candidate_activity: string | null }>(`
+               active_count: string; shortlisted_scored_count: string; shortlisted_count: string; scored_above_60_count: string;
+               last_candidate_activity: string | null }>(`
         SELECT r.id, r.title, r.priority, r.hiring_manager_name,
                r.start_date, r.target_closure_date, r.status,
                COUNT(a.id) FILTER (WHERE a.status='Active') AS active_count,
                COUNT(a.id) FILTER (WHERE a.status='Active' AND a.stage <> 'Applied and Screened' AND a.ai_fit_score > 60) AS shortlisted_scored_count,
+               -- The two intermediate steps of the pipeline breakdown the Low Pipeline Roles
+               -- module shows (Pipeline -> scored above 60 -> shortlisted -> both). Same
+               -- definitions as the two counts above, so the four numbers always nest:
+               -- shortlisted_scored <= shortlisted, scored_above_60 <= active.
+               COUNT(a.id) FILTER (WHERE a.status='Active' AND a.stage <> 'Applied and Screened') AS shortlisted_count,
+               COUNT(a.id) FILTER (WHERE a.status='Active' AND a.ai_fit_score > 60) AS scored_above_60_count,
                -- "No recent candidate movement" flag input: the latest
                -- activity_log row actually tied to an application under this
                -- role (application_id IS NOT NULL excludes role-metadata-only
@@ -438,6 +445,8 @@ router.get('/', async (req: Request, res: Response) => {
       ...r, days_open, days_overdue, aging_alert,
       active_count: parseInt(r.active_count || '0'),
       shortlisted_scored_count: parseInt(r.shortlisted_scored_count || '0'),
+      shortlisted_count: parseInt(r.shortlisted_count || '0'),
+      scored_above_60_count: parseInt(r.scored_above_60_count || '0'),
       no_recent_candidate_activity,
     };
   });

@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, X } from 'lucide-react';
 
+// Matches the panel's `w-56` (14rem) below.
+const PANEL_WIDTH = 224;
+const VIEWPORT_MARGIN = 8;
+
 export interface MultiSelectOption {
   value: string;
   label: string;
@@ -39,7 +43,12 @@ export default function MultiSelectFilter({ label, options, selected, onChange }
   // same ancestor even though only horizontal scrolling was intended.
   const reposition = () => {
     const rect = btnRef.current?.getBoundingClientRect();
-    if (rect) setCoords({ top: rect.bottom + 4, left: rect.left });
+    // Keep the panel inside the window: a filter that sits near the right edge (the Hiring
+    // Funnel Snapshot's Role filter is right-aligned in its row) would otherwise open off-screen.
+    if (rect) setCoords({
+      top: rect.bottom + 4,
+      left: Math.max(VIEWPORT_MARGIN, Math.min(rect.left, window.innerWidth - PANEL_WIDTH - VIEWPORT_MARGIN)),
+    });
   };
 
   useEffect(() => {

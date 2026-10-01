@@ -5,6 +5,9 @@ import { ChevronDown } from 'lucide-react';
 import { dashboardApi } from '../../services/api.ts';
 import { HiringFunnelSnapshotStage } from '../../types/index.ts';
 import { EmptyState } from './Badges.tsx';
+import MultiSelectFilter, { MultiSelectOption } from './MultiSelectFilter.tsx';
+import InfoTooltip from './InfoTooltip.tsx';
+import { usePersistedState } from '../../hooks/usePersistedState.ts';
 import { STAGE_COLORS, UNLIT_BG, shade, glossyFill } from './PipelineProgress.tsx';
 
 // ─── Chevron geometry — same interlocking-arrow shape/overlap as the
@@ -44,20 +47,34 @@ function toggleBtnClass(active: boolean) {
   }`;
 }
 
-// Local per-section Role filter (and its rail) was retired — this section
-// now relies solely on the Dashboard's own master filters, matching every
-// other section on the page instead of carrying an independent one.
+// This section has its own Role filter again (an earlier one was retired in favour of
+// the dashboard's master filters alone; reinstated on request, as a single multi-select
+// rather than the old rail). It is SECTION-ONLY: when set it replaces the master Role
+// filter for this section, while the other master filters (department, location, …)
+// still apply on top. `roleOptions` is empty for a Hiring Manager, whose data the
+// backend locks to their own roles anyway — so there is nothing to pick and no filter shown.
 export default function HiringFunnelSnapshot({
   masterFilterParams,
+  roleOptions = [],
 }: {
   masterFilterParams: Record<string, string[]>;
+  roleOptions?: MultiSelectOption[];
 }) {
   const [owner, setOwner] = useState<string | null>(null);
   const [openStage, setOpenStage] = useState<string | null>(null);
   const [openType, setOpenType] = useState<string | null>(null);
+  const [savedRoleIds, setSavedRoleIds] = usePersistedState<string[]>('dashboard.funnelRoleIds', []);
+
+  // A saved selection can outlive the role it pointed at; once the options have loaded,
+  // drop anything that is no longer offered so it can't silently filter everything out.
+  const sectionRoleIds = roleOptions.length
+    ? savedRoleIds.filter(id => roleOptions.some(o => o.value === id))
+    : [];
 
   const params: Record<string, string | string[]> = { ...masterFilterParams };
+  if (sectionRoleIds.length) params.role_id = sectionRoleIds;
   if (owner) params.owner = owner;
+  const overridesMasterRole = sectionRoleIds.length > 0 && (masterFilterParams.role_id?.length ?? 0) > 0;
 
   // Its own lightweight endpoint, not the full GET /api/dashboard this used
   // to call — this section only ever reads hiring_funnel_snapshot out of
@@ -66,7 +83,7 @@ export default function HiringFunnelSnapshot({
   // unrelated queries' worth of work for nothing. See the RCA comment on
   // GET /dashboard/funnel-snapshot in backend/src/routes/dashboard.ts.
   const { data, isLoading } = useQuery<{ data: { hiring_funnel_snapshot: HiringFunnelSnapshotStage[] } }>({
-    queryKey: ['dashboard-funnel-snapshot', masterFilterParams, owner],
+    queryKey: ['dashboard-funnel-snapshot', masterFilterParams, sectionRoleIds, owner],
     queryFn:  () => dashboardApi.funnelSnapshot(params),
   });
 
@@ -94,13 +111,22 @@ export default function HiringFunnelSnapshot({
         <p className="text-xs text-gray-400 mt-0.5">SLA breaches across the pipeline — click a stage to see what's overdue and who owns it</p>
       </div>
 
-      {/* Owner filter — horizontal, top */}
+      {/* Owner filter — horizontal, top; the section's own Role filter sits at the end of the row */}
       <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
         <button className={toggleBtnClass(owner === null)} onClick={() => setOwner(null)}>All owners</button>
         {OWNER_OPTIONS.map(o => (
           <button key={o} className={toggleBtnClass(owner === o)} onClick={() => setOwner(o)}>{o}</button>
         ))}
+        {roleOptions.length > 0 && (
+          <div className="ml-auto flex items-center gap-1.5">
+            <MultiSelectFilter label="Role" options={roleOptions} selected={sectionRoleIds} onChange={setSavedRoleIds} />
+            <InfoTooltip align="right" text="Filters this section only. When a role is picked here it replaces the dashboard's Role filter for this section; the dashboard's other filters (department, location, mode, priority) still apply." />
+          </div>
+        )}
       </div>
+      {overridesMasterRole && (
+        <p className="px-5 pt-2 text-[11px] text-gray-400">Showing the role(s) picked here — not the dashboard's Role filter.</p>
+      )}
 
       <div className="px-5 pb-5 pt-4">
         <div className="w-full">

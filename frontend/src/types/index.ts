@@ -370,7 +370,13 @@ export interface DashboardData {
   };
   hiring_funnel_snapshot:    HiringFunnelSnapshotStage[];
   aging_roles:               Array<Role & { active_count: number; shortlisted_scored_count: number; no_recent_candidate_activity: boolean }>;
-  low_pipeline:              Array<Role & { active_count: number; shortlisted_scored_count: number; no_recent_candidate_activity: boolean }>;
+  low_pipeline:              Array<Role & {
+    active_count: number;               // total Active pipeline
+    scored_above_60_count: number;      // ...of which ResumeIQ fit score > 60
+    shortlisted_count: number;          // ...of which shortlisted (past Applied and Screened)
+    shortlisted_scored_count: number;   // ...shortlisted AND scored > 60 (the number the "low" threshold is judged on)
+    no_recent_candidate_activity: boolean;
+  }>;
   roles_by_status:           Record<string, number>;
   hiring_funnel:             Array<{ stage: string; active: number; rejected: number; withdrawn: number; hold_for_future: number }>;
   rejected_by_stage:         Record<string, number>;
