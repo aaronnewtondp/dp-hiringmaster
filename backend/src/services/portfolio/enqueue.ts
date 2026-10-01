@@ -10,7 +10,7 @@ export const PORTFOLIO_TOPIC = 'portfolio-analysis';
 
 export async function enqueuePortfolioAnalysis(
   applicationId: string,
-  opts: { busyRetries?: number; delaySeconds?: number } = {},
+  opts: { busyRetries?: number; attemptsUsed?: number; delaySeconds?: number } = {},
 ): Promise<{ enqueued: boolean; error?: string }> {
   try {
     const { send } = await import('@vercel/queue');
@@ -20,7 +20,9 @@ export async function enqueuePortfolioAnalysis(
     await Promise.race([
       send(
         PORTFOLIO_TOPIC,
-        opts.busyRetries ? { applicationId, busyRetries: opts.busyRetries } : { applicationId },
+        opts.busyRetries || opts.attemptsUsed
+          ? { applicationId, busyRetries: opts.busyRetries ?? 0, attemptsUsed: opts.attemptsUsed ?? 0 }
+          : { applicationId },
         opts.delaySeconds ? { delaySeconds: opts.delaySeconds } : undefined,
       ),
       new Promise((_, reject) => setTimeout(() => reject(new Error('queue did not respond within 8s')), 8000)),
@@ -31,8 +33,10 @@ export async function enqueuePortfolioAnalysis(
     console.error('[Portfolio] Could not enqueue', applicationId, error);
     // Leave the row 'pending' with a visible reason — the manual Re-run
     // button and the sweep pick it up; never a silent null.
+    // Only while the review is still waiting: by now the row may have settled (a duplicate
+    // chain's hand-back failing late) and must not get an error note written onto a good review.
     await query(
-      `UPDATE applications SET portfolio_analysis_error=$1 WHERE id=$2`,
+      `UPDATE applications SET portfolio_analysis_error=$1 WHERE id=$2 AND portfolio_analysis_status='pending'`,
       [`Could not be queued (${error}). Use Re-run to retry.`, applicationId],
     ).catch(() => {});
     return { enqueued: false, error };
@@ -44,6 +48,40 @@ export interface PreparedPortfolio {
   status: 'pending' | 'no_portfolio' | 'busy';
   links:  PortfolioLink[];
   queued: boolean;
+}
+
+/**
+ * Worker-side give-up (budget spent, or the browser stayed busy too long). Unlike
+ * markPortfolioFailed it only touches a row that is genuinely still waiting — 'pending', or
+ * 'running' past the point a live worker could hold it — so a stale duplicate message can never
+ * flip a review that has since completed (or settled any other way) to 'failed'.
+ */
+export async function markPortfolioGaveUp(applicationId: string, message: string): Promise<void> {
+  await query(
+    `UPDATE applications SET portfolio_analysis_status='failed', portfolio_analysis_error=$1
+     WHERE id=$2 AND (
+       portfolio_analysis_status='pending'
+       OR (portfolio_analysis_status='running' AND portfolio_started_at < NOW() - ($3 || ' seconds')::interval)
+     )`,
+    [message.slice(0, 500), applicationId, String(STALE_RUNNING_SECONDS)],
+  ).catch(() => {});
+}
+
+/**
+ * Is there still a review for a queue message to do? True for a waiting row ('pending', or
+ * 'failed' which claim() will pick up) and for a dead 'running' one; false once the review has
+ * settled, is held by a live worker, or the application is gone. A legitimate Re-run always
+ * resets the row to 'pending' before it queues, so a message for a settled row is a stale
+ * duplicate.
+ */
+export async function portfolioNeedsReview(applicationId: string): Promise<boolean> {
+  const rows = await query<{ needs: boolean }>(
+    `SELECT (portfolio_analysis_status IN ('pending','failed')
+             OR (portfolio_analysis_status='running' AND portfolio_started_at < NOW() - ($2 || ' seconds')::interval)) AS needs
+     FROM applications WHERE id=$1`,
+    [applicationId, String(STALE_RUNNING_SECONDS)],
+  );
+  return rows[0]?.needs === true;
 }
 
 /** Records a failure that is ours (not the candidate's) so it shows up with a Re-run action instead of vanishing. */

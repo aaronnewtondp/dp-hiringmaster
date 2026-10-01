@@ -6,7 +6,7 @@ import { BrowserBusyError, isBrowserInUse, withBrowser } from './browser.js';
 import { capturePortfolios, CapturedPortfolio } from './capture.js';
 import { analyzePortfolios } from './analyze.js';
 import { applyPortfolioOutcome } from './scoring.js';
-import { STALE_RUNNING_SECONDS } from './jobState.js';
+import { MAX_ATTEMPTS, STALE_RUNNING_SECONDS } from './jobState.js';
 import { PortfolioAnalysisResult, PortfolioLink, PortfolioReviewed } from './types.js';
 
 // Wall-clock budget for the whole job. The function limit is 300s; browser work
@@ -14,8 +14,7 @@ import { PortfolioAnalysisResult, PortfolioLink, PortfolioReviewed } from './typ
 const TOTAL_BUDGET_MS = 270_000;
 const ANALYSIS_RESERVE_MS = 75_000;
 
-/** Queue deliveries after which a transient failure is recorded as 'failed' instead of retried. */
-export const MAX_ATTEMPTS = 3;
+export { MAX_ATTEMPTS };
 
 /**
  * How long a review waits for this instance's browser before reporting 'busy'. Short on
