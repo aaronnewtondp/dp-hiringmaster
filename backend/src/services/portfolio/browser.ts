@@ -34,6 +34,9 @@ export class BrowserBusyError extends Error {
 let inUse: Promise<void> | null = null;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+/** Is another review using this instance's browser right now? A cheap check callers can make before doing any work. */
+export function isBrowserInUse(): boolean { return inUse !== null; }
+
 export async function acquireBrowserSlot(maxWaitMs: number): Promise<() => void> {
   const start = Date.now();
   while (inUse) {

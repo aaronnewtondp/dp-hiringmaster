@@ -19,30 +19,27 @@
 import 'dotenv/config';
 import express from 'express';
 import { QueueClient } from '@vercel/queue';
-import { MAX_ATTEMPTS, runPortfolioAnalysis } from '../src/services/portfolio/run.js';
+import { MAX_ATTEMPTS } from '../src/services/portfolio/run.js';
+import { handlePortfolioMessage } from '../src/services/portfolio/queueHandler.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
-// Application ids look like A0747 / A10140 — anything else is not ours to run.
-const APPLICATION_ID = /^A\d{1,10}$/;
-
 const queue = new QueueClient();
 const handleQueueMessage = queue.handleNodeCallback(
   async (message, metadata) => {
-    const applicationId = (message as { applicationId?: unknown } | null)?.applicationId;
-    if (typeof applicationId !== 'string' || !APPLICATION_ID.test(applicationId)) return;   // malformed: acknowledge, don't retry forever
-    // Returns normally for every settled outcome (completed, inaccessible, a
-    // recorded 'failed', or "not claimable") — that acknowledges the message, so
-    // a dead portfolio site is never retried. It THROWS only for a transient
-    // failure of ours (browser busy/launch, model overloaded) on an early
-    // attempt; the queue then redelivers with a fresh invocation and budget.
-    // (vercel.json also caps deliveries at MAX_ATTEMPTS, which bounds the one
-    // case this code can't see: a hard kill — OOM, the 300s limit — where no
-    // JS runs to ack or throw. The row then reads 'running' and, after
-    // STALE_RUNNING_SECONDS, an HR Re-run can reclaim it.)
-    const result = await runPortfolioAnalysis(applicationId, { attempt: metadata?.deliveryCount ?? 1 });
-    console.log('[Portfolio] queue job finished', applicationId, JSON.stringify(result));
+    // All the decisions live in queueHandler.ts (unit-tested). Returns normally for every
+    // settled outcome — completed, inaccessible, a recorded 'failed', "not claimable", or a
+    // review handed back to the queue because this instance's browser was busy — which
+    // acknowledges the message, so a dead portfolio site is never retried. It THROWS only
+    // for a transient failure of ours (browser launch, model overloaded) on an early
+    // attempt, or when a busy review could not be handed back; the queue then redelivers
+    // with a fresh invocation and budget.
+    // (vercel.json also caps deliveries at MAX_ATTEMPTS, which bounds the one case this code
+    // can't see: a hard kill — OOM, the 300s limit — where no JS runs to ack or throw. The
+    // row then reads 'running' and, after STALE_RUNNING_SECONDS, an HR Re-run can reclaim it.)
+    const outcome = await handlePortfolioMessage(message, metadata);
+    console.log('[Portfolio] queue message handled', JSON.stringify({ deliveryCount: metadata?.deliveryCount, ...outcome }));
   },
   {
     visibilityTimeoutSeconds: 330,

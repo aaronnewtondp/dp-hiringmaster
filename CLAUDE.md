@@ -678,10 +678,23 @@ Express app would drag 70 MB of Chromium into every request's function.
 - One Chromium per process (`browser.ts` `acquireBrowserSlot`): Fluid compute packs concurrent
   invocations onto one instance and `@sparticuz/chromium` treats "/tmp/chromium exists" as
   "extracted" (upstream Sparticuz/chromium#507), so a second cold-start invocation could launch a
-  half-written binary. A waiter that can't get in within 45s throws `BrowserBusyError` (transient
-  → queue redelivers). `/tmp/.chromium-ready` marks a finished extraction; a truncated leftover
+  half-written binary. `/tmp/.chromium-ready` marks a finished extraction; a truncated leftover
   is wiped. `--disable-web-security` is filtered out of the Lambda launch args (a hostile page's
   script could otherwise read cross-origin responses).
+- **A busy browser is handed back, never failed (found in the first production backfill).** The
+  one-browser lock means that when Vercel delivers several messages to the same instance, the
+  extras can't run. First version: wait 45s, throw `BrowserBusyError`, let the queue redeliver —
+  but that spent one of a message's 3 delivery attempts each time, and a third of the ~25 reviews
+  in the first half hour ended `failed` ("Another portfolio review is using the browser on this
+  instance"). Now `run.ts` checks `isBrowserInUse()` BEFORE touching the database (answers in
+  0 ms), waits only `BUSY_WAIT_MS` (3s) if it loses the race, releases the row back to `pending`
+  and returns `{status:'busy'}`; `queueHandler.ts` (the unit-tested body of the consumer) then
+  sends a fresh `{applicationId, busyRetries+1}` message with `delaySeconds` 60-105 and
+  acknowledges the old one, up to `MAX_BUSY_RETRIES` (90, ~2h) before recording a failure. The
+  counter rides in the message because `maxDeliveries: 3` in `vercel.json` must stay small — it is
+  the only bound on a hard-killed review. If the hand-back `send()` itself fails, the handler
+  throws and the queue's own redelivery takes over. Queue messages are pinned to the deployment
+  that published them, so a fix like this only helps messages sent after it deploys.
 - `POST /:id/portfolio-analysis` never changes state when the resume can't be read right now
   (502): a transient Drive failure used to look like "no links", wiping stored links and turning a
   good review into `no_portfolio` with the old score still in the average. Likewise a failed
