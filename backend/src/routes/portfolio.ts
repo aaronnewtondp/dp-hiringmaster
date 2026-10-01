@@ -6,6 +6,7 @@ import { fetchResumeTextAndLinks } from '../services/driveService.js';
 import { pickPortfolioLinks } from '../services/portfolio/links.js';
 import { preparePortfolioReview } from '../services/portfolio/enqueue.js';
 import { STALE_RUNNING_SECONDS } from '../services/portfolio/jobState.js';
+import { hasReadableText } from '../services/portfolio/text.js';
 
 // Mounted at /api/applications, ahead of applicationsRouter. Auth is applied
 // per route (not router-wide) because the batch endpoint is secret-protected
@@ -45,7 +46,9 @@ async function requeue(applicationId: string): Promise<
     if (fetched.text == null || fetched.linksError) {
       return { ok: false, code: 502, error: 'The resume could not be read right now — nothing was changed. Try again shortly.' };
     }
-    resumeRead = true;
+    // An image-only PDF "reads" as page markers alone — that is not evidence the
+    // candidate has no portfolio, so it must not be scored as 'no link found'.
+    resumeRead = hasReadableText(fetched.text);
     links = pickPortfolioLinks(fetched.links, 3, { candidateName: candidate.full_name });
   }
   const prepared = await preparePortfolioReview({ applicationId, links, resumeRead });

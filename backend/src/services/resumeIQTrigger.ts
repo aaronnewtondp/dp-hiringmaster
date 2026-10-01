@@ -12,6 +12,7 @@ import { scoreCandidate, priorityBucketFromScore } from './resumeIQ.js';
 import { fetchResumeText, fetchResumeTextAndLinks } from './driveService.js';
 import { LinkInput, pickPortfolioLinks } from './portfolio/links.js';
 import { markPortfolioFailed, preparePortfolioReview } from './portfolio/enqueue.js';
+import { hasReadableText } from './portfolio/text.js';
 
 export interface ResumeIqTriggerResult {
   scored: boolean;
@@ -117,7 +118,7 @@ export async function runResumeIQScoring(applicationId: string): Promise<ResumeI
           return { scored: true, portfolio: { status: 'failed', queued: false, links: 0 } };
         }
         const links = pickPortfolioLinks(resumeLinks, 3, { candidateName: candidate.full_name });
-        const prepared = await preparePortfolioReview({ applicationId: app.id, links, resumeRead: result.resumeRead });
+        const prepared = await preparePortfolioReview({ applicationId: app.id, links, resumeRead: result.resumeRead && hasReadableText(resumeText) });
         return { scored: true, portfolio: { status: prepared.status, queued: prepared.queued, links: prepared.links.length } };
       } catch (err) {
         console.error('[ResumeIQ] Portfolio preparation failed for', app.id, err);

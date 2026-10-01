@@ -3,7 +3,6 @@
 // below — the 70 MB Chromium binary, which must stay out of the main API's
 // serverless bundle. The main app only ever imports enqueue.ts / links.ts.
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import type { Browser } from 'puppeteer-core';
 
@@ -76,7 +75,11 @@ function findLocalChrome(): string | null {
   for (const p of fixed) if (fs.existsSync(p)) return p;
 
   // A Playwright-installed Chromium (this repo's e2e suite already has one).
-  const pwRoots = [path.join(os.homedir(), 'Library/Caches/ms-playwright'), path.join(os.homedir(), '.cache/ms-playwright')];
+  // $HOME via process.env, not os.homedir(): @vercel/nft statically evaluates
+  // os.homedir() on the build machine and then tries to bundle the entire
+  // (multi-GB) Playwright cache it finds there. process.env is opaque to it.
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const pwRoots = home ? [path.join(home, 'Library/Caches/ms-playwright'), path.join(home, '.cache/ms-playwright')] : [];
   for (const root of pwRoots) {
     if (!fs.existsSync(root)) continue;
     for (const dir of fs.readdirSync(root).filter(d => d.startsWith('chromium')).sort().reverse()) {

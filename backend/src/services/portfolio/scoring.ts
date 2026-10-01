@@ -3,6 +3,7 @@ import { SLA_HOURS } from '../../types/index.js';
 import { priorityBucketFromScore } from '../resumeIQ.js';
 import { computeAvg } from './rubric.js';
 import { PortfolioAnalysisResult } from './types.js';
+import { jsonbSafeStringify } from './text.js';
 
 // Writes the portfolio review into the application: the 9th ResumeIQ
 // dimension, the recomputed average (and everything derived from it), the
@@ -71,7 +72,7 @@ export async function applyPortfolioOutcome(applicationId: string, out: Portfoli
       await client.query(
         `INSERT INTO portfolio_analyses (application_id, analysis) VALUES ($1, $2::jsonb)
          ON CONFLICT (application_id) DO UPDATE SET analysis=EXCLUDED.analysis, updated_at=NOW()`,
-        [applicationId, JSON.stringify(out.analysis)],
+        [applicationId, jsonbSafeStringify(out.analysis)],
       );
     }
 

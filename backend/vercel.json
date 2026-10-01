@@ -19,7 +19,9 @@
         {
           "type": "queue/v2beta",
           "topic": "portfolio-analysis",
-          "retryAfterSeconds": 120
+          "retryAfterSeconds": 120,
+          "maxDeliveries": 3,
+          "maxConcurrency": 5
         }
       ]
     }

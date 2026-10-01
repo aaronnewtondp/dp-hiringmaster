@@ -6,6 +6,7 @@
 import type { Browser, Page } from 'puppeteer-core';
 import { PortfolioLink, PortfolioSignals } from './types.js';
 import { assertSafePublicUrl, makeHostChecker, safeFetch } from './urlSafety.js';
+import { wellFormed } from './text.js';
 
 export interface Shot { label: string; data: string }   // base64 JPEG
 export interface CapturedPage { url: string; title: string; text: string; shots: Shot[] }
@@ -319,8 +320,8 @@ async function capturePortfolio(
       if (problem) continue;
 
       const isHome = out.pages.length === 0;
-      const title = ((await withTimeout(page.title(), 2000, '')) || target).slice(0, 200);
-      const shots = await scrollSlices(page, isHome ? 'Home page' : `Page: ${title.slice(0, 50)}`, isHome ? 3 : 2);
+      const title = wellFormed(((await withTimeout(page.title(), 2000, '')) || target).slice(0, 200));
+      const shots = await scrollSlices(page, isHome ? 'Home page' : `Page: ${wellFormed(title.slice(0, 50))}`, isHome ? 3 : 2);
       out.pages.push({ url: page.url(), title, text, shots });
       const key = (() => { const u = new URL(page.url()); u.hash = ''; return u.origin + u.pathname.replace(/\/$/, ''); })();
       visited.add(key);

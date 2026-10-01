@@ -627,9 +627,19 @@ stored structured review shown in the highlights.
    `queue/v2beta`) runs `runPortfolioAnalysis()` (`portfolio/run.ts`): atomically
    *claims* the row (a redelivered message can't run twice), captures with
    `puppeteer-core` + `@sparticuz/chromium`, calls Claude with screenshots, writes
-   via `applyPortfolioOutcome()` (`portfolio/scoring.ts`). It also accepts a direct
-   POST with `x-ingest-secret` — the fallback if the queue misbehaves, and how the
-   deployed function is verified independently of the queue.
+   via `applyPortfolioOutcome()` (`portfolio/scoring.ts`). **It has no HTTP entry
+   point and cannot have one**: a Vercel queue consumer has no public URL (Vercel
+   documents it as air-gapped), so a secret-protected "direct run" route was
+   unreachable dead code and was removed after a pre-merge review caught it.
+   The deployed function is verified only through the queue — press Re-run on one
+   application and watch `portfolio_analysis_status`/`_error`. Running a review
+   outside the queue is a local-only thing: call `runPortfolioAnalysis(id)` from a
+   `tsx` script (optionally with `PORTFOLIO_BROWSER_WS_ENDPOINT`).
+   `vercel.json`'s trigger also sets `maxDeliveries: 3` (= `MAX_ATTEMPTS`) — the
+   one case `run.ts` can't see is a hard kill (OOM, the 300s limit), where no JS
+   runs to ack or throw; without a cap that message is redelivered, and billed at
+   the full 300s x 2 GB, until its 24h TTL — and `maxConcurrency: 5`, which keeps a
+   bulk backfill from firing ~150 vision-model calls at once.
 3. Status `portfolio_analysis_status`: `pending | running | completed | failed |
    no_portfolio | inaccessible`. **`inaccessible` (dead/private link) is held against
    the candidate; `failed` (our timeout/crash) never is** — `capture.ts`
@@ -657,6 +667,14 @@ Express app would drag 70 MB of Chromium into every request's function.
   = acknowledged, so a dead portfolio site is never retried. A review that would conclude
   "no usable portfolio" while another link *errored on our side* fails (retryable) instead of
   scoring the candidate down on an incomplete look.
+- **Text guards (`portfolio/text.ts`).** `hasReadableText()` — an image-only (scanned) PDF
+  "extracts" successfully to nothing but pdf-parse's page markers (`-- 1 of 1 --`), so a
+  non-null string is not proof the resume was read; used (portfolio path only — base
+  `resumeRead` semantics are unchanged for every role) so such a resume isn't scored 0 as
+  "no portfolio link". `jsonbSafeStringify()` — a page title cut by `.slice(0, 200)` can end
+  mid-emoji; `JSON.stringify` then emits a lone `\ud83d` escape that PostgreSQL's jsonb
+  rejects, which failed the whole review write on every Re-run. Everything stored in
+  `portfolio_analyses` goes through it.
 - One Chromium per process (`browser.ts` `acquireBrowserSlot`): Fluid compute packs concurrent
   invocations onto one instance and `@sparticuz/chromium` treats "/tmp/chromium exists" as
   "extracted" (upstream Sparticuz/chromium#507), so a second cold-start invocation could launch a
@@ -752,8 +770,14 @@ with a visible "Could not be queued" message; run a review locally by calling
 and private files are reported as inaccessible, not scored; PDF/slide-deck links are not
 opened (flagged for manual review); criteria like field visits or business outcomes can
 only be judged from what the site states, so absence is "not evidenced", never a concern.
-R007's `generated_jd_content` is null, so JD alignment uses its short must/nice-to-have
-DB fields rather than the fuller published JD text.
+R007's `generated_jd_content` was set on 2026-10-01 from the published long-form JD
+(`DP_JD7_Senior_UX_Product_Designer.pdf`, loaded by SQL — R007 has no `jd_drive_link`,
+that JD was made outside HMS), so both the base 8-dimension scoring and the portfolio
+JD alignment compare against the full JD for applications created from then on;
+already-scored applicants keep the score they got against the short DB fields.
+**Do not press "Regenerate JD" on R007 expecting it to keep that content** — it
+(`roles.ts`) overwrites `generated_jd_content` with a fresh Claude-generated version
+(`jd_source` is still `'generated'`).
 
 ### SLA / aging checks — compute-on-read, not cron
 Vercel Hobby tier does not support sub-hourly cron, so the SLA checker

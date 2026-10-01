@@ -5,16 +5,18 @@
  *    binary, neither of which the main API should carry;
  *  - if Chromium ever misbehaves on Vercel it can only break this function.
  *
- * Two ways in:
- *  1. Vercel Queues (beta) delivers { applicationId } messages here — the
- *     normal path, triggered from vercel.json's experimentalTriggers. Vercel
- *     invokes queue consumers itself; that path is not reachable from outside.
- *  2. A direct POST carrying the shared x-ingest-secret runs one review
- *     synchronously — the fallback if the queue is unavailable, and how the
- *     deployed function can be verified independently of the queue.
+ * It is a Vercel Queues (beta) CONSUMER: vercel.json's experimentalTriggers
+ * wires the `portfolio-analysis` topic to it and Vercel's queue infrastructure
+ * delivers { applicationId } messages here. A queue consumer has NO public URL
+ * (Vercel documents it as air-gapped from the internet) — so there is
+ * deliberately no HTTP entry point here: a secret-protected "direct run" route
+ * would be unreachable in production, and dead code that looks like a fallback
+ * is worse than none. Ways to run a review outside the queue are local only:
+ * call runPortfolioAnalysis(applicationId) from a tsx script with DATABASE_URL
+ * set, optionally with PORTFOLIO_BROWSER_WS_ENDPOINT pointing at a hosted
+ * Chrome. To verify the deployed function, press Re-run on one application.
  */
 import 'dotenv/config';
-import crypto from 'crypto';
 import express from 'express';
 import { QueueClient } from '@vercel/queue';
 import { MAX_ATTEMPTS, runPortfolioAnalysis } from '../src/services/portfolio/run.js';
@@ -24,14 +26,6 @@ app.use(express.json({ limit: '1mb' }));
 
 // Application ids look like A0747 / A10140 — anything else is not ours to run.
 const APPLICATION_ID = /^A\d{1,10}$/;
-
-function secretMatches(provided: unknown): boolean {
-  const secret = process.env.ROLE_INGEST_SECRET;
-  if (!secret || typeof provided !== 'string') return false;   // no secret configured => the direct path is CLOSED, never open
-  const a = Buffer.from(provided);
-  const b = Buffer.from(secret);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
 
 const queue = new QueueClient();
 const handleQueueMessage = queue.handleNodeCallback(
@@ -43,6 +37,10 @@ const handleQueueMessage = queue.handleNodeCallback(
     // a dead portfolio site is never retried. It THROWS only for a transient
     // failure of ours (browser busy/launch, model overloaded) on an early
     // attempt; the queue then redelivers with a fresh invocation and budget.
+    // (vercel.json also caps deliveries at MAX_ATTEMPTS, which bounds the one
+    // case this code can't see: a hard kill — OOM, the 300s limit — where no
+    // JS runs to ack or throw. The row then reads 'running' and, after
+    // STALE_RUNNING_SECONDS, an HR Re-run can reclaim it.)
     const result = await runPortfolioAnalysis(applicationId, { attempt: metadata?.deliveryCount ?? 1 });
     console.log('[Portfolio] queue job finished', applicationId, JSON.stringify(result));
   },
@@ -53,19 +51,6 @@ const handleQueueMessage = queue.handleNodeCallback(
 );
 
 app.get('*', (_req, res) => { res.json({ ok: true, service: 'portfolio-worker' }); });
-
-app.post('*', async (req, res, next) => {
-  if (secretMatches(req.headers['x-ingest-secret'])) {
-    const applicationId = String(req.body?.applicationId || '');
-    if (!APPLICATION_ID.test(applicationId)) { res.status(400).json({ error: 'valid applicationId required' }); return; }
-    try {
-      res.json(await runPortfolioAnalysis(applicationId));   // direct run: no retries, so it settles as 'failed' if it fails
-    } catch (err) {
-      res.status(500).json({ error: (err as Error).message.slice(0, 200) });
-    }
-    return;
-  }
-  return (handleQueueMessage as unknown as express.RequestHandler)(req, res, next);
-});
+app.post('*', handleQueueMessage as unknown as express.RequestHandler);
 
 export default app;
