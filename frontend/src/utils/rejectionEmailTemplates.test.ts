@@ -46,6 +46,19 @@ describe('buildRejectionDraft with several reasons', () => {
     expect(mixed.body).not.toContain('unrelated to your candidacy');
   });
 
+  it("when the role itself is cancelled/on hold, never claims the company is moving forward with other candidates", () => {
+    for (const others of [['Compensation mismatch'], ['Missing mandatory skill', 'Communication gap']]) {
+      const d = buildRejectionDraft(['Role cancelled / on hold', ...others], 'Jane', 'Eng');
+      expect(d.body).not.toMatch(/other candidates?/i);
+      expect(d.body).toContain('status of the role');
+    }
+  });
+
+  it('but a genuine "other candidate preferred" mixed with others may still say so', () => {
+    const d = buildRejectionDraft(['Role filled — other candidate preferred', 'Communication gap'], 'Jane', 'Eng');
+    expect(d.body).toContain('other candidates');
+  });
+
   it('falls back to the generic opener for an empty list', () => {
     expect(buildRejectionDraft([], 'Jane', 'Eng').body).toContain("we've decided not to move forward with your application");
   });

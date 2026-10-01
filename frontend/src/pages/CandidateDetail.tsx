@@ -9,7 +9,7 @@ import { StageBadge, StatusBadge, PriorityBadge, OverBudgetBadge, Spinner, Empty
 import PipelineProgress from '../components/shared/PipelineProgress.tsx';
 import RejectionEmailDraft, { RejectionEmailState } from '../components/shared/RejectionEmailDraft.tsx';
 import ReasonCheckboxList from '../components/shared/ReasonCheckboxList.tsx';
-import { splitReasons } from '../utils/rejectionReasons.ts';
+import { reasonFields, splitReasons } from '../utils/rejectionReasons.ts';
 import BackButton from '../components/shared/BackButton.tsx';
 import { isOverBudget } from '../utils/budget.ts';
 import EditableSection from '../components/shared/EditableSection.tsx';
@@ -268,7 +268,7 @@ export default function CandidateDetail() {
       const sendEmail = statusValue === 'Rejected' && rejectionEmail.enabled;
       const res = await applicationsApi.updateStatus(selectedAppId, {
         new_status: statusValue,
-        rejection_reason_cats: reasons.length ? reasons : undefined,
+        ...reasonFields(reasons),
         rejection_reason_detail: rejectionDetail || undefined,
         send_rejection_email: sendEmail || undefined,
         rejection_email_subject: sendEmail ? rejectionEmail.subject : undefined,
@@ -904,7 +904,7 @@ export default function CandidateDetail() {
 
       {showStatusModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <h3 className="text-base font-semibold">Update status</h3>
             <select value={statusValue} onChange={e => setStatusValue(e.target.value)} className="select">
               {['Active', 'Rejected', 'Withdrawn', 'Hold for Future'].map(s => <option key={s} value={s}>{s}</option>)}
@@ -931,7 +931,8 @@ export default function CandidateDetail() {
                 onChange={setRejectionEmail}
               />
             )}
-            <div className="flex gap-2 justify-end">
+            {/* Pinned to the bottom of the (scrolling) card so Update is always reachable on a short window */}
+            <div className="flex gap-2 justify-end sticky bottom-0 bg-white pt-3 pb-1">
               <button onClick={() => setShowStatusModal(false)} className="btn-secondary">Cancel</button>
               <button onClick={handleStatusUpdate} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Update'}</button>
             </div>

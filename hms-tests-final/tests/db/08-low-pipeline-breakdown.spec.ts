@@ -59,7 +59,7 @@ test.describe('Low Pipeline Roles — pipeline breakdown counts', () => {
 
   test('counts each step of the funnel separately, and they nest', async ({ request }) => {
     const roleId = await newRole();
-    // 8 Active candidates:
+    // 9 Active candidates:
     await addApp(roleId, { fit: 85 });                                   // pipeline, >60
     await addApp(roleId, { fit: 61 });                                   // pipeline, >60 (just over)
     await addApp(roleId, { fit: 60 });                                   // pipeline, NOT >60 (60 is not above 60)
@@ -68,6 +68,7 @@ test.describe('Low Pipeline Roles — pipeline breakdown counts', () => {
     await addApp(roleId, { stage: 'Interview Round 1', fit: 90 });       // shortlisted, >60
     await addApp(roleId, { stage: 'Interview Round 1', fit: 40 });       // shortlisted, NOT >60
     await addApp(roleId, { stage: 'Founders Round', fit: null });        // shortlisted, unscored
+    await addApp(roleId, { stage: 'Interview Round 2', fit: 35 });       // shortlisted, NOT >60  (makes shortlisted != scored_above_60)
     // ...and ones that must NOT count anywhere:
     await addApp(roleId, { status: 'Rejected', fit: 95 });
     await addApp(roleId, { status: 'Hold for Future', stage: 'Interview Round 1', fit: 95 });
@@ -76,9 +77,9 @@ test.describe('Low Pipeline Roles — pipeline breakdown counts', () => {
     const row = await lowPipelineRow(request, roleId);
     expect(row, 'a role with fewer than 3 shortlisted >60 appears in low_pipeline').toBeTruthy();
     expect(row).toMatchObject({
-      active_count: 8,
+      active_count: 9,
       scored_above_60_count: 3,       // 85, 61, 90
-      shortlisted_count: 3,           // two Interview Round 1 + Founders Round
+      shortlisted_count: 4,           // two Interview Round 1 + Interview Round 2 + Founders Round
       shortlisted_scored_count: 1,    // only the 90 at Interview Round 1
     });
     const r = row as { active_count: number; scored_above_60_count: number; shortlisted_count: number; shortlisted_scored_count: number };
@@ -103,7 +104,8 @@ test.describe('Low Pipeline Roles — pipeline breakdown counts', () => {
   test('exactly 2 qualifying candidates is still low-pipeline (the threshold is "fewer than 3")', async ({ request }) => {
     const roleId = await newRole();
     for (let i = 0; i < 2; i++) await addApp(roleId, { stage: 'Interview Round 2', fit: 75 });
-    expect(await lowPipelineRow(request, roleId)).toMatchObject({ shortlisted_scored_count: 2, shortlisted_count: 2, scored_above_60_count: 2, active_count: 2 });
+    await addApp(roleId, { fit: 88 });                                   // scored >60 but not shortlisted: widens scored_above_60 past shortlisted
+    expect(await lowPipelineRow(request, roleId)).toMatchObject({ shortlisted_scored_count: 2, shortlisted_count: 2, scored_above_60_count: 3, active_count: 3 });
   });
 
   test('closed roles are not listed at all', async ({ request }) => {

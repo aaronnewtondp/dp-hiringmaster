@@ -80,7 +80,7 @@ tests/
 │   └── calendar.ts       # real Google Calendar helper (get/delete event, credential
 │                          # detection) — used by the one real-round-trip Calendar test
 │                          # and its e2e counterpart, see below
-├── api/  (40 files)
+├── api/  (41 files)
 │   ├── 01-auth.spec.ts
 │   ├── 02-roles.spec.ts
 │   ├── 03-candidates.spec.ts
@@ -122,8 +122,9 @@ tests/
 │   ├── 37-auto-advance-positive-feedback.spec.ts   # positive interview feedback auto-advances stage
 │   ├── 38-role-closure-summary.spec.ts             # role closure summary PDF/route
 │   ├── 39-dashboard-funnel-snapshot-endpoint.spec.ts # GET /api/dashboard/funnel-snapshot
-│   └── 40-candidate-gender.spec.ts                 # auto-tag from name, manual correction, gender filter
-├── db/  (7 files — direct Postgres via `pg`, LOCAL ONLY, never prod)
+│   ├── 40-candidate-gender.spec.ts                 # auto-tag from name, manual correction, gender filter
+│   └── 41-multiple-rejection-reasons.spec.ts       # rejection_reason_cats[]: stored '; '-joined, legacy single field, validation, HM path
+├── db/  (8 files — direct Postgres via `pg`, LOCAL ONLY, never prod)
 │   ├── 00-schema-integrity.spec.ts        # dedicated sequences, GIN indexes
 │   ├── 01-talent-pool-archival.spec.ts    # 90-day archival threshold (backdates last_updated directly)
 │   ├── 02-role-discard-activity-log.spec.ts
@@ -131,7 +132,8 @@ tests/
 │   ├── 04-role-aging-close-target.spec.ts # aging_alert anchored to target_closure_date, not days-open
 │   ├── 05-aging-roles-no-movement.spec.ts # no_recent_candidate_activity flag (backdates activity_log)
 │   ├── 06-manual-jd-source.spec.ts        # roles.jd_source='manual' guard on auto-gen + regenerate-jd
-│   └── 07-portfolio-review.spec.ts        # portfolio review (9th ResumeIQ dimension): schema, route gating, killed-job recovery, backfill guards — no browser/model calls
+│   ├── 07-portfolio-review.spec.ts        # portfolio review (9th ResumeIQ dimension): schema, route gating, killed-job recovery, backfill guards — no browser/model calls
+│   └── 08-low-pipeline-breakdown.spec.ts  # Low Pipeline Roles: Pipeline / Scored >60 / Shortlisted / Shortlisted >60 counts (sets fit scores + stages directly)
 ├── smoke/
 │   └── production.spec.ts   # safe for live Vercel — read-only + auth-rejection checks only
 └── e2e/  (7 files)

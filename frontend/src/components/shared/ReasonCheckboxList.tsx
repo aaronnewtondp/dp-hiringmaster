@@ -8,7 +8,9 @@ interface ReasonCheckboxListProps {
 
 // Pick one or more reasons. Inline (not a floating dropdown) on purpose: it lives
 // inside modals, where a portal-based popover would fight the modal's own stacking
-// and click-outside handling, and the whole list is short enough to just show.
+// and click-outside handling. Rows are compact so the whole reject list (nine) shows at
+// once — scrollbars in this app are invisible until you scroll, so an inner scroll box
+// would hide the last options with no cue that they exist. `max-h-72` is only a ceiling.
 export default function ReasonCheckboxList({ label, options, selected, onChange, required }: ReasonCheckboxListProps) {
   const toggle = (value: string) =>
     onChange(selected.includes(value) ? selected.filter(v => v !== value) : [...selected, value]);
@@ -21,9 +23,9 @@ export default function ReasonCheckboxList({ label, options, selected, onChange,
           {selected.length === 0 ? '(select one or more)' : `(${selected.length} selected)`}
         </span>
       </legend>
-      <div className="rounded-lg border border-gray-200 divide-y divide-gray-50 max-h-52 overflow-y-auto">
+      <div className="rounded-lg border border-gray-200 divide-y divide-gray-50 max-h-72 overflow-y-auto">
         {options.map(opt => (
-          <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer">
+          <label key={opt} className="flex items-center gap-2 px-3 py-1 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer">
             <input
               type="checkbox"
               checked={selected.includes(opt)}

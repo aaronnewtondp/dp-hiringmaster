@@ -11,6 +11,7 @@ import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import RejectionEmailDraft, { RejectionEmailState } from '../components/shared/RejectionEmailDraft.tsx';
 import ReasonCheckboxList from '../components/shared/ReasonCheckboxList.tsx';
+import { reasonFields } from '../utils/rejectionReasons.ts';
 import { interpolateRejectionDraft } from '../utils/rejectionEmailTemplates.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
@@ -300,7 +301,7 @@ export default function Candidates() {
         : null;
       return applicationsApi.updateStatus(id, {
         new_status: bulkStatusValue,
-        rejection_reason_cats: reasons.length ? reasons : undefined,
+        ...reasonFields(reasons),
         rejection_reason_detail: bulkRejectionDetail || undefined,
         send_rejection_email: perRecipient ? true : undefined,
         rejection_email_subject: perRecipient?.subject,
@@ -692,7 +693,7 @@ export default function Candidates() {
 
       {showBulkStatusModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div>
               <h3 className="text-base font-semibold">Update status</h3>
               <p className="text-sm font-mono text-gray-500">{selectedIds.size} candidates</p>
@@ -720,7 +721,8 @@ export default function Candidates() {
                 onChange={setBulkRejectionEmail}
               />
             )}
-            <div className="flex gap-2 justify-end">
+            {/* Pinned to the bottom of the (scrolling) card so Update is always reachable on a short window */}
+            <div className="flex gap-2 justify-end sticky bottom-0 bg-white pt-3 pb-1">
               <button onClick={() => setShowBulkStatusModal(false)} className="btn-secondary">Cancel</button>
               <button onClick={handleBulkStatus} disabled={bulkSaving} className="btn-primary">{bulkSaving ? 'Updating…' : 'Update'}</button>
             </div>

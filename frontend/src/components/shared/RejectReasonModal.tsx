@@ -31,12 +31,14 @@ export default function RejectReasonModal({ count, saving, onConfirm, onClose }:
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+      {/* Card never taller than the window: header and buttons stay put, the middle scrolls
+          (the checkbox list + the email draft together are taller than a laptop screen). */}
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
           <h3 className="text-sm font-semibold text-gray-900">Reject {count > 1 ? `${count} candidates` : 'candidate'}</h3>
           <button onClick={onClose}><X className="w-4 h-4 text-gray-400" /></button>
         </div>
-        <div className="px-5 py-4 space-y-4">
+        <div className="px-5 py-4 space-y-4 overflow-y-auto">
           <ReasonCheckboxList label="Reasons" required options={REJECTION_REASONS} selected={reasons} onChange={setReasons} />
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1.5">Additional detail <span className="text-gray-400">(optional)</span></label>
@@ -49,7 +51,7 @@ export default function RejectReasonModal({ count, saving, onConfirm, onClose }:
           </div>
           <RejectionEmailDraft reasons={reasons} bulkCount={count} onChange={setEmail} />
         </div>
-        <div className="flex gap-3 justify-end px-5 py-4 border-t border-gray-100">
+        <div className="flex gap-3 justify-end px-5 py-4 border-t border-gray-100 shrink-0">
           <button onClick={onClose} className="btn-secondary text-sm">Cancel</button>
           <button onClick={handleSubmit} disabled={saving || !reasons.length} className="btn-primary text-sm">
             {saving ? <Spinner size="sm" /> : 'Reject'}

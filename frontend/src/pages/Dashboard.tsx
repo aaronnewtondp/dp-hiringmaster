@@ -199,7 +199,10 @@ export default function Dashboard() {
       </div>
 
       {/* Hiring Funnel Snapshot — replaces the old "Pending actions by owner" board */}
-      <HiringFunnelSnapshot masterFilterParams={filterParams} roleOptions={roleOptions} />
+      {/* A Hiring Manager is locked to their own roles server-side, so the section gets no role options
+          (the filter-options query is disabled for them here, but the Roles / Candidates pages share its
+          cache key and fetch it for everyone — don't let that leak a dropdown that would do nothing). */}
+      <HiringFunnelSnapshot masterFilterParams={filterParams} roleOptions={isLockedToOwnRole ? [] : roleOptions} />
 
       {/* Aging roles + Hiring funnel */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -309,7 +312,7 @@ export default function Dashboard() {
             <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
               <Radio className="w-4 h-4 text-gray-400" />
               <h2 className="text-sm font-semibold text-gray-900">Source quality</h2>
-              <InfoTooltip align="left" text="Computed over full application history (not just Active), per source channel. Pass rate = % that ever reached Interview Round 1 or later. Hire rate = % that ever reached Offer Accepted or later. Contribution = that channel's share of all sourced applications." />
+              <InfoTooltip align="center" text="Computed over full application history (not just Active), per source channel. Pass rate = % that ever reached Interview Round 1 or later. Hire rate = % that ever reached Offer Accepted or later. Contribution = that channel's share of all sourced applications." />
             </div>
             <div className="px-5 py-4 space-y-4">
               {source_quality.length === 0 ? (
@@ -350,8 +353,10 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Low pipeline roles — wider than Source quality: it carries the 4-step pipeline breakdown per role */}
-          <div className="card overflow-hidden lg:col-span-3">
+          {/* Low pipeline roles — wider than Source quality: it carries the 4-step pipeline breakdown per role.
+              No overflow-hidden on the card itself: its info tooltip is long and the row can be short, and the
+              table already scrolls inside its own wrapper. */}
+          <div className="card lg:col-span-3">
             <div className="px-5 py-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-semibold text-gray-900">Low pipeline roles</h2>

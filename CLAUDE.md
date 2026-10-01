@@ -213,7 +213,8 @@ API endpoint — never conflate them:
 - `recruiter_screening_status` — New → Under Recruiter Review → Awaiting HM
   Review → HM Shortlisted (etc.)
 
-Rejection/withdrawal requires a reason category at the API level (hard 400 if
+Rejection/withdrawal requires a reason at the API level (a rejection may carry
+several — see "A rejection can carry several reasons" below) (hard 400 if
 missing) — this is intentional governance, not a bug to relax.
 
 ### ID scheme
