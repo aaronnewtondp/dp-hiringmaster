@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
-    "@sparticuz/chromium": "^153.0.0",
+    "@sparticuz/chromium": "143.0.4",
     "@vercel/queue": "^0.7.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -34,7 +34,7 @@
     "pdfkit": "^0.15.2",
     "pdfmake": "^0.2.23",
     "pg": "^8.12.0",
-    "puppeteer-core": "^25.12.0",
+    "puppeteer-core": "24.32.0",
     "uuid": "^10.0.0",
     "xlsx": "^0.18.5"
   },
