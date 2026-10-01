@@ -108,8 +108,9 @@ export async function withBrowser<T>(fn: (browser: Browser) => Promise<T>, opts:
     let browser: Browser;
     if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
       ensureCleanChromiumTmp();
-      // ESM-only package; loadable via require() on Node >= 22.17, which is
-      // exactly the engines floor it declares (backend/package.json pins 22.x).
+      // The compiled output turns this import() into require(), so the package
+      // MUST ship a CommonJS build (143.x does; 149+ is ESM-only and fails with
+      // ERR_REQUIRE_ESM on Vercel's Node 22 — see browserPackages.test.ts).
       const chromium = (await import('@sparticuz/chromium')).default;
       const executablePath = await chromium.executablePath();
       try { fs.writeFileSync(READY_MARKER, String(Date.now())); } catch { /* /tmp not writable would fail launch anyway */ }

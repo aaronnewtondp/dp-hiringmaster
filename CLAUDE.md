@@ -707,9 +707,19 @@ and that path runs for every role's scoring, not just designers.**
   capture code in the `public.ecr.aws/lambda/nodejs:22` image with
   `AWS_EXECUTION_ENV=AWS_Lambda_nodejs22.x` set (without that variable the package never
   unpacks its bundled system libs).
-- It's ESM-only; the backend compiles to CommonJS. `require()` of it works on Node
-  >= 22.17 (its `engines` floor), so `backend/package.json` pins `"node": "22.x"` and
-  `src/types/sparticuz-chromium.d.ts` declares the surface we use.
+- **Both browser packages must ship a real CommonJS build — pinned on purpose.** The backend
+  compiles to CommonJS and TypeScript turns `await import('x')` into `require('x')`, and
+  `require()` of an ES-module-only package only works on Node >= 22.12. Locally that always
+  works (this machine runs a much newer Node), so it was never seen until the first real
+  production review failed with `ERR_REQUIRE_ESM` from `browser.js`: Vercel's "22.x" runtime
+  is older than 22.12. The first versions used (`puppeteer-core` 25, `@sparticuz/chromium`
+  153) are ESM-only. Now `puppeteer-core` 24.32.0 (Chrome 143) + `@sparticuz/chromium` 143.0.4
+  (Chrome 143), exact versions, both with a `require` export. Verified by running the compiled
+  code in the Lambda image under Node **22.11** (the failing case) — reproduced the error with
+  the old versions, passed with the new. `browserPackages.test.ts` fails the build if either
+  package is bumped to an ESM-only release; when upgrading, keep the two on the same Chrome
+  major and re-run that Lambda-image check. `src/types/sparticuz-chromium.d.ts` declares the
+  surface we use. `backend/package.json` still pins `"node": "22.x"`.
 - Every browser step has a hard cap (`protocolTimeout` 45s, screenshot 20s, 100s per
   portfolio, 270s job budget). Puppeteer's default is 180s *per CDP call*; one stalled
   Figma WebGL screenshot once consumed a 9-minute test run.
