@@ -18,6 +18,7 @@ import rateLimit from 'express-rate-limit';
 import authRouter          from './routes/auth.js';
 import rolesRouter         from './routes/roles.js';
 import candidatesRouter    from './routes/candidates.js';
+import portfolioRouter      from './routes/portfolio.js';
 import applicationsRouter  from './routes/applications.js';
 import interviewsRouter    from './routes/interviews.js';
 import dashboardRouter     from './routes/dashboard.js';
@@ -59,6 +60,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/auth',             authRouter);
 app.use('/api/roles',            rolesRouter);
 app.use('/api/candidates',       candidatesRouter);
+app.use('/api/applications',     portfolioRouter);   // portfolio review (per-route auth) — ahead of applicationsRouter, whose router-wide authenticate would otherwise gate the secret-protected batch route
 app.use('/api/applications',     applicationsRouter);
 app.use('/api/interviews',       interviewsRouter);
 app.use('/api/dashboard',        dashboardRouter);

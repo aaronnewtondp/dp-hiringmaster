@@ -1,7 +1,9 @@
 import { Application } from '../types/index.ts';
 import InfoTooltip from './shared/InfoTooltip.tsx';
+import PortfolioReviewCard from './PortfolioReviewCard.tsx';
 
 // ─── 8-dimension ResumeIQ table — mirrors digitalpaani-candidate-scoring output exactly
+// (designer roles add a 9th 'Portfolio' row from the separate portfolio review)
 export default function ResumeIQPanel({ app }: { app: Application }) {
   if (app.score_avg == null) {
     return (
@@ -22,6 +24,15 @@ export default function ResumeIQPanel({ app }: { app: Application }) {
     { label: 'Leadership',    score: app.score_leadership,    note: app.score_leadership_note },
     { label: 'Communication', score: app.score_communication, note: app.score_communication_note },
   ];
+  const hasPortfolio = !!app.portfolio_analysis_status;
+  if (hasPortfolio) {
+    const inProgress = app.portfolio_analysis_status === 'pending' || app.portfolio_analysis_status === 'running';
+    DIMENSIONS.push({
+      label: 'Portfolio',
+      score: app.score_portfolio ?? undefined,
+      note: inProgress ? 'Review in progress — overall score is provisional' : (app.score_portfolio_note ?? undefined) || undefined,
+    });
+  }
 
   const recColor =
     app.score_recommendation === 'Strong Yes' ? 'bg-green-100 text-green-800' :
@@ -42,7 +53,7 @@ export default function ResumeIQPanel({ app }: { app: Application }) {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">ResumeIQ Analysis</span>
-          <InfoTooltip align="left" text="Scored automatically the moment this candidate applied, across 8 dimensions — averaged into the score shown here. Reads the actual resume text from Drive when it can; falls back to scoring from profile fields alone if the resume can't be fetched (see the 'No resume read' tag when that happens), rather than failing outright." />
+          <InfoTooltip align="left" text="Scored automatically the moment this candidate applied, across 8 dimensions — averaged into the score shown here. Designer roles add a ninth, Portfolio, once the portfolio review finishes a few minutes later. Reads the actual resume text from Drive when it can; falls back to scoring from profile fields alone if the resume can't be fetched (see the 'No resume read' tag when that happens), rather than failing outright." />
         </div>
         <div className="flex items-center gap-2">
           <span className="text-lg font-bold text-gray-900">{Number(app.score_avg).toFixed(1)}</span>
@@ -102,6 +113,10 @@ export default function ResumeIQPanel({ app }: { app: Application }) {
         <p className="text-xs text-gray-500 leading-relaxed italic mt-3 border-l-2 border-dp-300 pl-2">
           {app.score_summary}
         </p>
+      )}
+
+      {hasPortfolio && (
+        <div className="mt-3"><PortfolioReviewCard applicationId={app.id} status={app.portfolio_analysis_status} /></div>
       )}
 
       {app.score_computed_at && (

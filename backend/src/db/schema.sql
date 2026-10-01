@@ -946,3 +946,43 @@ ALTER TABLE applications
 -- read. Plain nullable/editable like any other candidate field, not a
 -- read-only computed column, since HR can always correct a wrong auto-tag.
 ALTER TABLE candidates ADD COLUMN gender TEXT CHECK (gender IN ('M','F'));
+
+-- ─── Portfolio review — 9th ResumeIQ dimension (2026-09-30) ────────────────────
+-- For roles flagged `portfolio_analysis_enabled` (Senior UX/Product Designer,
+-- R007), the candidate's portfolio site(s) — extracted from the resume — are
+-- opened in a real browser and reviewed by a vision model against the JD and
+-- the hiring manager's 15 criteria (backend/src/services/portfolio/). The
+-- result is a 9th ResumeIQ dimension (`score_portfolio`, folded into
+-- `score_avg`/`ai_fit_score`) plus a structured review shown in the highlights.
+--
+-- Deliberately NOT part of the synchronous scoring request: it takes ~35-140s
+-- per candidate, so the base 8-dimension score is written first and this runs
+-- as a separate queued job that updates the score when it finishes.
+-- `portfolio_analysis_status`: pending | running | completed | failed |
+--   no_portfolio (no link in the resume, or none was really a portfolio) |
+--   inaccessible (every portfolio was private/dead — the candidate's problem,
+--   unlike `failed`, which is ours and retryable).
+-- The bulky review JSON lives in its own table so `SELECT a.*` list queries
+-- (Candidates, Scorecard Summary — up to 100+ rows) stay light.
+ALTER TABLE roles ADD COLUMN IF NOT EXISTS portfolio_analysis_enabled BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE applications
+  ADD COLUMN IF NOT EXISTS portfolio_urls            JSONB,
+  ADD COLUMN IF NOT EXISTS portfolio_analysis_status TEXT,
+  ADD COLUMN IF NOT EXISTS portfolio_analysis_error  TEXT,
+  ADD COLUMN IF NOT EXISTS portfolio_started_at      TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS portfolio_analyzed_at     TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS score_portfolio           INTEGER,
+  ADD COLUMN IF NOT EXISTS score_portfolio_note      TEXT;
+
+ALTER TABLE applications DROP CONSTRAINT IF EXISTS applications_portfolio_status_check;
+ALTER TABLE applications ADD CONSTRAINT applications_portfolio_status_check
+  CHECK (portfolio_analysis_status IS NULL OR portfolio_analysis_status IN
+    ('pending','running','completed','failed','no_portfolio','inaccessible'));
+
+CREATE TABLE IF NOT EXISTS portfolio_analyses (
+  application_id TEXT PRIMARY KEY REFERENCES applications(id) ON DELETE CASCADE,
+  analysis       JSONB NOT NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

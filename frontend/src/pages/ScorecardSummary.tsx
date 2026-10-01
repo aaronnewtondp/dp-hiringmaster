@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { applicationsApi, rolesApi } from '../services/api.ts';
 import { Application, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
 import { Spinner, EmptyState, OverBudgetBadge, StageBadge, GenderBadge } from '../components/shared/Badges.tsx';
+import PortfolioReviewCard from '../components/PortfolioReviewCard.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
 import RejectReasonModal from '../components/shared/RejectReasonModal.tsx';
@@ -187,6 +188,11 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   const apps = filterInBudget
     ? allApps.filter(a => isWithinBudgetOrNear(a.candidate_expected_ctc, a.role_ctc_band))
     : allApps;
+  // A 'Port' column only appears when at least one row in view belongs to a
+  // role with portfolio review (Senior UX/Product Designer) — every other
+  // role's view is unchanged.
+  const showPortfolioCol = apps.some(a => a.portfolio_analysis_status);
+  const dimCols = DIMENSIONS.length + (showPortfolioCol ? 1 : 0);
   const sortValue = (app: Application, key: SortKey): number => {
     if (key === 'avg') return app.score_avg != null ? Number(app.score_avg) : -Infinity;
     return app.application_date ? new Date(app.application_date).getTime() : -Infinity;
@@ -467,6 +473,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                   { label: 'Company / Industry', width: 'w-[140px]' },
                   { label: 'Resume', width: 'w-[55px]' },
                   ...DIMENSIONS.map(d => ({ label: d.label, width: 'w-[42px]' })),
+                  ...(showPortfolioCol ? [{ label: 'Port', width: 'w-[42px]' }] : []),
                   { label: 'Avg', width: 'w-[58px]', sortKey: 'avg' as const },
                   { label: 'Verdict', width: 'w-[80px]' },
                   { label: 'App. Age', width: 'w-[80px]', sortKey: 'app_age' as const },
@@ -568,6 +575,15 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                     {DIMENSIONS.map(d => (
                       <td key={d.key} className="table-td px-1.5 py-3 text-right"><ScoreCell score={app[d.key] as number | undefined} /></td>
                     ))}
+                    {showPortfolioCol && (
+                      <td className="table-td px-1.5 py-3 text-right">
+                        {app.portfolio_analysis_status === 'pending' || app.portfolio_analysis_status === 'running'
+                          ? <span title="Portfolio review in progress — the average is provisional" className="text-xs text-gray-400">…</span>
+                          : app.portfolio_analysis_status === 'failed'
+                            ? <span title="Portfolio review failed — open the candidate to re-run it" className="text-xs text-red-500">!</span>
+                            : <ScoreCell score={app.score_portfolio ?? undefined} />}
+                      </td>
+                    )}
                     <td className="table-td px-1.5 py-3 text-sm font-semibold text-gray-900">
                       {app.score_avg != null ? Number(app.score_avg).toFixed(1) : '—'}
                     </td>
@@ -606,7 +622,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                   </tr>
                   <tr className="border-t-0">
                     <td colSpan={SCORECARD_COLS_BEFORE_DIMS} className="p-0" />
-                    <td colSpan={DIMENSIONS.length} className="px-1.5 pb-2 text-center">
+                    <td colSpan={dimCols} className="px-1.5 pb-2 text-center">
                       <button
                         onClick={() => toggleExpanded(app.id)}
                         className="text-[11px] text-dp-600 hover:text-dp-700 hover:underline font-medium"
@@ -618,7 +634,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                   </tr>
                   {expanded.has(app.id) && (
                     <tr key={`${app.id}-detail`} className="bg-gray-50/60">
-                      <td colSpan={SCORECARD_COLS_BEFORE_DIMS + DIMENSIONS.length + SCORECARD_COLS_AFTER_DIMS} className="px-4 py-4">
+                      <td colSpan={SCORECARD_COLS_BEFORE_DIMS + dimCols + SCORECARD_COLS_AFTER_DIMS} className="px-4 py-4">
                         <div className="grid grid-cols-3 gap-4">
                           <div>
                             <div className="text-xs text-green-600 font-medium mb-1">✓ Key strengths</div>
@@ -641,6 +657,9 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                             <p className="text-xs text-gray-600 leading-relaxed">{app.score_summary || '—'}</p>
                           </div>
                         </div>
+                        {app.portfolio_analysis_status && (
+                          <div className="mt-4"><PortfolioReviewCard applicationId={app.id} status={app.portfolio_analysis_status} /></div>
+                        )}
                       </td>
                     </tr>
                   )}

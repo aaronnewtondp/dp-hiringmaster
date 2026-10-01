@@ -369,6 +369,32 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
         ),
       },
       {
+        id: 'portfolio-review',
+        question: 'How does the Portfolio review work for designer roles?',
+        answer: (
+          <>
+            <p>For the Senior UX/Product Designer role, ResumeIQ adds a ninth dimension —{' '}
+            <strong>Portfolio</strong>. Right after the normal 8-dimension score is saved, the
+            portfolio links in the candidate's resume (Behance, Framer, Figma, their own site, and
+            so on — including links hidden behind a word like "Portfolio") are opened in a
+            browser and reviewed page by page against the JD and the hiring manager's 15 criteria
+            — full ownership of a product, storytelling and process, field research, design
+            system work, whether the site itself works, and so on. This takes a few minutes, so
+            the overall score shown at first is <strong>provisional</strong> (marked "…" in the
+            Port column) and updates when the review finishes.</p>
+            <p className="mt-2">The result appears under <strong>View Highlights and Summary</strong>{' '}
+            and on the candidate's page: a 0-10 portfolio score (included in the overall score),
+            what was reviewed, strengths and concerns, and each criterion marked Evidenced /
+            Partly / Not evidenced / Concern with a line of evidence. "Not evidenced" only means
+            the portfolio doesn't show it — it is not held against the candidate. A missing
+            portfolio link, or a dead or private one, is a concern and lowers the score.
+            If a review fails on our side it never counts against the candidate; HR can press{' '}
+            <strong>Re-run</strong> to retry, which also re-reads the resume in case a link was
+            missed.</p>
+          </>
+        ),
+      },
+      {
         id: 'jd-gen',
         question: 'Where do generated job descriptions come from?',
         answer: (
