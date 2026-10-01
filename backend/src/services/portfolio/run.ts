@@ -2,11 +2,11 @@
 // the direct-run endpoint in api/portfolio-worker.ts.
 import { query, queryOne } from '../../db/index.js';
 import { Application, Candidate, Role } from '../../types/index.js';
-import { BrowserBusyError, withBrowser } from './browser.js';
+import { BrowserBusyError, isBrowserInUse, withBrowser } from './browser.js';
 import { capturePortfolios, CapturedPortfolio } from './capture.js';
 import { analyzePortfolios } from './analyze.js';
 import { applyPortfolioOutcome } from './scoring.js';
-import { STALE_RUNNING_SECONDS } from './jobState.js';
+import { MAX_ATTEMPTS, STALE_RUNNING_SECONDS } from './jobState.js';
 import { PortfolioAnalysisResult, PortfolioLink, PortfolioReviewed } from './types.js';
 
 // Wall-clock budget for the whole job. The function limit is 300s; browser work
@@ -14,11 +14,18 @@ import { PortfolioAnalysisResult, PortfolioLink, PortfolioReviewed } from './typ
 const TOTAL_BUDGET_MS = 270_000;
 const ANALYSIS_RESERVE_MS = 75_000;
 
-/** Queue deliveries after which a transient failure is recorded as 'failed' instead of retried. */
-export const MAX_ATTEMPTS = 3;
+export { MAX_ATTEMPTS };
+
+/**
+ * How long a review waits for this instance's browser before reporting 'busy'. Short on
+ * purpose: the occupant needs minutes, so waiting longer only burns billed time — the
+ * caller hands the review back to the queue to be tried again later instead.
+ */
+export const BUSY_WAIT_MS = 3_000;
 
 export interface RunResult {
   ran:     boolean;
+  /** 'busy' = another review holds this instance's browser; nothing was run or recorded, hand the job back. */
   status?: string;
   reason?: string;
 }
@@ -80,6 +87,8 @@ function reviewedFromCapture(c: CapturedPortfolio): PortfolioReviewed {
  */
 export async function runPortfolioAnalysis(applicationId: string, opts: { attempt?: number } = {}): Promise<RunResult> {
   const attempt = opts.attempt ?? MAX_ATTEMPTS;
+  // Cheapest possible rejection: no database write at all when this instance is already busy.
+  if (isBrowserInUse()) return { ran: false, status: 'busy', reason: 'browser in use by another review on this instance' };
   if (!(await claim(applicationId))) return { ran: false, reason: 'not claimable (already running, completed or settled)' };
   const startedAt = Date.now();
 
@@ -108,8 +117,14 @@ export async function runPortfolioAnalysis(applicationId: string, opts: { attemp
     const captureDeadline = startedAt + TOTAL_BUDGET_MS - ANALYSIS_RESERVE_MS;
     let captured: CapturedPortfolio[];
     try {
-      captured = await withBrowser(b => capturePortfolios(b, links, captureDeadline));
+      captured = await withBrowser(b => capturePortfolios(b, links, captureDeadline), { maxWaitMs: BUSY_WAIT_MS });
     } catch (err) {
+      if (err instanceof BrowserBusyError) {
+        // Lost a race for the browser after claiming. Not a failure and not an attempt used:
+        // put the job back so the caller can re-queue it.
+        await release(applicationId);
+        return { ran: false, status: 'busy', reason: 'browser in use by another review on this instance' };
+      }
       return await settleFailure(err, 'Could not start the browser');
     }
 

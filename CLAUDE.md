@@ -678,10 +678,39 @@ Express app would drag 70 MB of Chromium into every request's function.
 - One Chromium per process (`browser.ts` `acquireBrowserSlot`): Fluid compute packs concurrent
   invocations onto one instance and `@sparticuz/chromium` treats "/tmp/chromium exists" as
   "extracted" (upstream Sparticuz/chromium#507), so a second cold-start invocation could launch a
-  half-written binary. A waiter that can't get in within 45s throws `BrowserBusyError` (transient
-  → queue redelivers). `/tmp/.chromium-ready` marks a finished extraction; a truncated leftover
+  half-written binary. `/tmp/.chromium-ready` marks a finished extraction; a truncated leftover
   is wiped. `--disable-web-security` is filtered out of the Lambda launch args (a hostile page's
   script could otherwise read cross-origin responses).
+- **A busy browser is handed back, never failed (found in the first production backfill).** The
+  one-browser lock means that when Vercel delivers several messages to the same instance, the
+  extras can't run. First version: wait 45s, throw `BrowserBusyError`, let the queue redeliver —
+  but that spent one of a message's 3 delivery attempts each time, and about a third of the
+  reviews that ran in the first half hour ended `failed` ("Another portfolio review is using the
+  browser on this instance"). Now `run.ts` checks `isBrowserInUse()` BEFORE touching the database
+  (answers in 0 ms), waits only `BUSY_WAIT_MS` (3s) if it loses the race, releases the row back
+  to `pending` and returns `{status:'busy'}`; `queueHandler.ts` (the unit-tested body of the
+  consumer) then sends a fresh `{applicationId, busyRetries+1, attemptsUsed}` message with
+  `delaySeconds` 60-105 and acknowledges the old one. Rules that a pre-merge review made explicit:
+  - **The attempt budget travels in the message.** A new message restarts the queue's
+    `deliveryCount`, and `maxDeliveries: 3` is the only bound on a HARD-KILLED review (OOM / the
+    300s limit — no JS runs to ack or throw). Without carrying it, a review that keeps killing its
+    worker got a fresh budget every time a redelivery landed on a busy instance. So
+    `attemptsUsed` (deliveries really spent, not the busy bounce itself) rides along;
+    `attempt = attemptsUsed + deliveryCount` is what `run.ts` sees, and once it exceeds
+    `MAX_ATTEMPTS` the handler records a failure instead of running.
+  - **A bounce first checks there is still work** (`portfolioNeedsReview`: row is `pending`,
+    `failed`, or a dead `running`). A duplicate/stale message for a review that has since settled
+    — e.g. HR pressed Re-run while the original was still bouncing — ends there instead of
+    bouncing for hours.
+  - **Giving up is guarded** (`markPortfolioGaveUp`: only a `pending` row or a dead `running`
+    one) so a stale chain can never flip a completed review to `failed`. The wait budget is
+    `MAX_BUSY_RETRIES` = 400 (~7-12h) — it must outlast a whole backfill draining one review at a
+    time yet stay under the queue's 24h message retention.
+  - **If the hand-back `send()` fails:** throw (the queue redelivers) — unless this is the last
+    delivery the worker's retry hook will allow, when it is recorded as `failed` with a Re-run
+    hint rather than dropped with the row left `pending` forever.
+  Queue messages are pinned to the deployment that published them, so a fix like this only
+  helps messages sent after it deploys.
 - `POST /:id/portfolio-analysis` never changes state when the resume can't be read right now
   (502): a transient Drive failure used to look like "no links", wiping stored links and turning a
   good review into `no_portfolio` with the old score still in the average. Likewise a failed

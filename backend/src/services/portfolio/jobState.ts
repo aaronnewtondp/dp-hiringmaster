@@ -8,3 +8,10 @@
  * can actually reclaim a job whose function was killed.
  */
 export const STALE_RUNNING_SECONDS = 310;
+
+/**
+ * Deliveries (counting ones spent before a hand-back, see queueMessage.ts) after which a
+ * transient failure is recorded as 'failed' instead of retried. Matches `maxDeliveries` in
+ * vercel.json and the retry hook in api/portfolio-worker.ts.
+ */
+export const MAX_ATTEMPTS = 3;

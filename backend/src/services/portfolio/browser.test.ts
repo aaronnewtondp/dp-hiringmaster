@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { acquireBrowserSlot, BrowserBusyError } from './browser.js';
+import { acquireBrowserSlot, BrowserBusyError, isBrowserInUse } from './browser.js';
 import { isTransient } from './run.js';
 import { STALE_RUNNING_SECONDS } from './jobState.js';
 
@@ -17,6 +17,16 @@ describe('browser slot (one Chromium at a time per instance)', () => {
     setTimeout(release1, 200);
     const release2 = await waiter;
     release2();
+  });
+});
+
+describe('isBrowserInUse', () => {
+  it('reflects whether the slot is held, so callers can bail out before doing any work', async () => {
+    expect(isBrowserInUse()).toBe(false);
+    const release = await acquireBrowserSlot(1000);
+    expect(isBrowserInUse()).toBe(true);
+    release();
+    expect(isBrowserInUse()).toBe(false);
   });
 });
 
