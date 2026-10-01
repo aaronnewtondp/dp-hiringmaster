@@ -10,6 +10,8 @@ import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import RejectionEmailDraft, { RejectionEmailState } from '../components/shared/RejectionEmailDraft.tsx';
+import ReasonCheckboxList from '../components/shared/ReasonCheckboxList.tsx';
+import { reasonFields } from '../utils/rejectionReasons.ts';
 import { interpolateRejectionDraft } from '../utils/rejectionEmailTemplates.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
@@ -81,7 +83,8 @@ export default function Candidates() {
   const [bulkStageValue,    setBulkStageValue]    = useState(STAGES[0]);
   const [showBulkStatusModal, setShowBulkStatusModal] = useState(false);
   const [bulkStatusValue,   setBulkStatusValue]   = useState('Active');
-  const [bulkRejectionCat,  setBulkRejectionCat]  = useState('');
+  const [bulkRejectionCat,  setBulkRejectionCat]  = useState('');          // Withdrawn: one reason
+  const [bulkRejectionCats, setBulkRejectionCats] = useState<string[]>([]); // Rejected: one or more
   const [bulkRejectionDetail, setBulkRejectionDetail] = useState('');
   const [bulkRejectionEmail, setBulkRejectionEmail] = useState<RejectionEmailState>({ enabled: false, subject: '', body: '' });
   const [bulkBudgetReasonCat,    setBulkBudgetReasonCat]    = useState('');
@@ -281,8 +284,10 @@ export default function Candidates() {
   };
 
   const handleBulkStatus = async () => {
-    if ((bulkStatusValue === 'Rejected' || bulkStatusValue === 'Withdrawn') && !bulkRejectionCat) {
-      toast.error('A reason is required'); return;
+    const needsReason = bulkStatusValue === 'Rejected' || bulkStatusValue === 'Withdrawn';
+    const reasons = !needsReason ? [] : bulkStatusValue === 'Rejected' ? bulkRejectionCats : (bulkRejectionCat ? [bulkRejectionCat] : []);
+    if (needsReason && !reasons.length) {
+      toast.error('Select at least one reason'); return;
     }
     setBulkSaving(true);
     const ids = Array.from(selectedIds);
@@ -296,7 +301,7 @@ export default function Candidates() {
         : null;
       return applicationsApi.updateStatus(id, {
         new_status: bulkStatusValue,
-        rejection_reason_cat: bulkRejectionCat || undefined,
+        ...reasonFields(reasons),
         rejection_reason_detail: bulkRejectionDetail || undefined,
         send_rejection_email: perRecipient ? true : undefined,
         rejection_email_subject: perRecipient?.subject,
@@ -311,6 +316,7 @@ export default function Candidates() {
     }
     toast[succeeded === ids.length ? 'success' : 'error'](msg);
     setShowBulkStatusModal(false);
+    setBulkRejectionCats([]);
     setSelectedIds(new Set());
     qc.invalidateQueries({ queryKey: ['applications'] });
     setBulkSaving(false);
@@ -687,7 +693,7 @@ export default function Candidates() {
 
       {showBulkStatusModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div>
               <h3 className="text-base font-semibold">Update status</h3>
               <p className="text-sm font-mono text-gray-500">{selectedIds.size} candidates</p>
@@ -697,21 +703,26 @@ export default function Candidates() {
             </select>
             {(bulkStatusValue === 'Rejected' || bulkStatusValue === 'Withdrawn') && (
               <>
-                <select value={bulkRejectionCat} onChange={e => setBulkRejectionCat(e.target.value)} className="select">
-                  <option value="">Select reason *</option>
-                  {(bulkStatusValue === 'Rejected' ? REJECTION_REASONS : WITHDRAWAL_REASONS).map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
+                {bulkStatusValue === 'Rejected' ? (
+                  <ReasonCheckboxList label="Reasons" required options={REJECTION_REASONS} selected={bulkRejectionCats} onChange={setBulkRejectionCats} />
+                ) : (
+                  <select value={bulkRejectionCat} onChange={e => setBulkRejectionCat(e.target.value)} className="select">
+                    <option value="">Select reason *</option>
+                    {WITHDRAWAL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                )}
                 <textarea placeholder="Additional detail (optional)" value={bulkRejectionDetail} onChange={e => setBulkRejectionDetail(e.target.value)} className="input h-20 resize-none" />
               </>
             )}
             {bulkStatusValue === 'Rejected' && (
               <RejectionEmailDraft
-                reasonCat={bulkRejectionCat}
+                reasons={bulkRejectionCats}
                 bulkCount={selectedIds.size}
                 onChange={setBulkRejectionEmail}
               />
             )}
-            <div className="flex gap-2 justify-end">
+            {/* Pinned to the bottom of the (scrolling) card so Update is always reachable on a short window */}
+            <div className="flex gap-2 justify-end sticky bottom-0 bg-white pt-3 pb-1">
               <button onClick={() => setShowBulkStatusModal(false)} className="btn-secondary">Cancel</button>
               <button onClick={handleBulkStatus} disabled={bulkSaving} className="btn-primary">{bulkSaving ? 'Updating…' : 'Update'}</button>
             </div>

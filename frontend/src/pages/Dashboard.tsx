@@ -66,6 +66,10 @@ function KpiCard({ icon: Icon, label, value, sub, accent, info, infoWidth, infoA
   );
 }
 
+// Header cell for the Low pipeline table's four count columns: small, right-aligned and
+// allowed to wrap onto two lines ("Shortlisted / >60") so all seven columns fit the card.
+const NUM_TH = 'table-th !px-2 !text-[10px] !whitespace-normal leading-tight text-right';
+
 export default function Dashboard() {
   const { user } = useAuth();
   // A Hiring Manager's dashboard is locked to their own role(s) — enforced
@@ -195,7 +199,10 @@ export default function Dashboard() {
       </div>
 
       {/* Hiring Funnel Snapshot — replaces the old "Pending actions by owner" board */}
-      <HiringFunnelSnapshot masterFilterParams={filterParams} />
+      {/* A Hiring Manager is locked to their own roles server-side, so the section gets no role options
+          (the filter-options query is disabled for them here, but the Roles / Candidates pages share its
+          cache key and fetch it for everyone — don't let that leak a dropdown that would do nothing). */}
+      <HiringFunnelSnapshot masterFilterParams={filterParams} roleOptions={isLockedToOwnRole ? [] : roleOptions} />
 
       {/* Aging roles + Hiring funnel */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -299,13 +306,13 @@ export default function Dashboard() {
         <div className="flex items-center gap-2 mb-3">
           <h2 className="text-base font-semibold text-gray-900">Source quality &amp; pipeline</h2>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {/* Source Quality */}
-          <div className="card overflow-hidden">
+          <div className="card overflow-hidden lg:col-span-2">
             <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
               <Radio className="w-4 h-4 text-gray-400" />
               <h2 className="text-sm font-semibold text-gray-900">Source quality</h2>
-              <InfoTooltip align="left" text="Computed over full application history (not just Active), per source channel. Pass rate = % that ever reached Interview Round 1 or later. Hire rate = % that ever reached Offer Accepted or later. Contribution = that channel's share of all sourced applications." />
+              <InfoTooltip align="center" text="Computed over full application history (not just Active), per source channel. Pass rate = % that ever reached Interview Round 1 or later. Hire rate = % that ever reached Offer Accepted or later. Contribution = that channel's share of all sourced applications." />
             </div>
             <div className="px-5 py-4 space-y-4">
               {source_quality.length === 0 ? (
@@ -346,40 +353,50 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Low pipeline roles */}
-          <div className="card overflow-hidden">
+          {/* Low pipeline roles — wider than Source quality: it carries the 4-step pipeline breakdown per role.
+              No overflow-hidden on the card itself: its info tooltip is long and the row can be short, and the
+              table already scrolls inside its own wrapper. */}
+          <div className="card lg:col-span-3">
             <div className="px-5 py-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-semibold text-gray-900">Low pipeline roles</h2>
-                <InfoTooltip align="left" text="Open roles (Approved, Live – Sourcing, or On Hold) currently showing fewer than 3 candidates who have both been shortlisted (past Applied and Screened) and scored above 60 on ResumeIQ — a signal that sourcing quality, not just process, may be the actual bottleneck, regardless of whether the role is also past its Close Target." />
+                <InfoTooltip align="left" text="Open roles (Approved, Live – Sourcing, or On Hold) currently showing fewer than 3 candidates who have both been shortlisted (past Applied and Screened) and scored above 60 on ResumeIQ — a signal that sourcing quality, not just process, may be the actual bottleneck, regardless of whether the role is also past its Close Target. The columns walk the funnel for each role: Pipeline = every Active candidate; Scored >60 = of those, ResumeIQ fit score above 60; Shortlisted = of the pipeline, past Applied and Screened; Shortlisted >60 = shortlisted and scored above 60 (the number judged against the threshold of 3)." />
               </div>
               <p className="text-xs text-gray-400 mt-0.5">Open roles with fewer than 3 shortlisted candidates scoring above 60</p>
             </div>
             {low_pipeline.length === 0 ? (
               <div className="p-5"><EmptyState title="No low-pipeline roles ✓" /></div>
             ) : (
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-gray-100">
-                    <th className="table-th">Role</th>
-                    <th className="table-th">P</th>
-                    <th className="table-th">HM</th>
-                    <th className="table-th">Shortlisted &gt;60</th>
+                    <th className="table-th !px-3">Role</th>
+                    <th className="table-th !px-2">P</th>
+                    <th className="table-th !px-2">HM</th>
+                    <th className={`${NUM_TH} w-[72px]`} title="All Active candidates in the pipeline">Pipeline</th>
+                    <th className={`${NUM_TH} w-[60px]`} title="Active candidates with a ResumeIQ fit score above 60">Scored &gt;60</th>
+                    <th className={`${NUM_TH} w-[76px]`} title="Active candidates past Applied and Screened">Shortlisted</th>
+                    <th className={`${NUM_TH} w-[84px] !pr-3`} title="Shortlisted AND scored above 60 — fewer than 3 puts a role on this list">Shortlisted &gt;60</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {low_pipeline.map(r => (
                     <tr key={r.id}>
-                      <td className="table-td font-medium text-gray-900">
+                      <td className="table-td !px-3 font-medium text-gray-900">
                         <Link to={`/roles/${r.id}`} className="hover:text-dp-600">{r.title}</Link>
                       </td>
-                      <td className="table-td"><PriorityBadge priority={r.priority as Priority} /></td>
-                      <td className="table-td text-gray-500 text-xs">{r.hiring_manager_name}</td>
-                      <td className="table-td font-mono text-sm text-gray-700">{r.shortlisted_scored_count}</td>
+                      <td className="table-td !px-2"><PriorityBadge priority={r.priority as Priority} /></td>
+                      <td className="table-td !px-2 text-gray-500 text-xs">{r.hiring_manager_name}</td>
+                      <td className="table-td !px-2 font-mono text-sm text-gray-700 text-right">{r.active_count}</td>
+                      <td className="table-td !px-2 font-mono text-sm text-gray-700 text-right">{r.scored_above_60_count}</td>
+                      <td className="table-td !px-2 font-mono text-sm text-gray-700 text-right">{r.shortlisted_count}</td>
+                      <td className="table-td !px-3 font-mono text-sm font-semibold text-gray-900 text-right">{r.shortlisted_scored_count}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </div>

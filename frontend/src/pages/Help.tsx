@@ -41,11 +41,17 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             funnel</strong> chart
             (every stage, broken into Active/Rejected/Withdrawn/Hold for Future so a stage never
             silently disappears just because nobody's currently sitting there), Source Quality,
-            Low Pipeline Roles, and Operational Velocity (turnaround time per stage,
+            Low Pipeline Roles (each role's pipeline step by step — all Active candidates, how many
+            scored above 60, how many are shortlisted, and how many are both), and Operational
+            Velocity (turnaround time per stage,
             Interview→Offer ratio, and the biggest drop-off stage shown both by raw count and by
             rejection rate, since those two can point at different stages).</p>
             <p className="mt-2">Filters at the top (Department, Location, Recruitment Mode,
-            Priority, Role) scope every section together. <strong>A Hiring Manager's dashboard is
+            Priority, Role) scope every section together. The <strong>Hiring Funnel
+            Snapshot</strong> also has its own <strong>Role</strong> filter, at the right of its
+            owner buttons, that applies to that section only (pick it to look at one or more roles
+            without changing the rest of the page; it replaces the page-level Role filter for that
+            section). <strong>A Hiring Manager's dashboard is
             locked to their own role(s)</strong> — the Role filter is replaced with a fixed
             indicator and can't be changed, enforced on the server regardless of what the page
             sends.</p>
@@ -104,7 +110,7 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
         question: 'On a candidate\'s page, why does a "Rejected" tag look clickable?',
         answer: (
           <p>Click any red <strong>Rejected</strong> tag on a candidate's applications to see the
-          exact reason category (and any additional detail) that was logged at the time — no need
+          exact reason(s) (and any additional detail) that were logged at the time — no need
           to dig through the activity timeline to find it. The Applications section itself now
           starts expanded by default when you open a candidate's page.</p>
         ),
@@ -263,8 +269,9 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
               progress, separate from the pipeline stage the candidate visibly sits at.</li>
             </ul>
             <p className="mt-1.5">Rejecting or withdrawing a candidate always requires selecting
-            a reason category first — this is deliberate, not a bug, so hiring data stays
-            auditable.</p>
+            a reason first — this is deliberate, not a bug, so hiring data stays auditable. When
+            rejecting, tick <strong>one or more</strong> reasons (a candidate often fails on
+            several things at once); withdrawals take a single reason.</p>
           </>
         ),
       },
@@ -286,7 +293,8 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
         answer: (
           <p>Optionally, yes — after picking a rejection reason, an editable draft email is
           generated for you (tone matched to the reason, but never exposing the literal internal
-          reason category to the candidate). Review or edit it, then send it in the same action
+          reasons to the candidate; if you tick several reasons the draft uses one neutral
+          wording instead of singling any of them out). Review or edit it, then send it in the same action
           that marks the candidate Rejected — available both for a single candidate and for a
           bulk rejection. Sending is optional; leaving it unchecked just rejects the candidate
           with no email.</p>

@@ -88,18 +88,35 @@ test.describe('Hiring Funnel Snapshot', () => {
     for (const bg of otherBgs) expect(bg).toBe(bgAfter.interview1);
   });
 
-  // The local per-section Role filter (and its rail) was retired —
-  // HiringFunnelSnapshot.tsx now relies solely on the Dashboard's own master
-  // filters, matching every other section on the page instead of carrying an
-  // independent one. This used to be a "no CSS truncation on long role
-  // names" check on that rail; now it's a regression guard that the rail
-  // (and its "Filter this section by role" trigger text) doesn't reappear.
-  test('the funnel snapshot no longer renders its own local role-filter rail', async ({ page }) => {
+  // The old per-section Role RAIL (a tall scrolling list of role buttons) was retired in
+  // favour of the dashboard's master filters, and stays retired. A compact Role multi-select
+  // was added back on request (2026-10-01): section-only, it replaces the master Role filter
+  // for this section. So: the rail must not reappear, and the compact filter must be there.
+  test('the funnel snapshot has a compact section-only Role filter, and the old role rail stays retired', async ({ page }) => {
     await loginViaApi(page);
     await expect(page.locator('button[title="Applied and Screened"]')).toBeVisible({ timeout: 15000 });
 
     await expect(page.locator('text=Filter this section by role')).toHaveCount(0);
     await expect(page.locator('div.max-h-80.overflow-y-auto button')).toHaveCount(0);
+
+    // The section's Role filter sits in the funnel card (the page-level one is up in the filter bar).
+    const section = page.locator('div.card', { has: page.getByRole('heading', { name: 'Hiring Funnel Snapshot' }) });
+    await expect(section.getByRole('button', { name: /^Role/ })).toBeVisible();
+  });
+
+  test('picking a role in the funnel snapshot re-queries just that section with that role', async ({ page }) => {
+    await loginViaApi(page);
+    await expect(page.locator('button[title="Applied and Screened"]')).toBeVisible({ timeout: 15000 });
+
+    const section = page.locator('div.card', { has: page.getByRole('heading', { name: 'Hiring Funnel Snapshot' }) });
+    const requested = page.waitForRequest(r => r.url().includes('/api/dashboard/funnel-snapshot') && /role_id/.test(r.url()));
+    await section.getByRole('button', { name: /^Role/ }).click();
+    // Any option will do — take the first one offered.
+    await page.locator('div.fixed label').first().locator('input').check();
+    const req = await requested;
+    expect(req.url()).toMatch(/role_id/);
+    // ...and the page-level Role filter was NOT touched (no count badge on it).
+    await expect(page.getByRole('button', { name: /^Role$/ }).first()).toBeVisible();
   });
 
   test('clicking a candidate breach tile navigates to that candidate\'s detail page', async ({ page }) => {

@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, X } from 'lucide-react';
 
+// Matches the panel's `w-56` (14rem) below.
+const PANEL_WIDTH = 224;
+const VIEWPORT_MARGIN = 8;
+const PANEL_MAX_HEIGHT = 288;   // Matches `max-h-72` below
+const PANEL_MIN_HEIGHT = 120;
+
 export interface MultiSelectOption {
   value: string;
   label: string;
@@ -24,7 +30,7 @@ interface MultiSelectFilterProps {
 // Priority/Status/Role).
 export default function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectFilterProps) {
   const [open, setOpen] = useState(false);
-  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const [coords, setCoords] = useState({ top: 0, left: 0, maxHeight: PANEL_MAX_HEIGHT });
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -39,7 +45,15 @@ export default function MultiSelectFilter({ label, options, selected, onChange }
   // same ancestor even though only horizontal scrolling was intended.
   const reposition = () => {
     const rect = btnRef.current?.getBoundingClientRect();
-    if (rect) setCoords({ top: rect.bottom + 4, left: rect.left });
+    // Keep the panel inside the window: a filter that sits near the right edge (the Hiring
+    // Funnel Snapshot's Role filter is right-aligned in its row) would otherwise open off-screen.
+    // ...and no taller than the room left below the button, so a filter that sits mid-page (the funnel
+    // section's) scrolls inside its panel instead of running off the bottom of a short window.
+    if (rect) setCoords({
+      top: rect.bottom + 4,
+      left: Math.max(VIEWPORT_MARGIN, Math.min(rect.left, window.innerWidth - PANEL_WIDTH - VIEWPORT_MARGIN)),
+      maxHeight: Math.max(PANEL_MIN_HEIGHT, Math.min(PANEL_MAX_HEIGHT, window.innerHeight - (rect.bottom + 4) - VIEWPORT_MARGIN)),
+    });
   };
 
   useEffect(() => {
@@ -87,7 +101,7 @@ export default function MultiSelectFilter({ label, options, selected, onChange }
       {open && createPortal(
         <div
           ref={panelRef}
-          style={{ top: coords.top, left: coords.left }}
+          style={{ top: coords.top, left: coords.left, maxHeight: coords.maxHeight }}
           className="fixed z-50 w-56 max-h-72 overflow-y-auto bg-white rounded-lg border border-gray-200 shadow-lg py-1"
         >
           {selected.length > 0 && (

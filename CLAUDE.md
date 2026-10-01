@@ -213,7 +213,8 @@ API endpoint — never conflate them:
 - `recruiter_screening_status` — New → Under Recruiter Review → Awaiting HM
   Review → HM Shortlisted (etc.)
 
-Rejection/withdrawal requires a reason category at the API level (hard 400 if
+Rejection/withdrawal requires a reason at the API level (a rejection may carry
+several — see "A rejection can carry several reasons" below) (hard 400 if
 missing) — this is intentional governance, not a bug to relax.
 
 ### ID scheme
@@ -853,7 +854,39 @@ any stage/score" — now "fewer than 3 applications that have both been
 shortlisted (stage past Applied and Screened) **and** scored above 60 on
 ResumeIQ" (`shortlisted_scored_count` in `dashboard.ts`), so a pipeline full
 of unqualified applicants no longer reads as healthy just because it's
-numerous.
+numerous. Each listed role also shows the whole funnel that number comes from
+(2026-10-01), all over `status='Active'` applications and nesting by
+construction: `active_count` (Pipeline) ⊇ `scored_above_60_count` (`ai_fit_score
+> 60`; exactly 60 does not count) and `shortlisted_count` (`stage <> 'Applied
+and Screened'`) ⊇ `shortlisted_scored_count`. Pinned by
+`hms-tests-final/tests/db/08-low-pipeline-breakdown.spec.ts`.
+
+**Hiring Funnel Snapshot has its own Role filter (2026-10-01).** A multi-select at
+the right of the owner buttons, remembered per tab (`dashboard.funnelRoleIds`). It is
+section-only and **replaces** (does not intersect with) the dashboard's master Role
+filter for this section — the other master filters (department, location, …) still
+apply; it just sends `role_id` to the same `GET /dashboard/funnel-snapshot` route, so
+there is no backend change. Hidden for a Hiring Manager (their data is locked to their
+own roles server-side). A remembered role that no longer exists is ignored rather than
+filtering everything out. `MultiSelectFilter` now clamps its dropdown inside the
+viewport (the new filter is right-aligned and otherwise opened off-screen).
+
+**A rejection can carry several reasons (2026-10-01).** `POST /applications/:id/status`
+takes `rejection_reason_cats: string[]` (the older single `rejection_reason_cat` string
+still works; the array wins if both are sent). They are stored in the EXISTING
+`applications.rejection_reason_cat` TEXT column as one `'; '`-joined string — no schema
+change, so nothing to migrate and every older reader/test keeps working.
+`backend/src/utils/rejectionReasons.ts` owns the format (trim, drop blanks, de-duplicate
+case-insensitively, replace any `;` inside a reason so splitting is always lossless, cap
+12 reasons x 200 chars); `frontend/src/utils/rejectionReasons.ts` mirrors the delimiter
+for display (the "Rejected" tag popup shows a bullet list). The reject modals
+(`CandidateDetail`, bulk on `Candidates`, `RejectReasonModal` on Scorecard/My Tasks) use
+a checkbox list (`ReasonCheckboxList`); **withdrawal is unchanged** (one reason). The
+candidate email never names internal reasons: one reason keeps its tailored opener,
+several use one neutral multi-factor opener (the per-reason openers could contradict each
+other, e.g. "unrelated to your candidacy" next to a skills gap). Reasons are only sent for
+Rejected/Withdrawn — a selection left over from an earlier open of the modal used to ride
+along on a Hold for Future.
 
 ### Environment variables / secrets
 - `GOOGLE_APPLICATION_CREDENTIALS` (local, file path) or

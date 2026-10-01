@@ -29,6 +29,47 @@ describe('buildRejectionDraft', () => {
   });
 });
 
+describe('buildRejectionDraft with several reasons', () => {
+  it('accepts a list, and a one-item list reads exactly like the single reason', () => {
+    expect(buildRejectionDraft(['Compensation mismatch'], 'Jane', 'Eng'))
+      .toEqual(buildRejectionDraft('Compensation mismatch', 'Jane', 'Eng'));
+  });
+
+  it('uses one neutral multi-factor line for several reasons — no single "because X", never the internal categories', () => {
+    const two = buildRejectionDraft(['Missing mandatory skill', 'Compensation mismatch'], 'Jane', 'Eng');
+    expect(two.body).toContain('several factors');
+    for (const reason of REJECTION_REASONS) expect(two.body.toLowerCase()).not.toContain(reason.toLowerCase());
+  });
+
+  it('does not let a role-level reason contradict a candidate-level one (no "unrelated to your candidacy" next to a skills gap)', () => {
+    const mixed = buildRejectionDraft(['Role cancelled / on hold', 'Missing mandatory skill'], 'Jane', 'Eng');
+    expect(mixed.body).not.toContain('unrelated to your candidacy');
+  });
+
+  it("when the role itself is cancelled/on hold, never claims the company is moving forward with other candidates", () => {
+    for (const others of [['Compensation mismatch'], ['Missing mandatory skill', 'Communication gap']]) {
+      const d = buildRejectionDraft(['Role cancelled / on hold', ...others], 'Jane', 'Eng');
+      expect(d.body).not.toMatch(/other candidates?/i);
+      expect(d.body).toContain('status of the role');
+    }
+  });
+
+  it('but a genuine "other candidate preferred" mixed with others may still say so', () => {
+    const d = buildRejectionDraft(['Role filled — other candidate preferred', 'Communication gap'], 'Jane', 'Eng');
+    expect(d.body).toContain('other candidates');
+  });
+
+  it('falls back to the generic opener for an empty list', () => {
+    expect(buildRejectionDraft([], 'Jane', 'Eng').body).toContain("we've decided not to move forward with your application");
+  });
+
+  it('is the same neutral text for any pair of reasons (nothing leaks which ones were picked)', () => {
+    const a = buildRejectionDraft(['Communication gap', 'Short average tenure'], 'Jane', 'Eng');
+    const b = buildRejectionDraft(['Missing mandatory skill', 'Cultural / values concern', 'Compensation mismatch'], 'Jane', 'Eng');
+    expect(a).toEqual(b);
+  });
+});
+
 describe('isKnownRejectionReason', () => {
   it('is true for every real REJECTION_REASONS value', () => {
     for (const reason of REJECTION_REASONS) {

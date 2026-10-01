@@ -12,6 +12,7 @@ import StageChangeModal from '../components/shared/StageChangeModal.tsx';
 import RejectReasonModal from '../components/shared/RejectReasonModal.tsx';
 import { RejectionEmailState } from '../components/shared/RejectionEmailDraft.tsx';
 import { interpolateRejectionDraft } from '../utils/rejectionEmailTemplates.ts';
+import { reasonFields } from '../utils/rejectionReasons.ts';
 import BudgetExceptionModal from '../components/shared/BudgetExceptionModal.tsx';
 import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -310,7 +311,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   const bulkHoldForFuture = () => runBulk(id => applicationsApi.updateStatus(id, { new_status: 'Hold for Future' }), Array.from(selectedIds), 'put on hold');
   const retryScoring = (ids: string[]) => runBulk(id => applicationsApi.retryScoring(id), ids, 'retried');
 
-  const handleBulkReject = async (reasonCat: string, reasonDetail: string, email: RejectionEmailState) => {
+  const handleBulkReject = async (reasons: string[], reasonDetail: string, email: RejectionEmailState) => {
     if (!rejectTargetIds) return;
     setBulkSaving(true);
     let succeeded = 0;
@@ -325,7 +326,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
           ? interpolateRejectionDraft(email, app.candidate_name, app.role_title)
           : null;
         return applicationsApi.updateStatus(id, {
-          new_status: 'Rejected', rejection_reason_cat: reasonCat, rejection_reason_detail: reasonDetail || undefined,
+          new_status: 'Rejected', ...reasonFields(reasons), rejection_reason_detail: reasonDetail || undefined,
           send_rejection_email: perRecipient ? true : undefined,
           rejection_email_subject: perRecipient?.subject,
           rejection_email_body: perRecipient?.body,
