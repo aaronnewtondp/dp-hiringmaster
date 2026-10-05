@@ -40,8 +40,8 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             it. The legend highlights one step, and <em>Table</em> shows the same numbers as
             rows. It follows the master filters (not the owner buttons — it always counts both
             HR and Hiring Manager breaches, and the drill-down shows who owns each), and a
-            Hiring Manager sees only their own roles. Breaches on roles that are no longer open aren't drawn;
-            a note under the chart says how many there are.</p>
+            Hiring Manager sees only their own roles. Breaches on roles that aren't open (closed, cancelled or
+            still a draft) aren't drawn; a note under the chart says how many there are.</p>
             <p className="mt-2">Further down: <strong>Aging roles</strong> (every role currently
             Approved, Live – Sourcing, or On Hold, with days-open shown for all of them — only
             ones actually past their Close Target get a red/yellow flag, sorted to the top; On

@@ -15,7 +15,7 @@ const stage = (name: string, count: number, types: Array<[string, string, number
 const DATA: SlaByRole = {
   stages: [],
   total_breaches: 14,
-  closed_roles: { roles: 2, breaches: 5 },
+  not_open_roles: { roles: 2, breaches: 5 },
   roles: [
     { role_id: 'R7', role_title: 'Senior UX Designer', priority: 'P1', status: 'Live – Sourcing', hiring_manager_name: 'Alex', total: 9,
       by_stage: [stage('Applied and Screened', 6, [['Resume Shortlist Pending', 'Hiring Manager', 6]]),
@@ -32,7 +32,7 @@ function manyRoles(n: number): SlaByRole {
     role_id: `R${i}`, role_title: `Role ${String(i).padStart(2, '0')}`, priority: 'P1', status: 'Approved', hiring_manager_name: null, total: n - i,
     by_stage: [stage('Applied and Screened', n - i, [['Resume Shortlist Pending', 'Hiring Manager', n - i]])],
   }));
-  return { stages: [], roles, total_breaches: roles.reduce((s, r) => s + r.total, 0), closed_roles: { roles: 0, breaches: 0 } };
+  return { stages: [], roles, total_breaches: roles.reduce((s, r) => s + r.total, 0), not_open_roles: { roles: 0, breaches: 0 } };
 }
 
 function mount(data: SlaByRole, master: Record<string, string[]> = {}) {
@@ -130,20 +130,69 @@ describe('SlaBreachesByRole', () => {
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 
-  it('says what it left out: breaches on closed roles are counted, not hidden', async () => {
+  it('says what it left out: breaches on roles that are not open are counted, not hidden — and does not call a draft "closed"', async () => {
     mount(DATA);
     await screen.findByText('Senior UX Designer');
-    expect(screen.getByText(/Not shown: 5 breaches on 2 closed roles/)).toBeInTheDocument();
+    const note = screen.getByText(/Not shown: 5 breaches on 2 roles that are not open/);
+    expect(note).toHaveTextContent(/closed, cancelled or still a draft/);
+    expect(note).not.toHaveTextContent(/on 2 closed roles/);
   });
 
-  it('is quiet about closed roles when there are none', async () => {
-    mount({ ...DATA, closed_roles: { roles: 0, breaches: 0 } });
+  it('singular wording for a single left-out role and breach', async () => {
+    mount({ ...DATA, not_open_roles: { roles: 1, breaches: 1 } });
+    await screen.findByText('Senior UX Designer');
+    expect(screen.getByText(/Not shown: 1 breach on 1 role that is not open/)).toBeInTheDocument();
+  });
+
+  it('is quiet about roles that are not open when there are none', async () => {
+    mount({ ...DATA, not_open_roles: { roles: 0, breaches: 0 } });
     await screen.findByText('Senior UX Designer');
     expect(screen.queryByText(/Not shown/)).not.toBeInTheDocument();
   });
 
+  it('subtitle only invites a click where a click does something', async () => {
+    mount(DATA);
+    await screen.findByText('Senior UX Designer');
+    expect(screen.getByText(/click a bar for the stage-by-stage split/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Table/ }));
+    expect(screen.queryByText(/click a bar/)).not.toBeInTheDocument();       // the table has no drill-down
+    expect(screen.getByText(/14 open breaches across 3 open roles/)).toBeInTheDocument();
+  });
+
+  it('with nothing to show, the subtitle does not claim "0 open breaches across 0 open roles — click a role"', async () => {
+    mount({ stages: [], roles: [], total_breaches: 0, not_open_roles: { roles: 0, breaches: 0 } });
+    await screen.findByText(/No SLA breaches on open roles/);
+    expect(screen.queryByText(/across 0 open roles/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/click a/)).not.toBeInTheDocument();
+  });
+
+  it('a spotlighted funnel step that a filter then empties does not leave every segment dimmed', async () => {
+    const EARLY_ONLY: SlaByRole = {
+      stages: [], total_breaches: 3, not_open_roles: { roles: 0, breaches: 0 },
+      roles: [{ role_id: 'R9', role_title: 'Only Early', priority: 'P1', status: 'Approved', hiring_manager_name: null, total: 3,
+        by_stage: [stage('Applied and Screened', 3, [['Resume Shortlist Pending', 'Hiring Manager', 3]])] }],
+    };
+    slaByRole.mockImplementation((p?: { department?: string[] }) => Promise.resolve({ data: p?.department ? EARLY_ONLY : DATA }));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = (m: Record<string, string[]>) =>
+      <QueryClientProvider client={qc}><MemoryRouter><SlaBreachesByRole masterFilterParams={m} /></MemoryRouter></QueryClientProvider>;
+    const { rerender } = render(tree({}));
+    await screen.findByText('Senior UX Designer');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Assignment & Founders' }));
+    expect(screen.getByRole('button', { name: 'Assignment & Founders' })).toHaveAttribute('aria-pressed', 'true');
+
+    rerender(tree({ department: ['Tech'] }));
+    await screen.findByText('Only Early');
+    expect(screen.queryByRole('button', { name: 'Assignment & Founders' })).not.toBeInTheDocument();   // gone from the legend...
+    const segs = bars()[0].querySelectorAll('span[style*="flex-grow"]');
+    expect(segs.length).toBeGreaterThan(0);
+    for (const seg of Array.from(segs)) expect(getComputedStyle(seg).opacity).toBe('1');                // ...so it must not still dim the bars
+    expect(screen.getByRole('button', { name: 'Applied & Screened' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
   it('empty state when no open role has a breach', async () => {
-    mount({ stages: [], roles: [], total_breaches: 0, closed_roles: { roles: 0, breaches: 0 } });
+    mount({ stages: [], roles: [], total_breaches: 0, not_open_roles: { roles: 0, breaches: 0 } });
     expect(await screen.findByText(/No SLA breaches on open roles/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Table/ })).toBeInTheDocument();      // the toggle stays; nothing breaks
   });
@@ -188,6 +237,30 @@ describe('SlaBreachesByRole', () => {
       fireEvent.click(screen.getByRole('button', { name: /Table/ }));
       fireEvent.click(screen.getByRole('button', { name: /Chart/ }));
       expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    });
+
+    it('flips above the pointer near the bottom of the window instead of running off it', async () => {
+      mount(DATA);
+      await screen.findByText('Senior UX Designer');
+      const segment = bars()[0].querySelector('span[style*="flex-grow: 6"]') as HTMLElement;
+      fireEvent.pointerEnter(segment, { clientX: 100, clientY: 100 });
+      expect(parseFloat((await screen.findByRole('tooltip')).style.top)).toBeCloseTo(114);               // normal: just below
+      fireEvent.pointerMove(segment, { clientX: 100, clientY: window.innerHeight - 10 });
+      expect(parseFloat(screen.getByRole('tooltip').style.top)).toBeLessThan(window.innerHeight - 10);   // near the bottom: above
+    });
+
+    it('never shows "0%" for a real but tiny share', async () => {
+      mount({
+        stages: [], total_breaches: 201, not_open_roles: { roles: 0, breaches: 0 },
+        roles: [{ role_id: 'R1', role_title: 'Big Role', priority: 'P1', status: 'Approved', hiring_manager_name: null, total: 201,
+          by_stage: [stage('Applied and Screened', 200, [['Resume Shortlist Pending', 'Hiring Manager', 200]]),
+                     stage('Interview Round 1', 1, [['Interview 1 Not Scheduled', 'HR / Recruiter', 1]])] }],
+      });
+      await screen.findByText('Big Role');
+      fireEvent.pointerEnter(bars()[0].querySelector('span[style*="flex-grow: 1;"]') as HTMLElement, { clientX: 100, clientY: 100 });
+      const tipEl = await screen.findByRole('tooltip');
+      expect(tipEl).toHaveTextContent('<1% of this role');
+      expect(tipEl).not.toHaveTextContent('0% of this role');
     });
 
     it('goes away when the window loses focus', async () => {

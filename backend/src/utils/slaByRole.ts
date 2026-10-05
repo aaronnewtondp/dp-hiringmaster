@@ -1,7 +1,13 @@
 // Powers the Dashboard's "SLA breaches by role" stacked bar chart
 // (GET /api/dashboard/sla-by-role). Pure — it only re-shapes the same unresolved-
 // breach rows (fetchSlaBreachRows) the Hiring Funnel Snapshot is built from, so the
-// two can never disagree about what counts as an open breach.
+// two agree about what counts as an open breach.
+//
+// Where they can differ: the snapshot only has the 11 canonical stages, so a breach on an
+// application whose stage is not one of them (applications.stage is plain TEXT) is dropped
+// there but kept here under OTHER_STAGE (on open roles; on roles that are not open it is left out of
+// not_open_roles too). bars + not_open_roles.breaches − the 'Other' stage counts therefore equals the
+// snapshot's total.
 import { STAGE_ORDER } from '../types/index.js';
 import { SlaBreachRow } from './hiringFunnelSnapshot.js';
 
@@ -29,8 +35,8 @@ export interface SlaByRole {
   roles: SlaRoleBar[];
   /** Sum over `roles` — what the chart shows. */
   total_breaches: number;
-  /** Breaches on roles that are no longer open (candidates still marked Active there): left off the chart, counted here so the totals still reconcile. */
-  closed_roles: { roles: number; breaches: number };
+  /** Breaches on roles that are not open — closed, cancelled or still a draft — (candidates still marked Active there): left off the chart, counted here so the totals still reconcile. */
+  not_open_roles: { roles: number; breaches: number };
   /** Canonical funnel order, so the UI can colour and order segments consistently. */
   stages: string[];
 }
@@ -38,18 +44,20 @@ export interface SlaByRole {
 export function buildSlaByRole(rows: SlaBreachRow[], roles: Map<string, RoleMeta>): SlaByRole {
   type Acc = Map<string, Map<string, SlaRoleBreachType>>;     // stage -> breach type -> counts
   const perRole = new Map<string, Acc>();
-  const closed = new Map<string, number>();
+  const notOpen = new Map<string, number>();
 
   for (const row of rows) {
     const roleId = row.effective_role_id ?? row.pa_role_id;
     if (!roleId) continue;
     const meta = roles.get(roleId);
     if (!meta) continue;                                      // a role that no longer exists has nothing to label
+    const stage = row.current_stage && (STAGE_ORDER as readonly string[]).includes(row.current_stage) ? row.current_stage : OTHER_STAGE;
     if (!OPEN_ROLE_STATUSES.includes(meta.status)) {
-      closed.set(roleId, (closed.get(roleId) ?? 0) + 1);
+      // Only what the Hiring Funnel Snapshot also counts: it has no place for a stage outside the canonical 11,
+      // and this footnote promises "the snapshot still includes them".
+      if (stage !== OTHER_STAGE) notOpen.set(roleId, (notOpen.get(roleId) ?? 0) + 1);
       continue;
     }
-    const stage = row.current_stage && (STAGE_ORDER as readonly string[]).includes(row.current_stage) ? row.current_stage : OTHER_STAGE;
     let byStage = perRole.get(roleId);
     if (!byStage) perRole.set(roleId, byStage = new Map());
     let byType = byStage.get(stage);
@@ -80,7 +88,7 @@ export function buildSlaByRole(rows: SlaBreachRow[], roles: Map<string, RoleMeta
   return {
     roles: bars,
     total_breaches: bars.reduce((n, r) => n + r.total, 0),
-    closed_roles: { roles: closed.size, breaches: [...closed.values()].reduce((n, c) => n + c, 0) },
+    not_open_roles: { roles: notOpen.size, breaches: [...notOpen.values()].reduce((n, c) => n + c, 0) },
     stages: [...STAGE_ORDER],
   };
 }

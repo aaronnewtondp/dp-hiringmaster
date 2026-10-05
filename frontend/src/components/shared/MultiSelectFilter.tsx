@@ -45,10 +45,10 @@ export default function MultiSelectFilter({ label, options, selected, onChange }
   // same ancestor even though only horizontal scrolling was intended.
   const reposition = () => {
     const rect = btnRef.current?.getBoundingClientRect();
-    // Keep the panel inside the window: a filter that sits near the right edge (the Hiring
-    // Funnel Snapshot's Role filter is right-aligned in its row) would otherwise open off-screen.
-    // ...and no taller than the room left below the button, so a filter that sits mid-page (the funnel
-    // section's) scrolls inside its panel instead of running off the bottom of a short window.
+    // Keep the panel inside the window: a filter that sits near the right edge of its row would
+    // otherwise open off-screen...
+    // ...and no taller than the room left below the button, so a filter that sits mid-page scrolls
+    // inside its panel instead of running off the bottom of a short window.
     if (rect) setCoords({
       top: rect.bottom + 4,
       left: Math.max(VIEWPORT_MARGIN, Math.min(rect.left, window.innerWidth - PANEL_WIDTH - VIEWPORT_MARGIN)),

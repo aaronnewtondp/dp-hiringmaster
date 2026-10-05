@@ -21,6 +21,19 @@ function toggleBtnClass(active: boolean) {
   }`;
 }
 
+// The readout sits just below the pointer; near the bottom of the window it flips above, so a tall one (a
+// bucket that spans several stages) is never cut off.
+function tipTop(t: Tip) {
+  const est = 70 + (t.stages.length > 1 ? 10 + t.stages.length * 17 : 0);
+  return t.y + 14 + est > window.innerHeight ? Math.max(8, t.y - est - 8) : t.y + 14;
+}
+
+// "0%" for a real, non-zero count reads as a bug; anything under half a percent says so instead.
+function pctLabel(count: number, total: number) {
+  const p = (count / total) * 100;
+  return count > 0 && p < 1 ? '<1%' : `${Math.round(p)}%`;
+}
+
 function OwnerChip({ owner }: { owner: string }) {
   return (
     <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${owner === 'Hiring Manager' ? 'bg-amber-100 text-amber-700' : 'bg-dp-100 text-dp-700'}`}>
@@ -49,6 +62,7 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
     queryKey: ['dashboard-sla-by-role', masterFilterParams],
     queryFn:  () => dashboardApi.slaByRole(masterFilterParams),
     placeholderData: keepPreviousData,       // refetch keeps the frame: hold the last chart, dimmed, instead of flashing
+    refetchInterval: 5 * 60 * 1000,          // same cadence as the KPI cards, so a tab left open doesn't drift from them
   });
 
   const result = data?.data;
@@ -65,6 +79,9 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
     for (const b of bc) present.add(b.bucket.key);
   }
   const legend = [...SLA_STAGE_BUCKETS, OTHER_BUCKET].filter(b => present.has(b.key));
+  // A spotlighted step that a filter/refetch has since emptied is no longer in the legend, so there'd be no button
+  // left to un-spotlight it — and every segment would sit dimmed. Treat it as off.
+  const hl = highlight && present.has(highlight) ? highlight : null;
 
   // A readout must never outlive its mark: browsers don't send pointerleave when the page scrolls under a
   // still mouse or when the hovered bar is removed (view switch, "Show all", a refetch), and touch has no hover
@@ -76,7 +93,7 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
     window.addEventListener('blur', clear);
     return () => { window.removeEventListener('scroll', clear, true); window.removeEventListener('blur', clear); };
   }, [tip]);
-  useEffect(() => { setTip(null); }, [view, showAll, expanded, highlight, data]);
+  useEffect(() => { setTip(null); }, [view, showAll, expanded, hl, data]);
 
   const showTip = (e: React.PointerEvent, role: SlaRoleBar, seg: ReturnType<typeof bucketCounts>[number]) => {
     if (e.pointerType === 'touch') return;      // tap opens the drill-down, which carries the same numbers
@@ -84,16 +101,16 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
   };
 
   return (
-    <div className="card overflow-hidden">
+    <div className="card">
       <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-3 flex-wrap">
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold text-gray-900">SLA breaches by role</h2>
-            <InfoTooltip align="left" text="Open SLA breaches on each open role (Approved, Live – Sourcing, Under Review, On Hold), longest bar first. Each bar is split by how far along the funnel the overdue candidates are — lighter = earlier, darker = later. Click a role to see every stage and what is overdue there. Uses the same dashboard filters as the Hiring Funnel Snapshot above." />
+            <InfoTooltip align="left" text="Open SLA breaches on each open role (Approved, Live – Sourcing, Under Review, On Hold), longest bar first. Each bar is split by how far along the funnel the overdue candidates are — lighter = earlier, darker = later. Click a bar to see every stage and what is overdue there. Uses the same dashboard filters as the Hiring Funnel Snapshot above, but always counts both HR and Hiring Manager breaches (the owner buttons don't apply)." />
           </div>
           <p className="text-xs text-gray-400 mt-0.5">
-            {result
-              ? <>{nf.format(result.total_breaches)} open breach{result.total_breaches === 1 ? '' : 'es'} across {roles.length} open role{roles.length === 1 ? '' : 's'} — click a role for the stage-by-stage split</>
+            {result && roles.length > 0
+              ? <>{nf.format(result.total_breaches)} open breach{result.total_breaches === 1 ? '' : 'es'} across {roles.length} open role{roles.length === 1 ? '' : 's'}{view === 'chart' ? ' — click a bar for the stage-by-stage split' : ''}</>
               : 'Overdue candidates per open role, split by funnel stage'}
           </p>
         </div>
@@ -147,9 +164,9 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-4" role="group" aria-label="Funnel steps">
               {legend.map(b => (
                 <button
-                  key={b.key} type="button" aria-pressed={highlight === b.key}
+                  key={b.key} type="button" aria-pressed={hl === b.key}
                   onClick={() => setHighlight(h => (h === b.key ? null : b.key))}
-                  className={`inline-flex items-center gap-1.5 text-xs rounded px-1 py-0.5 transition-opacity ${highlight && highlight !== b.key ? 'opacity-40' : ''} hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-dp-500`}
+                  className={`inline-flex items-center gap-1.5 text-xs rounded px-1 py-0.5 transition-opacity ${hl && hl !== b.key ? 'opacity-50' : ''} hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-dp-600`}
                 >
                   <span className="inline-block w-3 h-3 rounded-[3px]" style={{ background: b.color }} aria-hidden="true" />
                   <span className="text-gray-600">{b.label}</span>
@@ -175,7 +192,7 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
                         aria-controls={panelId}
                         aria-label={`${r.role_title}: ${r.total} open SLA breaches (${summary}). ${open ? 'Hide' : 'Show'} stage breakdown`}
                         onClick={() => setExpanded(open ? null : r.role_id)}
-                        className="flex items-center gap-2 py-1 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-dp-500"
+                        className="flex items-center gap-2 py-1 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-dp-600"
                       >
                         <span className="flex-1 min-w-0 h-5 flex">
                           <span className="flex h-full gap-[2px]" style={{ width: `${(r.total / max) * 100}%` }}>
@@ -188,7 +205,7 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
                                 className={`h-full transition-opacity ${i === segs.length - 1 ? 'rounded-r-[4px]' : ''}`}
                                 style={{
                                   flexGrow: s.count, flexBasis: 0, minWidth: 3, background: s.bucket.color,
-                                  opacity: highlight && highlight !== s.bucket.key ? 0.2 : 1,
+                                  opacity: hl && hl !== s.bucket.key ? 0.2 : 1,
                                 }}
                               />
                             ))}
@@ -246,9 +263,9 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
           </>
         )}
 
-        {result && result.closed_roles.breaches > 0 && (
+        {result && result.not_open_roles.breaches > 0 && (
           <p className="mt-4 text-[11px] text-gray-400">
-            Not shown: {nf.format(result.closed_roles.breaches)} breach{result.closed_roles.breaches === 1 ? '' : 'es'} on {result.closed_roles.roles} closed role{result.closed_roles.roles === 1 ? '' : 's'} (candidates still marked Active there). They are still counted in the Hiring Funnel Snapshot above.
+            Not shown: {nf.format(result.not_open_roles.breaches)} breach{result.not_open_roles.breaches === 1 ? '' : 'es'} on {result.not_open_roles.roles} role{result.not_open_roles.roles === 1 ? '' : 's'} that {result.not_open_roles.roles === 1 ? 'is' : 'are'} not open (closed, cancelled or still a draft) with candidates still marked Active. The Hiring Funnel Snapshot above still includes {result.not_open_roles.breaches === 1 ? 'it' : 'them'}.
           </p>
         )}
       </div>
@@ -258,7 +275,7 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
         <div
           role="tooltip"
           className="fixed z-50 pointer-events-none rounded-lg border border-gray-200 bg-white shadow-lg px-3 py-2 text-xs max-w-[15rem]"
-          style={{ left: Math.min(tip.x + 14, window.innerWidth - 250), top: tip.y + 14 }}
+          style={{ left: Math.min(tip.x + 14, window.innerWidth - 250), top: tipTop(tip) }}
         >
           <div className="text-[11px] text-gray-500 truncate">{tip.role.role_title}</div>
           <div className="flex items-center gap-2 mt-0.5">
@@ -266,7 +283,7 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
             <span className="font-mono text-sm font-semibold text-gray-900">{nf.format(tip.count)}</span>
             <span className="text-gray-600">at {tip.bucket.label}</span>
           </div>
-          <div className="text-[11px] text-gray-400 mt-0.5">{Math.round((tip.count / tip.role.total) * 100)}% of this role's {nf.format(tip.role.total)}</div>
+          <div className="text-[11px] text-gray-400 mt-0.5">{pctLabel(tip.count, tip.role.total)} of this role's {nf.format(tip.role.total)}</div>
           {tip.stages.length > 1 && (
             <ul className="mt-1 pt-1 border-t border-gray-100 space-y-0.5">
               {tip.stages.map(s => (

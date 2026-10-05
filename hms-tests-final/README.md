@@ -124,7 +124,7 @@ tests/
 │   ├── 39-dashboard-funnel-snapshot-endpoint.spec.ts # GET /api/dashboard/funnel-snapshot
 │   ├── 40-candidate-gender.spec.ts                 # auto-tag from name, manual correction, gender filter
 │   └── 41-multiple-rejection-reasons.spec.ts       # rejection_reason_cats[]: stored '; '-joined, legacy single field, validation, HM path
-├── db/  (8 files — direct Postgres via `pg`, LOCAL ONLY, never prod)
+├── db/  (10 files — direct Postgres via `pg`, LOCAL ONLY, never prod)
 │   ├── 00-schema-integrity.spec.ts        # dedicated sequences, GIN indexes
 │   ├── 01-talent-pool-archival.spec.ts    # 90-day archival threshold (backdates last_updated directly)
 │   ├── 02-role-discard-activity-log.spec.ts

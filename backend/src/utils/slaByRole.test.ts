@@ -45,8 +45,13 @@ describe('buildSlaByRole', () => {
       breach('R1', 'Founders Round'), breach('R1', 'Applied and Screened'), breach('R1', 'Interview Round 2'),
       breach('R2', 'Applied and Screened'), breach('R2', 'Applied and Screened'), breach('R2', 'Applied and Screened'),
       breach('R3', 'Applied and Screened'), breach('R3', 'Applied and Screened'), breach('R3', 'Applied and Screened'),
-    ], roles(meta('R1', 'Zeta'), meta('R2', 'Beta'), meta('R3', 'Alpha')));
-    expect(out.roles.map(r => r.role_title)).toEqual(['Alpha', 'Beta', 'Zeta']);          // 3, 3 (alphabetical), 3 — all tied at 3
+      breach('R4', 'Applied and Screened'), breach('R4', 'Applied and Screened'), breach('R4', 'Applied and Screened'),
+      breach('R4', 'Applied and Screened'), breach('R4', 'Applied and Screened'),
+      breach('R5', 'Applied and Screened'),
+    ], roles(meta('R1', 'Zeta'), meta('R2', 'Beta'), meta('R3', 'Alpha'), meta('R4', 'Mid'), meta('R5', 'Aardvark')));
+    // most breaches first (5), then the three tied at 3 alphabetically, and the single breach last —
+    // alphabetical order alone would put 'Aardvark' (1) first, so reversing the count sort cannot pass.
+    expect(out.roles.map(r => [r.role_title, r.total])).toEqual([['Mid', 5], ['Alpha', 3], ['Beta', 3], ['Zeta', 3], ['Aardvark', 1]]);
     const zeta = out.roles.find(r => r.role_title === 'Zeta')!;
     expect(zeta.by_stage.map(s => s.stage)).toEqual(['Applied and Screened', 'Interview Round 2', 'Founders Round']);
   });
@@ -60,7 +65,7 @@ describe('buildSlaByRole', () => {
     expect(out.roles[0].by_stage[0].count).toBe(3);
   });
 
-  it('leaves closed roles off the chart but counts them, so totals still reconcile', () => {
+  it('leaves roles that are not open off the chart but counts them, so totals still reconcile', () => {
     const out = buildSlaByRole([
       breach('R1', 'Applied and Screened'),
       breach('R_CLOSED', 'Interview Round 1'), breach('R_CLOSED', 'Interview Round 1'),
@@ -68,14 +73,31 @@ describe('buildSlaByRole', () => {
     ], roles(meta('R1', 'Open'), meta('R_CLOSED', 'Old', 'Closed – Filled'), meta('R_CLOSED2', 'Older', 'Closed – Cancelled')));
     expect(out.roles.map(r => r.role_id)).toEqual(['R1']);
     expect(out.total_breaches).toBe(1);
-    expect(out.closed_roles).toEqual({ roles: 2, breaches: 3 });
+    expect(out.not_open_roles).toEqual({ roles: 2, breaches: 3 });
+  });
+
+  it('an unrecognised stage is kept on an open role (as "Other") but not counted in not_open_roles — the snapshot has no place for it', () => {
+    const out = buildSlaByRole([
+      breach('R1', 'Offer'), breach('R1', 'Applied and Screened'),                    // 'Offer' is a legacy stage name, not one of the 11
+      breach('R_OLD', 'Offer'), breach('R_OLD', 'Interview Round 1'),
+    ], roles(meta('R1', 'Open'), meta('R_OLD', 'Gone', 'Closed – Filled')));
+    expect(out.roles[0].by_stage.map(s => [s.stage, s.count])).toEqual([['Applied and Screened', 1], ['Other', 1]]);
+    expect(out.not_open_roles).toEqual({ roles: 1, breaches: 1 });                    // only the Interview Round 1 one
+  });
+
+  it('a Draft role is "not open", not "closed": its breaches stay off the chart but are counted', () => {
+    const out = buildSlaByRole(
+      [breach('R_DRAFT', 'Applied and Screened'), breach('R_DRAFT', 'Applied and Screened')],
+      roles(meta('R_DRAFT', 'Not yet approved', 'Draft')));
+    expect(out.roles).toEqual([]);
+    expect(out.not_open_roles).toEqual({ roles: 1, breaches: 2 });
   });
 
   it('treats every open-role status as open', () => {
     const statuses = ['Approved', 'Live – Sourcing', 'Under Review', 'On Hold'];
     const out = buildSlaByRole(statuses.map((s, i) => breach(`R${i}`, 'Applied and Screened')), roles(...statuses.map((s, i) => meta(`R${i}`, `Role ${i}`, s))));
     expect(out.roles).toHaveLength(4);
-    expect(out.closed_roles.breaches).toBe(0);
+    expect(out.not_open_roles.breaches).toBe(0);
   });
 
   it('files a breach with no recognisable stage under "Other" instead of losing it', () => {
@@ -87,7 +109,7 @@ describe('buildSlaByRole', () => {
   it('skips breaches whose role no longer exists, and never throws on empty input', () => {
     expect(buildSlaByRole([breach('R_GONE', 'Applied and Screened')], roles()).roles).toEqual([]);
     const empty = buildSlaByRole([], roles());
-    expect(empty).toMatchObject({ roles: [], total_breaches: 0, closed_roles: { roles: 0, breaches: 0 } });
+    expect(empty).toMatchObject({ roles: [], total_breaches: 0, not_open_roles: { roles: 0, breaches: 0 } });
   });
 
   it('every segment of a bar adds up to that bar, and every bar to the total', () => {

@@ -27,6 +27,7 @@ test('Dashboard loads without errors', async ({ page }) => {
 });
 
 test('Dashboard shows role count metric', async ({ page }) => {
+  test.setTimeout(75_000);                 // room for the 45s wait below (the Playwright default is 30s)
   await loginViaApi(page);
   // At least one numeric metric should be visible. Poll instead of a fixed 3s wait: the
   // first dashboard load after >3 minutes idle runs the whole SLA sweep before it answers
@@ -159,9 +160,12 @@ test.describe('Hiring Funnel Snapshot', () => {
 
       await page.getByRole('button', { name: 'Table', exact: true }).click();
       await expect(page.getByRole('button', { name: 'Table', exact: true })).toHaveAttribute('aria-pressed', 'true');
-      // table view is not limited to the top 8
-      for (const r of api.roles.slice(0, 12)) {
-        await expect(page.getByRole('row', { name: new RegExp(escapeRe(r.role_title)) }).first()).toBeVisible();
+      // not limited to the top 8, and in the API's order: row i is role i (titles are not unique), ending in its total
+      const rows = page.getByRole('table', { name: /Open SLA breaches per open role/ }).locator('tbody tr');   // not the dashboard's other tables
+      await expect(rows).toHaveCount(api.roles.length);
+      for (const [i, r] of api.roles.slice(0, 12).entries()) {
+        await expect(rows.nth(i)).toContainText(r.role_title);
+        await expect(rows.nth(i).getByRole('cell').last()).toHaveText(r.total.toLocaleString('en-IN'));
       }
     });
   });

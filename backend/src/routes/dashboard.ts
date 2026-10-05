@@ -721,7 +721,7 @@ router.get('/funnel-snapshot', async (req: Request, res: Response) => {
 // Snapshot. Built from the very same unresolved-breach rows as the snapshot (same
 // master filters, same owner toggle, same Hiring Manager role lock), just grouped by
 // role then stage instead of stage then breach type. Open roles only; breaches on
-// closed roles are counted in closed_roles so the totals still reconcile.
+// roles that aren't open (closed, cancelled, draft) are counted in not_open_roles so the totals still reconcile.
 router.get('/sla-by-role', async (req: Request, res: Response) => {
   await maybeRunSlaCheck();
 

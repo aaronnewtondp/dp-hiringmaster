@@ -874,9 +874,15 @@ role (`OPEN_ROLE_STATUSES` in `utils/slaByRole.ts`: Approved / Live – Sourcing
 Review / On Hold), longest first, top 8 with "Show all"; click a bar for the second
 level — the stage-by-stage split with breach types and owners. Built by the pure
 `buildSlaByRole()` from the **same** unresolved-breach rows (`fetchSlaBreachRows`) as the
-snapshot, so the two can't disagree: bars + `closed_roles.breaches` (breaches whose role
-is no longer open — left off the chart, counted in a footnote) always equal the
-snapshot's total. Things that are easy to get wrong:
+snapshot, so the two agree on what an open breach is: bars + `not_open_roles.breaches`
+(breaches on roles that are not open — closed, cancelled **or still a draft**; left off
+the chart, counted in a footnote) equal the snapshot's total. One deliberate difference: a
+breach on an application at a stage outside the 11 canonical ones (`applications.stage` is
+plain TEXT) is dropped by the snapshot but kept by the chart under "Other", so the exact
+identity is `bars + not_open_roles.breaches − 'Other' = snapshot` (the API spec uses that form).
+The three dashboard requests are not atomic (`maybeRunSlaCheck` lets only the first caller
+wait for the sweep), so right after the 3-minute throttle expires they can read slightly
+different states. Things that are easy to get wrong:
 - **Group by the application's *current* role** — `COALESCE(a.role_id, pa.role_id)`
   (`effective_role_id`); `pending_actions.role_id` goes stale when an application is moved
   to another role.

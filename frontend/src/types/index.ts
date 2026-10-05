@@ -360,7 +360,7 @@ export interface SlaRoleBar {
 export interface SlaByRole {
   roles: SlaRoleBar[];
   total_breaches: number;
-  closed_roles: { roles: number; breaches: number };
+  not_open_roles: { roles: number; breaches: number };
   stages: string[];
 }
 
@@ -395,7 +395,7 @@ export interface DashboardData {
     active_count: number;               // total Active pipeline
     scored_above_60_count: number;      // ...of which ResumeIQ fit score > 60
     shortlisted_count: number;          // ...of which shortlisted (past Applied and Screened)
-    shortlisted_scored_count: number;   // ...shortlisted AND scored > 60 (the number the "low" threshold is judged on)
+    shortlisted_scored_count: number;   // ...shortlisted AND scored > 60 (information only — membership is shortlisted_count < 3 AND active_count < 8)
     no_recent_candidate_activity: boolean;
   }>;
   roles_by_status:           Record<string, number>;

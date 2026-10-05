@@ -20,7 +20,7 @@ type Bar = {
   by_stage: { stage: string; count: number; breach_types: { type: string; owner: string; count: number }[] }[];
 };
 type Payload = {
-  roles: Bar[]; total_breaches: number; closed_roles: { roles: number; breaches: number }; stages: string[];
+  roles: Bar[]; total_breaches: number; not_open_roles: { roles: number; breaches: number }; stages: string[];
 };
 type SnapshotStage = { stage: string; total: number };
 
@@ -31,9 +31,17 @@ test.describe('GET /api/dashboard/sla-by-role', () => {
   let client: Client;
   const appIds: string[] = [];
   const candidateIds: string[] = [];
+  let r005Status: string | null = null;
 
-  test.beforeAll(async () => { client = new Client({ connectionString: LOCAL_DB_URL }); await client.connect(); });
+  test.beforeAll(async () => {
+    client = new Client({ connectionString: LOCAL_DB_URL });
+    await client.connect();
+    r005Status = (await client.query(`SELECT status FROM roles WHERE id = 'R005'`)).rows[0]?.status ?? null;
+  });
   test.afterAll(async () => {
+    // R005 is a shared seeded role other specs rely on being open: put it back even if a test above died mid-change
+    // (a timeout skips the test's own `finally`).
+    if (r005Status) await client.query(`UPDATE roles SET status = $1 WHERE id = 'R005'`, [r005Status]);
     if (appIds.length) {
       await client.query(`DELETE FROM pending_actions WHERE application_id = ANY($1)`, [appIds]);
       await client.query(`DELETE FROM activity_log WHERE application_id = ANY($1)`, [appIds]);
@@ -42,6 +50,11 @@ test.describe('GET /api/dashboard/sla-by-role', () => {
     if (candidateIds.length) await client.query(`DELETE FROM candidates WHERE id = ANY($1)`, [candidateIds]);
     await client.end();
   });
+
+  /** What the chart counts that the snapshot cannot: breaches on applications at a stage outside the 11 canonical ones. */
+  const otherStage = (b: Payload) => b.roles.reduce((n, r) => n + r.by_stage.filter(s => s.stage === 'Other').reduce((m, s) => m + s.count, 0), 0);
+  /** bars + roles that are not open − the 'Other' stage = every breach the Hiring Funnel Snapshot counts. */
+  const reconciled = (b: Payload) => b.total_breaches + b.not_open_roles.breaches - otherStage(b);
 
   async function runSlaCheck(request: Req) {
     expect((await authed(request, CRON_SECRET).post('/api/cron/sla-check', {})).status()).toBe(200);
@@ -72,8 +85,8 @@ test.describe('GET /api/dashboard/sla-by-role', () => {
     const body = await get(request, 'hr');
     expect(Array.isArray(body.roles)).toBe(true);
     expect(typeof body.total_breaches).toBe('number');
-    expect(typeof body.closed_roles.roles).toBe('number');
-    expect(typeof body.closed_roles.breaches).toBe('number');
+    expect(typeof body.not_open_roles.roles).toBe('number');
+    expect(typeof body.not_open_roles.breaches).toBe('number');
     expect(body.stages.length).toBe(11);                  // the canonical funnel, always
     expect(body.stages[0]).toBe('Applied and Screened');
 
@@ -84,7 +97,8 @@ test.describe('GET /api/dashboard/sla-by-role', () => {
     for (const r of body.roles) {
       expect(r.total).toBeGreaterThan(0);                 // a role with nothing overdue is not a bar
       expect(r.by_stage.reduce((n, s) => n + s.count, 0)).toBe(r.total);
-      const ranks = r.by_stage.map(s => body.stages.indexOf(s.stage));
+      // 'Other' (a stage outside the canonical 11) is not in body.stages and sorts last
+      const ranks = r.by_stage.map(s => (body.stages.includes(s.stage) ? body.stages.indexOf(s.stage) : body.stages.length));
       expect(ranks).toEqual([...ranks].sort((a, b) => a - b));                      // funnel order
       for (const s of r.by_stage) {
         expect(s.breach_types.reduce((n, t) => n + t.count, 0)).toBe(s.count);
@@ -132,22 +146,22 @@ test.describe('GET /api/dashboard/sla-by-role', () => {
     expect(names.indexOf('Applied and Screened')).toBeLessThan(names.indexOf('Interview Round 1'));
   });
 
-  test('reconciles with the Hiring Funnel Snapshot: bars + breaches on closed roles = every snapshot breach', async ({ request }) => {
+  test('reconciles with the Hiring Funnel Snapshot: bars + breaches on roles that are not open (− any "Other" stage) = every snapshot breach', async ({ request }) => {
     const body = await get(request, 'hr');
-    expect(body.total_breaches + body.closed_roles.breaches).toBe(await snapshotTotal(request, 'hr'));
+    expect(reconciled(body)).toBe(await snapshotTotal(request, 'hr'));
   });
 
   test('role_id filter narrows to that role, and its total matches the snapshot under the same filter', async ({ request }) => {
     const body = await get(request, 'hr', '?role_id=R006');
     expect(body.roles.every(r => r.role_id === 'R006')).toBe(true);
     expect(body.roles.length).toBe(1);
-    expect(body.total_breaches + body.closed_roles.breaches).toBe(await snapshotTotal(request, 'hr', '?role_id=R006'));
+    expect(reconciled(body)).toBe(await snapshotTotal(request, 'hr', '?role_id=R006'));
   });
 
   test('master filters apply exactly as on the snapshot (department)', async ({ request }) => {
     const qs = '?department=Product%2FQA';
     const body = await get(request, 'hr', qs);
-    expect(body.total_breaches + body.closed_roles.breaches).toBe(await snapshotTotal(request, 'hr', qs));
+    expect(reconciled(body)).toBe(await snapshotTotal(request, 'hr', qs));
   });
 
   test('owner toggle splits the total: every breach type is owned by the requested owner, and the two halves add up', async ({ request }) => {
@@ -203,23 +217,28 @@ test.describe('GET /api/dashboard/sla-by-role', () => {
     expect(after.roles.find(r => r.role_id === 'R006')?.total ?? 0).toBe(r6 + 1);
   });
 
-  test('breaches on a role that is no longer open leave the chart but are still counted in closed_roles', async ({ request }) => {
-    const appId = await breachedApp(request, 'R005');
-    await runSlaCheck(request);
-    const before = await get(request, 'hr');
-    const { rows } = await client.query(`SELECT status FROM roles WHERE id = 'R005'`);
-    const original = rows[0].status as string;
-    try {
-      await client.query(`UPDATE roles SET status = 'Closed – Filled' WHERE id = 'R005'`);
-      const after = await get(request, 'hr');
-      expect(after.roles.find(r => r.role_id === 'R005')).toBeUndefined();
-      expect(after.closed_roles.breaches).toBeGreaterThan(before.closed_roles.breaches);
-      expect(after.closed_roles.roles).toBeGreaterThan(before.closed_roles.roles);
-      // nothing is lost: what left the chart moved to closed_roles
-      expect(after.total_breaches + after.closed_roles.breaches).toBe(before.total_breaches + before.closed_roles.breaches);
-    } finally {
-      await client.query(`UPDATE roles SET status = $1 WHERE id = 'R005'`, [original]);
-    }
-    expect(appId).toBeTruthy();
-  });
+  // Closed, cancelled AND draft roles are all "not open": off the chart, but counted (a draft role is
+  // not "closed", and the footnote under the chart must not call it that).
+  for (const status of ['Closed – Filled', 'Closed – Cancelled', 'Draft']) {
+    test(`breaches on a role that is ${status} leave the chart but are still counted in not_open_roles`, async ({ request }) => {
+      const appId = await breachedApp(request, 'R005');
+      await runSlaCheck(request);
+      const before = await get(request, 'hr');
+      expect(before.roles.find(r => r.role_id === 'R005'), 'R005 starts out as an open role with a breach').toBeTruthy();
+      const { rows } = await client.query(`SELECT status FROM roles WHERE id = 'R005'`);
+      const original = rows[0].status as string;
+      try {
+        await client.query(`UPDATE roles SET status = $1 WHERE id = 'R005'`, [status]);
+        const after = await get(request, 'hr');
+        expect(after.roles.find(r => r.role_id === 'R005')).toBeUndefined();
+        expect(after.not_open_roles.breaches).toBeGreaterThan(before.not_open_roles.breaches);
+        expect(after.not_open_roles.roles).toBeGreaterThan(before.not_open_roles.roles);
+        // nothing is lost: what left the chart moved to not_open_roles
+        expect(after.total_breaches + after.not_open_roles.breaches).toBe(before.total_breaches + before.not_open_roles.breaches);
+      } finally {
+        await client.query(`UPDATE roles SET status = $1 WHERE id = 'R005'`, [original]);
+      }
+      expect(appId).toBeTruthy();
+    });
+  }
 });
