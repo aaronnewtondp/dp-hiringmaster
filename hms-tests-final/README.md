@@ -124,7 +124,7 @@ tests/
 │   ├── 39-dashboard-funnel-snapshot-endpoint.spec.ts # GET /api/dashboard/funnel-snapshot
 │   ├── 40-candidate-gender.spec.ts                 # auto-tag from name, manual correction, gender filter
 │   └── 41-multiple-rejection-reasons.spec.ts       # rejection_reason_cats[]: stored '; '-joined, legacy single field, validation, HM path
-├── db/  (8 files — direct Postgres via `pg`, LOCAL ONLY, never prod)
+├── db/  (10 files — direct Postgres via `pg`, LOCAL ONLY, never prod)
 │   ├── 00-schema-integrity.spec.ts        # dedicated sequences, GIN indexes
 │   ├── 01-talent-pool-archival.spec.ts    # 90-day archival threshold (backdates last_updated directly)
 │   ├── 02-role-discard-activity-log.spec.ts
@@ -133,12 +133,13 @@ tests/
 │   ├── 05-aging-roles-no-movement.spec.ts # no_recent_candidate_activity flag (backdates activity_log)
 │   ├── 06-manual-jd-source.spec.ts        # roles.jd_source='manual' guard on auto-gen + regenerate-jd
 │   ├── 07-portfolio-review.spec.ts        # portfolio review (9th ResumeIQ dimension): schema, route gating, killed-job recovery, backfill guards — no browser/model calls
-│   └── 08-low-pipeline-breakdown.spec.ts  # Low Pipeline Roles: Pipeline / Scored >60 / Shortlisted / Shortlisted >60 counts (sets fit scores + stages directly)
+│   ├── 08-low-pipeline-breakdown.spec.ts  # Low Pipeline Roles: the rule (<3 shortlisted AND <8 active, exact boundaries) + the Pipeline / Scored >60 / Shortlisted / Shortlisted >60 counts (sets fit scores + stages directly)
+│   └── 09-sla-by-role.spec.ts             # GET /api/dashboard/sla-by-role: shape, reconciles with funnel-snapshot, filters/owner/HM lock, stale-role move, closed roles (real breaches via backdated stage_entry_time + /api/cron/sla-check)
 ├── smoke/
 │   └── production.spec.ts   # safe for live Vercel — read-only + auth-rejection checks only
 └── e2e/  (7 files)
     ├── 01-login.spec.ts
-    ├── 02-dashboard.spec.ts             # + Hiring Funnel Snapshot chevron/rail/tile interactions
+    ├── 02-dashboard.spec.ts             # + Hiring Funnel Snapshot chevron/rail/tile interactions, SLA-breaches-by-role chart (render, drill-down, table view)
     ├── 03-jd-generation.spec.ts         # slow, real JD generation through the actual UI
     ├── 04-inline-editing.spec.ts        # EditableSection save/cancel, Role/Candidate/Agency
     ├── 05-unlinked-candidates.spec.ts   # unlinked panel + Link-to-role modal

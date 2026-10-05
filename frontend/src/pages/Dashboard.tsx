@@ -3,10 +3,11 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, Briefcase, Users, TrendingUp, TrendingDown, Radio, Gauge, Lock } from 'lucide-react';
 import { dashboardApi, rolesApi } from '../services/api.ts';
-import { DashboardData, Priority, STAGES, PRIORITIES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
+import { DashboardData, Priority, STAGES, PRIORITIES, LOCATIONS, DEPARTMENTS, LOW_PIPELINE_MAX_ACTIVE, LOW_PIPELINE_MAX_SHORTLISTED } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import HiringFunnelSnapshot from '../components/shared/HiringFunnelSnapshot.tsx';
+import SlaBreachesByRole from '../components/shared/SlaBreachesByRole.tsx';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -199,10 +200,11 @@ export default function Dashboard() {
       </div>
 
       {/* Hiring Funnel Snapshot — replaces the old "Pending actions by owner" board */}
-      {/* A Hiring Manager is locked to their own roles server-side, so the section gets no role options
-          (the filter-options query is disabled for them here, but the Roles / Candidates pages share its
-          cache key and fetch it for everyone — don't let that leak a dropdown that would do nothing). */}
-      <HiringFunnelSnapshot masterFilterParams={filterParams} roleOptions={isLockedToOwnRole ? [] : roleOptions} />
+      <HiringFunnelSnapshot masterFilterParams={filterParams} />
+
+      {/* The same open breaches, by role (stacked by funnel step) — answers "which roles are the problem?"
+          where the snapshot above answers "which stages are". Uses the same dashboard filters. */}
+      <SlaBreachesByRole masterFilterParams={filterParams} />
 
       {/* Aging roles + Hiring funnel */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -360,9 +362,9 @@ export default function Dashboard() {
             <div className="px-5 py-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-semibold text-gray-900">Low pipeline roles</h2>
-                <InfoTooltip align="left" text="Open roles (Approved, Live – Sourcing, or On Hold) currently showing fewer than 3 candidates who have both been shortlisted (past Applied and Screened) and scored above 60 on ResumeIQ — a signal that sourcing quality, not just process, may be the actual bottleneck, regardless of whether the role is also past its Close Target. The columns walk the funnel for each role: Pipeline = every Active candidate; Scored >60 = of those, ResumeIQ fit score above 60; Shortlisted = of the pipeline, past Applied and Screened; Shortlisted >60 = shortlisted and scored above 60 (the number judged against the threshold of 3)." />
+                <InfoTooltip align="left" text={`Open roles (Approved, Live – Sourcing, Under Review, or On Hold) with fewer than ${LOW_PIPELINE_MAX_SHORTLISTED} shortlisted candidates (past Applied and Screened) AND fewer than ${LOW_PIPELINE_MAX_ACTIVE} Active candidates in the pipeline — thinly stocked on both counts, a signal that sourcing, not just process, may be the bottleneck, regardless of whether the role is also past its Close Target. A big pool of applicants who simply haven't been shortlisted yet does not count as thin. The two bold columns decide membership. The columns walk the funnel: Pipeline = every Active candidate; Scored >60 = of those, ResumeIQ fit score above 60; Shortlisted = past Applied and Screened; Shortlisted >60 = shortlisted and scored above 60 (shown for information).`} />
               </div>
-              <p className="text-xs text-gray-400 mt-0.5">Open roles with fewer than 3 shortlisted candidates scoring above 60</p>
+              <p className="text-xs text-gray-400 mt-0.5">Open roles with fewer than {LOW_PIPELINE_MAX_SHORTLISTED} shortlisted candidates and fewer than {LOW_PIPELINE_MAX_ACTIVE} active candidates in the pipeline</p>
             </div>
             {low_pipeline.length === 0 ? (
               <div className="p-5"><EmptyState title="No low-pipeline roles ✓" /></div>
@@ -374,10 +376,10 @@ export default function Dashboard() {
                     <th className="table-th !px-3">Role</th>
                     <th className="table-th !px-2">P</th>
                     <th className="table-th !px-2">HM</th>
-                    <th className={`${NUM_TH} w-[72px]`} title="All Active candidates in the pipeline">Pipeline</th>
-                    <th className={`${NUM_TH} w-[60px]`} title="Active candidates with a ResumeIQ fit score above 60">Scored &gt;60</th>
-                    <th className={`${NUM_TH} w-[76px]`} title="Active candidates past Applied and Screened">Shortlisted</th>
-                    <th className={`${NUM_TH} w-[84px] !pr-3`} title="Shortlisted AND scored above 60 — fewer than 3 puts a role on this list">Shortlisted &gt;60</th>
+                    <th className={`${NUM_TH} w-[72px] !text-gray-700`} title={`All Active candidates in the pipeline — a role is low-pipeline with fewer than ${LOW_PIPELINE_MAX_ACTIVE}`}>Pipeline</th>
+                    <th className={`${NUM_TH} w-[60px]`} title="Active candidates with a ResumeIQ fit score above 60 (information only)">Scored &gt;60</th>
+                    <th className={`${NUM_TH} w-[76px] !text-gray-700`} title={`Active candidates past Applied and Screened — a role is low-pipeline with fewer than ${LOW_PIPELINE_MAX_SHORTLISTED}`}>Shortlisted</th>
+                    <th className={`${NUM_TH} w-[84px] !pr-3`} title="Shortlisted AND scored above 60 (information only)">Shortlisted &gt;60</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -388,10 +390,10 @@ export default function Dashboard() {
                       </td>
                       <td className="table-td !px-2"><PriorityBadge priority={r.priority as Priority} /></td>
                       <td className="table-td !px-2 text-gray-500 text-xs">{r.hiring_manager_name}</td>
-                      <td className="table-td !px-2 font-mono text-sm text-gray-700 text-right">{r.active_count}</td>
-                      <td className="table-td !px-2 font-mono text-sm text-gray-700 text-right">{r.scored_above_60_count}</td>
-                      <td className="table-td !px-2 font-mono text-sm text-gray-700 text-right">{r.shortlisted_count}</td>
-                      <td className="table-td !px-3 font-mono text-sm font-semibold text-gray-900 text-right">{r.shortlisted_scored_count}</td>
+                      <td className="table-td !px-2 font-mono text-sm font-semibold text-gray-900 text-right">{r.active_count}</td>
+                      <td className="table-td !px-2 font-mono text-sm text-gray-500 text-right">{r.scored_above_60_count}</td>
+                      <td className="table-td !px-2 font-mono text-sm font-semibold text-gray-900 text-right">{r.shortlisted_count}</td>
+                      <td className="table-td !px-3 font-mono text-sm text-gray-500 text-right">{r.shortlisted_scored_count}</td>
                     </tr>
                   ))}
                 </tbody>
