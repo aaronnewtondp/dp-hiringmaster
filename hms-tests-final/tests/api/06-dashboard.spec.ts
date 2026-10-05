@@ -153,12 +153,21 @@ test.describe('Dashboard API', () => {
       }
     });
 
-    test('Leadership sees only their queue', async ({ request }) => {
+    test('Leadership sees only their queue — Leadership-owned rows, plus Hiring Manager rows only on roles they are the named HM of', async ({ request }) => {
       const token   = await getToken(request, 'leadership');
-      const { actions } = await (await authed(request, token).get('/api/dashboard/pending')).json();
-      for (const a of actions) {
-        expect(a.owner_type).toBe('Leadership / Founders');
+      const { actions, alerts, hm_roles } = await (await authed(request, token).get('/api/dashboard/pending')).json();
+      const mine = new Set((hm_roles as { id: string }[]).map(r => r.id));
+      for (const a of [...actions, ...alerts]) {
+        if (a.owner_type === 'Leadership / Founders') continue;
+        expect(a.owner_type).toBe('Hiring Manager');
+        expect(mine.has(a.role_id), `${a.action_type} on ${a.role_id} is not one of their roles`).toBe(true);
       }
+    });
+
+    test('a Leadership user who is nobody\'s Hiring Manager gets exactly the old queue: Leadership-owned only, hm_roles empty', async ({ request }) => {
+      const { actions, alerts, hm_roles } = await (await authed(request, await getToken(request, 'leadership')).get('/api/dashboard/pending')).json();
+      test.skip(hm_roles.length > 0, 'the seeded leadership user is currently the named Hiring Manager of some role');
+      for (const a of [...actions, ...alerts]) expect(a.owner_type).toBe('Leadership / Founders');
     });
   });
 });

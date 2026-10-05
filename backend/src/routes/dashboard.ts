@@ -744,33 +744,64 @@ router.get('/sla-by-role', async (req: Request, res: Response) => {
 // ─── GET /api/dashboard/pending — just the pending actions queue ──────────────
 router.get('/pending', async (req: Request, res: Response) => {
   const persona = req.user!.persona;
-  let ownerFilter = '';
-  const params: unknown[] = [];
 
-  // Each persona only sees their own queue by default. Hiring managers are
-  // further scoped to responsible_person matching their own name — owner_type
-  // alone only isolates the HM queue as a whole, not which specific HM each
-  // row belongs to, which previously showed every HM every other HM's items.
-  // A substring match, not exact equality: checkFeedbackDue (slaChecker.ts)
-  // attributes "*Feedback Due" rows to the round's actual interviewer_emails
-  // (comma-joined display names when a round has more than one), not the
-  // role's single hiring_manager_name — an exact match would never fire for
-  // a multi-interviewer round. 'Resume Shortlist Pending' rows are still a
-  // single role-HM name, which a substring check also matches safely.
-  if (persona === 'hiring_manager') {
-    ownerFilter = `AND owner_type='Hiring Manager' AND position(lower(trim($1)) IN lower(coalesce(responsible_person,''))) > 0`;
-    params.push(req.user!.name);
-  }
-  if (persona === 'leadership')     ownerFilter = `AND owner_type='Leadership / Founders'`;
-
-  const rows = await query<{ action_type: string; candidate_id: string | null }>(
+  const pendingSql = (ownerFilterSql: string) =>
     `SELECT pa.*, a.candidate_id
      FROM pending_actions pa
      LEFT JOIN applications a ON a.id = pa.application_id
-     WHERE pa.resolved=false ${ownerFilter}
-     ORDER BY pa.priority_level DESC, pa.created_at ASC LIMIT 100`,
-    params
-  );
+     WHERE pa.resolved=false ${ownerFilterSql}
+     ORDER BY pa.priority_level DESC, pa.created_at ASC LIMIT 100`;
+  type PendingRow = { action_type: string; candidate_id: string | null };
+
+  let rows: PendingRow[];
+  // `hm_roles`: the roles a Leadership user is ALSO the named Hiring Manager of (see below); [] for everyone else.
+  let hm_roles: Array<{ id: string; title: string }> = [];
+
+  if (persona === 'leadership') {
+    // Leadership's own queue is the Leadership-owned rows. A Leadership user who is ALSO the named Hiring Manager of
+    // some role (roles.hiring_manager_name = their name — the same free-text match every other Hiring Manager rule
+    // uses) additionally gets that role's Hiring Manager queue: the rows owned by 'Hiring Manager' that name them,
+    // on roles they are the Hiring Manager of. Role-scoped on purpose — it does not turn the persona into a Hiring
+    // Manager everywhere (no dashboard lock, no comp hiding), and a Leadership user who is nobody's Hiring Manager
+    // gets exactly what they got before.
+    //
+    // The name is read from users, NOT from the token: at Google sign-in the token carries the Google profile
+    // display name (auth.ts: `name ?? user.name`), which can differ from the name an admin keeps in users.name and
+    // writes into roles.hiring_manager_name — a mismatch would silently drop the whole Hiring Manager queue. (The
+    // Hiring Manager persona's own rules still compare the token name; that predates this and is left as it was.)
+    const me = await queryOne<{ name: string }>(`SELECT name FROM users WHERE id = $1`, [req.user!.userId]);
+    const myName = me?.name ?? req.user!.name;
+    hm_roles = await query<{ id: string; title: string }>(
+      `SELECT id, title FROM roles WHERE lower(trim(hiring_manager_name)) = lower(trim($1)) ORDER BY title`, [myName]);
+    // Two windows of 100, one per owner group: a role with a big pile of unreviewed applicants (one 'Resume Shortlist
+    // Pending' row each) must not push the Leadership alerts out of the response, nor a pile of old Leadership rows
+    // push the Hiring Manager rows out.
+    const [own, hm] = await Promise.all([
+      query<PendingRow>(pendingSql(`AND owner_type='Leadership / Founders'`), []),
+      hm_roles.length
+        ? query<PendingRow>(pendingSql(
+            `AND owner_type='Hiring Manager'
+             AND position(lower(trim($1)) IN lower(coalesce(responsible_person,''))) > 0
+             AND COALESCE(a.role_id, pa.role_id) = ANY($2::text[])`), [myName, hm_roles.map(r => r.id)])
+        : Promise.resolve([] as PendingRow[]),
+    ]);
+    rows = [...own, ...hm];
+  } else {
+    // Each other persona sees their own queue (HR-tier: everything). Hiring managers are further scoped to
+    // responsible_person matching their own name — owner_type alone only isolates the HM queue as a whole, not which
+    // specific HM each row belongs to. A substring match, not exact equality: checkFeedbackDue (slaChecker.ts)
+    // attributes "*Feedback Due" rows to the round's actual interviewer_emails (comma-joined display names when a round
+    // has more than one), not the role's single hiring_manager_name — an exact match would never fire for a
+    // multi-interviewer round. 'Resume Shortlist Pending' rows are still a single role-HM name, which a substring
+    // check also matches safely.
+    const params: unknown[] = [];
+    let ownerFilter = '';
+    if (persona === 'hiring_manager') {
+      ownerFilter = `AND owner_type='Hiring Manager' AND position(lower(trim($1)) IN lower(coalesce(responsible_person,''))) > 0`;
+      params.push(req.user!.name);
+    }
+    rows = await query<PendingRow>(pendingSql(ownerFilter), params);
+  }
 
   // NON_ACTIONABLE_ALERT_TYPES (role-aging/comp-change notices) have no
   // individual attribution and no in-app action at all — split them into
@@ -783,7 +814,8 @@ router.get('/pending', async (req: Request, res: Response) => {
   // under a box labeled for what it actually is, per persona.
   const actions = rows.filter(r => !(NON_ACTIONABLE_ALERT_TYPES as readonly string[]).includes(r.action_type));
   const alerts  = rows.filter(r => (NON_ACTIONABLE_ALERT_TYPES as readonly string[]).includes(r.action_type));
-  res.json({ actions, alerts });
+
+  res.json({ actions, alerts, hm_roles });
 });
 
 export default router;

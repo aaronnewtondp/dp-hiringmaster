@@ -47,7 +47,7 @@ async function logActivity(
 
 // ─── GET /api/applications — list with filters ────────────────────────────────
 router.get('/', async (req: Request, res: Response) => {
-  const { stage, status, screening_status, sla_breach, founder_flag,
+  const { stage, status, screening_status, sla_breach, founder_flag, or_role_id,
           exclude_stale_archived, scored_only, scored_only_exempt_stage, q, gender, limit = '50', offset = '0' } = req.query;
 
   let sql = `
@@ -81,7 +81,14 @@ router.get('/', async (req: Request, res: Response) => {
   if (statuses.length) { sql += ` AND a.status = ANY($${i++})`;                     params.push(statuses); }
   if (screening_status) { sql += ` AND a.recruiter_screening_status = $${i++}`;    params.push(screening_status); }
   if (sla_breach === 'true') { sql += ` AND a.sla_breach = true`; }
-  if (founder_flag === 'true') { sql += ` AND a.founder_review_flag = true`; }
+  // `or_role_id` widens the Founder-flag filter into a union: founder-flagged OR on one of these roles. It is
+  // what lets a Leadership user who is also a role's Hiring Manager see Founder-flagged candidates AND that
+  // role's candidates in one Ready-for-Review list. Meaningless without founder_flag=true, so ignored then.
+  const orRoleIds = founder_flag === 'true' ? toArray(or_role_id) : [];
+  if (founder_flag === 'true') {
+    if (orRoleIds.length) { sql += ` AND (a.founder_review_flag = true OR a.role_id = ANY($${i++}::text[]))`; params.push(orRoleIds); }
+    else                  { sql += ` AND a.founder_review_flag = true`; }
+  }
   // Archival (PRD §21) — opt-in only, so every existing caller of this
   // shared endpoint is unaffected unless it explicitly starts passing this.
   // Candidates.tsx's default pipeline table always passes it; the excluded
@@ -149,11 +156,15 @@ router.get('/', async (req: Request, res: Response) => {
   // LIMIT window, no unscored exempt-stage row ever survives to reach the
   // client. Ranking that stage first (regardless of score) guarantees it
   // always wins the window; every other caller's ordering is unchanged.
+  // In the founder_flag + or_role_id union the Founder-flagged candidates are the primary duty of the list and the
+  // role's candidates are the addition — so when the window is capped (Ready for Review sends limit=500 and a big role
+  // can have thousands of Active applicants) the flagged ones must win it, not be ranked out by score.
+  const founderFirst = orRoleIds.length ? 'a.founder_review_flag DESC, ' : '';
   if (scored_only_exempt_stage) {
-    sql += ` ORDER BY (a.stage = $${i++}) DESC, a.ai_fit_score DESC NULLS LAST, a.application_date DESC LIMIT $${i++} OFFSET $${i++}`;
+    sql += ` ORDER BY ${founderFirst}(a.stage = $${i++}) DESC, a.ai_fit_score DESC NULLS LAST, a.application_date DESC LIMIT $${i++} OFFSET $${i++}`;
     params.push(scored_only_exempt_stage);
   } else {
-    sql += ` ORDER BY a.ai_fit_score DESC NULLS LAST, a.application_date DESC LIMIT $${i++} OFFSET $${i++}`;
+    sql += ` ORDER BY ${founderFirst}a.ai_fit_score DESC NULLS LAST, a.application_date DESC LIMIT $${i++} OFFSET $${i++}`;
   }
   params.push(parseInt(limit as string), parseInt(offset as string));
 
