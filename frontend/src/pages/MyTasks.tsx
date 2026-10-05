@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipboardList, MessageSquare, Clock, AlertCircle, ListChecks, Megaphone } from 'lucide-react';
 import { dashboardApi, rolesApi } from '../services/api.ts';
@@ -150,9 +150,11 @@ export default function MyTasks() {
   // `hm_roles` (Leadership only): roles this user is ALSO the named Hiring
   // Manager of — their HM queue for those roles is already in `actions`, and
   // "Ready for Review" widens to the same roles below.
-  const { data: pendingData, isLoading: loadingPending, refetch: refetchPending } =
+  // The key carries the signed-in user: the response is per-user (and now drives who sees which Ready-for-Review
+  // scope), and the query cache outlives a sign-out/sign-in in the same tab.
+  const { data: pendingData, isLoading: loadingPending, isError: pendingFailed, refetch: refetchPending } =
     useQuery<{ data: { actions: PendingAction[]; alerts: PendingAction[]; hm_roles?: Array<{ id: string; title: string }> } }>({
-      queryKey: ['my-tasks-pending'],
+      queryKey: ['my-tasks-pending', user?.email],
       queryFn:  () => dashboardApi.pending(),
     });
 
@@ -237,7 +239,19 @@ export default function MyTasks() {
         // Hiring Manager of, and fetching the founder-only list first would flash the wrong rows.
         isLeadership && loadingPending
           ? <div className="flex justify-center p-12"><Spinner size="lg" /></div>
-          : <ScorecardSummary personaScope={personaScope} onCountChange={setReadyCount} />
+          : (
+            <>
+              {/* If /pending could not be read we do not know which roles they are Hiring Manager of — say so rather
+                  than silently showing the narrower Founder-flagged list as if it were everything. */}
+              {isLeadership && pendingFailed && (
+                <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+                  <span>Couldn't check which roles you're the Hiring Manager of, so this shows Founder-flagged candidates only.</span>
+                  <button type="button" onClick={() => refetchPending()} className="font-medium underline whitespace-nowrap">Retry</button>
+                </div>
+              )}
+              <ScorecardSummary personaScope={personaScope} onCountChange={setReadyCount} />
+            </>
+          )
       )}
 
       {section === 'feedback' && (
@@ -326,6 +340,15 @@ export default function MyTasks() {
                       <div>
                         <p className="text-xs font-medium text-gray-700">{action.action_type}</p>
                         <p className="text-xs text-gray-400 mt-0.5">{action.description}</p>
+                        {/* Say whose it is and let them get to it: a bare "Resume Shortlist Pending" line is not actionable. */}
+                        {(action.candidate_name || action.role_title) && (
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {action.candidate_id && action.candidate_name
+                              ? <Link to={`/candidates/${action.candidate_id}`} className="text-dp-600 hover:underline">{action.candidate_name}</Link>
+                              : action.candidate_name}
+                            {action.candidate_name && action.role_title ? ' · ' : ''}{action.role_title}
+                          </p>
+                        )}
                       </div>
                     </div>
                   ))}

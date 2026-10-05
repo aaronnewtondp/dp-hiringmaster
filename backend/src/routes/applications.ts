@@ -156,11 +156,15 @@ router.get('/', async (req: Request, res: Response) => {
   // LIMIT window, no unscored exempt-stage row ever survives to reach the
   // client. Ranking that stage first (regardless of score) guarantees it
   // always wins the window; every other caller's ordering is unchanged.
+  // In the founder_flag + or_role_id union the Founder-flagged candidates are the primary duty of the list and the
+  // role's candidates are the addition — so when the window is capped (Ready for Review sends limit=500 and a big role
+  // can have thousands of Active applicants) the flagged ones must win it, not be ranked out by score.
+  const founderFirst = orRoleIds.length ? 'a.founder_review_flag DESC, ' : '';
   if (scored_only_exempt_stage) {
-    sql += ` ORDER BY (a.stage = $${i++}) DESC, a.ai_fit_score DESC NULLS LAST, a.application_date DESC LIMIT $${i++} OFFSET $${i++}`;
+    sql += ` ORDER BY ${founderFirst}(a.stage = $${i++}) DESC, a.ai_fit_score DESC NULLS LAST, a.application_date DESC LIMIT $${i++} OFFSET $${i++}`;
     params.push(scored_only_exempt_stage);
   } else {
-    sql += ` ORDER BY a.ai_fit_score DESC NULLS LAST, a.application_date DESC LIMIT $${i++} OFFSET $${i++}`;
+    sql += ` ORDER BY ${founderFirst}a.ai_fit_score DESC NULLS LAST, a.application_date DESC LIMIT $${i++} OFFSET $${i++}`;
   }
   params.push(parseInt(limit as string), parseInt(offset as string));
 

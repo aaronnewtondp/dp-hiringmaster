@@ -172,33 +172,49 @@ Date the same moment.
 **A Leadership user can also be the Hiring Manager of a role — without changing
 persona (2026-10-05, first case: Mansi Jain / R019 Head of Marketing).** "Hiring
 Manager of a role" has always meant `roles.hiring_manager_name` matching the user's
-`name` (case/space-insensitive free text, no FK); it is separate from the persona.
+name (case/space-insensitive free text, no FK); it is separate from the persona.
 `leadership` is HR-tier, so such a user already holds every right a Hiring Manager has
 (shortlist, feedback on any round — `isHRTier` bypasses the `interviewer_emails` check —
 reject, hold, comp visibility). What the persona did NOT give them was the Hiring
 Manager *workspace*: My Tasks showed Leadership only the Leadership-owned rows and the
 Founder-flagged list. Now, for the `leadership` persona only:
 - `GET /dashboard/pending` also returns the `owner_type='Hiring Manager'` rows that name
-  them **on roles they are the named HM of** (per-role — a row that merely names them on
+  them **on roles they are the named HM of** (per role — a row that merely names them on
   someone else's role stays out), and `hm_roles` (`[{id,title}]`, `[]` for every other
-  persona) listing those roles.
+  persona) listing those roles. **The name comes from `users.name` (looked up by id), not
+  from the token**: at Google sign-in the token carries the Google profile display name
+  (`auth.ts`: `name ?? user.name`), which can differ from what an admin keeps in
+  `users.name` and writes into `hiring_manager_name` — comparing the token would silently
+  drop the whole queue. (The `hiring_manager` persona's own rules — `canSeeCompForRole`,
+  `applyHiringManagerRoleLock`, its `/pending` branch — still compare the token name;
+  that predates this and was not changed.) The two owner groups get **separate 100-row
+  windows**, so a role with a big pile of unreviewed applicants (one 'Resume Shortlist
+  Pending' row each) can't push the Leadership alerts out, nor old Leadership rows the
+  Hiring Manager rows.
 - `GET /applications` takes `or_role_id` (repeatable), meaningful only with
-  `founder_flag=true`: the filter becomes founder-flagged **OR** on those roles. My Tasks
-  sends it from `hm_roles`, so Ready for Review = Founder-flagged + that role. Their own Role
-  filter still ANDs on top (narrows, never widens).
+  `founder_flag=true`: the filter becomes founder-flagged **OR** on those roles, and
+  Founder-flagged rows are ranked first so a capped window (Ready for Review sends
+  `limit=500`) never drops them for a big role. My Tasks sends it from `hm_roles`, so
+  Ready for Review = Founder-flagged + that role. Their own Role filter still ANDs on top.
 - My Tasks (`MyTasks.tsx`): a Leadership user with `hm_roles` gets the HR-style third box
   ("Other Pending Actions" counting only what is actionable, with Leadership Alerts as a
-  separate panel) instead of the alerts-only "Leadership Alerts" box, plus a one-line
-  note naming the role(s). Leadership waits for `/pending` before fetching Ready for
-  Review so it never flashes the Founder-only list.
+  separate panel — its rows now show candidate · role and link to the candidate) instead
+  of the alerts-only "Leadership Alerts" box, plus a one-line note naming the role(s).
+  Leadership waits for `/pending` before fetching Ready for Review (so it never flashes
+  the Founder-only list); if `/pending` fails it says so and offers Retry instead of
+  silently showing the narrower list. The `/pending` query key carries the user's email
+  (the cache outlives a sign-out/sign-in in the same tab).
+- "Feedback Due" for such a user is the feedback owed by *them personally* on that role's
+  rounds (rounds where they are the listed interviewer, or that list none): feedback rows
+  are attributed to the round's interviewers, falling back to the role's HM only when a
+  round has none.
 It deliberately does **not** apply the Hiring Manager *restrictions*: no dashboard role
 lock (`applyHiringManagerRoleLock` is persona-gated), no comp hiding. Granting this to
-someone = set the role's `hiring_manager_name` to their `users.name` exactly (done for
-R019 in prod via SQL + a `role_edit_log` row). Caveat inherited from the route: `/pending`
-returns at most 100 rows, oldest first — production has ~30 unresolved Leadership rows so
-a new Hiring Manager row fits; a pile of old Leadership rows would crowd it out.
-Pinned by `hms-tests-final/tests/db/10-leadership-role-hiring-manager.spec.ts`,
-`frontend/src/pages/MyTasks.test.tsx` and `ScorecardSummary.scope.test.tsx`.
+someone = set the role's `hiring_manager_name` to their `users.name` (done for R019 in
+prod via SQL + a `role_edit_log` row). Pinned by
+`hms-tests-final/tests/db/10-leadership-role-hiring-manager.spec.ts`,
+`tests/api/06-dashboard.spec.ts`, `frontend/src/pages/MyTasks.test.tsx` and
+`ScorecardSummary.scope.test.tsx`.
 
 **User Management** (`/users`, Super-Admin only — the first page in the app
 with a real route-level guard, `RequireSuperAdmin` in

@@ -28,7 +28,7 @@ const action = (id: number, owner_type: string, action_type: string, extra: Reco
   ({ id, owner_type, action_type, priority_level: 'High', description: `${action_type} #${id}`, hours_overdue: 5, created_at: new Date().toISOString(), ...extra });
 
 const HM_ITEMS = [
-  action(1, 'Hiring Manager', 'Resume Shortlist Pending', { responsible_person: 'Mansi Jain', role_id: 'R019' }),
+  action(1, 'Hiring Manager', 'Resume Shortlist Pending', { responsible_person: 'Mansi Jain', role_id: 'R019', candidate_id: 'C7', candidate_name: 'Arjun Mehta', role_title: 'Head of Marketing' }),
   action(2, 'Hiring Manager', 'Interview 1 Feedback Due', { responsible_person: 'Mansi Jain', role_id: 'R019', candidate_id: 'C1', application_id: 'A1', candidate_name: 'Priya Rao', role_title: 'Head of Marketing' }),
   action(3, 'Leadership / Founders', 'Founder Review'),
 ];
@@ -81,12 +81,55 @@ describe('My Tasks — a Leadership user who is also a role\'s Hiring Manager', 
     expect(screen.getByText('Role aging alert')).toBeInTheDocument();
   });
 
+  it('names the candidate and role on an Other Pending Actions row and links to the candidate (a bare action name is not actionable)', async () => {
+    pending.mockResolvedValue({ data: { actions: HM_ITEMS, alerts: [], hm_roles: [{ id: 'R019', title: 'Head of Marketing' }] } });
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: /Other Pending Actions/ }));
+    const link = await screen.findByRole('link', { name: 'Arjun Mehta' });
+    expect(link).toHaveAttribute('href', '/candidates/C7');
+    expect(link.parentElement).toHaveTextContent('Arjun Mehta · Head of Marketing');
+  });
+
+  it('if the pending response cannot be read it says so instead of silently showing the narrower Founder-only list, and can retry', async () => {
+    pending.mockRejectedValueOnce(new Error('boom'));
+    mount();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/Founder-flagged candidates only/);
+    expect(await screen.findByTestId('scorecard')).toBeInTheDocument();                 // the list is still usable
+    pending.mockResolvedValue({ data: { actions: [], alerts: [], hm_roles: [{ id: 'R019', title: 'Head of Marketing' }] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(lastScope()).toEqual({ founderFlagOnly: true, alsoRoleIds: ['R019'] }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+  });
+
   it('lists her Feedback Due item with a way into the candidate', async () => {
     pending.mockResolvedValue({ data: { actions: HM_ITEMS, alerts: [], hm_roles: [{ id: 'R019', title: 'Head of Marketing' }] } });
     mount();
     fireEvent.click(await screen.findByRole('button', { name: /Feedback Due/ }));
     expect(await screen.findByText('Priya Rao')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Submit feedback/ })).toBeInTheDocument();
+  });
+});
+
+describe('My Tasks — the pending cache is per user', () => {
+  it('one user\'s pending response is not shown to the next user who signs in without a reload', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = () => <QueryClientProvider client={qc}><MemoryRouter><MyTasks /></MemoryRouter></QueryClientProvider>;
+    pending.mockResolvedValue({ data: { actions: HM_ITEMS, alerts: [], hm_roles: [{ id: 'R019', title: 'Head of Marketing' }] } });
+    const first = render(tree());
+    expect(await screen.findByTestId('hm-roles-note')).toBeInTheDocument();
+    first.unmount();
+
+    currentUser = { name: 'Nalin', persona: 'leadership', email: 'nalin@digitalpaani.com' };
+    let resolve!: (v: unknown) => void;
+    pending.mockReturnValue(new Promise(r => { resolve = r; }));
+    render(tree());
+    // while the new user's own response is on its way nothing of the previous user's shows
+    expect(screen.queryByTestId('hm-roles-note')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('scorecard')).not.toBeInTheDocument();
+    resolve({ data: { actions: [], alerts: [], hm_roles: [] } });
+    await screen.findByTestId('scorecard');
+    expect(screen.queryByTestId('hm-roles-note')).not.toBeInTheDocument();
   });
 });
 

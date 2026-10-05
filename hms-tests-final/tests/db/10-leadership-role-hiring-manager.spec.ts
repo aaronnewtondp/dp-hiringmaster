@@ -29,6 +29,7 @@ test.describe('Leadership user who is also a role\'s Hiring Manager', () => {
   const candidateIds: string[] = [];
   const apps: Record<string, string> = {};              // label -> application id
   let ownRole = '', otherRole = '', shoutyRole = '';
+  let decoyApp = '';
 
   test.beforeAll(async ({ request }) => {
     client = new Client({ connectionString: LOCAL_DB_URL });
@@ -66,20 +67,17 @@ test.describe('Leadership user who is also a role\'s Hiring Manager', () => {
     await newApp('other-flagged', otherRole, { founder: true });
     await newApp('other-plain', otherRole);
 
-    // A Hiring-Manager-owned row that NAMES the leadership user but sits on somebody else's role (the shape you get
-    // when they are an interviewer on another role's round): must NOT come into their queue — access is per role.
-    await client.query(
-      `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue, role_id, responsible_person)
-       VALUES ('Hiring Manager', 'High', 'Interview 1 Feedback Due', 'named but not their role', $1, 'x', 'x', 1, $2, $3)`,
-      [apps['other-stale'], otherRole, leaderName]);
-
     expect((await authed(request, CRON_SECRET).post('/api/cron/sla-check', {})).status()).toBe(200);
 
-    // GET /dashboard/pending returns at most 100 rows, oldest first within a priority. This long-lived local database
-    // holds hundreds of old unresolved Leadership rows from earlier runs, which would push these brand-new rows out of
-    // the window (production has ~30). Make this spec's rows the oldest so they are in it — what is under test is
-    // who is allowed to see them, not the window.
-    await client.query(`UPDATE pending_actions SET created_at = '2000-01-01' WHERE application_id = ANY($1)`, [Object.values(apps)]);
+    // A Hiring-Manager-owned row that NAMES the leadership user but sits on somebody else's role (the shape you get when
+    // they are an interviewer on another role's round): must NOT come into their queue — access is per role. Inserted
+    // AFTER the sweep, with a type the sweeps leave alone: the sweep resolves a 'Feedback Due' row whose application is
+    // not at an interview stage, which would silently turn the negative tests below into no-ops.
+    await client.query(
+      `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue, role_id, responsible_person)
+       VALUES ('Hiring Manager', 'High', 'HM shortlist review', 'named but not their role', $1, 'x', 'x', 0, $2, $3)`,
+      [apps['other-stale'], otherRole, leaderName]);
+    decoyApp = apps['other-stale'];
   });
 
   test.afterAll(async () => {
@@ -117,6 +115,12 @@ test.describe('Leadership user who is also a role\'s Hiring Manager', () => {
     });
 
     test('nothing from somebody else\'s role comes in — including a row that merely names them', async ({ request }) => {
+      // the decoy really is there and unresolved (so this is not a vacuous pass), and it names the user...
+      const decoy = (await client.query(
+        `SELECT resolved, responsible_person FROM pending_actions WHERE application_id = $1 AND action_type = 'HM shortlist review'`, [decoyApp])).rows[0];
+      expect(decoy.resolved).toBe(false);
+      expect(decoy.responsible_person).toBe(leaderName);
+      // ...yet the Leadership user does not get it
       const body = await pending(request, 'leadership');
       expect(mine(body, [apps['other-stale'], apps['other-plain'], apps['other-flagged']])).toEqual([]);
     });
@@ -150,10 +154,12 @@ test.describe('Leadership user who is also a role\'s Hiring Manager', () => {
       expect((await pending(request, 'hm_alex')).hm_roles).toEqual([]);
     });
 
-    test('HR still sees every row; a real Hiring Manager is untouched (only their own rows)', async ({ request }) => {
+    test('HR is untouched (still unfiltered by owner); a real Hiring Manager is untouched (only their own Hiring Manager rows)', async ({ request }) => {
+      // HR's response is capped at 100 rows, so it is not asserted to contain any particular row — only that it is not narrowed to one owner.
       const hr = await pending(request, 'hr');
-      expect(mine(hr, [apps['own-stale'], apps['other-stale']]).length).toBeGreaterThanOrEqual(2);
-      for (const a of (await pending(request, 'hm_alex')).actions) expect(a.owner_type).toBe('Hiring Manager');
+      expect(new Set([...hr.actions, ...hr.alerts].map(a => a.owner_type)).size).toBeGreaterThan(1);
+      const alex = await pending(request, 'hm_alex');
+      for (const a of alex.actions) expect(a.owner_type).toBe('Hiring Manager');
     });
 
     test('a Leadership user with no role of their own gets no widening (precondition for the others: only roles named for them count)', async () => {
@@ -171,6 +177,42 @@ test.describe('Leadership user who is also a role\'s Hiring Manager', () => {
       } finally {
         await client.query(`UPDATE roles SET hiring_manager_name = $2 WHERE id = $1`, [ownRole, leaderName]);
         await client.query(`UPDATE roles SET hiring_manager_name = $2 WHERE id = $1`, [shoutyRole, `  ${leaderName.toUpperCase()} `]);
+      }
+    });
+  });
+
+  test.describe('robustness of the Hiring Manager queue', () => {
+    test('the name is read from the database, not from the token: a token issued under another name still resolves the roles', async ({ request }) => {
+      // Google sign-in puts the Google profile name in the token; users.name is what an admin keeps and writes into
+      // roles.hiring_manager_name. The cached token here carries the old name.
+      await client.query(`UPDATE users SET name = 'Renamed Leader' WHERE email = 'nalin@digitalpaani.com'`);
+      await client.query(`UPDATE roles SET hiring_manager_name = 'Renamed Leader' WHERE id = $1`, [ownRole]);
+      try {
+        const ids = (await pending(request, 'leadership')).hm_roles.map(r => r.id);
+        expect(ids).toContain(ownRole);
+      } finally {
+        await client.query(`UPDATE users SET name = $1 WHERE email = 'nalin@digitalpaani.com'`, [leaderName]);
+        await client.query(`UPDATE roles SET hiring_manager_name = $2 WHERE id = $1`, [ownRole, leaderName]);
+      }
+      expect((await pending(request, 'leadership')).hm_roles.map(r => r.id)).toContain(ownRole);
+    });
+
+    test('a big pile of Hiring Manager rows does not push the Leadership rows out (each owner group has its own 100-row window)', async ({ request }) => {
+      await client.query(
+        `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, hours_overdue, role_id, responsible_person, created_at)
+         SELECT 'Hiring Manager', 'High', 'HM shortlist review', 'filler ' || g, 0, $1, $2, '2000-01-01' FROM generate_series(1, 120) g`,
+        [ownRole, leaderName]);
+      try {
+        const body = await pending(request, 'leadership');
+        const all = [...body.actions, ...body.alerts];
+        const hm = all.filter(a => a.owner_type === 'Hiring Manager');
+        const lead = all.filter(a => a.owner_type === 'Leadership / Founders');
+        const leadTotal = Number((await client.query(
+          `SELECT count(*) FROM pending_actions WHERE resolved = false AND owner_type = 'Leadership / Founders'`)).rows[0].count);
+        expect(hm.length).toBe(100);                                  // capped, as before
+        expect(lead.length).toBe(Math.min(100, leadTotal));           // and not displaced by the 120 above
+      } finally {
+        await client.query(`DELETE FROM pending_actions WHERE role_id = $1 AND description LIKE 'filler %'`, [ownRole]);
       }
     });
   });
@@ -221,6 +263,14 @@ test.describe('Leadership user who is also a role\'s Hiring Manager', () => {
       const ids = await list(request, `founder_flag=true&status=Active&or_role_id=${ownRole}&role_id=${ownRole}`);
       expect(ids).toContain(apps['own-fresh']);
       expect(ids).not.toContain(apps['other-flagged']);    // flagged, but outside the chosen role
+    });
+
+    test('when the result is capped, the Founder-flagged candidates win the window over the role\'s higher-scored ones', async ({ request }) => {
+      await client.query(`UPDATE applications SET ai_fit_score = 100 WHERE id = ANY($1)`, [[apps['own-fresh'], apps['own-stale']]]);
+      const res = await authed(request, await getToken(request, 'leadership')).get(`/api/applications?limit=1&status=Active&founder_flag=true&or_role_id=${ownRole}`);
+      const top = (await res.json()).applications as { id: string; founder_review_flag: boolean }[];
+      expect(top).toHaveLength(1);
+      expect(top[0].founder_review_flag).toBe(true);          // by score alone one of the two 100s would have won
     });
 
     test('or_role_id without founder_flag is ignored: it cannot be used to widen an ordinary listing', async ({ request }) => {
