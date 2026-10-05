@@ -84,9 +84,10 @@ type SortKey = 'avg' | 'app_age';
 // the user's own Role filter picks — mirrors the scoping MyTasks.tsx's old
 // "Ready for review" section had before this page was merged into it
 // (2026-09-05): a Hiring Manager can never widen their view past their own
-// roles, and Leadership only ever sees Founder-flagged candidates.
+// roles, and Leadership only ever sees Founder-flagged candidates — plus, for a Leadership user who is also
+// the named Hiring Manager of some role(s) (`alsoRoleIds`), those roles' candidates (a union with the flag).
 export default function ScorecardSummary({ personaScope, onCountChange }: {
-  personaScope?: { ownRoleIds?: string[]; founderFlagOnly?: boolean };
+  personaScope?: { ownRoleIds?: string[]; founderFlagOnly?: boolean; alsoRoleIds?: string[] };
   onCountChange?: (count: number) => void;
 } = {}) {
   const qc = useQueryClient();
@@ -171,7 +172,12 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   if (modes.length)       params.recruitment_mode = modes;
   if (priorities.length)  params.priority = priorities;
   if (genders.length)     params.gender = genders;
-  if (personaScope?.founderFlagOnly) params.founder_flag = 'true';
+  if (personaScope?.founderFlagOnly) {
+    params.founder_flag = 'true';
+    // Union, not intersection: founder-flagged OR on a role this Leadership user is also Hiring Manager of.
+    // Their own Role filter above still narrows the union, never widens it.
+    if (personaScope.alsoRoleIds?.length) params.or_role_id = personaScope.alsoRoleIds;
+  }
   // Default to Active only — otherwise a Rejected/Hold-for-Future candidate
   // (who has already left this queue's whole reason for existing) would
   // linger here forever. The Status filter still lets anyone deliberately

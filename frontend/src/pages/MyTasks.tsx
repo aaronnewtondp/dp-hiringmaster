@@ -142,22 +142,30 @@ export default function MyTasks() {
     return mine.length ? mine.map(r => r.id) : [NO_ROLES_OWNED_SENTINEL];
   }, [isHiringManager, ownRolesData, user?.name]);
 
-  const personaScope = isHiringManager
-    ? { ownRoleIds }
-    : isLeadership
-    ? { founderFlagOnly: true }
-    : undefined;
-
   // Pending actions for the current user (feedback due etc.) — already
   // persona-scoped server-side (see GET /dashboard/pending). `alerts` are
   // company-wide role-aging/comp-change notices with no individual owner and
   // no in-app action — kept visible, just split out so they're never
   // miscounted as a resolvable task (see that route's own comment).
+  // `hm_roles` (Leadership only): roles this user is ALSO the named Hiring
+  // Manager of — their HM queue for those roles is already in `actions`, and
+  // "Ready for Review" widens to the same roles below.
   const { data: pendingData, isLoading: loadingPending, refetch: refetchPending } =
-    useQuery<{ data: { actions: PendingAction[]; alerts: PendingAction[] } }>({
+    useQuery<{ data: { actions: PendingAction[]; alerts: PendingAction[]; hm_roles?: Array<{ id: string; title: string }> } }>({
       queryKey: ['my-tasks-pending'],
       queryFn:  () => dashboardApi.pending(),
     });
+
+  const hmRoles = pendingData?.data?.hm_roles ?? [];
+  // A Leadership user who is also a role's Hiring Manager works that role like a Hiring Manager (queue + ready
+  // list) while staying Leadership everywhere else; one who isn't keeps the alerts-only Leadership view.
+  const leadershipAlertsOnly = isLeadership && hmRoles.length === 0;
+
+  const personaScope = isHiringManager
+    ? { ownRoleIds }
+    : isLeadership
+    ? { founderFlagOnly: true, alsoRoleIds: hmRoles.map(r => r.id) }
+    : undefined;
 
   const allPending  = pendingData?.data?.actions || [];
   const alerts      = pendingData?.data?.alerts  || [];
@@ -180,7 +188,7 @@ export default function MyTasks() {
           <h1 className="text-xl font-semibold text-gray-900">My Tasks</h1>
           <InfoTooltip
             align="left"
-            text={isLeadership
+            text={leadershipAlertsOnly
               ? "Leadership Alerts is company-wide role-aging/compensation notices and the Feedback-Overdue escalation — visibility, not a personal to-do list, since nobody individually resolves these here."
               : "Other Pending Actions only counts what's genuinely yours to resolve. Role-aging/compensation notices nobody can individually act on show separately in a Leadership Alerts panel below it — visible, never hidden, just not counted toward the badge."}
           />
@@ -190,6 +198,11 @@ export default function MyTasks() {
             ? 'Founder-flagged candidates awaiting a shortlist decision, feedback due from you, and everything else pending'
             : 'Candidates awaiting your shortlist decision, feedback due from you, and everything else pending'}
         </p>
+        {isLeadership && hmRoles.length > 0 && (
+          <p className="text-xs text-dp-600 mt-1" data-testid="hm-roles-note">
+            You're also the Hiring Manager for {hmRoles.map(r => r.title).join(', ')} — its candidates and Hiring Manager tasks are included here.
+          </p>
+        )}
       </div>
 
       {/* Section selector */}
@@ -211,16 +224,20 @@ export default function MyTasks() {
           accent={feedbackDue.some(a => a.hours_overdue > 0) ? 'text-red-500' : 'text-amber-500'}
         />
         <SectionBox
-          label={isLeadership ? 'Leadership Alerts' : 'Other Pending Actions'}
-          count={isLeadership ? alerts.length + otherPending.length : otherPending.length}
+          label={leadershipAlertsOnly ? 'Leadership Alerts' : 'Other Pending Actions'}
+          count={leadershipAlertsOnly ? alerts.length + otherPending.length : otherPending.length}
           active={section === 'other'}
           onClick={() => setSection('other')}
-          icon={isLeadership ? Megaphone : ListChecks}
+          icon={leadershipAlertsOnly ? Megaphone : ListChecks}
         />
       </div>
 
       {section === 'ready' && (
-        <ScorecardSummary personaScope={personaScope} onCountChange={setReadyCount} />
+        // Leadership waits for the pending response: it says whether Ready for Review also covers a role they are
+        // Hiring Manager of, and fetching the founder-only list first would flash the wrong rows.
+        isLeadership && loadingPending
+          ? <div className="flex justify-center p-12"><Spinner size="lg" /></div>
+          : <ScorecardSummary personaScope={personaScope} onCountChange={setReadyCount} />
       )}
 
       {section === 'feedback' && (
@@ -262,7 +279,7 @@ export default function MyTasks() {
       {section === 'other' && (
         loadingPending ? (
           <div className="flex justify-center p-12"><Spinner size="lg" /></div>
-        ) : isLeadership ? (
+        ) : leadershipAlertsOnly ? (
           // Leadership never had an operational HR/HM queue here — this box
           // has mostly shown role-aging/comp-change notices, renamed
           // "Leadership Alerts" since there's no in-app action on those.

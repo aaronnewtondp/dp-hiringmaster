@@ -191,7 +191,12 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             role-aging flags or the Feedback-Overdue escalation that nobody individually owns, kept
             visible but not counted toward the actionable badge); Leadership sees that same
             content directly as <strong>Leadership Alerts</strong>, since it's the whole point of
-            their tab, not an aside.</p>
+            their tab, not an aside. A Leadership user who is also the named Hiring Manager of a
+            role (a name on the role's Hiring Manager field) keeps all of that and additionally
+            gets that role's Hiring Manager work: its candidates join Ready for review, and its
+            overdue shortlist decisions and feedback land in Feedback Due / Other Pending Actions,
+            with a line at the top naming the role(s). Only that role — it doesn't make them a
+            Hiring Manager anywhere else.</p>
             <p className="mt-1.5"><strong>Scorecard Summary</strong> is the full, org-wide table
             of every ResumeIQ-scored candidate side by side, with all 8 dimension scores and
             verdict — built for comparing candidates against each other, not just working through

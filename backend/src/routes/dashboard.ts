@@ -761,7 +761,19 @@ router.get('/pending', async (req: Request, res: Response) => {
     ownerFilter = `AND owner_type='Hiring Manager' AND position(lower(trim($1)) IN lower(coalesce(responsible_person,''))) > 0`;
     params.push(req.user!.name);
   }
-  if (persona === 'leadership')     ownerFilter = `AND owner_type='Leadership / Founders'`;
+  // Leadership's own queue is the Leadership-owned rows. A Leadership user who is ALSO the named Hiring
+  // Manager of some role (roles.hiring_manager_name = their name — the same free-text match every other
+  // Hiring Manager rule here uses) additionally gets that role's Hiring Manager queue: the rows owned by
+  // 'Hiring Manager' that name them, on roles they are the Hiring Manager of. Role-scoped on purpose — it
+  // does not turn the persona into a Hiring Manager everywhere (no dashboard lock, no comp hiding), and a
+  // Leadership user who is nobody's Hiring Manager gets exactly what they got before.
+  if (persona === 'leadership') {
+    ownerFilter = `AND (owner_type='Leadership / Founders'
+      OR (owner_type='Hiring Manager'
+          AND position(lower(trim($1)) IN lower(coalesce(responsible_person,''))) > 0
+          AND COALESCE(a.role_id, pa.role_id) IN (SELECT id FROM roles WHERE lower(trim(hiring_manager_name)) = lower(trim($1)))))`;
+    params.push(req.user!.name);
+  }
 
   const rows = await query<{ action_type: string; candidate_id: string | null }>(
     `SELECT pa.*, a.candidate_id
@@ -783,7 +795,16 @@ router.get('/pending', async (req: Request, res: Response) => {
   // under a box labeled for what it actually is, per persona.
   const actions = rows.filter(r => !(NON_ACTIONABLE_ALERT_TYPES as readonly string[]).includes(r.action_type));
   const alerts  = rows.filter(r => (NON_ACTIONABLE_ALERT_TYPES as readonly string[]).includes(r.action_type));
-  res.json({ actions, alerts });
+
+  // `hm_roles`: the roles this Leadership user is the named Hiring Manager of — what widened their queue above,
+  // returned so My Tasks can widen "Ready for Review" to the same roles from the same source of truth instead
+  // of re-deriving the name match client-side. Always [] for everyone else (a Hiring Manager's roles are all of
+  // their view already; HR-tier sees everything).
+  const hm_roles = persona === 'leadership'
+    ? await query<{ id: string; title: string }>(
+        `SELECT id, title FROM roles WHERE lower(trim(hiring_manager_name)) = lower(trim($1)) ORDER BY title`, [req.user!.name])
+    : [];
+  res.json({ actions, alerts, hm_roles });
 });
 
 export default router;
