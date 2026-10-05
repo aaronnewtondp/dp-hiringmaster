@@ -94,17 +94,15 @@ test.describe('Dashboard API additions', () => {
   });
 
   // ─── low_pipeline ──────────────────────────────────────────────────────────
-  // Not new this batch — it existed before — but is now actually rendered on
-  // the frontend, which makes a shape regression here worth guarding. Hiring
-  // SOP v2.1 (2026-09-18) redefined this from rolesWithAging.filter(active_count
-  // < 5) (any active application, any stage/score) to
-  // shortlisted_scored_count < 3 — active applications that have both been
-  // shortlisted (stage past Applied and Screened) AND scored above 60 on
-  // ResumeIQ — so a pipeline full of unqualified applicants no longer reads
-  // as "healthy" just because it's numerous.
+  // History of the rule: "fewer than 5 Active applications" -> (Hiring SOP v2.1,
+  // 2026-09-18) "fewer than 3 shortlisted AND scored above 60" -> (2026-10-05) "fewer
+  // than 3 shortlisted AND fewer than 8 Active candidates in the pipeline". The score
+  // condition was dropped; a pipeline-size cap replaced it so a big pool of applicants
+  // who simply haven't been shortlisted yet doesn't read as a thin pipeline.
+  // Exact boundaries are pinned in tests/db/08-low-pipeline-breakdown.spec.ts.
   test.describe('low_pipeline', () => {
 
-    test('is an array; every entry has shortlisted_scored_count < 3', async ({ request }) => {
+    test('is an array; every entry has fewer than 3 shortlisted AND fewer than 8 active candidates', async ({ request }) => {
       const token = await getToken(request, 'hr');
       const res   = await authed(request, token).get('/api/dashboard');
       expect(res.status()).toBe(200);
@@ -112,8 +110,13 @@ test.describe('Dashboard API additions', () => {
 
       expect(Array.isArray(low_pipeline)).toBe(true);
       for (const role of low_pipeline) {
-        expect(typeof role.shortlisted_scored_count).toBe('number');
-        expect(role.shortlisted_scored_count).toBeLessThan(3);
+        expect(typeof role.shortlisted_count).toBe('number');
+        expect(typeof role.active_count).toBe('number');
+        expect(role.shortlisted_count).toBeLessThan(3);
+        expect(role.active_count).toBeLessThan(8);
+        // the score-based figures are still reported (shown for information), and still nest
+        expect(role.shortlisted_scored_count).toBeLessThanOrEqual(role.shortlisted_count);
+        expect(role.scored_above_60_count).toBeLessThanOrEqual(role.active_count);
       }
     });
   });

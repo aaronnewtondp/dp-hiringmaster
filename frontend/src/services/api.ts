@@ -108,6 +108,7 @@ export const dashboardApi = {
   // own data, not the whole dashboard payload (see backend/src/routes/
   // dashboard.ts's RCA comment on the route this hits).
   funnelSnapshot: (params?: Record<string, string | string[]>) => api.get('/dashboard/funnel-snapshot', { params }),
+  slaByRole:      (params?: Record<string, string | string[]>) => api.get('/dashboard/sla-by-role', { params }),
 };
 
 export const refChecksApi = {

@@ -12,6 +12,8 @@ export interface SlaBreachRow {
   application_id: string; candidate_name: string; role_title: string;
   pa_role_id: string | null; current_stage: string | null; candidate_id: string | null;
   responsible_person: string | null;
+  /** The application's CURRENT role (falls back to the breach row's own). pa_role_id goes stale when an application is moved to another role. */
+  effective_role_id: string | null;
 }
 
 export async function fetchSlaBreachRows(filters: RoleFilterParams, ownerParam?: string): Promise<SlaBreachRow[]> {
@@ -25,7 +27,8 @@ export async function fetchSlaBreachRows(filters: RoleFilterParams, ownerParam?:
   return query<SlaBreachRow>(`
     SELECT pa.id, pa.action_type, pa.owner_type, pa.hours_overdue, pa.application_id,
            pa.candidate_name, pa.role_title, pa.role_id AS pa_role_id,
-           a.stage AS current_stage, a.candidate_id AS candidate_id, pa.responsible_person
+           a.stage AS current_stage, a.candidate_id AS candidate_id, pa.responsible_person,
+           COALESCE(a.role_id, pa.role_id) AS effective_role_id
     FROM pending_actions pa
     LEFT JOIN applications a ON a.id = pa.application_id
     WHERE pa.resolved=false AND pa.action_type = ANY($1::text[])

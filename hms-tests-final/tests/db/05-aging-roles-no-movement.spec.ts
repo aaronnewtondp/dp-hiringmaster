@@ -171,15 +171,16 @@ test.describe('Aging Roles — no_recent_candidate_activity flag', () => {
 
   test('low_pipeline entries (when present) carry the same field, consistent with aging_roles', async ({ request }) => {
     // low_pipeline is a filtered subset of the same rolesWithAging array
-    // aging_roles comes from — a role with < 3 shortlisted+scored applications
-    // and zero real activity should show up in both, with the same value.
+    // aging_roles comes from — a role with < 3 shortlisted and < 8 active
+    // applications (here: none at all) and zero real activity should show up in
+    // both, with the same value.
     const roleId = await createRole();
 
     const hrToken = await getToken(request, 'hr');
     const res = await authed(request, hrToken).get('/api/dashboard');
     const { low_pipeline } = await res.json();
     const entry = low_pipeline.find((r: { id: string }) => r.id === roleId);
-    expect(entry, `role ${roleId} should appear in low_pipeline (0 shortlisted+scored applications)`).toBeTruthy();
+    expect(entry, `role ${roleId} should appear in low_pipeline (no applications: under both limits)`).toBeTruthy();
     expect(entry.no_recent_candidate_activity).toBe(true);
   });
 });

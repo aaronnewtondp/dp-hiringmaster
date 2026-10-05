@@ -849,27 +849,49 @@ a second, Leadership-owned flag (`'Feedback Overdue — Leadership Escalation'`,
 which stays open until feedback is actually submitted. This is additional
 visibility, not a replacement.
 
-**Low Pipeline Roles redefined:** was "fewer than 5 Active applications,
-any stage/score" — now "fewer than 3 applications that have both been
-shortlisted (stage past Applied and Screened) **and** scored above 60 on
-ResumeIQ" (`shortlisted_scored_count` in `dashboard.ts`), so a pipeline full
-of unqualified applicants no longer reads as healthy just because it's
-numerous. Each listed role also shows the whole funnel that number comes from
-(2026-10-01), all over `status='Active'` applications and nesting by
-construction: `active_count` (Pipeline) ⊇ `scored_above_60_count` (`ai_fit_score
-> 60`; exactly 60 does not count) and `shortlisted_count` (`stage <> 'Applied
-and Screened'`) ⊇ `shortlisted_scored_count`. Pinned by
-`hms-tests-final/tests/db/08-low-pipeline-breakdown.spec.ts`.
+**Low Pipeline Roles redefined — twice.** Was "fewer than 5 Active applications,
+any stage/score"; then (SOP v2.1) "fewer than 3 shortlisted **and** scored above 60";
+now (2026-10-05) an open role is listed when it has **fewer than 3 shortlisted
+candidates AND fewer than 8 Active candidates in the pipeline**
+(`utils/lowPipeline.ts`'s `isLowPipeline`, constants `LOW_PIPELINE_MAX_SHORTLISTED`/
+`LOW_PIPELINE_MAX_ACTIVE`, mirrored in `frontend/src/types`). The score condition was
+dropped on purpose: a big pool of applicants nobody has shortlisted yet is a process
+problem (the SLA breaches already flag it), not thin sourcing, and the pipeline cap is
+what now stops a large unshortlisted pool reading as "low". Each listed role still
+shows the whole funnel (all over `status='Active'`, nesting by construction):
+`active_count` (Pipeline) ⊇ `scored_above_60_count` (`ai_fit_score > 60`; exactly 60
+does not count) and `shortlisted_count` (`stage <> 'Applied and Screened'`) ⊇
+`shortlisted_scored_count`. **Only Pipeline and Shortlisted decide membership**; the
+two scored columns are kept as information (muted in the table) — don't "fix" them
+back into the rule. Pinned by `hms-tests-final/tests/db/08-low-pipeline-breakdown.spec.ts`
+(exact boundaries: 3 shortlisted / 8 active are NOT low).
 
-**Hiring Funnel Snapshot has its own Role filter (2026-10-01).** A multi-select at
-the right of the owner buttons, remembered per tab (`dashboard.funnelRoleIds`). It is
-section-only and **replaces** (does not intersect with) the dashboard's master Role
-filter for this section — the other master filters (department, location, …) still
-apply; it just sends `role_id` to the same `GET /dashboard/funnel-snapshot` route, so
-there is no backend change. Hidden for a Hiring Manager (their data is locked to their
-own roles server-side). A remembered role that no longer exists is ignored rather than
-filtering everything out. `MultiSelectFilter` now clamps its dropdown inside the
-viewport (the new filter is right-aligned and otherwise opened off-screen).
+**SLA breaches by role (2026-10-05)** — a stacked bar chart under the Hiring Funnel
+Snapshot (`SlaBreachesByRole.tsx`, `GET /dashboard/sla-by-role`). It **replaced** the
+Funnel Snapshot's short-lived section-only Role filter (that filter is gone — the
+snapshot inherits the master Role filter like every other section). One bar per *open*
+role (`OPEN_ROLE_STATUSES` in `utils/slaByRole.ts`: Approved / Live – Sourcing / Under
+Review / On Hold), longest first, top 8 with "Show all"; click a bar for the second
+level — the stage-by-stage split with breach types and owners. Built by the pure
+`buildSlaByRole()` from the **same** unresolved-breach rows (`fetchSlaBreachRows`) as the
+snapshot, so the two can't disagree: bars + `closed_roles.breaches` (breaches whose role
+is no longer open — left off the chart, counted in a footnote) always equal the
+snapshot's total. Things that are easy to get wrong:
+- **Group by the application's *current* role** — `COALESCE(a.role_id, pa.role_id)`
+  (`effective_role_id`); `pending_actions.role_id` goes stale when an application is moved
+  to another role.
+- **11 stages can't be told apart as 11 colours**, so the chart groups them into 5
+  funnel steps (`frontend/src/utils/slaStageBuckets.ts`; every `STAGES` value must land in
+  exactly one bucket — a test enforces it) on a one-hue blue ramp validated with the
+  dataviz `validate_palette.js --ordinal`. The exact per-stage split lives in the hover
+  readout and the drill-down. Adding a stage to `STAGES` means choosing its bucket.
+- The chart ignores the owner buttons (it always counts HR + Hiring Manager breaches;
+  the drill-down shows each type's owner). The route does accept `owner`, mirroring
+  `/funnel-snapshot`, but the UI doesn't send it.
+- A Hiring Manager is locked to their own roles server-side (`applyHiringManagerRoleLock`).
+- `MultiSelectFilter` clamps its dropdown inside the viewport (added for the removed funnel Role filter; kept — any right-aligned filter benefits).
+Pinned by `tests/db/09-sla-by-role.spec.ts` (real breaches via backdated
+`stage_entry_time` + `/api/cron/sla-check`) and three chart tests in `tests/e2e/02-dashboard.spec.ts`.
 
 **A rejection can carry several reasons (2026-10-01).** `POST /applications/:id/status`
 takes `rejection_reason_cats: string[]` (the older single `rejection_reason_cat` string

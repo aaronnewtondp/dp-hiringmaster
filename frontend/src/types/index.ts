@@ -349,6 +349,27 @@ export interface HiringFunnelSnapshotStage {
   breach_types: SlaBreachType[];
 }
 
+// GET /dashboard/sla-by-role — mirrors backend/src/utils/slaByRole.ts
+export interface SlaRoleBreachType { type: string; owner: string; count: number }
+export interface SlaRoleStage { stage: string; count: number; breach_types: SlaRoleBreachType[] }
+export interface SlaRoleBar {
+  role_id: string; role_title: string; priority: string; status: string; hiring_manager_name: string | null;
+  total: number;
+  by_stage: SlaRoleStage[];
+}
+export interface SlaByRole {
+  roles: SlaRoleBar[];
+  total_breaches: number;
+  closed_roles: { roles: number; breaches: number };
+  stages: string[];
+}
+
+// Low Pipeline Roles rule — mirrors backend/src/utils/lowPipeline.ts (separate packages, so
+// not a shared import): a role is low-pipeline when it has FEWER THAN 3 shortlisted
+// candidates AND FEWER THAN 8 Active candidates in its pipeline.
+export const LOW_PIPELINE_MAX_SHORTLISTED = 3;
+export const LOW_PIPELINE_MAX_ACTIVE = 8;
+
 export interface DashboardData {
   metrics: {
     open_roles_count:              number;

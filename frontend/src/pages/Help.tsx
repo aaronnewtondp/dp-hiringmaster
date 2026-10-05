@@ -28,8 +28,20 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             <p className="mt-2">Below that, the <strong>Hiring Funnel Snapshot</strong> is an
             interactive chevron strip: click any stage to see which SLA breach types are open
             there and exactly who's overdue, filterable by owner (HR/Recruiter or Hiring Manager).
-            Role isn't a filter local to this section anymore — it inherits the Role filter from
-            the master filters above, like every other section.</p>
+            Role isn't a filter local to this section — it inherits the Role filter from the
+            master filters above, like every other section.</p>
+            <p className="mt-2">Right under it, <strong>SLA breaches by role</strong> shows the
+            same open breaches by role instead of by stage: one stacked bar per open role (the
+            eight with the most breaches, or all of them with <em>Show all</em>), longest first.
+            The bar is split by where in the funnel the overdue candidates are sitting — five
+            steps, from <em>Applied &amp; Screened</em> through <em>Reference → Offer</em>, each a
+            darker blue the further along it is. Hover a segment for the exact count; click a bar
+            for the second level — the stage-by-stage split with each breach type and who owns
+            it. The legend highlights one step, and <em>Table</em> shows the same numbers as
+            rows. It follows the master filters (not the owner buttons — it always counts both
+            HR and Hiring Manager breaches, and the drill-down shows who owns each), and a
+            Hiring Manager sees only their own roles. Breaches on roles that are no longer open aren't drawn;
+            a note under the chart says how many there are.</p>
             <p className="mt-2">Further down: <strong>Aging roles</strong> (every role currently
             Approved, Live – Sourcing, or On Hold, with days-open shown for all of them — only
             ones actually past their Close Target get a red/yellow flag, sorted to the top; On
@@ -41,17 +53,15 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             funnel</strong> chart
             (every stage, broken into Active/Rejected/Withdrawn/Hold for Future so a stage never
             silently disappears just because nobody's currently sitting there), Source Quality,
-            Low Pipeline Roles (each role's pipeline step by step — all Active candidates, how many
-            scored above 60, how many are shortlisted, and how many are both), and Operational
+            Low Pipeline Roles (open roles with <strong>fewer than 3 shortlisted candidates and
+            fewer than 8 active candidates</strong> in the pipeline — those two columns decide who
+            is listed; the scored-above-60 columns beside them are shown for information only),
+            and Operational
             Velocity (turnaround time per stage,
             Interview→Offer ratio, and the biggest drop-off stage shown both by raw count and by
             rejection rate, since those two can point at different stages).</p>
             <p className="mt-2">Filters at the top (Department, Location, Recruitment Mode,
-            Priority, Role) scope every section together. The <strong>Hiring Funnel
-            Snapshot</strong> also has its own <strong>Role</strong> filter, at the right of its
-            owner buttons, that applies to that section only (pick it to look at one or more roles
-            without changing the rest of the page; it replaces the page-level Role filter for that
-            section). <strong>A Hiring Manager's dashboard is
+            Priority, Role) scope every section together. <strong>A Hiring Manager's dashboard is
             locked to their own role(s)</strong> — the Role filter is replaced with a fixed
             indicator and can't be changed, enforced on the server regardless of what the page
             sends.</p>

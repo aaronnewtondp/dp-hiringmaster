@@ -6,6 +6,8 @@ import { runSlaCheck, NON_ACTIONABLE_ALERT_TYPES } from '../jobs/slaChecker.js';
 import { parseRoleFilters, buildRoleFilterSql, roleIdsSubquery, applyHiringManagerRoleLock } from '../utils/roleFilters.js';
 import { computeAging } from '../utils/aging.js';
 import { fetchSlaBreachRows, buildHiringFunnelSnapshot } from '../utils/hiringFunnelSnapshot.js';
+import { buildSlaByRole, RoleMeta } from '../utils/slaByRole.js';
+import { isLowPipeline } from '../utils/lowPipeline.js';
 import { countUnmatchedCandidates } from '../utils/unmatchedCandidates.js';
 
 // ─── Compute-on-read SLA trigger ──────────────────────────────────────────────
@@ -452,13 +454,14 @@ router.get('/', async (req: Request, res: Response) => {
   });
 
   const redAlertRoles   = rolesWithAging.filter(r => r.aging_alert === 'red').length;
-  // Hiring SOP v2.1 §4.2: fewer than 3 candidates who have both been
-  // shortlisted (past Applied and Screened) AND scored above 60 —
-  // replaces the earlier "< 5 active candidates" rule, which counted every
-  // active application regardless of stage or score and so couldn't tell a
-  // healthy-looking pipeline of unqualified applicants from a genuinely
-  // thin one.
-  const lowPipelineRoles = rolesWithAging.filter(r => r.shortlisted_scored_count < 3);
+  // Low pipeline (2026-10-05): fewer than 3 shortlisted candidates AND fewer than 8
+  // Active candidates in the pipeline — see utils/lowPipeline.ts. History: it was
+  // "< 5 active" (any stage/score), then Hiring SOP v2.1 §4.2 made it "< 3 shortlisted
+  // AND scored above 60"; the score condition was dropped on request, a pipeline-size
+  // cap added so a role with a large pool of applicants who simply haven't been
+  // shortlisted yet doesn't read as "thin". shortlisted_scored_count is still returned
+  // (and shown) as information.
+  const lowPipelineRoles = rolesWithAging.filter(isLowPipeline);
 
   // Average active role age (KPI redesign) — mean days_open over the "open
   // roles" set (Live – Sourcing/Approved/Under Review), a deliberately
@@ -711,6 +714,31 @@ router.get('/funnel-snapshot', async (req: Request, res: Response) => {
 
   const slaBreachRows = await fetchSlaBreachRows(filters, ownerParam);
   res.json({ hiring_funnel_snapshot: buildHiringFunnelSnapshot(slaBreachRows) });
+});
+
+// ─── GET /api/dashboard/sla-by-role — SLA breaches per open role, split by stage ─
+// Feeds the "SLA breaches by role" stacked bar chart under the Hiring Funnel
+// Snapshot. Built from the very same unresolved-breach rows as the snapshot (same
+// master filters, same owner toggle, same Hiring Manager role lock), just grouped by
+// role then stage instead of stage then breach type. Open roles only; breaches on
+// closed roles are counted in closed_roles so the totals still reconcile.
+router.get('/sla-by-role', async (req: Request, res: Response) => {
+  await maybeRunSlaCheck();
+
+  const filters = parseRoleFilters(req.query as Record<string, unknown>);
+  await applyHiringManagerRoleLock(filters, req.user!);
+
+  const ownerParam = typeof req.query.owner === 'string' &&
+    (req.query.owner === 'HR / Recruiter' || req.query.owner === 'Hiring Manager')
+    ? req.query.owner : undefined;
+
+  const rows = await fetchSlaBreachRows(filters, ownerParam);
+  const roleIds = [...new Set(rows.map(r => r.effective_role_id).filter((id): id is string => !!id))];
+  const roleRows = roleIds.length
+    ? await query<RoleMeta>(
+        `SELECT id, title, status, priority, hiring_manager_name FROM roles WHERE id = ANY($1::text[])`, [roleIds])
+    : [];
+  res.json(buildSlaByRole(rows, new Map(roleRows.map(r => [r.id, r]))));
 });
 
 // ─── GET /api/dashboard/pending — just the pending actions queue ──────────────

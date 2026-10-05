@@ -28,12 +28,10 @@ test('Dashboard loads without errors', async ({ page }) => {
 
 test('Dashboard shows role count metric', async ({ page }) => {
   await loginViaApi(page);
-  // Wait for data to load
-  await page.waitForTimeout(3000);
-  // At least one numeric metric should be visible
-  const body = await page.locator('body').textContent();
-  // We seeded 7 roles so some number should appear
-  expect(body).toMatch(/\d+/);
+  // At least one numeric metric should be visible. Poll instead of a fixed 3s wait: the
+  // first dashboard load after >3 minutes idle runs the whole SLA sweep before it answers
+  // (compute-on-read), which takes 25-30s against this suite's large local dataset.
+  await expect(page.locator('body')).toHaveText(/\d+/, { timeout: 45000 });
 });
 
 // ─── Hiring Funnel Snapshot — interactive chevron/rail/tile regressions ──────
@@ -88,35 +86,84 @@ test.describe('Hiring Funnel Snapshot', () => {
     for (const bg of otherBgs) expect(bg).toBe(bgAfter.interview1);
   });
 
-  // The old per-section Role RAIL (a tall scrolling list of role buttons) was retired in
-  // favour of the dashboard's master filters, and stays retired. A compact Role multi-select
-  // was added back on request (2026-10-01): section-only, it replaces the master Role filter
-  // for this section. So: the rail must not reappear, and the compact filter must be there.
-  test('the funnel snapshot has a compact section-only Role filter, and the old role rail stays retired', async ({ page }) => {
+  // The local per-section Role filter (and its rail) was retired —
+  // HiringFunnelSnapshot.tsx now relies solely on the Dashboard's own master
+  // filters, matching every other section on the page instead of carrying an
+  // independent one. This used to be a "no CSS truncation on long role
+  // names" check on that rail; now it's a regression guard that the rail
+  // (and its "Filter this section by role" trigger text) doesn't reappear.
+  test('the funnel snapshot no longer renders its own local role-filter rail', async ({ page }) => {
     await loginViaApi(page);
     await expect(page.locator('button[title="Applied and Screened"]')).toBeVisible({ timeout: 15000 });
 
     await expect(page.locator('text=Filter this section by role')).toHaveCount(0);
     await expect(page.locator('div.max-h-80.overflow-y-auto button')).toHaveCount(0);
-
-    // The section's Role filter sits in the funnel card (the page-level one is up in the filter bar).
-    const section = page.locator('div.card', { has: page.getByRole('heading', { name: 'Hiring Funnel Snapshot' }) });
-    await expect(section.getByRole('button', { name: /^Role/ })).toBeVisible();
   });
 
-  test('picking a role in the funnel snapshot re-queries just that section with that role', async ({ page }) => {
-    await loginViaApi(page);
-    await expect(page.locator('button[title="Applied and Screened"]')).toBeVisible({ timeout: 15000 });
+  // "SLA breaches by role" — a stacked bar per open role, under the funnel snapshot.
+  // The data is the live local dataset (breaches come and go as the engine runs), so
+  // what is asserted is structure and agreement with the API, not particular roles.
+  test.describe('SLA breaches by role chart', () => {
+    const escapeRe = (t: string) => t.replace(/[.*+?^$\{}()|[\]\\]/g, '\\$&');
 
-    const section = page.locator('div.card', { has: page.getByRole('heading', { name: 'Hiring Funnel Snapshot' }) });
-    const requested = page.waitForRequest(r => r.url().includes('/api/dashboard/funnel-snapshot') && /role_id/.test(r.url()));
-    await section.getByRole('button', { name: /^Role/ }).click();
-    // Any option will do — take the first one offered.
-    await page.locator('div.fixed label').first().locator('input').check();
-    const req = await requested;
-    expect(req.url()).toMatch(/role_id/);
-    // ...and the page-level Role filter was NOT touched (no count badge on it).
-    await expect(page.getByRole('button', { name: /^Role$/ }).first()).toBeVisible();
+    async function apiPayload(page: Page) {
+      const { token } = await (await page.request.post(`${BASE}/api/auth/login`, {
+        data: { email: USERS.hr.email, password: 'password123' },
+      })).json();
+      return (await page.request.get(`${BASE}/api/dashboard/sla-by-role`, { headers: { Authorization: `Bearer ${token}` } })).json() as Promise<{
+        roles: { role_id: string; role_title: string; total: number }[]; total_breaches: number;
+      }>;
+    }
+
+    test('is rendered under the funnel snapshot, with one bar per role (top 8) matching the API', async ({ page }) => {
+      await loginViaApi(page);
+      const heading = page.getByRole('heading', { name: 'SLA breaches by role' });
+      await expect(heading).toBeVisible({ timeout: 20000 });
+
+      // below the funnel snapshot, not above it
+      const funnelY = (await page.locator('button[title="Applied and Screened"]').boundingBox())!.y;
+      expect((await heading.boundingBox())!.y).toBeGreaterThan(funnelY);
+
+      const api = await apiPayload(page);
+      if (api.roles.length === 0) {
+        await expect(page.getByText('No SLA breaches on open roles')).toBeVisible();
+        return;
+      }
+      const bars = page.getByRole('button', { name: /open SLA breaches/ });
+      await expect(bars).toHaveCount(Math.min(api.roles.length, 8));
+      // the busiest role is first, and its label carries the API's own count
+      await expect(bars.first()).toHaveAttribute('aria-label', new RegExp(`^${escapeRe(api.roles[0].role_title)}: ${api.roles[0].total} open SLA breaches`));
+    });
+
+    test('clicking a bar opens the stage-by-stage breakdown, and clicking again closes it', async ({ page }) => {
+      await loginViaApi(page);
+      await expect(page.getByRole('heading', { name: 'SLA breaches by role' })).toBeVisible({ timeout: 20000 });
+      const bars = page.getByRole('button', { name: /open SLA breaches/ });
+      test.skip((await bars.count()) === 0, 'No open-role SLA breaches right now — nothing to drill into.');
+
+      const first = bars.first();
+      await expect(first).toHaveAttribute('aria-expanded', 'false');
+      await first.click();
+      await expect(first).toHaveAttribute('aria-expanded', 'true');
+      await expect(page.getByRole('region', { name: /breaches by stage$/ })).toBeVisible();
+      await first.click();
+      await expect(first).toHaveAttribute('aria-expanded', 'false');
+      await expect(page.getByRole('region', { name: /breaches by stage$/ })).toHaveCount(0);
+    });
+
+    test('the table view lists every role with a breach, with the same total as the API', async ({ page }) => {
+      await loginViaApi(page);
+      await expect(page.getByRole('heading', { name: 'SLA breaches by role' })).toBeVisible({ timeout: 20000 });
+      const api = await apiPayload(page);
+      test.skip(api.roles.length === 0, 'No open-role SLA breaches right now.');
+
+      await page.getByRole('button', { name: 'Table', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Table', exact: true })).toHaveAttribute('aria-pressed', 'true');
+      // table view is not limited to the top 8
+      for (const r of api.roles.slice(0, 12)) {
+        await expect(page.getByRole('row', { name: new RegExp(escapeRe(r.role_title)) }).first()).toBeVisible();
+      }
+    });
   });
 
   test('clicking a candidate breach tile navigates to that candidate\'s detail page', async ({ page }) => {
