@@ -100,7 +100,6 @@ router.post('/google', async (req: Request, res: Response) => {
 
   const email    = payload.email?.toLowerCase();
   const googleId = payload.sub;
-  const name     = payload.name;
   const picture  = payload.picture;
 
   // 2. Domain check — only @digitalpaani.com accounts
@@ -144,8 +143,11 @@ router.post('/google', async (req: Request, res: Response) => {
     await queryOne('UPDATE users SET last_login = NOW() WHERE id = $1', [user.id]);
   }
 
-  // 5. Issue HMS JWT — same shape as email/password response
-  res.json(issueToken({ ...user, name: name ?? user.name, avatar_url: picture }));
+  // 5. Issue HMS JWT — same shape as email/password response. The name is users.name (what an admin maintains and what
+  //    roles.hiring_manager_name is matched against), NOT the Google profile display name: that is whatever the person
+  //    has set on their Google account, can differ from the HMS name, and would silently decide whether a Hiring Manager
+  //    gets their role's compensation, dashboard and queue.
+  res.json(issueToken({ ...user, avatar_url: picture }));
 });
 
 // ─── GET /api/auth/me ─────────────────────────────────────────────────────────

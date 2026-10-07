@@ -10,8 +10,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
-import { getToken, authed, CRON_SECRET } from '../helpers/api';
+import { getToken, authed, CRON_SECRET, BASE, ROLE_INGEST_SECRET, uid } from '../helpers/api';
 import { isNamedHiringManager, namedHiringManagerSql } from '../../../backend/src/utils/hiringManagers';
+import { isNamedHiringManager as isNamedHiringManagerFrontend } from '../../../frontend/src/utils/hiringManagers';
+
+// Invisible characters that arrive when a name is pasted from Slack, Docs or a web page.
+const NBSP = String.fromCharCode(0xa0);
+const ZWSP = String.fromCharCode(0x200b);
+const IDEO = String.fromCharCode(0x3000);
+const BOM  = String.fromCharCode(0xfeff);
 
 const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
 type Req = Parameters<typeof authed>[0];
@@ -71,6 +78,14 @@ test.describe('Several Hiring Managers on one role', () => {
     await client.query(`UPDATE pending_actions SET created_at = '2000-01-01' WHERE application_id = ANY($1)`, [Object.values(apps)]);
   });
 
+  // A sweep resolves and re-inserts every breach row with created_at = NOW(), which undoes the backdating in beforeAll
+  // (any dashboard load more than 3 minutes after the last one runs one). Re-pin them before every test.
+  test.beforeEach(async () => {
+    if (Object.keys(apps).length) {
+      await client.query(`UPDATE pending_actions SET created_at = '2000-01-01' WHERE application_id = ANY($1) AND resolved = false`, [Object.values(apps)]);
+    }
+  });
+
   test.afterAll(async () => {
     test.setTimeout(180_000);     // pending_actions.application_id is unindexed: each cascading delete scans it
     const appIds = Object.values(apps);
@@ -82,6 +97,8 @@ test.describe('Several Hiring Managers on one role', () => {
     if (candidateIds.length) await client.query(`DELETE FROM candidates WHERE id = ANY($1)`, [candidateIds]);
     if (roleIds.length) {
       await client.query(`DELETE FROM pending_actions WHERE role_id = ANY($1)`, [roleIds]);
+      await client.query(`DELETE FROM activity_log WHERE role_id = ANY($1)`, [roleIds]);
+      await client.query(`DELETE FROM role_edit_log WHERE role_id = ANY($1)`, [roleIds]);
       await client.query(`DELETE FROM roles WHERE id = ANY($1)`, [roleIds]);
     }
     await client.end();
@@ -188,23 +205,139 @@ test.describe('Several Hiring Managers on one role', () => {
     });
   });
 
-  test.describe('the SQL and the TypeScript rule are the same rule', () => {
+  test.describe('the SQL, backend TypeScript and frontend TypeScript rules are the same rule', () => {
     const FIELDS = [
       'Alex', 'alex ', '  ALEX  ', 'Alex Kumar', 'Alexander', 'Alex, Satyadev', 'Satyadev,Alex', 'Satyadev ; Alex', 'Satyadev & Alex',
-      'Satyadev and Alex', 'Satyadev AND Alex', 'Sandeep Anand', 'Brandon', 'Alex,, ,', ',', ' ', '', 'Amit Gosain', 'Amit', 'Amit ',
-      'Someone Else and Nalin', 'Nalin & Alex', 'Alex and', 'and Alex',
+      'Satyadev and Alex', 'Satyadev AND Alex', 'Satyadev And Alex', 'Sandeep Anand', 'Anand Kumar', 'Brandon', 'Alex,, ,', ',', ' ', '', 'Amit Gosain',
+      'Amit', 'Amit ', 'Someone Else and Nalin', 'Nalin & Alex', 'Alex and', 'and Alex', 'Satyadev, and Alex', 'Satyadev, Nalin, and Alex',
+      'Alex;and Satyadev', 'and', 'Dagar, Mandeep', 'Anderson & Sons',
+      // pasted whitespace in every position: edge, inside a name, around a delimiter, in place of the spaces around "and"
+      `Mandeep${NBSP}Dagar,${NBSP}Piyush Negi`, `Mandeep Dagar,${NBSP}${NBSP}Piyush${NBSP}Negi${NBSP}`, `${NBSP}Piyush Negi`,
+      'Mandeep Dagar,\tPiyush Negi\n', '\tPiyush Negi', 'Piyush Negi\r\n', `Mandeep Dagar${NBSP}and${NBSP}Piyush Negi`,
+      `Mandeep Dagar${IDEO}and${IDEO}Piyush Negi`, `${BOM}Piyush Negi`, `Piyush${ZWSP}Negi`, `Mandeep Dagar${ZWSP}, Piyush Negi`,
     ];
-    const USERS = ['Alex', 'alex', ' Satyadev ', 'Amit', 'Nalin', 'Sandeep Anand', 'Anand', ''];
+    const USERS = ['Alex', 'alex', ' Satyadev ', 'Amit', 'Nalin', 'Sandeep Anand', 'Anand', 'Piyush Negi', `Piyush${NBSP}Negi`, 'Mandeep Dagar',
+      'Dagar, Mandeep', 'Anderson & Sons', 'and', ''];
 
-    test('for every field/user pair the database and isNamedHiringManager agree', async () => {
+    test('for every field/user pair they agree (SQL results compared with isNamedHiringManager in both packages)', async () => {
       const mismatches: string[] = [];
+      let trueCount = 0;
       for (const field of FIELDS) for (const user of USERS) {
         const { rows } = await client.query(`SELECT ${namedHiringManagerSql('$2::text', '$1::text')} AS hit`, [user, field]);
-        const sql = rows[0].hit === true;
+        const sql = rows[0].hit === true;               // NULL (blank field) counts as false
         const js = isNamedHiringManager(user, field);
-        if (sql !== js) mismatches.push(`field=${JSON.stringify(field)} user=${JSON.stringify(user)} sql=${sql} js=${js}`);
+        const fe = isNamedHiringManagerFrontend(user, field);
+        if (js) trueCount++;
+        if (sql !== js || fe !== js) mismatches.push(`field=${JSON.stringify(field)} user=${JSON.stringify(user)} sql=${sql} backend=${js} frontend=${fe}`);
       }
       expect(mismatches).toEqual([]);
+      expect(trueCount).toBeGreaterThan(40);            // the table really exercises matches, not just misses
+    });
+
+    test('the exotic-whitespace rows really do match (not vacuously agreeing on false)', async () => {
+      for (const [user, field] of [
+        ['Piyush Negi', `Mandeep${NBSP}Dagar,${NBSP}Piyush Negi`], ['Piyush Negi', 'Mandeep Dagar,\tPiyush Negi\n'],
+        ['Piyush Negi', `Mandeep Dagar${NBSP}and${NBSP}Piyush Negi`], ['Piyush Negi', `${BOM}Piyush Negi`], ['Alex', 'Satyadev, and Alex'],
+        [`Piyush${NBSP}Negi`, 'Mandeep Dagar, Piyush Negi'],
+      ]) {
+        const { rows } = await client.query(`SELECT ${namedHiringManagerSql('$2::text', '$1::text')} AS hit`, [user, field]);
+        expect(rows[0].hit, `${JSON.stringify(user)} in ${JSON.stringify(field)}`).toBe(true);
+        expect(isNamedHiringManager(user, field)).toBe(true);
+      }
+    });
+
+    test('a field of a million blanks is answered quickly by the database too', async () => {
+      const t0 = Date.now();
+      await client.query(`SELECT ${namedHiringManagerSql('$2::text', '$1::text')} AS hit`, ['Piyush Negi', ' '.repeat(1_000_000)]);
+      expect(Date.now() - t0).toBeLessThan(2000);
+    });
+  });
+
+  test.describe('writing the field (POST/PATCH /roles, the requisition ingest)', () => {
+    const hrApi = async (request: Req) => authed(request, await getToken(request, 'hr'));
+    const storedName = async (id: string) => (await client.query(`SELECT hiring_manager_name FROM roles WHERE id = $1`, [id])).rows[0].hiring_manager_name as string;
+
+    test('PATCH stores the canonical "A, B" form however it was typed, and logs the change once', async ({ request }) => {
+      const api = await hrApi(request);
+      const res = await api.patch(`/api/roles/${roles.alexOnly}`, { hiring_manager_name: `  mandeep dagar ;${NBSP}Piyush Negi  and Ria Sontakke ` });
+      expect(res.status()).toBe(200);
+      expect(await storedName(roles.alexOnly)).toBe('mandeep dagar, Piyush Negi, Ria Sontakke');
+      const log = (await client.query(`SELECT count(*)::int AS n FROM role_edit_log WHERE role_id = $1 AND field_name = 'hiring_manager_name'`, [roles.alexOnly])).rows[0].n;
+      expect(log).toBe(1);
+      // put it back for the other tests
+      await api.patch(`/api/roles/${roles.alexOnly}`, { hiring_manager_name: 'Alex and Someone Else' });
+      expect(await storedName(roles.alexOnly)).toBe('Alex, Someone Else');
+    });
+
+    test('re-saving the same people in another spelling is not a change', async ({ request }) => {
+      const api = await hrApi(request);
+      await api.patch(`/api/roles/${roles.both}`, { hiring_manager_name: 'Alex, Satyadev' });
+      const res = await api.patch(`/api/roles/${roles.both}`, { hiring_manager_name: ' Alex ;  Satyadev ' });
+      expect((await res.json()).message).toBe('No changes detected');
+    });
+
+    test('values that would silently remove every Hiring Manager, or that are not text / too long, are refused and nothing changes', async ({ request }) => {
+      const api = await hrApi(request);
+      const before = await storedName(roles.both);
+      for (const bad of [',', ' ; ', '&', 42, null, ['Alex'], 'x'.repeat(301), ' '.repeat(5000)]) {
+        const res = await api.patch(`/api/roles/${roles.both}`, { hiring_manager_name: bad });
+        expect(res.status(), JSON.stringify(bad).slice(0, 30)).toBe(400);
+      }
+      expect(await storedName(roles.both)).toBe(before);
+    });
+
+    test('the response names anyone who matches no active user (a typo would otherwise be invisible)', async ({ request }) => {
+      const api = await hrApi(request);
+      const good = await (await api.patch(`/api/roles/${roles.alexOnly}`, { hiring_manager_name: 'Alex, Satyadev' })).json();
+      expect(good.unmatched_hiring_managers).toEqual([]);
+      const typo = await (await api.patch(`/api/roles/${roles.alexOnly}`, { hiring_manager_name: 'Alex, Satyadve, Nobody Atall' })).json();
+      expect(typo.unmatched_hiring_managers).toEqual(['Satyadve', 'Nobody Atall']);
+      await api.patch(`/api/roles/${roles.alexOnly}`, { hiring_manager_name: 'Alex, Someone Else' });
+    });
+
+    test('open "HM shortlist review" rows follow the field (the sweep never rewrites them); resolved ones and other roles are left alone', async ({ request }) => {
+      const api = await hrApi(request);
+      const mk = async (appKey: string, resolved: boolean, person: string) => (await client.query(
+        `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue, role_id, responsible_person, resolved)
+         VALUES ('Hiring Manager', 'High', 'HM shortlist review', 'review', $1, 'x', 'x', 0, $2, $3, $4) RETURNING id`,
+        [apps[appKey], resolved ? roles[appKey] : roles[appKey], person, resolved])).rows[0].id as number;
+      const open = await mk('both', false, 'Alex, Satyadev');
+      const done = await mk('both', true, 'Alex, Satyadev');
+      const other = await mk('lookalike', false, 'Alexander, Satyadev Kumar');
+      const personOf = async (id: number) => (await client.query(`SELECT responsible_person FROM pending_actions WHERE id = $1`, [id])).rows[0].responsible_person as string;
+      await api.patch(`/api/roles/${roles.both}`, { hiring_manager_name: 'Alex, Satyadev, Piyush Negi' });
+      expect(await personOf(open)).toBe('Alex, Satyadev, Piyush Negi');
+      expect(await personOf(done)).toBe('Alex, Satyadev');
+      expect(await personOf(other)).toBe('Alexander, Satyadev Kumar');
+      await api.patch(`/api/roles/${roles.both}`, { hiring_manager_name: 'Alex, Satyadev' });   // removing a person takes the row away from them too
+      expect(await personOf(open)).toBe('Alex, Satyadev');
+    });
+
+    test('POST (HR or a Hiring Manager requesting a role) canonicalises, and refuses a value of only delimiters', async ({ request }) => {
+      const make = async (who: 'hr' | 'hm_alex', name: string) => {
+        const res = await authed(request, await getToken(request, who)).post('/api/roles', {
+          title: `CoHM POST ${uid()}`, priority: 'P2', hiring_manager_name: name });
+        if (res.status() === 201) roleIds.push((await res.json()).role.id);
+        return res;
+      };
+      const hr = await make('hr', ` Alex ; Satyadev${NBSP}`);
+      expect(hr.status()).toBe(201);
+      expect((await hr.json()).role.hiring_manager_name).toBe('Alex, Satyadev');
+      expect((await make('hm_alex', 'Alex and Piyush Negi')).status()).toBe(201);
+      expect((await make('hm_alex', ' , ')).status()).toBe(400);
+    });
+
+    test('the requisition ingest canonicalises too', async ({ request }) => {
+      const marker = uid();
+      const res = await request.post(`${BASE}/api/roles/ingest`, {
+        headers: { 'x-ingest-secret': ROLE_INGEST_SECRET },
+        data: { timestamp: `${Date.now()}-${marker}`, email: `requester+${marker}@digitalpaani.com`, job_title: `CoHM Ingest ${marker}`,
+                hiring_manager: ` Alex ;${NBSP}Satyadev `, priority_level: 'P2' },
+      });
+      expect(res.status()).toBe(201);
+      const role = (await res.json()).role;
+      roleIds.push(role.id);
+      expect(role.hiring_manager_name).toBe('Alex, Satyadev');
     });
   });
 });

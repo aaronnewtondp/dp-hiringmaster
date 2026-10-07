@@ -135,8 +135,14 @@ export default function RoleDetail() {
   };
 
   const saveRoleFields = async (changes: Record<string, unknown>) => {
-    await rolesApi.update(id!, changes);
+    const res = await rolesApi.update(id!, changes);
     qc.invalidateQueries({ queryKey: ['role', id] });
+    // The server matches the Hiring Manager field against HMS user names; a name nobody has (a typo, a person without an
+    // account yet) is saved but gets no Hiring Manager access — say so instead of failing silently.
+    const unmatched: string[] = res.data?.unmatched_hiring_managers ?? [];
+    if (unmatched.length) {
+      toast(`Saved. No HMS user is named ${unmatched.join(', ')} — they won't get Hiring Manager access until a user with exactly that name exists.`, { icon: '⚠️', duration: 9000 });
+    }
   };
 
   const handleStatusUpdate = async () => {

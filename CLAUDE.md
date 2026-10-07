@@ -172,27 +172,57 @@ Date the same moment.
 **A role can have several Hiring Managers (2026-10-07, first case: R016 Senior Platform
 Engineer — Mandeep Dagar + Piyush Negi).** There is still ONE text column,
 `roles.hiring_manager_name`, but it may now list several people, separated by a comma,
-semicolon, ampersand or the word "and": `Mandeep Dagar, Piyush Negi`. Each listed person is
-a Hiring Manager of the role in every sense below. `backend/src/utils/hiringManagers.ts`
-(mirrored by `frontend/src/utils/hiringManagers.ts` — keep the delimiter rule identical)
-is the single definition: `splitHiringManagerNames`, `isNamedHiringManager(user, field)`
-(whole name, case/edge-space-insensitive — "Amit" is **not** "Amit Gosain" or "Alexander")
-and `namedHiringManagerSql(column, param)` (its Postgres twin; `tests/db/11-…spec.ts`
-runs both over a table of cases and fails if they ever disagree). The rules that use it:
-`canSeeCompForRole` (compensation, 28 call sites), `applyHiringManagerRoleLock` (the
-Hiring Manager dashboard lock), the Hiring Manager's SLA KPI in `GET /dashboard`
-(previously whole-string equality on `responsible_person`, which would have matched nobody
-once a role lists two people — it now matches any listed name), the Leadership `hm_roles`
-query, and the two client-side comparisons (`MyTasks` own roles, `CandidateDetail` comp).
-SLA attribution needed no change: the engine rewrites `pending_actions.responsible_person`
-from the field on every sweep, so both people are named on each row and the Hiring Manager
-`/pending` branch (a substring match on that column) shows it to each of them within one
-sweep. **Known, pre-existing and left alone:** that `/pending` substring match means "Alex"
-also finds a row naming "Alexander"; the comp/lock/KPI rules are whole-name. Only HR-tier
-can edit the field (`PATCH /roles/:id` is `isHRTier`-gated), so nobody can add themselves.
-**Deploy order matters when you change a live role's field:** the code must be live BEFORE
-the data is edited — the previous code compares the whole string, so writing `A, B` first
-would lock both A and B out of the role until the deploy lands.
+semicolon, ampersand or the word "and": `Mandeep Dagar, Piyush Negi`. Write names
+"First Last" — a comma always separates people, so a surname-first "Gosain, Amit" reads as
+two people. Each listed person is a Hiring Manager of the role in every sense below.
+- **One rule, three implementations that must stay identical:** `backend/src/utils/
+  hiringManagers.ts` (`splitHiringManagerNames`, `isNamedHiringManager(user, field)`,
+  `canonicalHiringManagerField`, `normalizeHiringManagerInput`), its Postgres twin
+  `namedHiringManagerSql(column, param)`, and `frontend/src/utils/hiringManagers.ts`.
+  `tests/db/11-co-hiring-managers.spec.ts` runs all three over one table (exotic
+  whitespace, every delimiter, Oxford comma, look-alike names) and fails if they disagree.
+  Matching is whole-name and case/whitespace-insensitive ("Amit" is **not** "Amit
+  Gosain"/"Alexander"); invisible whitespace pasted from Slack/Docs (no-break space, ZWSP,
+  BOM, ideographic space) counts as a space — Postgres' own `\s` follows the DB locale and
+  misses several of these, so the SQL spells the class out. It is a **superset of the old
+  rule**: a user whose name equals the entire field still matches, so no existing single-name
+  role can lose its Hiring Manager. Whitespace is collapsed to one space *before* any other
+  pattern runs and nothing is examined past 1000 characters: a first version's `\s*(,|…)\s*`
+  split took ~10 s on 100k spaces (quadratic) in a field any Hiring Manager can write.
+- **Where it applies** (12 production `canSeeCompForRole` call sites, all via one function):
+  `canSeeCompForRole` (compensation), `applyHiringManagerRoleLock` (the Hiring Manager
+  dashboard lock), the Hiring Manager's SLA KPI in `GET /dashboard` (it used to compare the
+  whole `responsible_person` string with the user's name — that would have matched nobody on a
+  two-name role), the Leadership `hm_roles` query, and the two client-side comparisons
+  (`MyTasks` own roles, `CandidateDetail` comp).
+- **Writes are validated and canonicalised** (`POST /roles`, `PATCH /roles/:id`, the
+  requisition ingest): stored as `A, B` whatever was typed (a no-op re-spelling is not logged
+  as a change); a value of only delimiters, non-text, or over 300 characters is a 400 (it
+  would otherwise silently remove every Hiring Manager). `PATCH` also returns
+  `unmatched_hiring_managers` — listed names that match no active user (matching is against
+  `users.name`, so a typo is otherwise invisible); RoleDetail shows it as a warning toast.
+  Only HR-tier can PATCH the field, so nobody can add themselves. A Hiring Manager creating
+  a role request can name others — harmless: the role is a Draft and HR approves it.
+- **SLA attribution:** the engine re-writes `pending_actions.responsible_person` from the
+  field on every sweep (it resolves and re-inserts each run), so both people are named on
+  those rows and the Hiring Manager queue (a substring match on that column) shows it to each
+  within one sweep. **'HM shortlist review' rows are different**: written once when a
+  candidate is shortlisted (`applications.ts`), never touched by the sweep — so `PATCH
+  /roles/:id` rewrites `responsible_person` on that role's OPEN ones when the field changes
+  (adding a person gives them the waiting work; removing one takes it away).
+- **The identity compared is `users.name`**, because `POST /auth/google` now issues the
+  token with `user.name`, not the Google profile display name (previously `name ?? user.name`:
+  whatever the person had set on their Google account decided whether they got their role's
+  comp, dashboard and queue, and a mismatch failed silently). Checked against production
+  before the change: every Google-sign-in Hiring Manager already had `users.name` exactly
+  equal to their roles' text. **Pre-existing and left alone:** the Hiring Manager persona's
+  `/pending` branch is a substring match, so "Alex" also finds a row naming "Alexander"; and
+  production still has Satyadev Singh (users.name) as the person on roles written "Satyadev",
+  which the whole-name rules do not match.
+- **Deploy order when you change a live role's field:** the new code (backend AND frontend —
+  separate Vercel projects; open tabs keep the old bundle until reload) must be live BEFORE the
+  data is edited — the previous code compares the whole string, so writing `A, B` first would
+  lock both A and B out of the role until the deploy lands.
 
 **A Leadership user can also be the Hiring Manager of a role — without changing
 persona (2026-10-05, first case: Mansi Jain / R019 Head of Marketing).** "Hiring

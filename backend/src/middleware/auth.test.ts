@@ -51,8 +51,13 @@ describe('canSeeCompForRole', () => {
     expect(canSeeCompForRole('hiring_manager', 'Amit', 'Amit Gosain, Amit')).toBe(true);
   });
 
-  it('other personas get nothing extra from being listed: a Hiring Manager listing never turns HR-tier rules off or a non-HM persona on', () => {
-    expect(canSeeCompForRole('hr_recruiter', 'Nobody', 'A, B')).toBe(true);
+  it('only the hiring_manager persona is ever matched by name: any other persona string stays false even when listed', () => {
+    expect(canSeeCompForRole('viewer' as never, 'Alex', 'Alex, Piyush Negi')).toBe(false);
+    expect(canSeeCompForRole('interviewer' as never, 'Piyush Negi', 'Mandeep Dagar, Piyush Negi')).toBe(false);
+  });
+
+  it('invisible whitespace pasted into the field does not hide a listed person', () => {
+    expect(canSeeCompForRole('hiring_manager', 'Piyush Negi', 'Mandeep Dagar,\u00a0Piyush Negi')).toBe(true);
   });
 });
 
