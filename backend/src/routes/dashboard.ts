@@ -9,6 +9,7 @@ import { fetchSlaBreachRows, buildHiringFunnelSnapshot } from '../utils/hiringFu
 import { buildSlaByRole, RoleMeta } from '../utils/slaByRole.js';
 import { isLowPipeline } from '../utils/lowPipeline.js';
 import { countUnmatchedCandidates } from '../utils/unmatchedCandidates.js';
+import { isNamedHiringManager, namedHiringManagerSql } from '../utils/hiringManagers.js';
 
 // ─── Compute-on-read SLA trigger ──────────────────────────────────────────────
 // Vercel Hobby tier only supports daily cron, not the 15-min interval the SLA
@@ -493,12 +494,12 @@ router.get('/', async (req: Request, res: Response) => {
   // Snapshot section below stays unscoped/company-wide regardless of
   // persona, same as the old "Pending Actions by Owner" board's columns
   // always showed everyone's items to every viewer.
-  const userNameLower = req.user!.name.trim().toLowerCase();
+  // responsible_person can name several people (a role with co-Hiring-Managers, or a round with several interviewers —
+  // comma-joined), so "is this row mine" is a whole-name match against any of them, not equality with the whole string.
   const kpiScopedRows = req.user!.persona === 'hiring_manager'
     ? slaBreachRows.filter(pa =>
         pa.owner_type === 'Hiring Manager' &&
-        !!pa.responsible_person &&
-        pa.responsible_person.trim().toLowerCase() === userNameLower
+        isNamedHiringManager(req.user!.name, pa.responsible_person)
       )
     : slaBreachRows;
 
@@ -772,7 +773,7 @@ router.get('/pending', async (req: Request, res: Response) => {
     const me = await queryOne<{ name: string }>(`SELECT name FROM users WHERE id = $1`, [req.user!.userId]);
     const myName = me?.name ?? req.user!.name;
     hm_roles = await query<{ id: string; title: string }>(
-      `SELECT id, title FROM roles WHERE lower(trim(hiring_manager_name)) = lower(trim($1)) ORDER BY title`, [myName]);
+      `SELECT id, title FROM roles WHERE ${namedHiringManagerSql('hiring_manager_name', '$1')} ORDER BY title`, [myName]);
     // Two windows of 100, one per owner group: a role with a big pile of unreviewed applicants (one 'Resume Shortlist
     // Pending' row each) must not push the Leadership alerts out of the response, nor a pile of old Leadership rows
     // push the Hiring Manager rows out.

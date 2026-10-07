@@ -11,6 +11,7 @@ import { parseRoleFilters, buildRoleFilterSql } from '../utils/roleFilters.js';
 import { getCompBenchmark } from '../services/compBenchmark.js';
 import { computeAging } from '../utils/aging.js';
 import { ALL_BREACH_ACTION_TYPES } from '../jobs/slaChecker.js';
+import { isNamedHiringManager, normalizeHiringManagerInput, splitHiringManagerNames } from '../utils/hiringManagers.js';
 
 const router = Router();
 router.use(authenticate);
@@ -132,6 +133,14 @@ router.post('/', async (req: Request, res: Response) => {
     return;
   }
 
+  // The Hiring Manager field may list several people; store it in the canonical "A, B" form.
+  let hiringManagerName = hiring_manager_name;
+  if (hiring_manager_name !== undefined && hiring_manager_name !== null) {
+    const hm = normalizeHiringManagerInput(hiring_manager_name);
+    if (!hm.ok) { res.status(400).json({ error: hm.error }); return; }
+    hiringManagerName = hm.value;
+  }
+
   // A Hiring Manager can request a role but never sets its own compensation
   // band — same restriction as everywhere else ctc_band is HR/Leadership-only.
   const effectiveCtcBand = isHRTier(persona) ? ctc_band : null;
@@ -153,7 +162,7 @@ router.post('/', async (req: Request, res: Response) => {
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
     ) RETURNING *`,
     [
-      title, department, hiring_manager_name, priority, new_or_replacement,
+      title, department, hiringManagerName, priority, new_or_replacement,
       num_openings || 1, location, employment_type, yoe_required,
       effectiveCtcBand, kpi_expectations, job_description, must_have_skills, nice_to_have_skills,
       suggested_interviewers, assignment_required ?? true, recruitment_mode || [],
@@ -325,6 +334,14 @@ router.patch('/:id', async (req: Request, res: Response) => {
     body.start_date     = today;
   }
 
+  // The Hiring Manager field may list several people; validate it and store the canonical "A, B" form. (A no-op
+  // re-save in a different spelling then compares equal below and is not logged as a change.)
+  if (body.hiring_manager_name !== undefined) {
+    const hm = normalizeHiringManagerInput(body.hiring_manager_name);
+    if (!hm.ok) { res.status(400).json({ error: hm.error }); return; }
+    body.hiring_manager_name = hm.value;
+  }
+
   const allowedFields = [
     'title','department','hiring_manager_name','priority','status','new_or_replacement',
     'num_openings','location','employment_type','yoe_required',
@@ -366,6 +383,19 @@ router.patch('/:id', async (req: Request, res: Response) => {
       `UPDATE roles SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *`,
       values
     );
+
+    // 'HM shortlist review' rows are written once, when the candidate is shortlisted, with the field as it was — the SLA
+    // sweep never rewrites them (every other Hiring Manager row it re-creates each run). Keep the open ones in step, so a
+    // Hiring Manager added to (or removed from) a role gets (or stops getting) the work already waiting on it.
+    if (editLogEntries.some(e => e.field === 'hiring_manager_name')) {
+      await client.query(
+        `UPDATE pending_actions pa SET responsible_person = $1
+           FROM applications a
+          WHERE a.id = pa.application_id AND a.role_id = $2
+            AND pa.resolved = false AND pa.owner_type = 'Hiring Manager' AND pa.action_type = 'HM shortlist review'`,
+        [result.rows[0].hiring_manager_name || null, req.params.id]
+      );
+    }
 
     // Write edit log entries
     for (const entry of editLogEntries) {
@@ -443,7 +473,20 @@ router.patch('/:id', async (req: Request, res: Response) => {
   const safeUpdated = canSeeComp
     ? enrichRole(updatedRole)
     : (() => { const { ctc_band: _ctc, ...safe } = enrichRole(updatedRole) as Role & { ctc_band: string }; return safe; })();
-  res.json({ role: safeUpdated, jdGeneration });
+
+  // A name that matches no active user gets no Hiring Manager access (it is matched against users.name) and nothing else
+  // would say so — a typo in a second name is otherwise invisible. Informational: the save has already happened.
+  let unmatched_hiring_managers: string[] | undefined;
+  if (editLogEntries.some(e => e.field === 'hiring_manager_name')) {
+    try {
+      const users = await query<{ name: string }>(`SELECT name FROM users WHERE is_active = true`);
+      unmatched_hiring_managers = splitHiringManagerNames(updatedRole.hiring_manager_name)
+        .filter(n => !users.some(u => isNamedHiringManager(u.name, n)));
+    } catch (err) {
+      console.error('[roles] could not check Hiring Manager names against users:', err);
+    }
+  }
+  res.json({ role: safeUpdated, jdGeneration, unmatched_hiring_managers });
 });
 
 // ─── GET /api/roles/:id/edit-log ──────────────────────────────────────────────

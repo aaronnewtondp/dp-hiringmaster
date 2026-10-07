@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
 import { Role } from '../types/index.js';
+import { canonicalHiringManagerField } from '../utils/hiringManagers.js';
 
 const router = Router();
 
@@ -79,7 +80,7 @@ router.post('/ingest', async (req: Request, res: Response) => {
        VALUES ($1,$2,$3,$4,$5,'Draft',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        RETURNING *`,
       [
-        roleId, job_title, department || null, hiring_manager || null,
+        roleId, job_title, department || null, canonicalHiringManagerField(hiring_manager) || null,
         mapPriority(priority_level),
         num_openings ? parseInt(num_openings, 10) : 1,
         location || null,

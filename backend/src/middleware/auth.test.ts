@@ -37,6 +37,28 @@ describe('canSeeCompForRole', () => {
     expect(canSeeCompForRole('hiring_manager', 'Alex Kumar', null)).toBe(false);
     expect(canSeeCompForRole('hiring_manager', 'Alex Kumar', undefined)).toBe(false);
   });
+
+  it('a role can have several Hiring Managers: every listed person qualifies, nobody else does', () => {
+    const field = 'Mandeep Dagar, Piyush Negi';
+    expect(canSeeCompForRole('hiring_manager', 'Mandeep Dagar', field)).toBe(true);
+    expect(canSeeCompForRole('hiring_manager', 'piyush negi', field)).toBe(true);
+    expect(canSeeCompForRole('hiring_manager', 'Someone Else', field)).toBe(false);
+  });
+
+  it('a whole name must match — a prefix or a longer name is not the same person', () => {
+    expect(canSeeCompForRole('hiring_manager', 'Amit', 'Amit Gosain')).toBe(false);
+    expect(canSeeCompForRole('hiring_manager', 'Amit Gosain', 'Amit')).toBe(false);
+    expect(canSeeCompForRole('hiring_manager', 'Amit', 'Amit Gosain, Amit')).toBe(true);
+  });
+
+  it('only the hiring_manager persona is ever matched by name: any other persona string stays false even when listed', () => {
+    expect(canSeeCompForRole('viewer' as never, 'Alex', 'Alex, Piyush Negi')).toBe(false);
+    expect(canSeeCompForRole('interviewer' as never, 'Piyush Negi', 'Mandeep Dagar, Piyush Negi')).toBe(false);
+  });
+
+  it('invisible whitespace pasted into the field does not hide a listed person', () => {
+    expect(canSeeCompForRole('hiring_manager', 'Piyush Negi', 'Mandeep Dagar,\u00a0Piyush Negi')).toBe(true);
+  });
 });
 
 describe('stripRestrictedFields', () => {

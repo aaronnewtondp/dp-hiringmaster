@@ -156,6 +156,19 @@ describe('My Tasks — everyone else is unchanged', () => {
     expect(screen.queryByTestId('hm-roles-note')).not.toBeInTheDocument();
   });
 
+  it('a Hiring Manager listed with a co-Hiring-Manager ("Mandeep Dagar, Piyush Negi") is scoped to that role too', async () => {
+    currentUser = { name: 'Piyush Negi', persona: 'hiring_manager', email: 'piyush.negi@digitalpaani.com' };
+    rolesList.mockResolvedValue({ data: { roles: [
+      { id: 'R016', hiring_manager_name: 'Mandeep Dagar, Piyush Negi' },
+      { id: 'R020', hiring_manager_name: 'Piyush Negi and Someone' },
+      { id: 'R001', hiring_manager_name: 'Mandeep Dagar' },
+      { id: 'R030', hiring_manager_name: 'Piyush Negi Jr' },
+    ] } });
+    pending.mockResolvedValue({ data: { actions: [], alerts: [], hm_roles: [] } });
+    mount();
+    await waitFor(() => expect(lastScope()).toEqual({ ownRoleIds: ['R016', 'R020'] }));      // not R001, and not the longer "Piyush Negi Jr"
+  });
+
   it('HR/Admin sees everything: no persona scope at all', async () => {
     currentUser = { name: 'Aaron Newton', persona: 'hr_recruiter', email: 'aaron.newton@digitalpaani.com' };
     pending.mockResolvedValue({ data: { actions: [], alerts: [] } });                // older servers do not send hm_roles at all

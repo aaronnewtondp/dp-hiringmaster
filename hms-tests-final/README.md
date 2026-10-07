@@ -124,7 +124,7 @@ tests/
 │   ├── 39-dashboard-funnel-snapshot-endpoint.spec.ts # GET /api/dashboard/funnel-snapshot
 │   ├── 40-candidate-gender.spec.ts                 # auto-tag from name, manual correction, gender filter
 │   └── 41-multiple-rejection-reasons.spec.ts       # rejection_reason_cats[]: stored '; '-joined, legacy single field, validation, HM path
-├── db/  (11 files — direct Postgres via `pg`, LOCAL ONLY, never prod)
+├── db/  (12 files — direct Postgres via `pg`, LOCAL ONLY, never prod)
 │   ├── 00-schema-integrity.spec.ts        # dedicated sequences, GIN indexes
 │   ├── 01-talent-pool-archival.spec.ts    # 90-day archival threshold (backdates last_updated directly)
 │   ├── 02-role-discard-activity-log.spec.ts
@@ -135,7 +135,8 @@ tests/
 │   ├── 07-portfolio-review.spec.ts        # portfolio review (9th ResumeIQ dimension): schema, route gating, killed-job recovery, backfill guards — no browser/model calls
 │   ├── 08-low-pipeline-breakdown.spec.ts  # Low Pipeline Roles: the rule (<3 shortlisted AND <8 active, exact boundaries) + the Pipeline / Scored >60 / Shortlisted / Shortlisted >60 counts (sets fit scores + stages directly)
 │   ├── 09-sla-by-role.spec.ts             # GET /api/dashboard/sla-by-role: shape, reconciles with funnel-snapshot, filters/owner/HM lock, stale-role move, closed roles (real breaches via backdated stage_entry_time + /api/cron/sla-check)
-│   └── 10-leadership-role-hiring-manager.spec.ts # a Leadership user who is also a role's named HM: /pending adds that role's HM queue + hm_roles (role-scoped), applications founder_flag+or_role_id union, persona/dashboard unchanged
+│   ├── 10-leadership-role-hiring-manager.spec.ts # a Leadership user who is also a role's named HM: /pending adds that role's HM queue + hm_roles (role-scoped), applications founder_flag+or_role_id union, persona/dashboard unchanged
+│   └── 11-co-hiring-managers.spec.ts      # several Hiring Managers in one hiring_manager_name ("A, B"): comp visibility, dashboard lock, SLA row attribution + My Tasks queue, SLA KPI, Leadership co-HM, look-alike names rejected, SQL-vs-TypeScript parity of the name rule
 ├── smoke/
 │   └── production.spec.ts   # safe for live Vercel — read-only + auth-rejection checks only
 └── e2e/  (7 files)

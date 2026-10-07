@@ -5,6 +5,7 @@ import { rolesApi } from '../services/api.ts';
 import { LOCATIONS, VACANCY_REASONS, DEPARTMENTS, EMPLOYMENT_TYPES, RECRUITMENT_CHANNELS, PRIORITIES } from '../types/index.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import BackButton from '../components/shared/BackButton.tsx';
+import { HIRING_MANAGER_FIELD_HINT } from '../utils/hiringManagers.ts';
 
 type FormState = {
   title: string; department: string; hiring_manager_name: string; priority: string;
@@ -104,6 +105,7 @@ export default function NewRole() {
             <div>
               <label className="label">Hiring Manager *</label>
               <input className="input" value={form.hiring_manager_name} onChange={e => set('hiring_manager_name', e.target.value)} required placeholder="Full name" />
+              <p className="text-xs text-gray-400 mt-1">{HIRING_MANAGER_FIELD_HINT}</p>
             </div>
             <div>
               <label className="label">Priority *</label>

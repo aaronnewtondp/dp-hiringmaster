@@ -470,7 +470,9 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
               rounds they're listed on, records Assignment outcomes, and can shortlist/hold/reject
               candidates from Applied and Screened. Role approval is HR/Leadership/Super Admin only — a Hiring
               Manager can't approve even their own role. Their Dashboard is
-              locked to their own role(s) — this can't be changed.</li>
+              locked to their own role(s) — this can't be changed. A role can have more than one
+              Hiring Manager: HR lists them all in the role's Hiring Manager field, separated by
+              commas, and each one gets all of the above for that role.</li>
               <li><strong>Leadership</strong> — sees everything HR/Admin sees (no field or route
               either is blocked from that the other isn't) and additionally approves roles.</li>
               <li><strong>Super Admin</strong> — everything Leadership has, plus User Management
