@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { JwtPayload, Persona } from '../types/index.js';
+import { isNamedHiringManager } from '../utils/hiringManagers.js';
 
 // Extend Express Request to carry the decoded JWT payload
 declare global {
@@ -90,9 +91,8 @@ export function canSeeCompForRole(
   hiringManagerName: string | null | undefined
 ): boolean {
   if (isHRTier(persona)) return true;
-  return persona === 'hiring_manager' &&
-    !!hiringManagerName &&
-    hiringManagerName.trim().toLowerCase() === userName.trim().toLowerCase();
+  // hiringManagerName may list several people ("A, B" — see utils/hiringManagers.ts); any one of them qualifies.
+  return persona === 'hiring_manager' && isNamedHiringManager(userName, hiringManagerName);
 }
 
 // ─── Field filter: strip restricted fields based on persona ──────────────────

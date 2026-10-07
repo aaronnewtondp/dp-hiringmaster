@@ -8,6 +8,7 @@ import { Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import InterviewFeedbackModal from '../components/InterviewFeedbackModal.tsx';
 import ScorecardSummary from './ScorecardSummary.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
+import { isNamedHiringManager } from '../utils/hiringManagers.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { formatDistanceToNow } from 'date-fns';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
@@ -136,9 +137,8 @@ export default function MyTasks() {
     });
   const ownRoleIds = useMemo(() => {
     if (!isHiringManager) return [];
-    const mine = (ownRolesData?.data?.roles || []).filter(
-      r => (r.hiring_manager_name || '').trim().toLowerCase() === (user?.name || '').trim().toLowerCase()
-    );
+    // hiring_manager_name may list several people — any one of them is a Hiring Manager of the role.
+    const mine = (ownRolesData?.data?.roles || []).filter(r => isNamedHiringManager(user?.name, r.hiring_manager_name));
     return mine.length ? mine.map(r => r.id) : [NO_ROLES_OWNED_SENTINEL];
   }, [isHiringManager, ownRolesData, user?.name]);
 

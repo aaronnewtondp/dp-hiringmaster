@@ -7,6 +7,7 @@ import { rolesApi } from '../services/api.ts';
 import { Role, Application, STAGES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS, EMPLOYMENT_TYPES, VACANCY_REASONS, RECRUITMENT_CHANNELS, PRIORITIES } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, FitScore, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
+import { HIRING_MANAGER_FIELD_HINT } from '../utils/hiringManagers.ts';
 import BackButton from '../components/shared/BackButton.tsx';
 import CompBenchmarkPanel from '../components/CompBenchmarkPanel.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -218,7 +219,7 @@ export default function RoleDetail() {
           fields={[
             { key: 'title', label: 'Title', type: 'text' },
             { key: 'department', label: 'Department', type: 'select', options: DEPARTMENTS },
-            { key: 'hiring_manager_name', label: 'Hiring Manager', type: 'text' },
+            { key: 'hiring_manager_name', label: 'Hiring Manager', type: 'text', hint: HIRING_MANAGER_FIELD_HINT },
             { key: 'priority', label: 'Priority', type: 'select', options: PRIORITIES },
             { key: 'new_or_replacement', label: 'New / Replacement', type: 'select', options: ['New Position', 'Replacement'] },
             { key: 'vacancy_reason', label: 'Vacancy Caused Due To', type: 'multiselect', options: VACANCY_REASONS },

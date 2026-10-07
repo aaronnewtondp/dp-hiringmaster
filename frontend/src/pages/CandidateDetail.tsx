@@ -23,6 +23,7 @@ import AddReferenceCheckModal from '../components/AddReferenceCheckModal.tsx';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { isNamedHiringManager } from '../utils/hiringManagers.ts';
 import { formatDistanceToNow, format } from 'date-fns';
 
 // Screening & Risk Notes stays collapsed by default (item #10) unless it
@@ -166,9 +167,7 @@ export default function CandidateDetail() {
   // applications to several roles, so this is true if ANY of them is a role
   // this Hiring Manager is assigned to.
   const canSeeComp = canHR || applications.some(app =>
-    user?.persona === 'hiring_manager' &&
-    !!app.hiring_manager_name &&
-    app.hiring_manager_name.trim().toLowerCase() === user.name.trim().toLowerCase()
+    user?.persona === 'hiring_manager' && isNamedHiringManager(user.name, app.hiring_manager_name)
   );
 
   // Applications section starts expanded by default (was collapsed) —

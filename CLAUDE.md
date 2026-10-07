@@ -169,6 +169,31 @@ end to end (no `isHmForThisRole` carve-out); approver name and date are
 captured from the acting HR-tier user and Open Date copies from Approval
 Date the same moment.
 
+**A role can have several Hiring Managers (2026-10-07, first case: R016 Senior Platform
+Engineer — Mandeep Dagar + Piyush Negi).** There is still ONE text column,
+`roles.hiring_manager_name`, but it may now list several people, separated by a comma,
+semicolon, ampersand or the word "and": `Mandeep Dagar, Piyush Negi`. Each listed person is
+a Hiring Manager of the role in every sense below. `backend/src/utils/hiringManagers.ts`
+(mirrored by `frontend/src/utils/hiringManagers.ts` — keep the delimiter rule identical)
+is the single definition: `splitHiringManagerNames`, `isNamedHiringManager(user, field)`
+(whole name, case/edge-space-insensitive — "Amit" is **not** "Amit Gosain" or "Alexander")
+and `namedHiringManagerSql(column, param)` (its Postgres twin; `tests/db/11-…spec.ts`
+runs both over a table of cases and fails if they ever disagree). The rules that use it:
+`canSeeCompForRole` (compensation, 28 call sites), `applyHiringManagerRoleLock` (the
+Hiring Manager dashboard lock), the Hiring Manager's SLA KPI in `GET /dashboard`
+(previously whole-string equality on `responsible_person`, which would have matched nobody
+once a role lists two people — it now matches any listed name), the Leadership `hm_roles`
+query, and the two client-side comparisons (`MyTasks` own roles, `CandidateDetail` comp).
+SLA attribution needed no change: the engine rewrites `pending_actions.responsible_person`
+from the field on every sweep, so both people are named on each row and the Hiring Manager
+`/pending` branch (a substring match on that column) shows it to each of them within one
+sweep. **Known, pre-existing and left alone:** that `/pending` substring match means "Alex"
+also finds a row naming "Alexander"; the comp/lock/KPI rules are whole-name. Only HR-tier
+can edit the field (`PATCH /roles/:id` is `isHRTier`-gated), so nobody can add themselves.
+**Deploy order matters when you change a live role's field:** the code must be live BEFORE
+the data is edited — the previous code compares the whole string, so writing `A, B` first
+would lock both A and B out of the role until the deploy lands.
+
 **A Leadership user can also be the Hiring Manager of a role — without changing
 persona (2026-10-05, first case: Mansi Jain / R019 Head of Marketing).** "Hiring
 Manager of a role" has always meant `roles.hiring_manager_name` matching the user's

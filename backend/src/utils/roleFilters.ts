@@ -8,6 +8,7 @@
 
 import { query } from '../db/index.js';
 import type { JwtPayload } from '../types/index.js';
+import { namedHiringManagerSql } from './hiringManagers.js';
 
 export interface RoleFilterParams {
   departments:      string[];
@@ -50,7 +51,7 @@ export function parseRoleFilters(query: Record<string, unknown>): RoleFilterPara
 export async function applyHiringManagerRoleLock(filters: RoleFilterParams, user: JwtPayload): Promise<void> {
   if (user.persona !== 'hiring_manager') return;
   const ownRoles = await query<{ id: string }>(
-    `SELECT id FROM roles WHERE lower(trim(hiring_manager_name)) = lower(trim($1))`,
+    `SELECT id FROM roles WHERE ${namedHiringManagerSql('hiring_manager_name', '$1')}`,
     [user.name]
   );
   filters.roleIds = ownRoles.length ? ownRoles.map(r => r.id) : ['__no_roles_owned__'];

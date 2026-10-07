@@ -13,6 +13,8 @@ export interface FieldConfig {
   options?: string[];
   /** select type only: maps a raw option value to a nicer display label (e.g. an agency's id -> its name). Falls back to the raw value itself when absent. */
   optionLabels?: Record<string, string>;
+  /** Edit mode only: a short line of help shown under the input. */
+  hint?: string;
   /** Excluded entirely (not rendered, not sent) — used for persona-gated fields like ctc_band. */
   hidden?: boolean;
   /** Shown in both read and edit mode, but never as an input — for fields the server sets automatically (e.g. a role's approver_name/approval_date/start_date, only ever written by the approve action). */
@@ -276,6 +278,7 @@ export default function EditableSection({ title, data: rawData, fields, onSave, 
                   onChange={e => setDraft(d => ({ ...d, [f.key]: e.target.value }))}
                 />
               )}
+              {f.hint && <p className="text-xs text-gray-400 mt-1">{f.hint}</p>}
                 </>
               )}
             </div>
