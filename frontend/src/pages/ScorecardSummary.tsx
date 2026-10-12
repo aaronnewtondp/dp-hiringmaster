@@ -140,6 +140,29 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
     return () => clearTimeout(t);
   }, [searchInput]);
 
+  const { data: filterOptionsData, isLoading: filterOptionsLoading } = useQuery<{ data: { recruitment_modes: string[]; roles: { id: string; title: string; portfolio_analysis_enabled?: boolean }[] } }>({
+    queryKey: ['roles', 'filter-options'],
+    queryFn:  () => rolesApi.filterOptions(),
+  });
+
+  // The "Portfolio >= 7.5" filter exists for the roles that get a portfolio review (today only Senior UX/Product Designer —
+  // nobody else ever has a portfolio score, so for them it could only ever empty the list). It is offered when the Role
+  // filter is clear or includes such a role; a Hiring Manager is further limited to their own roles. A remembered "on" is
+  // only APPLIED while the control is shown — otherwise a filter nobody can see would silently narrow the list.
+  const portfolioRoleIds = (filterOptionsData?.data?.roles || []).filter(r => r.portfolio_analysis_enabled).map(r => r.id);
+  // Which roles the list can actually contain — the same rule the request below applies: a Hiring Manager's own roles
+  // intersected with whatever the Role filter picks (they can never widen past their own), otherwise the Role filter, or null
+  // (= every role: HR-tier and Leadership, whose list can hold any role's Founder-flagged candidates).
+  const rolesInView: string[] | null = personaScope?.ownRoleIds
+    ? (roleIds.length ? roleIds.filter(id => personaScope.ownRoleIds!.includes(id)) : personaScope.ownRoleIds)
+    : (roleIds.length ? roleIds : null);
+  const showPortfolioFilter = portfolioRoleIds.length > 0 && (rolesInView === null || rolesInView.some(id => portfolioRoleIds.includes(id)));
+  const portfolioFilterOn = showPortfolioFilter && portfolioHigh;
+  // A remembered "on" can only be honoured once we know which roles have portfolio review. Until then, don't fetch at all:
+  // fetching the unfiltered list first would flash every candidate (and report a wrong Ready for Review count) before the
+  // filtered list replaces it.
+  const waitingForPortfolioRoles = portfolioHigh && filterOptionsLoading;
+
   // NOT scoped to Applied and Screened — this page compares every scored
   // candidate across the whole pipeline, not just the shortlisting queue
   // (removing every other stage broke that comparison entirely — see
@@ -154,20 +177,6 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   // render '—' for a null value, so nothing breaks by including these rows.
   // `limit: '500'` is generous headroom above any realistic Active+scored
   // population across the whole pipeline.
-  const { data: filterOptionsData } = useQuery<{ data: { recruitment_modes: string[]; roles: { id: string; title: string; portfolio_analysis_enabled?: boolean }[] } }>({
-    queryKey: ['roles', 'filter-options'],
-    queryFn:  () => rolesApi.filterOptions(),
-  });
-
-  // The "Portfolio >= 7.5" filter exists for the roles that get a portfolio review (today only Senior UX/Product Designer —
-  // nobody else ever has a portfolio score, so for them it could only ever empty the list). It is offered when the Role
-  // filter is clear or includes such a role; a Hiring Manager is further limited to their own roles. A remembered "on" is
-  // only APPLIED while the control is shown — otherwise a filter nobody can see would silently narrow the list.
-  const portfolioRoleIds = (filterOptionsData?.data?.roles || []).filter(r => r.portfolio_analysis_enabled).map(r => r.id);
-  const rolesInView: string[] | null = roleIds.length ? roleIds : (personaScope?.ownRoleIds ?? null);     // null = every role
-  const showPortfolioFilter = portfolioRoleIds.length > 0 && (rolesInView === null || rolesInView.some(id => portfolioRoleIds.includes(id)));
-  const portfolioFilterOn = showPortfolioFilter && portfolioHigh;
-
   const params: Record<string, string | string[]> = {
     limit: '500', scored_only: 'true', scored_only_exempt_stage: 'Applied and Screened',
   };
@@ -206,10 +215,12 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   // what shows up with no filter touched.
   params.status = statuses.length ? statuses : ['Active'];
 
-  const { data, isLoading } = useQuery<{ data: { applications: Application[] } }>({
+  const { data, isLoading: appsLoading } = useQuery<{ data: { applications: Application[] } }>({
     queryKey: ['applications', 'scorecard', search, roleIds, departments, locations, modes, priorities, genders, statuses, personaScope, portfolioFilterOn],
     queryFn:  () => applicationsApi.list(params),
+    enabled:  !waitingForPortfolioRoles,
   });
+  const isLoading = appsLoading || waitingForPortfolioRoles;
   const allApps = data?.data?.applications || [];
   // Client-side, same reasoning as Candidates.tsx's identical toggle —
   // role_ctc_band is freeform text, best parsed in JS.
@@ -250,6 +261,10 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   // Tasks' Ready for Review section box) — matches what the old compact
   // list's own "N pending" badge showed before this page was merged into it.
   useEffect(() => { onCountChange?.(reviewable.length); }, [reviewable.length, onCountChange]);
+  // selectedIds can still hold candidates a filter has since hidden (it is never pruned). Every bulk action and the "N selected"
+  // count use only the selected candidates that are on screen — acting on rows you cannot see (a bulk reject, a shortlist that
+  // skips the budget-exception prompt) must never happen as a side effect of narrowing the list.
+  const selectedVisibleIds = reviewable.filter(a => selectedIds.has(a.id)).map(a => a.id);
   const allReviewableSelected  = reviewable.length > 0 && reviewable.every(a => selectedIds.has(a.id));
   const someReviewableSelected = reviewable.some(a => selectedIds.has(a.id));
   // Every application is meant to be auto-scored the instant it's created
@@ -330,8 +345,8 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
     setBudgetExceptionIds(null);
   };
 
-  const bulkShortlist     = () => requestShortlist(Array.from(selectedIds));
-  const bulkHoldForFuture = () => runBulk(id => applicationsApi.updateStatus(id, { new_status: 'Hold for Future' }), Array.from(selectedIds), 'put on hold');
+  const bulkShortlist     = () => requestShortlist(selectedVisibleIds);
+  const bulkHoldForFuture = () => runBulk(id => applicationsApi.updateStatus(id, { new_status: 'Hold for Future' }), selectedVisibleIds, 'put on hold');
   const retryScoring = (ids: string[]) => runBulk(id => applicationsApi.retryScoring(id), ids, 'retried');
 
   const handleBulkReject = async (reasons: string[], reasonDetail: string, email: RejectionEmailState) => {
@@ -429,6 +444,16 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
         </button>
       </div>
 
+      {portfolioFilterOn && (
+        <div className="flex items-center justify-between gap-3 px-4 py-2 bg-dp-50 border border-dp-100 rounded-lg text-xs text-dp-800" data-testid="portfolio-filter-note">
+          <span>
+            Showing candidates whose portfolio review scored {PORTFOLIO_SCORE_FILTER_MIN} or higher (scores are whole numbers, so 8 or more).
+            Candidates without a portfolio score — including every other role's — are hidden.
+          </span>
+          <button type="button" onClick={() => setPortfolioHigh(false)} className="shrink-0 font-medium underline">Turn off</button>
+        </div>
+      )}
+
       {canHR && unscored.length > 0 && (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg">
           <span className="text-xs font-medium text-amber-800">
@@ -445,9 +470,9 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
         </div>
       )}
 
-      {selectedIds.size > 0 && (
+      {selectedVisibleIds.length > 0 && (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-dp-50 border border-dp-100 rounded-lg">
-          <span className="text-xs font-medium text-dp-700">{selectedIds.size} selected</span>
+          <span className="text-xs font-medium text-dp-700">{selectedVisibleIds.length} selected</span>
           <button
             onClick={bulkShortlist}
             disabled={bulkSaving}
@@ -465,7 +490,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
             Hold for Future
           </button>
           <button
-            onClick={() => setRejectTargetIds(Array.from(selectedIds))}
+            onClick={() => setRejectTargetIds(selectedVisibleIds)}
             disabled={bulkSaving}
             className="flex items-center gap-1.5 btn-secondary text-xs py-1 px-2.5 text-red-600 hover:bg-red-50"
           >

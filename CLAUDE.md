@@ -908,8 +908,8 @@ Local `@vercel/queue` `send()` fails outside Vercel by design → the row stays 
 with a visible "Could not be queued" message; run a review locally by calling
 `runPortfolioAnalysis(applicationId)` from a `tsx` script with `DATABASE_URL` set.
 
-**Portfolio score filter in Ready for Review (2026-10-12).** A "Portfolio ≥ 7.5" toggle next to
-"In-budget only" in `ScorecardSummary.tsx` (My Tasks → Ready for Review) narrows the list to
+**Portfolio score filter in Ready for Review (2026-10-12).** A "Portfolio ≥ 7.5" toggle first in the filter
+bar (beside the search box — that row already overflows at ~1280px, so the far right would hide it) in `ScorecardSummary.tsx` (My Tasks → Ready for Review) narrows the list to
 candidates whose `score_portfolio` is at least 7.5. **`score_portfolio` is an INTEGER 0–10** (the
 model's holistic score and the checklist score are blended and rounded in `blendPortfolioScore`), so
 7.5 means 8+ in practice — the button's tooltip says so; a 7 never qualifies. The cut is applied in
