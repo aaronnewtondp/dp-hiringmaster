@@ -47,7 +47,7 @@ async function logActivity(
 
 // ─── GET /api/applications — list with filters ────────────────────────────────
 router.get('/', async (req: Request, res: Response) => {
-  const { stage, status, screening_status, sla_breach, founder_flag, or_role_id,
+  const { stage, status, screening_status, sla_breach, founder_flag, or_role_id, min_portfolio_score,
           exclude_stale_archived, scored_only, scored_only_exempt_stage, q, gender, limit = '50', offset = '0' } = req.query;
 
   let sql = `
@@ -85,6 +85,18 @@ router.get('/', async (req: Request, res: Response) => {
   // what lets a Leadership user who is also a role's Hiring Manager see Founder-flagged candidates AND that
   // role's candidates in one Ready-for-Review list. Meaningless without founder_flag=true, so ignored then.
   const orRoleIds = founder_flag === 'true' ? toArray(or_role_id) : [];
+  // Portfolio review score (the 9th ResumeIQ dimension — a whole number 0-10, set only on roles with portfolio review
+  // enabled) at or above a minimum. Applied in SQL, not in the browser: Ready for Review caps its fetch (limit=500), and
+  // filtering after that cap could hide exactly the candidates asked for. Applications with no portfolio score (every
+  // other role, or a review that has not completed) never match. A value that is not a plain number is a 400 rather than
+  // being ignored: silently dropping the filter would list every candidate while the UI says the filter is on.
+  if (min_portfolio_score !== undefined) {
+    const min = typeof min_portfolio_score === 'string' && min_portfolio_score.trim() !== '' ? Number(min_portfolio_score) : NaN;
+    if (!Number.isFinite(min)) { res.status(400).json({ error: 'min_portfolio_score must be a number' }); return; }
+    // ::numeric — the column is INTEGER, so without it Postgres types the parameter as integer and rejects a bound like 7.5.
+    sql += ` AND a.score_portfolio >= $${i++}::numeric`;
+    params.push(min);
+  }
   if (founder_flag === 'true') {
     if (orRoleIds.length) { sql += ` AND (a.founder_review_flag = true OR a.role_id = ANY($${i++}::text[]))`; params.push(orRoleIds); }
     else                  { sql += ` AND a.founder_review_flag = true`; }

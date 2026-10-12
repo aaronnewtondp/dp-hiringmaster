@@ -27,6 +27,9 @@ const BULK_CONCURRENCY = 3;
 // `role_id IN (...)` matching nothing, not "no filter" (everyone's data).
 const NO_OWNED_ROLES_SENTINEL = '__no_roles_owned__';
 
+// "Portfolio >= 7.5" filter threshold. The portfolio score is stored as a whole number 0-10, so in practice this is 8+.
+const PORTFOLIO_SCORE_FILTER_MIN = 7.5;
+
 const COLUMN_INFO: Record<string, string> = {
   'CTC → ECTC': "Candidate's current fixed CTC, then the Expected CTC they quoted for this role — both read from the candidate's own profile, not this application's legacy fields.",
 };
@@ -109,6 +112,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   const [genders,     setGenders]     = usePersistedState<string[]>('scorecard.genders', []);
   const [statuses,    setStatuses]    = usePersistedState<string[]>('scorecard.statuses', []);
   const [filterInBudget, setFilterInBudget] = usePersistedState('scorecard.inBudget', false);
+  const [portfolioHigh, setPortfolioHigh] = usePersistedState('scorecard.portfolioHigh', false);
 
   useEffect(() => {
     const roleId = searchParams.get('role_id');
@@ -150,10 +154,27 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   // render '—' for a null value, so nothing breaks by including these rows.
   // `limit: '500'` is generous headroom above any realistic Active+scored
   // population across the whole pipeline.
+  const { data: filterOptionsData } = useQuery<{ data: { recruitment_modes: string[]; roles: { id: string; title: string; portfolio_analysis_enabled?: boolean }[] } }>({
+    queryKey: ['roles', 'filter-options'],
+    queryFn:  () => rolesApi.filterOptions(),
+  });
+
+  // The "Portfolio >= 7.5" filter exists for the roles that get a portfolio review (today only Senior UX/Product Designer —
+  // nobody else ever has a portfolio score, so for them it could only ever empty the list). It is offered when the Role
+  // filter is clear or includes such a role; a Hiring Manager is further limited to their own roles. A remembered "on" is
+  // only APPLIED while the control is shown — otherwise a filter nobody can see would silently narrow the list.
+  const portfolioRoleIds = (filterOptionsData?.data?.roles || []).filter(r => r.portfolio_analysis_enabled).map(r => r.id);
+  const rolesInView: string[] | null = roleIds.length ? roleIds : (personaScope?.ownRoleIds ?? null);     // null = every role
+  const showPortfolioFilter = portfolioRoleIds.length > 0 && (rolesInView === null || rolesInView.some(id => portfolioRoleIds.includes(id)));
+  const portfolioFilterOn = showPortfolioFilter && portfolioHigh;
+
   const params: Record<string, string | string[]> = {
     limit: '500', scored_only: 'true', scored_only_exempt_stage: 'Applied and Screened',
   };
   if (search)              params.q = search;
+  // Applied server-side (not by filtering the fetched rows): the fetch is capped, and a client-side cut after the cap could hide
+  // exactly the candidates asked for.
+  if (portfolioFilterOn)   params.min_portfolio_score = String(PORTFOLIO_SCORE_FILTER_MIN);
   // A Hiring Manager's own-roles scope intersects with whatever they've
   // picked in the Role filter (empty selection = "all roles" from their own
   // pool) — never a union, so they can't widen past their own roles by
@@ -186,7 +207,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   params.status = statuses.length ? statuses : ['Active'];
 
   const { data, isLoading } = useQuery<{ data: { applications: Application[] } }>({
-    queryKey: ['applications', 'scorecard', search, roleIds, departments, locations, modes, priorities, genders, statuses, personaScope],
+    queryKey: ['applications', 'scorecard', search, roleIds, departments, locations, modes, priorities, genders, statuses, personaScope, portfolioFilterOn],
     queryFn:  () => applicationsApi.list(params),
   });
   const allApps = data?.data?.applications || [];
@@ -208,14 +229,10 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
     ? [...apps].sort((a, b) => (sortDir === 'desc' ? 1 : -1) * (sortValue(b, sortKey) - sortValue(a, sortKey)))
     : apps;
 
-  const { data: filterOptionsData } = useQuery<{ data: { recruitment_modes: string[]; roles: { id: string; title: string }[] } }>({
-    queryKey: ['roles', 'filter-options'],
-    queryFn:  () => rolesApi.filterOptions(),
-  });
   const modeOptions = filterOptionsData?.data?.recruitment_modes || [];
   const roleOptions = (filterOptionsData?.data?.roles || []).map(r => ({ value: r.id, label: r.title }));
 
-  const hasActiveFilters = !!search || roleIds.length || departments.length || locations.length || modes.length || priorities.length || statuses.length || filterInBudget;
+  const hasActiveFilters = !!search || roleIds.length || departments.length || locations.length || modes.length || priorities.length || statuses.length || filterInBudget || portfolioFilterOn;
 
   const toggleExpanded = (id: string) => setExpanded(prev => {
     const s = new Set(prev);
@@ -381,6 +398,20 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
             className="input text-xs pl-8 py-1.5 w-52"
           />
         </div>
+        {/* First in the bar on purpose: this row already overflows at ~1280px, and a toggle at the far right would sit behind the scroll. */}
+        {showPortfolioFilter && (
+          <button
+            type="button"
+            aria-pressed={portfolioHigh}
+            onClick={() => setPortfolioHigh(v => !v)}
+            title={`Only candidates whose portfolio review scored ${PORTFOLIO_SCORE_FILTER_MIN} or higher. Portfolio scores are whole numbers (0-10), so this means 8 or more. Candidates without a portfolio score are hidden.`}
+            className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              portfolioHigh ? 'bg-dp-600 text-white border-dp-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            Portfolio ≥ {PORTFOLIO_SCORE_FILTER_MIN}
+          </button>
+        )}
         <div className="shrink-0"><MultiSelectFilter label="Department"       options={DEPARTMENTS}          selected={departments} onChange={setDepartments} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Location"         options={LOCATIONS}            selected={locations}   onChange={setLocations} /></div>
         <div className="shrink-0"><MultiSelectFilter label="Recruitment Mode" options={modeOptions}          selected={modes}        onChange={setModes} /></div>

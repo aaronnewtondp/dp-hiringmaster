@@ -205,6 +205,13 @@ const GROUPS: Array<{ title: string; sections: Section[] }> = [
             Summary</strong> button under the score columns expands a candidate's strengths, red
             flags, and executive summary. Both pages offer the same Shortlist / Hold for Future /
             Reject actions on Applied and Screened candidates, individually or in bulk.</p>
+            <p className="mt-1.5">For roles that get a <strong>portfolio review</strong> (today the
+            Senior UX/Product Designer role), Ready for review has a <strong>Portfolio ≥ 7.5</strong>
+            button next to <em>In-budget only</em>: it narrows the list to candidates whose portfolio
+            review scored 7.5 or higher. Portfolio scores are whole numbers (0–10), so that means 8 or
+            more, and candidates with no portfolio score — including every other role's — are hidden
+            while it is on. The button only appears when the Role filter is clear or includes such a
+            role.</p>
           </>
         ),
       },
