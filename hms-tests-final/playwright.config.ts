@@ -26,7 +26,8 @@ export default defineConfig({
     {
       name: 'smoke',
       testMatch: 'tests/smoke/**/*.spec.ts',
-      use: { baseURL: API_URL },
+      // Run against production: a failing test must not leave candidate data behind in traces, videos or screenshots.
+      use: { baseURL: API_URL, trace: 'off', video: 'off', screenshot: 'off' },
     },
     {
       name: 'db',

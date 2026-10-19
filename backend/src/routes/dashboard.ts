@@ -10,6 +10,10 @@ import { buildSlaByRole, RoleMeta } from '../utils/slaByRole.js';
 import { isLowPipeline } from '../utils/lowPipeline.js';
 import { countUnmatchedCandidates } from '../utils/unmatchedCandidates.js';
 import { isNamedHiringManager, namedHiringManagerSql } from '../utils/hiringManagers.js';
+import { isSourcingEnabled, OPEN_ROLE_STATUSES } from '../utils/sourcingConfig.js';
+import { maybeRunSourcingCheck } from '../jobs/sourcingChecker.js';
+import { loadSettings } from '../services/sourcingSettings.js';
+import { ageDays, describeException } from '../utils/sourcingDescribe.js';
 
 // ─── Compute-on-read SLA trigger ──────────────────────────────────────────────
 // Vercel Hobby tier only supports daily cron, not the 15-min interval the SLA
@@ -740,6 +744,87 @@ router.get('/sla-by-role', async (req: Request, res: Response) => {
         `SELECT id, title, status, priority, hiring_manager_name FROM roles WHERE id = ANY($1::text[])`, [roleIds])
     : [];
   res.json(buildSlaByRole(rows, new Map(roleRows.map(r => [r.id, r]))));
+});
+
+// ─── GET /api/dashboard/sourcing — Sourcing execution & accountability ──────────
+// A separate lazy endpoint (like /sla-by-role): the main GET /dashboard payload is untouched. Same master filters and the
+// same Hiring Manager role lock. Exceptions are the section: what was committed, what actually happened, the next action.
+// Provisional (shadow) signals are shown to HR-tier/Leadership only and flagged; a Hiring Manager gets live exceptions on
+// their own roles with nothing prospect-level (a plan holds none in P1 anyway).
+router.get('/sourcing', async (req: Request, res: Response) => {
+  if (!isSourcingEnabled()) { res.json({ enabled: false }); return; }
+  try {
+    await maybeRunSourcingCheck();
+    const filters = parseRoleFilters(req.query as Record<string, unknown>);
+    await applyHiringManagerRoleLock(filters, req.user!);
+    const isHm = req.user!.persona === 'hiring_manager';
+    const sub = roleIdsSubquery(filters, 1);
+    const scope = sub ? ` AND r.id IN ${sub.sql}` : '';
+    const params = sub ? sub.params : [];
+    const OPEN = OPEN_ROLE_STATUSES as unknown as string[];
+    const openParam = `$${params.length + 1}`;
+    const settings = await loadSettings();
+
+    const [exRows, planCounts, rolesCount, onTime, overdue] = await Promise.all([
+      query<{ id: string; plan_id: string; role_id: string; title: string; priority: string; channel: string; type: string; status: string; severity: number;
+              is_shadow: boolean; detected_at: Date; evidence: Record<string, unknown>; snooze_until: string | null; blocker_due: string | null }>(
+        `SELECT e.id::text AS id, p.id::text AS plan_id, r.id AS role_id, r.title, r.priority, e.channel, e.type, e.status, e.severity, e.is_shadow, e.detected_at,
+                e.evidence, to_char(e.snooze_until,'YYYY-MM-DD') AS snooze_until, to_char(e.blocker_due,'YYYY-MM-DD') AS blocker_due
+           FROM sourcing_exceptions e JOIN sourcing_plans p ON p.id = e.plan_id JOIN roles r ON r.id = p.role_id
+          WHERE e.status IN ('open','blocked','snoozed') AND r.status = ANY(${openParam}::text[])${scope}
+          ORDER BY e.is_shadow, e.severity DESC, e.detected_at`, [...params, OPEN]),
+      query<{ status: string; n: string }>(
+        `SELECT p.status, count(*) AS n FROM sourcing_plans p JOIN roles r ON r.id = p.role_id
+          WHERE r.status = ANY(${openParam}::text[])${scope} GROUP BY p.status`, [...params, OPEN]),
+      queryOne<{ n: string }>(`SELECT count(*) AS n FROM roles r WHERE r.status = ANY(${openParam}::text[])${scope}`, [...params, OPEN]),
+      queryOne<{ done: string; on_time: string }>(
+        `SELECT count(*) AS done, count(*) FILTER (WHERE l.done_at <= l.was_due_at) AS on_time
+           FROM sourcing_commitment_log l JOIN sourcing_commitments c ON c.id = l.commitment_id
+           JOIN sourcing_plan_channels ch ON ch.id = c.plan_channel_id JOIN sourcing_plans p ON p.id = ch.plan_id JOIN roles r ON r.id = p.role_id
+          WHERE l.done_at >= NOW() - INTERVAL '14 days' AND COALESCE(l.note,'') <> 'Already running at plan activation'
+            AND r.status = ANY(${openParam}::text[])${scope}`, [...params, OPEN]),
+      queryOne<{ n: string }>(
+        `SELECT count(*) AS n FROM sourcing_commitments c JOIN sourcing_plan_channels ch ON ch.id = c.plan_channel_id
+           JOIN sourcing_plans p ON p.id = ch.plan_id JOIN roles r ON r.id = p.role_id
+          WHERE c.status = 'open' AND c.due_at < NOW() AND p.status = 'active' AND ch.state <> 'excluded'
+            AND r.status = ANY(${openParam}::text[])${scope}`, [...params, OPEN]),
+    ]);
+
+    const now = new Date();
+    const visible = exRows.filter(e => !(isHm && e.is_shadow));
+    const live = visible.filter(e => !e.is_shadow);
+    const byPriority: Record<string, number> = {};
+    for (const e of live.filter(x => x.status === 'open' || x.status === 'blocked')) byPriority[e.priority] = (byPriority[e.priority] ?? 0) + 1;
+    const plan = (st: string) => Number(planCounts.find(c => c.status === st)?.n ?? 0);
+    const done = Number(onTime?.done ?? 0);
+
+    res.json({
+      enabled: true,
+      read_only: isHm,
+      provisional_until: settings.shadow_until,
+      summary: {
+        open_roles: Number(rolesCount?.n ?? 0),
+        plans_active: plan('active'), plans_draft: plan('draft'), plans_paused: plan('paused'),
+        commitments_done_14d: done,
+        on_time_pct_14d: done ? Math.round((Number(onTime?.on_time ?? 0) / done) * 100) : null,
+        overdue_commitments: Number(overdue?.n ?? 0),
+        exceptions_open: live.filter(e => e.status === 'open').length,
+        exceptions_blocked: live.filter(e => e.status === 'blocked').length,
+        exceptions_snoozed: live.filter(e => e.status === 'snoozed').length,
+        provisional_signals: visible.filter(e => e.is_shadow && e.status !== 'snoozed').length,
+        by_priority: byPriority,
+      },
+      exceptions: visible.filter(e => e.status !== 'snoozed').map(e => ({
+        id: e.id, plan_id: e.plan_id, role_id: e.role_id, role_title: e.title, priority: e.priority, channel: e.channel, type: e.type,
+        status: e.status, provisional: e.is_shadow, severity: e.severity, age_days: ageDays(e.detected_at, now),
+        blocker_due: isHm ? null : e.blocker_due,
+        ...describeException(e),
+      })),
+    });
+  } catch (err) {
+    console.error('[Dashboard] /sourcing failed:', err);
+    res.status(500).json({ error: 'Failed to load sourcing execution' });
+  }
 });
 
 // ─── GET /api/dashboard/pending — just the pending actions queue ──────────────

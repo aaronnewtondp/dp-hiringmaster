@@ -93,6 +93,10 @@ Docker (immediate fix) *and* appended to `schema.sql` (permanent fix), in that
 order, every time. Skipping the third step means the next `docker-compose down
 -v` silently reintroduces a bug that was already "fixed."
 
+**Security state of production Supabase (found 2026-10-19).** *Closed:* the seed password hash was removed from the 8 production
+users that still had one (`UPDATE … SET password_hash = NULL`), so every production account is Google-only. The only password-login accounts in production are the two read-only smoke-test accounts (created 2026-10-19, see Testing).
+*Known and accepted — not being addressed (Aaron's decision, 2026-10-19):* the 17 pre-existing public tables have row level security OFF and the `anon`/`authenticated` roles hold table privileges, so the project's public Supabase key can read and modify candidate data through the Data API (established from the privilege catalog; not exercised through the API). The backend connects as role `postgres` (owner, BYPASSRLS). The 8 `sourcing_*` tables were created with RLS on.
+
 ### Local dev workflow
 - **Backend + DB run in Docker.** `docker-compose up -d` (only `dp_hms_backend`
   and `dp_hms_db` — the frontend container was removed).
@@ -110,7 +114,18 @@ order, every time. Skipping the third step means the next `docker-compose down
   Vercel deployment). See that directory's own `README.md` for the full
   per-file breakdown and conventions (fresh test data via `uid()`, direct-
   Postgres `tests/db/*` specs for state no API can set, e.g. backdating a
-  timestamp).
+  timestamp). **`npm run test:prod` signs in as two dedicated read-only smoke accounts (2026-10-19).** The seed password hash was removed from
+  the 8 production users that still had one, so every real production account is Google-only and the seeded users cannot sign in there.
+  The suite uses `smoke.leadership@hms-smoke.invalid` (leadership) and `smoke.hm@hms-smoke.invalid` (hiring_manager, named on no role): the
+  reserved `.invalid` domain means no mailbox can exist and Google sign-in can never reach them; `authenticate()` in
+  `middleware/auth.ts` answers 403 `Smoke-test accounts are read-only` to any non-GET/HEAD/OPTIONS request from that domain (unit-tested; only
+  protects once a backend containing it is deployed). Passwords live only in `hms-tests-final/.env.smoke.local` (git-ignored, mode 600) or the
+  environment; `node hms-tests-final/scripts/smoke-accounts.mjs` prints the SQL that creates / refreshes the two rows (hashes only) and
+  `--rotate` replaces the passwords. **STATUS: both rows were created in production on 2026-10-19 (Aaron approved the write in chat; ids
+  `d4a1aefb-…` leadership and `3b4d92b1-…` hiring manager; production now has exactly two accounts with a password hash, these two) and the whole
+  smoke suite (34 tests, API + browser) passes against local Docker AND against the live production deployment (verified 2026-10-19). The read-only guard protects only once a backend containing it is deployed.** Do not remove `POST /api/auth/login`: the smoke accounts and local Docker's seeded users sign in through it. The
+  suite never writes, never prints candidate data, and has traces/videos/screenshots off. Details: `hms-tests-final/README.md`.
+  `seed.sql` still carries the seed password for LOCAL Docker only, so `test:local` is unaffected.
 - **`backend/src/**/*.test.ts` and `frontend/src/**/*.test.{ts,tsx}`**
   (Vitest) — unit/module-level tests for pure logic and small components,
   run with `npm test` from `backend/` or `frontend/` respectively. This is
@@ -1033,6 +1048,156 @@ other, e.g. "unrelated to your candidacy" next to a skills gap). Reasons are onl
 Rejected/Withdrawn — a selection left over from an earlier open of the modal used to ride
 along on a Hold for Future.
 
+### Sourcing Execution & Accountability module (2026-10-14, P0–P2 built; P3/P4 specified, not built)
+Spec: `docs/SourcingModule_PRD_v2.md` — rewritten 2026-10-19 to the system's CURRENT state, with a rendered copy `docs/SourcingModule_PRD_v2.pdf` (made from the markdown with headless Chromium; regenerate it when the markdown changes). A Google Doc of the original 14 Oct design also exists but is OUT OF DATE (the Drive connector cannot overwrite a Doc's body, only its title/location), so treat the repo file as the source of truth; go-live steps: `docs/SourcingModule_Runbook.md`. A per-role
+**plan → channels → commitments → evidence → exceptions** layer so sourcing is *executed*, not just listed. **Off unless
+`SOURCING_ENABLED=true` on the backend** — reads answer `{ enabled:false }`, writes 503 (the cron route 200 `{ ok:true, enabled:false }`),
+hooks no-op with zero queries, the UI hides itself; `docker-compose.yml` passes the flag through (default `false`). **Rollback = set it
+to `false` AND redeploy** (a Vercel env-var change only takes effect on a new deployment; or use Instant Rollback) — the tables stay,
+inert. Flag-off *hides* the module, it does not pause it: the role hook doesn't run, so a role put On Hold/Closed in that window leaves
+its active plan as it was (it is reconciled on that role's next real save — see Hooks).
+- **Production state (2026-10-19): schema in, module OFF.** The schema block was applied to Supabase as migration `20261019025305`
+  `sourcing_execution_module_tables` — 8 tables, RLS on with no policies, matching `schema.sql` object-for-object, all empty.
+  `SOURCING_ENABLED` is unset there and the code is not deployed. `docs/SourcingModule_Rollback.sql` is a guarded rollback (refuses to
+  drop while any sourcing table holds a row; touches nothing outside the 8 tables; keeps `update_updated_at()`); tested in a throwaway
+  local database. **Deploy BACKEND before FRONTEND:** until the backend is live the Dashboard's "Sourcing execution" section shows a
+  "Couldn't load sourcing execution." card (the role card and My Tasks box degrade silently) — **known limitation, left as is on
+  purpose.** Go-live order (including the Google Form order) is in the runbook.
+- **Own tables, not `pending_actions`** (`sourcing_*`, BIGSERIAL ids → node-pg returns them as STRINGS; RLS enabled with no
+  policies; all `IF NOT EXISTS`). Reusing `pending_actions` would have been hit by `resolveUnknownActionTypes`, inflated every HR
+  user's My Tasks badge, shared its 100-row window and sorted priority as text. `slaChecker.ts`, the SLA KPIs, the funnel
+  snapshot, `candidates.source` and Source-quality are untouched.
+- **Ownership is the HR/Admin PERSONA, never an individual (Aaron's decision, 2026-10-19: "no segregation of HRs for sourcing").** A plan has
+  no owner: activation asks for none, nothing assigns, reassigns or filters by person, the card says "Owner: HR", every HR-tier user sees the
+  same My Tasks → Sourcing queue (no "mine", no scope) and can complete, skip, resolve or edit anything on any plan, the dashboard table has
+  no Owner column, and the daily e-mail (off by default) is ONE message to all active HR/Admin users. `sourcing_plans.owner_user_id` and
+  `sourcing_exceptions.owner_user_id` remain in the schema, unused and always NULL (kept so no production migration is needed; a
+  `PATCH /plans/:id` that sends `owner_user_id` is a 400). What survives is the BLOCKER owner (`blocker_owner_user_id`: who must unblock a
+  blocked exception — any active person, chosen from `GET /sourcing/people`, which hides the smoke-test accounts).
+- **Engine** (`jobs/sourcingChecker.ts`): pure detectors (rows + clock → `DetectedException[]`, unit-tested) + `runSourcingCheck()`
+  (≤2 concurrent set-based queries — the pool is max 5 on Vercel, 10 locally — never a per-plan loop) + `reconcileExceptions()`. Compute-on-read with
+  its own 3-minute throttle (`maybeRunSourcingCheck`, called from the queue and dashboard routes) plus a daily cron
+  (`GET|POST /api/cron/sourcing-check`, one handler for both verbs because Vercel Cron issues GET; registered in `vercel.json`).
+  **Correctness comes from the database, not the throttle:** partial unique index `uq_sourcing_exceptions_live` over
+  `status IN ('open','snoozed','blocked')` — an index over `open` alone would let the engine duplicate a snoozed/blocked row.
+  The overdue-commitment family rolls up to one exception per (plan, channel) at its worst state (`CHANNEL_NOT_ACTIVATED` >
+  `FOLLOWUP_OVERDUE` > `COMMITMENT_OVERDUE`) — that roll-up is for that family only. An exception's `subject_key` is `''` for every type
+  except `BLOCKER_OVERDUE` (the blocked exception's id) and **never per prospect**, so the live-uniqueness guarantee is per
+  (plan, channel, type, subject_key), not strictly one row per (plan, channel). Evidence is counts and titles only.
+  Launch set: `PLAN_NOT_ACTIVATED`, `CHANNEL_NOT_ACTIVATED`, `COMMITMENT_OVERDUE`, `FOLLOWUP_OVERDUE`, `VOLUME_GAP`, `BLOCKER_OVERDUE`.
+- **Shadow mode.** Threshold detectors (`VOLUME_GAP`, later others) are `is_shadow` = *provisional*: shown to HR-tier users only (a
+  greyed "Provisional" on the dashboard and on the role's Sourcing card; not in the header chip), no My Tasks item, no Hiring-Manager
+  view, never listed in an e-mail (the Monday summary only states how many exist), not resolvable. The first enabled engine run
+  **stamps** `go_live_date = today` and `shadow_until = today + 42 days` (`stampGoLiveDefaults`, `ON CONFLICT DO NOTHING` — an
+  explicit `null` set by an admin means "live" and is never overwritten); without that a bare `SOURCING_ENABLED=true` would make most
+  P0/P1 roles raise `VOLUME_GAP` on day one (7 of 9 on 2026-10-14). **Settings cannot be written while the flag is off** (503), so the
+  go-live date and `shadow_until` can't be pre-set through the API: accept the stamp, or pre-insert `sourcing_settings` rows by SQL
+  BEFORE the first engine run (before the redeploy that turns the flag on). A **draft** plan's volume signal is always provisional; a draft raises only `PLAN_NOT_ACTIVATED`
+  (live), and only for a role approved on/after `go_live_date` and more than 1 working day ago. The deterministic commitment-overdue
+  family is live from activation because the recruiter set those due dates themselves.
+- **Qualified = shortlisted by a person OR ResumeIQ > 60** (`qualified_rule`: `either` | `shortlisted` | `scored`), always shown as
+  its two components. Built from **immutable timestamps** only (`utils/sourcingQualified.ts`): `applications.ai_scored_at` is never
+  written in production and `stage_entry_time` is overwritten on every move, so *scored* uses `score_computed_at` (falling back to
+  `application_date` — moot in production, where no scored row lacks it) and *shortlisted* uses the first `activity_log` `Stage
+  Changed` row leaving `Applied and Screened`. **Only the volume signal follows `qualified_rule`:** the per-source "Qualified" column
+  on the role card is a current-state snapshot (`ai_fit_score > 60 OR stage <> 'Applied and Screened'`, over all the role's applications).
+- **Dates are IST working days** (`utils/workingDays.ts`; Mon–Fri only — public holidays are deliberately NOT modelled, Aaron's call 2026-10-19; none of this existed before). A commitment is overdue
+  only after its due DAY ends (`endOfIstDay`). **Due dates anchor to the plan's ACTIVATION date**, never an old approval date, so
+  activating an existing role can't create an instant overdue pile; "Already running before today" at activation records the
+  commitment as done and starts the renewal clock from the posting's own date. Commitments are rolling (`due_at` = last done +
+  cadence − lead); follow-ons (renew posting, agency follow-up, referral repost, weekly outbound with a baseline window) are created
+  when the activation commitment is completed, not at activation.
+- **Hooks into existing flows** (`services/sourcingPlans.ts` `onRoleSaved`, called from `PATCH /roles/:id` AFTER the transaction commits
+  and BEFORE the 20–30 s JD generation): seed a draft plan on Approved, pause on On Hold (resume shifts due dates by the time
+  paused), close on `Closed – Filled/Cancelled` (skip every open commitment, resolve exceptions `role_closed`; nothing is queued —
+  there is no take-down task), reopen → draft, reconcile a hand-edited `recruitment_mode`. **The plan is reconciled from the role's NEW status and the
+  plan's CURRENT status** (`utils/sourcingPlanTransitions.ts` `planTransitionFor`, pure and unit-tested over every plan-state x
+  role-status cell), never from the hop `prev` → `next` — the first version compared hops and stranded a plan on a two-hop path
+  (Closed → On Hold → Approved left it closed on an open role, so activation answered 409 forever; On Hold → Under Review → Approved
+  left it paused for good, silently exempt from the engine, queue and digests). Open role: no plan → seed · paused → resume · closed →
+  draft · draft/active → nothing; On Hold: active → pause, anything else nothing; closed role: draft/active/paused → close, no plan
+  → nothing; Draft/Under Review: nothing. Same status saved twice is a no-op, and a missing plan on an open role heals on the next
+  real save (a PATCH that changes nothing returns "No changes detected" before the hook, so it does not reconcile). `prev` is used only
+  for the Recruitment Mode diff. A closed plan is deliberately not reopened by Draft/Under Review/On Hold; it returns to draft the moment the role is
+  open again. A JS `try/catch` cannot rescue a poisoned pg transaction (25P02), which is why
+  it runs post-commit; it is gated on the flag, has its own `try/catch` and tolerates missing tables — pinned by a spec that renames
+  `sourcing_plans` and proves a role save still succeeds. **`roles.recruitment_mode` is mirrored plan → role one way** (through
+  `role_edit_log`); the role page shows it read-only once a plan exists, and now re-reads the plan after every approve / status change /
+  field save (`RoleDetail.tsx` invalidates `['sourcing-plan', id]` beside `['role', id]`), so the header chip and card match the server straight
+  after those actions instead of waiting out `useSourcingPlan`'s 30 s `staleTime`.
+- **Attribution** (`applications.sub_source` only): `candidateIngest.ts` accepts an optional `source_tag` (the form's "How did you hear
+  about this role?" dropdown) → a known channel, `Other`, or `untagged_default`; written only while the flag is on (with it off
+  `sub_source` stays NULL). It is the applicant's own answer — *claimed* attribution; yield claims start from the day tagging starts:
+  every earlier Job Application Form applicant carries `candidates.source = 'LinkedIn'` (the ingest hard-codes it), but their
+  `applications.sub_source` is NULL and shows as "(untagged)" on the role card. `candidates.source` is not changed. The Apps Script
+  (outside the repo) needs the `HANDLED_ELSEWHERE` entry + `source_tag` mapping — reference copy in
+  `docs/CandidateApplicationFormTrigger.gs.js`. **Order when rolling out: update the script FIRST, enable the flag, THEN add the
+  dropdown** — the live script files any column it doesn't recognise under `screening_answers`, and a tag sent while the flag is off
+  is dropped. A test submission creates a real candidate and application and runs ResumeIQ: use an obviously fake address and remove it afterwards by SQL (`DELETE /api/candidates/:id` refuses a candidate that has an application).
+- **Access.** Writes are HR-tier. The role's own Hiring Manager(s) with persona `hiring_manager` (`isNamedHiringManager` against
+  `users.name`) get a read-only, PARTLY redacted view (`redactForHiringManager`, `services/sourcingPlans.ts`; another Hiring Manager
+  gets 403). A Leadership user who is also the named HM is HR-tier and sees and edits the full, unredacted plan. **What the HM view
+  does and does not contain (left as is on purpose — it is not "no reasons"):** *removed* — strategy note, baseline,
+  change history, each channel's `config` (posting URL/date), commitment completion notes and evidence refs, on exceptions the
+  evidence, `reason`, `corrective_action` and the blocker owner's name; provisional and resolved exceptions are dropped entirely. *Still
+  included* — each channel's `excluded_reason`; on exceptions the `resolution_path`, `snooze_until`, `blocker_due` and the
+  snoozed/blocked states, plus the plain-language committed/happened/next-action text; commitment titles, dates, status and evidence
+  counts; channel targets; per-source application counts; the volume block (weekly qualified / shortlisted / scored, minimum, rule), `settings` (`go_live_date`, `shadow_until`, `qualified_rule`), `attribution_reliable`, the plan's activation/pause/close timestamps, commitment `meta` (lead days, `baseline_until`, expected live days) and each completion's done/was-due dates and on-time flag. The HM branch of `GET /dashboard/sourcing` is narrower: `read_only: true`,
+  own roles only (role lock), provisional rows dropped, `blocker_due` nulled; for EVERY persona snoozed exceptions are
+  counted in `summary.exceptions_snoozed` but not listed. The PII spec plants a strategy note, a posting URL and a completion note and
+  checks nothing personal leaks; it does not mark an excluded reason or the snooze/blocker fields with its sentinel (the only excluded
+  reason it creates is a plain "Not needed for this role", never asserted on), so it would not catch a leak of those. Every persona can already read `GET /roles/:id`, which is why a plan payload must
+  not widen what a Hiring Manager sees. The My Tasks "Sourcing" box is `hr_recruiter` + `super_admin` only (Leadership has none); `GET /sourcing/queue` is
+  HR-tier and returns the SAME queue to everyone — there is no "mine" and no scope parameter (an old client's `scope=all` is ignored).
+  Settings: the full read (`GET /sourcing/settings`) is HR-tier, writes are Leadership/Super Admin; `GET /sourcing/status`, open to every signed-in user, returns `go_live_date`, `shadow_until`, `qualified_rule`, `volume_min_qualified` and `referral_audience_email`; `digest_recipients` must be company addresses.
+- **Surfaces:** RoleDetail `SourcingCard` (between Pipeline and Activity) + header chip; My Tasks 4th box (`mytasks.section` value
+  `'sourcing'` is clamped to `'ready'` for anyone without it, and not flashed while the status loads); Dashboard "Sourcing execution"
+  as the LAST section (own lazy endpoint `GET /dashboard/sourcing`, same master filters and Hiring-Manager lock; `KpiCard` was
+  extracted to `components/shared/`). Channel goes in the BODY of `PUT /sourcing/plans/:id/channel` — `Naukri/IIMjobs` contains a slash.
+- **E-mails** (`services/sourcingDigest.ts`, from hr@ via the existing Gmail service, internal only, **off by default**): ONE daily note
+  to the HR team — every active `hr_recruiter` + `super_admin` with a company address, in a single message, only when something needs doing
+  (`daily_digest_enabled`; weekdays only) — and a Monday summary to
+  `digest_recipients`. Each kind is *claimed* for the day first (atomic upsert), so a retried cron cannot double-send. The cron is
+  `30 3 * * *` (03:30 UTC, about 09:00 IST; Vercel Hobby may fire it any time within that hour).
+- **Not built (specified in the PRD):** P3 one-click agency brief / referral push through Gmail with auto-evidence; P4 company lists,
+  Sheets-API prospect sync, direct-send templated outreach with its guardrails, `/sourcing` page. Free external APIs were verified:
+  only Google Workspace APIs HMS already holds are both free and automatable; LinkedIn/Naukri/Indeed are never scraped or polled.
+- **Managing a running plan (2026-10-19).** On an ACTIVE or PAUSED plan the card (HR-tier only; not on a draft — activation chooses the
+  channels — and not on a closed plan) offers **Add channel** (and **Bring back** on a channel that was left out), **Undo skip** on a
+  skipped commitment of a channel that is in the plan, and **Edit strategy note** (the note is shown on the card to HR
+  only). Rules behind them, all in `services/sourcingPlans.ts`: `PUT /sourcing/plans/:id/channel` with `planned` starts the channel's
+  first commitment from today (`startChannel` — active and paused plans; a draft plan commits nothing, activation does) and answers 409
+  `already in this plan` for a channel that is already in it (it used to re-open a FINISHED activation and chase it again). A channel that
+  joins through the role's Recruitment Mode (`reconcileChannelsFromRole` — API or a stale tab) gets the same first commitment, and one
+  removed there is excluded with a reason beginning "Removed from…", which is what lets a later re-add bring it back; a reason the
+  recruiter typed is never overridden by a role edit. **Follow-ons come back by completing the channel's activation again:**
+  `completeInTx` revives a SKIPPED follow-on with a fresh due date and leaves a running one alone — which also fixes close → reopen →
+  re-activate with "already running", where the follow-ons skipped by the close used to stay skipped for good. `POST
+  /commitments/:id/reopen` (the card's Undo skip) answers 409 on a plan that is not active, a commitment that is already open, or a
+  channel that is left out (bring the channel back first), and sets a skipped follow-up due tomorrow (a skipped first task gets its normal
+  1–2 working days). `completeInTx` refuses (409) a SKIPPED commitment — a recurring one used to be "completed" straight back to open, around
+  the undo rules — a channel that is left out and a closed plan; `activatePlan` accepts a DRAFT only (a paused plan used to be re-activated, which
+  re-opened finished work and cleared the pause without shifting anything). **A channel added to a PAUSED plan is anchored to the day the pause
+  began** (`startChannel`), because resuming shifts every open due date by the whole pause — anchored to today it fell due a pause-length after
+  resume. **Lock order is plan → channel → commitment everywhere:** `complete`, `skip`, `reopen` and `resolveException` now take the plan's row
+  lock first (`lockPlanOfCommitment` / `lockPlanOfException`) and read state after it; with only their own row locked they deadlocked against
+  excluding a channel (a 500) or committed an open commitment on a closed plan. The "removed from the role" marker is matched EXACTLY
+  (`REMOVED_ON_ROLE`), not by prefix, so a recruiter's own reason can never be mistaken for it. `PATCH /plans/:id` edits the strategy note only and logs `strategy_note_changed` once per real change; a malformed blocker-owner id is a 400 (it was a 500).
+- **No take-down task (removed 2026-10-19, Aaron's call: not worth the complexity).** Closing a role skips every open commitment and
+  clears its exceptions; nothing is queued, so nobody is chased to take postings down, and the commitment detector looks at ACTIVE plans only (draft plans still raise PLAN_NOT_ACTIVATED, a draft's volume signal and blockers).
+  Taking a posting down on the portal is the recruiter's own job; the plan does not track it.
+- **Known gaps:** none open in the plan/channel/commitment workflow.
+- Pinned by `hms-tests-final/tests/db/13-sourcing-plans.spec.ts` (39 tests: 5 on multi-hop role-status chains and idempotency, 11 on managing a running plan — channel add / bring back, follow-on revival, reopen, strategy-note edits, the no-owner rule, the complete / activate guards, an exact-marker check and a concurrency race; three older ones also cover hold / close / recruitment-mode; skips itself if the
+  flag is off), `tests/e2e/08-sourcing.spec.ts` (6 browser tests, also skips itself) and the sourcing block (4 tests) in
+  `tests/db/00-schema-integrity.spec.ts`. Vitest — backend: pure detectors/utils and the digest service (`sourcingChecker`,
+  `workingDays`, `sourcingTemplates`, `sourcingDescribe`, `sourcingDigest` util + service, `sourcingPlanTransitions`: 7 files, 129
+  tests; the read-only guard for the smoke accounts is in `middleware/auth.test.ts`); `services/sourcingPlans.ts` (lifecycle, activation, resolution, hook), `services/sourcingSettings.ts` and
+  `routes/sourcing.ts` have NO Vitest and are covered only by the Playwright db spec, and `utils/sourcingConfig.ts` /
+  `sourcingQualified.ts` only indirectly. Frontend: 6 files, 78 tests (`useSourcingPlan`, `sourcingFormat`, `SourcingCard` (36),
+  `SourcingExecution`, `RoleDetail.sourcing`, and `MyTasks`, whose 20 cover the whole page). **Regression with the module ON (2026-10-19):** the whole local
+  suite — api + db + e2e + smoke, 592 tests — passed with `SOURCING_ENABLED=true` on the backend, so the existing dashboard / ingestion /
+  pending-actions / role-approval specs are proven with the flag on (re-run it that way before enabling in production again if the code changes).
+
 ### Environment variables / secrets
 - `GOOGLE_APPLICATION_CREDENTIALS` (local, file path) or
   `GOOGLE_APPLICATION_CREDENTIALS_JSON` (Vercel, full JSON as a string) — the
@@ -1089,3 +1254,4 @@ along on a Hold for Future.
 | Schema (permanent record) | `backend/src/db/schema.sql` |
 | Role ingestion from Forms | `backend/src/routes/roleIngest.ts` |
 | SLA/aging logic | `backend/src/jobs/slaChecker.ts` (called from `dashboard.ts`) |
+| Sourcing plans / exceptions | `backend/src/services/sourcingPlans.ts`, `backend/src/jobs/sourcingChecker.ts`, `backend/src/routes/sourcing.ts` (spec: `docs/SourcingModule_PRD_v2.md`; go-live + rollback: `docs/SourcingModule_Runbook.md`, `docs/SourcingModule_Rollback.sql`) |

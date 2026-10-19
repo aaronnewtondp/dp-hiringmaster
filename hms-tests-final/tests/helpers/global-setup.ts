@@ -9,16 +9,26 @@
 import { request } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
+import { isLocalTarget, loadSmokeEnv } from './smoke-env';
 
 const BASE = process.env.TEST_API_URL || 'http://localhost:4000';
 
-const TEST_USERS = {
+loadSmokeEnv();
+
+// Local Docker: the seeded users. Production: seeded users cannot sign in (every production account is Google-only), so the
+// suite uses the two dedicated read-only smoke accounts instead — see helpers/smoke-env.ts.
+const LOCAL_USERS: Record<string, { email: string; password: string }> = {
   hr:          { email: 'aaron.newton@digitalpaani.com', password: 'password123' },
   hr2:         { email: 'garima@digitalpaani.com',       password: 'password123' },
   hm_alex:     { email: 'alex@digitalpaani.com',         password: 'password123' },
   hm_satyadev: { email: 'satyadev@digitalpaani.com',     password: 'password123' },
   leadership:  { email: 'nalin@digitalpaani.com',        password: 'password123' },
 };
+const SMOKE_USERS: Record<string, { email: string; password: string }> = {
+  smoke_lead: { email: process.env.SMOKE_LEADERSHIP_EMAIL ?? '', password: process.env.SMOKE_LEADERSHIP_PASSWORD ?? '' },
+  smoke_hm:   { email: process.env.SMOKE_HM_EMAIL ?? '',         password: process.env.SMOKE_HM_PASSWORD ?? '' },
+};
+const TEST_USERS = isLocalTarget(BASE) ? LOCAL_USERS : SMOKE_USERS;
 
 export default async function globalSetup() {
   const authDir = path.join(process.cwd(), '.auth');
@@ -31,6 +41,11 @@ export default async function globalSetup() {
   console.log(`\n[global-setup] Pre-authenticating test users against ${BASE}`);
 
   for (const [key, cred] of Object.entries(TEST_USERS)) {
+    if (!cred.email || !cred.password) {
+      failed.push(`${key}: no credentials configured`);
+      console.error(`  ✗ ${key} — not configured: put SMOKE_* in hms-tests-final/.env.smoke.local (see README)`);
+      continue;
+    }
     try {
       const res  = await apiContext.post('/api/auth/login', {
         data: { email: cred.email, password: cred.password },

@@ -8,9 +8,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 // Manager queue and ready list. Everything the page renders around that is mocked.
 const pending = vi.fn();
 const rolesList = vi.fn();
+const sourcingStatus = vi.fn();
+const sourcingQueue = vi.fn();
 vi.mock('../services/api.ts', () => ({
   dashboardApi: { pending: () => pending() },
   rolesApi: { list: () => rolesList() },
+  // The Sourcing box is additive and recruiter/Super-Admin only; the modals it can open call the rest of sourcingApi.
+  sourcingApi: { status: () => sourcingStatus(), queue: () => sourcingQueue(), people: () => Promise.resolve({ data: { people: [] } }) },
 }));
 
 let currentUser: { name: string; persona: string; email: string } = { name: 'Mansi Jain', persona: 'leadership', email: 'mansi.jain@digitalpaani.com' };
@@ -41,7 +45,8 @@ function mount() {
 const lastScope = () => scorecardProps.mock.calls[scorecardProps.mock.calls.length - 1]?.[0]?.personaScope;
 
 beforeEach(() => {
-  pending.mockReset(); rolesList.mockReset(); scorecardProps.mockReset();
+  pending.mockReset(); rolesList.mockReset(); scorecardProps.mockReset(); sourcingStatus.mockReset(); sourcingQueue.mockReset();
+  sourcingStatus.mockResolvedValue({ data: { enabled: false } });                  // module off unless a test switches it on
   sessionStorage.clear();
   currentUser = { name: 'Mansi Jain', persona: 'leadership', email: 'mansi.jain@digitalpaani.com' };
   rolesList.mockResolvedValue({ data: { roles: [] } });
@@ -175,5 +180,130 @@ describe('My Tasks — everyone else is unchanged', () => {
     mount();
     await screen.findByTestId('scorecard');
     expect(lastScope()).toBeUndefined();
+  });
+});
+
+
+// ─── Sourcing box (additive 4th box) ────────────────────────────────────────────────────────────────────────
+const QUEUE = {
+  enabled: true, today: '2026-10-14',
+  plans_to_activate: [{ plan_id: '1', role_id: 'R005', title: 'Quality Assurance Engineer', priority: 'P1', approval_date: '2026-10-01' }],
+  due: [{ id: '9', plan_id: '2', role_id: 'R001', role_title: 'Sr. Backend Developer', priority: 'P1', channel: 'LinkedIn', kind: 'renew_posting', title: 'Renew the LinkedIn posting', due_date: '2026-10-14', overdue: false }],
+  exceptions: [{ role_id: 'R003', title: 'Sr. E&I Engineer (Hyderabad)', priority: 'P1', severity: 40, items: [
+    { id: '5', plan_id: '3', channel: 'Agency', type: 'CHANNEL_NOT_ACTIVATED', severity: 40, age_days: 2, committed: 'Agency: Select agencies', happened: 'Not done — 2 days overdue', next_action: 'Choose the agencies' }] }],
+  exception_count: 1, snoozed_count: 1, blocked_count: 0, active_plans: 3,
+  volume: [{ role_id: 'R003', title: 'Sr. E&I Engineer (Hyderabad)', priority: 'P1', min: 5, qualified: 2 }, { role_id: 'R001', title: 'Sr. Backend Developer', priority: 'P1', min: 5, qualified: 7 }],
+  volume_ok: 1,
+};
+const recruiter = { name: 'Aaron Newton', persona: 'hr_recruiter', email: 'aaron.newton@digitalpaani.com' };
+
+describe('My Tasks — the Sourcing box', () => {
+  beforeEach(() => {
+    currentUser = recruiter;
+    pending.mockResolvedValue({ data: { actions: [], alerts: [] } });
+    sourcingStatus.mockResolvedValue({ data: { enabled: true } });
+    sourcingQueue.mockResolvedValue({ data: QUEUE });
+  });
+
+  it('appears for a recruiter when the module is on, counting plans to activate + due today + open exceptions', async () => {
+    mount();
+    const box = await screen.findByRole('button', { name: /^Sourcing/ });
+    await waitFor(() => expect(box).toHaveTextContent('3'));                           // 1 plan + 1 due today + 1 exception
+  });
+
+  it('shows the three groups, the weekly target line, and the "not shown" footer', async () => {
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: /^Sourcing/ }));
+    expect(await screen.findByText('Plans to activate')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Quality Assurance Engineer' })).toHaveAttribute('href', '/roles/R005#sourcing');
+    expect(screen.getByText('Renew the LinkedIn posting')).toBeInTheDocument();
+    expect(screen.getByText('Not done — 2 days overdue')).toBeInTheDocument();
+    expect(screen.getByTestId('sourcing-targets')).toHaveTextContent('1 of 2 priority roles');
+    expect(screen.getByTestId('sourcing-targets')).toHaveTextContent('Below target');
+    expect(screen.getByText(/1 catching up/)).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Whose queue' })).not.toBeInTheDocument();          // a recruiter only ever sees their own
+  });
+
+  it('is absent while the module is off — and the queue is never fetched', async () => {
+    sourcingStatus.mockResolvedValue({ data: { enabled: false } });
+    mount();
+    await screen.findByTestId('scorecard');
+    await waitFor(() => expect(sourcingStatus).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: /^Sourcing/ })).not.toBeInTheDocument();
+    expect(sourcingQueue).not.toHaveBeenCalled();
+  });
+
+  it('never appears for Leadership or a Hiring Manager, who do not even ask', async () => {
+    for (const u of [{ name: 'Nalin', persona: 'leadership', email: 'n@x.com' }, { name: 'Alex', persona: 'hiring_manager', email: 'a@x.com' }]) {
+      currentUser = u;
+      sourcingStatus.mockClear();
+      const { unmount } = mount();
+      await screen.findByTestId('scorecard');
+      expect(screen.queryByRole('button', { name: /^Sourcing/ })).not.toBeInTheDocument();
+      expect(sourcingStatus).not.toHaveBeenCalled();
+      unmount();
+    }
+  });
+
+  it('a persisted "sourcing" section is clamped to Ready for Review for someone without the box (never a blank panel)', async () => {
+    for (const u of [{ name: 'Nalin', persona: 'leadership', email: 'n@x.com' }, { name: 'Alex', persona: 'hiring_manager', email: 'a@x.com' }]) {
+      sessionStorage.setItem('hms:mytasks.section', JSON.stringify('sourcing'));
+      currentUser = u;
+      const { unmount } = mount();
+      expect(await screen.findByTestId('scorecard')).toBeInTheDocument();
+      unmount();
+    }
+    // module off for a recruiter: same fallback
+    sessionStorage.setItem('hms:mytasks.section', JSON.stringify('sourcing'));
+    currentUser = recruiter;
+    sourcingStatus.mockResolvedValue({ data: { enabled: false } });
+    mount();
+    expect(await screen.findByTestId('scorecard')).toBeInTheDocument();
+  });
+
+  it('a recruiter whose persisted section is "sourcing" does not flash Ready for Review while the status loads', async () => {
+    sessionStorage.setItem('hms:mytasks.section', JSON.stringify('sourcing'));
+    let resolve!: (v: unknown) => void;
+    sourcingStatus.mockReturnValue(new Promise(r => { resolve = r; }));
+    mount();
+    expect(screen.queryByTestId('scorecard')).not.toBeInTheDocument();
+    resolve({ data: { enabled: true } });
+    expect(await screen.findByText('Plans to activate')).toBeInTheDocument();
+    expect(screen.queryByTestId('scorecard')).not.toBeInTheDocument();
+  });
+
+  it('every HR user sees the same queue — there is no "mine / everyone" switch for anyone, the Super Admin included', async () => {
+    for (const who of [recruiter, { name: 'Super Admin', persona: 'super_admin', email: 'sa@x.com' }]) {
+      currentUser = who;
+      const view = mount();
+      fireEvent.click(await screen.findByRole('button', { name: /^Sourcing/ }));
+      await screen.findByText('Plans to activate');
+      expect(screen.queryByRole('button', { name: 'Everyone' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Mine' })).not.toBeInTheDocument();
+      expect(sourcingQueue).toHaveBeenLastCalledWith();
+      view.unmount();
+    }
+  });
+
+  it('a failed queue says so and can retry — it does not pretend there is nothing to do', async () => {
+    sourcingQueue.mockRejectedValueOnce(new Error('boom'));
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: /^Sourcing/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Couldn't load the sourcing queue/);
+    sourcingQueue.mockResolvedValue({ data: QUEUE });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Plans to activate')).toBeInTheDocument();
+  });
+
+  it('long lists show the top 5 and "Show N more"', async () => {
+    const many = Array.from({ length: 8 }, (_, i) => ({ plan_id: String(i), role_id: `R10${i}`, title: `Role ${i}`, priority: 'P2', approval_date: null }));
+    sourcingQueue.mockResolvedValue({ data: { ...QUEUE, plans_to_activate: many } });
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: /^Sourcing/ }));
+    await screen.findByText('Plans to activate');
+    expect(screen.getAllByRole('link', { name: /^Role \d$/ })).toHaveLength(5);
+    fireEvent.click(screen.getByRole('button', { name: 'Show 3 more' }));
+    expect(screen.getAllByRole('link', { name: /^Role \d$/ })).toHaveLength(8);
+    expect(screen.getByRole('button', { name: 'Show fewer' })).toBeInTheDocument();
   });
 });

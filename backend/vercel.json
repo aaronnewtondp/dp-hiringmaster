@@ -30,6 +30,10 @@
     {
       "path": "/api/cron/email-digest",
       "schedule": "15 8 * * *"
+    },
+    {
+      "path": "/api/cron/sourcing-check",
+      "schedule": "30 3 * * *"
     }
   ]
 }

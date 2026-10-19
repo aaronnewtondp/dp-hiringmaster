@@ -12,12 +12,14 @@
       (previously shared one sequence, causing duplicate-key crashes)
 - [x] GIN indexes on `candidates.parsed_skills/parsed_industries/hr_tags` and
       `applications` AI/score array columns
-- [ ] **RLS (Row Level Security) on all 14 Supabase tables** — currently
-      disabled everywhere. The Supabase anon key is exposed client-side, so
-      right now anyone with browser dev tools could query `ctc_band`,
-      `internal_risk_notes`, and other sensitive fields directly against
-      Supabase, completely bypassing the Express/JWT access control layer.
-      **This is the single highest-priority open item.**
+- [x] **Seed password hash removed from production users (2026-10-19)** — it was still set on
+      8 users; `password_hash` is now NULL for them, so every production account is Google-only
+      and `/api/auth/login` answers "use Google sign-in". Consequence: `hms-tests-final`'s
+      `npm run test:prod` smoke tests log in by password and no longer work against production
+      until they are given another way in (see `CLAUDE.md` Testing). `seed.sql` still carries
+      the seed password for LOCAL Docker only.
+- [x] **Production smoke-test accounts (2026-10-19)** — chosen and approved by Aaron; both rows created in production, `npm run test:prod`
+      signs in as them (34 smoke tests, API + browser).
 
 ---
 
@@ -241,6 +243,42 @@ live.
       moved to the page's top-right for a single-application candidate
       (stay per-row when there are multiple applications, since there's no
       single unambiguous "the" stage to act on from a page-level control).
+
+---
+
+## Phase 6 — Sourcing Execution & Accountability (spec: `docs/SourcingModule_PRD_v2.md`)
+
+- [x] **P0 foundations** — `sourcing_*` tables (RLS on, additive), settings + `SOURCING_ENABLED` flag, IST working-day helper, owners
+      endpoint, draft-plan backfill script, daily cron route (GET+POST), go-live runbook.
+- [x] **P1 plan + commitments + engine + queue + attribution** — plan seeding (a draft per open role; there is no create or delete
+      endpoint) / read / update (owner, strategy note, channels) / activation with "already running" attestation, post-commit role
+      hooks (approve / hold / close / reopen / recruitment-mode reconcile), compute-on-read engine with a DB-enforced no-duplicate
+      live-exception guarantee, three resolution paths, shadow mode for threshold signals, RoleDetail card + header chip, My Tasks
+      "Sourcing" box, `source_tag` → `applications.sub_source`.
+- [x] **P2 leadership view + e-mails** — Dashboard "Sourcing execution" (last section), per-owner daily note and Monday leadership
+      summary (both off until configured).
+- [x] **Schema applied to Supabase (2026-10-19)** — migration `20261019025305` `sourcing_execution_module_tables`: 8 tables, RLS on with
+      no policies, matches `schema.sql` object-for-object, all empty. The module is still OFF in production (`SOURCING_ENABLED` unset,
+      code not deployed). Guarded rollback: `docs/SourcingModule_Rollback.sql`.
+- [x] **Review fixes (2026-10-19)** — a role's status now reconciles its plan from the role's NEW status and the plan's CURRENT status
+      (`planTransitionFor`), so Closed → On Hold → Approved and On Hold → Under Review → Approved no longer strand a plan; the role page
+      re-reads the plan after approve / status change / field save. Docs corrected (19 inaccuracies).
+- [ ] **Enable in production** — deploy BACKEND, then frontend (until the backend is live the Dashboard shows a "Couldn't load sourcing
+      execution." card — known limitation, left as is); set `SOURCING_ENABLED=true` and redeploy; activate P0/P1 roles in waves. The Google
+      Form dropdown (and the Apps Script change that goes with it) is OPTIONAL — it only tells you which channel an applicant came from.
+      Order and caveats: the runbook.
+- [x] **Channel handling and take-down (2026-10-19, Aaron's decisions)** — a channel added to an active/paused plan gets its first
+      commitment; skipped follow-ons return when the channel's activation is completed again; the card has Add channel / Bring back,
+      Undo skip and Edit strategy note; the closed-role take-down task and everything chasing it was removed. 7 new db-spec tests, 10 new
+      component tests; one extra bug found and fixed on the way (close → reopen → re-activate left follow-ons skipped).
+- [x] **HR-persona ownership, no holidays (2026-10-19, Aaron's decisions)** — a plan has no individual owner (every HR user sees and can act
+      on every plan; the daily e-mail is one message to all HR/Admin users); public holidays are not modelled (Mon–Fri only). Six production
+      roles' Hiring Manager names corrected to the users' full names (R003, R005, R007, R012, R0015, R020).
+- [ ] **P3 automation** — one-click agency brief and referral push through Gmail (auto-evidence); channel effort-vs-output once
+      attribution has enough tagged applications.
+- [ ] **P4 outbound** — company lists, Sheets-API prospect sync, coverage/outbound exceptions, direct-send templated outreach with
+      guardrails (owner-mailbox sender, durable cap, suppression, signed unsubscribe), `/sourcing` page.
+- [ ] Parked (needs a public careers page, partner access or is policy-barred): job syndication, Cutshort, Brave/GitHub search, Campus.
 
 ---
 

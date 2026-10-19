@@ -28,6 +28,7 @@ import refChecksRouter     from './routes/refChecks.js';
 import { evalQuestionsRouter, compBenchmarksRouter } from './routes/lookups.js';
 import cronRouter          from './routes/cron.js';   // ← new
 import usersRouter         from './routes/users.js';
+import sourcingRouter      from './routes/sourcing.js';
 
 const app = express();
 
@@ -71,6 +72,7 @@ app.use('/api/eval-questions',   evalQuestionsRouter);
 app.use('/api/comp-benchmarks',  compBenchmarksRouter);
 app.use('/api/cron',             cronRouter);   // ← new
 app.use('/api/users',            usersRouter);
+app.use('/api/sourcing',         sourcingRouter);
 
 // Error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
