@@ -101,7 +101,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
             manually, use the suggested-role quick link when the system found a likely match, or
             delete the candidate outright.</p>
             <p className="mt-2">Every candidate also carries a best-effort <strong>Gender</strong>{' '}
-            tag (M/F), auto-computed from their first name — an unrecognized or genuinely
+            tag (M/F), auto-computed from their name — an unrecognized or genuinely
             ambiguous name is left blank rather than guessed, and it can't be edited from the screens today. Filterable alongside every other master filter,
             here and on Archived Pipeline and My Tasks' Ready for Review.</p>
           </>

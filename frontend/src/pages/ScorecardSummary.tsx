@@ -18,6 +18,7 @@ import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
+import { GENDER_COLUMN_INFO } from '../utils/columnInfo.ts';
 
 // Same chunked-batching constant as Candidates.tsx / MyTasks.tsx's bulk actions.
 const BULK_CONCURRENCY = 3;
@@ -31,6 +32,7 @@ const NO_OWNED_ROLES_SENTINEL = '__no_roles_owned__';
 const PORTFOLIO_SCORE_FILTER_MIN = 7.5;
 
 const COLUMN_INFO: Record<string, string> = {
+  'Gender': GENDER_COLUMN_INFO,
   'CTC → ECTC': "Current fixed CTC → expected CTC, both from the candidate's own profile (one figure per candidate, not per role), in ₹ lakhs. 'Over Budget' = expected CTC above the top of the role's CTC band.",
 };
 
@@ -527,7 +529,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                 {[
                   { label: '#', width: 'w-[32px]' },
                   { label: 'Candidate', width: 'w-[150px]' },
-                  { label: 'Gender', width: 'w-[48px]' },
+                  { label: 'Gender', width: 'w-[88px]' },
                   { label: 'Role', width: 'w-[120px]' },
                   { label: 'Stage', width: 'w-[100px]' },
                   { label: 'CTC → ECTC', width: 'w-[105px]' },
