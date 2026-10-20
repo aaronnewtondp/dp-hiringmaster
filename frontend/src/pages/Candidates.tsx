@@ -17,10 +17,12 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { formatDistanceToNow } from 'date-fns';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
+import { GENDER_COLUMN_INFO } from '../utils/columnInfo.ts';
 
 const UNMATCHED_PAGE_SIZE = 50;
 
 const COLUMN_INFO: Record<string, string> = {
+  'Gender': GENDER_COLUMN_INFO,
   'Fit': "ResumeIQ's score (0-100): the average of its 8 dimensions (Technical, Experience, Industry Fit, Culture Fit, Role Alignment, Trajectory, Leadership, Communication) × 10. The Senior UX/Product Designer role adds a ninth, Portfolio, once that review finishes. Scored automatically when the candidate applies; 75+ also tightens SLA windows to 24h.",
   'CTC → ECTC': "Current fixed CTC → expected CTC, both from the candidate's own profile (one figure per candidate, not per role), in ₹ lakhs. 'Over Budget' = expected CTC above the top of the role's CTC band.",
   'Application Date': 'Days since the candidate applied — not the same as Last Updated.',
@@ -327,9 +329,12 @@ export default function Candidates() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Active Candidates</h1>
-          <p className="text-sm font-mono text-gray-500 mt-0.5">
-            {filtered.length} applications
-            {slaCount > 0 && <span className="ml-2 text-red-500 font-medium font-mono">{slaCount} SLA breached</span>}
+          <p className="text-sm font-mono text-gray-500 mt-0.5 flex items-center gap-1 flex-wrap">
+            <span>
+              {filtered.length} applications
+              {slaCount > 0 && <span className="ml-2 text-red-500 font-medium font-mono">{slaCount} SLA breached</span>}
+            </span>
+            <InfoTooltip align="left" width="w-72" text="Applications in the list right now: highest ResumeIQ score first (newest first when scores tie), up to 100 at a time, so use the search and filters to reach the rest. Rejected and Withdrawn applications are not here; they are in Archived Pipeline. “SLA breached” counts the fetched applications flagged as SLA-breached, before “In-budget only” narrows the list." />
           </p>
         </div>
         {canHR && (
@@ -491,10 +496,10 @@ export default function Candidates() {
                 )}
                 {[
                   { label: 'Candidate', width: 'w-[140px]' },
-                  { label: 'Gender', width: 'w-[48px]' },
+                  { label: 'Gender', width: 'w-[88px]' },
                   { label: 'Role', width: 'w-[100px]' },
                   { label: 'Stage', width: 'w-[90px]' },
-                  { label: 'Fit', width: 'w-[64px]', sortKey: 'fit' as const },
+                  { label: 'Fit', width: 'w-[84px]', sortKey: 'fit' as const },
                   { label: 'CTC → ECTC', width: 'w-[110px]' },
                   { label: 'Notice', width: 'w-[58px]' },
                   { label: 'Preferred Location', width: 'w-[110px]' },

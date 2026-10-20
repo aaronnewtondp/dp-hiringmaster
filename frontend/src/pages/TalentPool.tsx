@@ -11,11 +11,19 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { formatDistanceToNow } from 'date-fns';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
+import { GENDER_COLUMN_INFO } from '../utils/columnInfo.ts';
 
 type Mode = 'hold_for_future' | 'archived';
 const LIMIT = 50;
 
 const COLUMN_INFO: Record<string, string> = {
+  'Gender': GENDER_COLUMN_INFO,
+  'Stage': "The stage this application had reached. Putting it on hold, rejecting or withdrawing it changes its status, not its stage, so this is where it was left.",
+  'Fit': "ResumeIQ's score (0-100) for this application: the average of its 8 dimensions (for the Senior UX/Product Designer role, a Portfolio score is added once its portfolio review finishes), scored automatically when the candidate applied.",
+  'CTC → ECTC': "Current fixed CTC → expected CTC from the candidate's own profile, in ₹ lakhs (one figure per candidate, so the same on each of their rows). There is no Over Budget flag here. A dash means not recorded or, for a Hiring Manager, a candidate on none of their roles.",
+  'Notice': "Notice period in days, from the candidate's profile.",
+  'Company / Industry': "Current company and industry from the candidate's own profile, shown as one field.",
+  'Actions': "Reactivate (HR/Admin, Leadership and Super Admin only) links the candidate to a role that is Live – Sourcing and that they haven't applied to yet. It creates a new application at Applied and Screened, scored by ResumeIQ, with the source “Talent Pool Reactivation”; the archived application stays as it is.",
   'Status': "The application's status. A candidate is listed when at least one application is Hold for Future (or, under Archived, Rejected or Withdrawn); all of their applications are shown, each with its own status.",
   'Application Date': 'Days since the candidate applied to this specific role.',
   'Last Added': "When this candidate/application pair last had activity — same underlying data as Candidates' Last Updated, just relabeled here.",
@@ -120,10 +128,13 @@ export default function TalentPool() {
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Archived Pipeline</h1>
-        <p className="text-sm font-mono text-gray-500 mt-0.5">
-          {mode === 'hold_for_future'
-            ? `${total} on hold for future roles`
-            : `${total} archived candidates (rejected/withdrawn)`}
+        <p className="text-sm font-mono text-gray-500 mt-0.5 flex items-center gap-1 flex-wrap">
+          <span>
+            {mode === 'hold_for_future'
+              ? `${total} on hold for future roles`
+              : `${total} archived candidates (rejected/withdrawn)`}
+          </span>
+          <InfoTooltip align="left" width="w-72" text={`This number counts candidates, not applications: the candidates matching your search and filters who have at least one ${mode === 'hold_for_future' ? 'Hold for Future' : 'Rejected or Withdrawn'} application. The table has one row for each application of those candidates, so it can show more rows than this number. 50 candidates load at a time; use “Load more” for the rest.`} />
         </p>
       </div>
 
@@ -200,19 +211,19 @@ export default function TalentPool() {
               <tr>
                 {[
                   { label: 'Candidate', width: 'w-[150px]' },
-                  { label: 'Gender', width: 'w-[48px]' },
+                  { label: 'Gender', width: 'w-[88px]' },
                   { label: 'Role', width: 'w-[100px]' },
                   { label: 'Stage', width: 'w-[90px]' },
                   { label: 'Status', width: 'w-[90px]' },
-                  { label: 'Fit', width: 'w-[64px]', sortKey: 'fit' as const },
+                  { label: 'Fit', width: 'w-[84px]', sortKey: 'fit' as const },
                   { label: 'CTC → ECTC', width: 'w-[105px]' },
-                  { label: 'Notice', width: 'w-[55px]' },
+                  { label: 'Notice', width: 'w-[82px]' },
                   { label: 'Preferred Location', width: 'w-[110px]' },
-                  { label: 'Company / Industry', width: 'w-[150px]' },
+                  { label: 'Company / Industry', width: 'w-[182px]' },
                   { label: 'Resume Link', width: 'w-[68px]' },
                   { label: 'Application Date', width: 'w-[122px]', sortKey: 'application_date' as const },
                   { label: 'Last Added', width: 'w-[100px]', sortKey: 'last_added' as const },
-                  { label: 'Actions', width: 'w-[90px]' },
+                  { label: 'Actions', width: 'w-[104px]' },
                 ].map(col => (
                   // overflow-hidden unconditional — see Candidates.tsx's own
                   // header cells for why (a too-wide label used to visually
