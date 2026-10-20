@@ -5,6 +5,7 @@ import { ChevronDown } from 'lucide-react';
 import { dashboardApi } from '../../services/api.ts';
 import { HiringFunnelSnapshotStage } from '../../types/index.ts';
 import { EmptyState } from './Badges.tsx';
+import InfoTooltip from './InfoTooltip.tsx';
 import { STAGE_COLORS, UNLIT_BG, shade, glossyFill } from './PipelineProgress.tsx';
 
 // ─── Chevron geometry — same interlocking-arrow shape/overlap as the
@@ -90,7 +91,10 @@ export default function HiringFunnelSnapshot({
   return (
     <div className="card overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-100">
-        <h2 className="text-sm font-semibold text-gray-900">Hiring Funnel Snapshot</h2>
+        <div className="flex items-center gap-1.5">
+          <h2 className="text-sm font-semibold text-gray-900">Hiring Funnel Snapshot</h2>
+          <InfoTooltip align="left" width="w-80" text="Each chevron counts open SLA breaches at that stage (one per overdue task, not a headcount). Click a stage to see the breach types, who owns each and how far past its SLA limit each one is — 'Overdue' counts from the limit, not from entering the stage." />
+        </div>
         <p className="text-xs text-gray-400 mt-0.5">SLA breaches across the pipeline — click a stage to see what's overdue and who owns it</p>
       </div>
 

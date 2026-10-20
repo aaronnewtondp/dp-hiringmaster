@@ -274,6 +274,12 @@ live.
 - [x] **HR-persona ownership, no holidays (2026-10-19, Aaron's decisions)** — a plan has no individual owner (every HR user sees and can act
       on every plan; the daily e-mail is one message to all HR/Admin users); public holidays are not modelled (Mon–Fri only). Six production
       roles' Hiring Manager names corrected to the users' full names (R003, R005, R007, R012, R0015, R020).
+- [x] **Help page, info markers and User Access Guide brought up to date (2026-10-19)** — `Help.tsx` answers rewritten against the code (My Tasks
+      is boxes, Scorecard Summary is the table inside Ready for review, the Sourcing FAQ group shows only while the module is on, a
+      "What e-mails does HMS send?" item that says there is no daily pending-items mail); info-marker texts corrected on Dashboard, Roles,
+      Active Candidates, Scorecard, Archived Pipeline, Agencies, My Tasks, candidate and role pages; the guide (docx + PDF) is Version 5.
+      `Help.test.tsx` pins the gate and three answers. Not done: new markers on the Gender columns, the Active Candidates subtitle and the
+      Archived Pipeline columns (additions, not corrections).
 - [ ] **P3 automation** — one-click agency brief and referral push through Gmail (auto-evidence); channel effort-vs-output once
       attribution has enough tagged applications.
 - [ ] **P4 outbound** — company lists, Sheets-API prospect sync, coverage/outbound exceptions, direct-send templated outreach with

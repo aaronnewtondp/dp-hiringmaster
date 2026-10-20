@@ -365,7 +365,7 @@ export default function RoleDetail() {
         <div className="space-y-2">
           <EditableSection
             title="Links & Assets"
-            tooltip="Long-form and Social JD are normally auto-generated once a role is Approved, and can be re-run any time via Regenerate JD below. Some roles instead have a long-form JD written entirely outside the system — for those, this link points directly at that original document, Regenerate JD doesn't appear, and ResumeIQ scores against that document's real content."
+            tooltip="Long-form and Social JD are generated automatically when a role is Approved. While it is still Approved, HR can re-run them with Regenerate JD (it overwrites both links); once the role moves on they can't be regenerated here. Some roles have a long-form JD written outside the system — for those the link points straight at that document, Regenerate JD doesn't appear, and ResumeIQ scores against it. Assignment Link is the brief emailed to the candidate by Send Assignment."
             data={role}
             onSave={saveRoleFields}
             pendingLabels={role.status === 'Approved' ? {

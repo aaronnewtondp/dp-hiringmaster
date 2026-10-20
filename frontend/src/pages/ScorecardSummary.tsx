@@ -31,7 +31,7 @@ const NO_OWNED_ROLES_SENTINEL = '__no_roles_owned__';
 const PORTFOLIO_SCORE_FILTER_MIN = 7.5;
 
 const COLUMN_INFO: Record<string, string> = {
-  'CTC → ECTC': "Candidate's current fixed CTC, then the Expected CTC they quoted for this role — both read from the candidate's own profile, not this application's legacy fields.",
+  'CTC → ECTC': "Current fixed CTC → expected CTC, both from the candidate's own profile (one figure per candidate, not per role), in ₹ lakhs. 'Over Budget' = expected CTC above the top of the role's CTC band.",
 };
 
 // Compact 0-10 dimension cell — mirrors ResumeIQPanel.tsx's private
@@ -457,7 +457,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
       {canHR && unscored.length > 0 && (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg">
           <span className="text-xs font-medium text-amber-800">
-            {unscored.length} candidate{unscored.length === 1 ? '' : 's'} pending ResumeIQ scoring
+            {unscored.length} candidate{unscored.length === 1 ? '' : 's'} without a ResumeIQ score (the automatic scoring didn't complete)
           </span>
           <button
             onClick={() => retryScoring(unscored.map(a => a.id))}
@@ -520,7 +520,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                       checked={allReviewableSelected}
                       ref={el => { if (el) el.indeterminate = someReviewableSelected && !allReviewableSelected; }}
                       onChange={toggleSelectAll}
-                      title="Select all (Applied only)"
+                      title="Select all (Applied and Screened only)"
                     />
                   )}
                 </th>

@@ -24,13 +24,14 @@ const NO_ROLES_OWNED_SENTINEL = '__no_roles_owned__';
 type Section = 'ready' | 'feedback' | 'other' | 'sourcing';
 
 // ─── Section selector box ─────────────────────────────────────────────────────
-function SectionBox({ label, count, active, onClick, icon: Icon, accent }: {
+function SectionBox({ label, count, active, onClick, icon: Icon, accent, hint }: {
   label: string; count: number; active: boolean; onClick: () => void;
-  icon: React.ElementType; accent?: string;
+  icon: React.ElementType; accent?: string; hint?: string;
 }) {
   return (
     <button
       type="button"
+      title={hint}
       onClick={onClick}
       aria-pressed={active}
       className={`flex-1 min-w-[180px] card p-4 text-left transition-all border-2 ${
@@ -220,7 +221,7 @@ export default function MyTasks() {
             align="left"
             text={leadershipAlertsOnly
               ? "Leadership Alerts is company-wide role-aging/compensation notices and the Feedback-Overdue escalation — visibility, not a personal to-do list, since nobody individually resolves these here."
-              : "Other Pending Actions only counts what's genuinely yours to resolve. Role-aging/compensation notices nobody can individually act on show separately in a Leadership Alerts panel below it — visible, never hidden, just not counted toward the badge."}
+              : "Other Pending Actions counts what's genuinely yours to resolve. HR/Admin see company-wide items here (HMS loads only the 100 highest-priority, oldest open items, shared with Feedback Due, so 100 means 'at least'); a Hiring Manager sees only items assigned to them. Role-aging/compensation notices and Feedback-Overdue escalations nobody can individually act on show in a Leadership Alerts panel below — visible, never counted."}
           />
         </div>
         <p className="text-sm text-gray-400 mt-1">
@@ -239,6 +240,7 @@ export default function MyTasks() {
       <div className="flex gap-3 flex-wrap">
         <SectionBox
           label="Ready for Review"
+          hint="Candidates waiting for a shortlist decision at Applied and Screened. The table also lists scored candidates at later stages for comparison (no actions there). HR/Admin see every role, a Hiring Manager their own roles, Leadership Founder-flagged candidates plus roles they are Hiring Manager of."
           count={readyCount}
           active={activeSection === 'ready'}
           onClick={() => setSection('ready')}
@@ -247,6 +249,7 @@ export default function MyTasks() {
         />
         <SectionBox
           label="Feedback Due"
+          hint="Overdue interview and assignment feedback. HR/Admin see everyone's; a Hiring Manager sees only rounds where they are an interviewer."
           count={feedbackDue.length}
           active={activeSection === 'feedback'}
           onClick={() => setSection('feedback')}
@@ -263,6 +266,7 @@ export default function MyTasks() {
         {showSourcing && (
           <SectionBox
             label="Sourcing"
+            hint="Plans waiting to be activated + tasks due today + open exceptions — one shared list for all of HR/Admin; there is no personal queue."
             count={sourcingQueueCount(sourcingQueue)}
             active={activeSection === 'sourcing'}
             onClick={() => setSection('sourcing')}

@@ -750,7 +750,7 @@ export default function CandidateDetail() {
                           <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-1.5">
                               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Reference Checks</span>
-                              <InfoTooltip align="left" text="Records a reference's name, phone, relationship to the candidate, and the feedback/notes from the call. A candidate can have more than one on record. Add Reference Check only appears once this application has actually reached the Reference Check stage." />
+                              <InfoTooltip align="left" text="Records a reference's name, phone, relationship to the candidate and the feedback from the call; a candidate can have more than one. HR can add one only while the application is at the Reference Check stage, and at least one is needed before it can move on." />
                             </div>
                             {canHR && app.stage === 'Reference Check' && (
                               <button

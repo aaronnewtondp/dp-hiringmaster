@@ -7,7 +7,7 @@ import { Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 
 const COLUMN_INFO: Record<string, string> = {
-  'Hires': 'Total candidates who reached Joined while sourced through this agency — a lifetime count, not scoped to any date range.',
+  'Hires': "Candidates sourced through this agency (their Source is Agency) who have an application at Offer Accepted or Joined — counted once per candidate. A lifetime count, not scoped to any date range.",
   'Commission Tiers': "This agency's fee tiers by CTC band — e.g. a lower-band placement billed at one rate, a higher-band placement at another.",
   'Replacement': "The window (in days) during which this agency will re-source a replacement at no extra cost if a placed hire doesn't work out, plus what triggers that guarantee.",
   'Billing and Payment terms': "When this agency expects payment relative to a candidate's joining date, and any stated penalty for late payment.",

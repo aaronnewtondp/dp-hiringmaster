@@ -25,14 +25,16 @@ const SLA_BREACH_TYPES_INFO = (
   <div className="space-y-1.5">
     <div className="font-medium text-white">SLA breach types</div>
     <ul className="space-y-1">
-      <li><b>Idle Candidate</b> — no stage change in 48h+ (Reference Check, Pre-Joining Docs, Offer Discussion, Offer Released)</li>
-      <li><b>Resume Shortlist Pending</b> — HM hasn't shortlisted within 48h of Applied (24h if fit score ≥75)</li>
-      <li><b>Interview/Founders Round Not Scheduled</b> — no round booked within 48h of entering that stage</li>
-      <li><b>Assignment Not Sent</b> — assignment not sent within 48h of entering Assignment Round</li>
-      <li><b>Interview/Founders Feedback Due</b> — HM hasn't submitted feedback within 48h of the interview (24h if fit score ≥75); still open 96h later also raises a Leadership-owned "Feedback Overdue — Leadership Escalation" alert alongside it</li>
-      <li><b>Assignment Feedback Due</b> — HM hasn't submitted feedback within 96h of the assignment being sent (untouched by the score-tiering above)</li>
-      <li><b>Joining risk — no contact</b> — no HR contact logged in 5+ days after Offer Accepted</li>
+      <li><b>Idle Candidate</b> (HR) — no stage change in 48h+ (Reference Check, Pre-Joining Docs, Offer Discussion, Offer Released)</li>
+      <li><b>Resume Shortlist Pending</b> (Hiring Manager) — not shortlisted within 48h of Applied and Screened (24h if fit score ≥75)</li>
+      <li><b>Interview/Founders Round Not Scheduled</b> (HR) — no round with a date booked within 48h of entering that stage (24h if fit score ≥75)</li>
+      <li><b>Assignment Not Sent</b> (HR) — assignment not sent within 48h of entering Assignment Round (24h if fit score ≥75)</li>
+      <li><b>Interview/Founders Feedback Due</b> (Hiring Manager) — feedback not submitted within 48h of the interview (24h if fit score ≥75); still open 96h later also raises a Leadership-owned "Feedback Overdue — Leadership Escalation" alert alongside it</li>
+      <li><b>Assignment Feedback Due</b> (Hiring Manager) — feedback not submitted within 96h of the assignment being sent (untouched by the score-tiering above)</li>
+      <li><b>Assignment deadline breached</b> (HR) — the candidate hasn't submitted within 60h of the assignment being sent</li>
+      <li><b>Joining risk — no contact</b> (HR) — no HR contact logged in the 5 days after Offer Accepted (flagged at the next check if none was ever logged)</li>
     </ul>
+    <p>HR / Hiring Manager = who owns the overdue step. Top type / Top stage = the breach type and stage with the most open breaches. For a Hiring Manager this card counts only breaches assigned to them; the sections below show every breach on their roles.</p>
   </div>
 );
 
@@ -125,7 +127,7 @@ export default function Dashboard() {
         {isLockedToOwnRole ? (
           <span
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-xs text-gray-500"
-            title="Every metric on this page is scoped to your own role(s) — this can't be changed"
+            title="Every metric on this page is scoped to your own role(s) (except Unmatched candidates, which has no role) — this can't be changed"
           >
             <Lock className="w-3 h-3" /> Locked to your role
           </span>
@@ -142,7 +144,8 @@ export default function Dashboard() {
       {/* KPI row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <KpiCard icon={Briefcase} label="Roles Snapshot" value={metrics.open_roles_count} accent="text-dp-600"
-          info="Roles currently Live – Sourcing, Approved, or Under Review — Draft and Closed roles don't count. Avg. active role age is the mean days since each open role's approval date; Avg. time to fill is the mean days from a role's approval to its first accepted offer, across all-time history. Filled (30D) reads from Closed roles, which no role filter can coherently describe — it shows N/A whenever any master filter is active."
+          info="Open roles = Live – Sourcing, Approved or Under Review. Draft, On Hold and Closed roles don't count here (On Hold roles still appear in Aging roles and Low pipeline roles, which use a wider 'open' set). P0+P1 roles = how many of those are priority P0 or P1. Avg. active role age = mean days since each open role's Open Date (set when it is approved). Avg. time to fill = mean days from a role's Open Date to each accepted offer, across all-time history — a role with several hires counts once per accepted offer. Filled (30D) counts roles moved to Closed – Filled in the last 30 days; it shows N/A whenever any filter is on, because closed roles can't be filtered coherently."
+          infoWidth="w-80"
           sub={[
             ['P0+P1 roles', metrics.open_roles_by_priority.P0 + metrics.open_roles_by_priority.P1],
             ['Avg. active role age', metrics.avg_active_role_age_days != null ? `${metrics.avg_active_role_age_days}d` : '—'],
@@ -150,7 +153,8 @@ export default function Dashboard() {
             ['Filled (30D)', hasActiveFilters ? 'N/A' : metrics.roles_filled_last_30d],
           ]} />
         <KpiCard icon={Users} label="Active candidates" value={metrics.active_candidates} accent="text-green-600"
-          info="Every application with status = Active (i.e. not Rejected, Withdrawn, Hold for Future, or Joined). Score ≥75/≤45 are ResumeIQ fit-score bands; ≥Interview 1 counts candidates currently sitting at Interview Round 1 or later; Unmatched is Job Application Form submissions that never matched an open role, plus any candidate never linked to a role at all — since these have no role_id, this shows N/A whenever any master filter is active."
+          infoWidth="w-80"
+          info="Every application with status = Active (i.e. not Rejected, Withdrawn, Hold for Future, Joined or Closed). A candidate with two applications counts twice. Score ≥75/≤45 are ResumeIQ fit-score bands; ≥Interview 1 counts candidates currently sitting at Interview Round 1 or later; Unmatched is Job Application Form submissions that never matched an open role, plus any candidate never linked to a role at all — since these have no role_id, this shows N/A whenever any master filter is active."
           sub={[
             ['Score ≥75', metrics.candidates_score_ge_75],
             ['Score ≤45', metrics.candidates_score_le_45],
@@ -181,7 +185,7 @@ export default function Dashboard() {
         <div className="card overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
             <h2 className="text-sm font-semibold text-gray-900">Aging roles</h2>
-            <InfoTooltip align="left" text="Every role currently Approved, Live – Sourcing, or On Hold, with how long it's been open. Only an Approved or Live – Sourcing role that's actually passed its own Close Target gets highlighted — yellow then red, thresholds set per priority — a role with no Close Target set falls back to flagging on days-since-opened instead. On Hold roles are shown for reference (how long they've been open) but never get an aging alert, since the clock isn't really running while a role is paused. A red ! next to a role's name means no candidate on that role has had any real movement (stage/status change, HR note, feedback, etc.) in 3+ days — new applications arriving don't count, so a role can't look 'active' just because people are still applying to it." />
+            <InfoTooltip align="left" text="Every role currently Approved, Live – Sourcing, or On Hold, with how long it's been open. Only an Approved or Live – Sourcing role that's actually passed its own Close Target gets highlighted — yellow then red, thresholds set per priority — a role with no Close Target set falls back to flagging on days-since-opened instead. On Hold roles are shown for reference (how long they've been open) but never get an aging alert, since the clock isn't really running while a role is paused. A red ! next to a role's name means no candidate on that role has had any real movement (a stage or status change, feedback, etc.) in 3+ days — new applications arriving and automatic scoring don't count, so a role can't look 'active' just because people are still applying to it." width="w-96" />
           </div>
           {aging_roles.length === 0 ? (
             <div className="p-5"><EmptyState title="No open roles" /></div>
@@ -231,7 +235,7 @@ export default function Dashboard() {
             <div className="flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-gray-400" />
               <h2 className="text-sm font-semibold text-gray-900">Hiring funnel</h2>
-              <InfoTooltip align="left" text="Every candidate who has ever reached each stage, not just those currently sitting there. The bar shows how many are still Active at that stage; the subtext below it breaks out how many were later Rejected, Withdrawn, or put on Hold for Future while at that stage — stage never resets once a candidate moves on, even after rejection." />
+              <InfoTooltip align="left" text="Where every application sits right now. Each application is counted once, at its current stage — a candidate who has moved on is not counted at earlier stages. The bar shows Active candidates at that stage; the small text beneath counts those Rejected, Withdrawn or put on Hold for Future while at it (their stage freezes where it happened). Joined and Closed applications aren't shown, so the Joined bar stays at 0." width="w-80" />
             </div>
           </div>
           <div className="px-5 py-4 space-y-2.5">
@@ -283,7 +287,7 @@ export default function Dashboard() {
             <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
               <Radio className="w-4 h-4 text-gray-400" />
               <h2 className="text-sm font-semibold text-gray-900">Source quality</h2>
-              <InfoTooltip align="center" text="Computed over full application history (not just Active), per source channel. Pass rate = % that ever reached Interview Round 1 or later. Hire rate = % that ever reached Offer Accepted or later. Contribution = that channel's share of all sourced applications." />
+              <InfoTooltip align="left" width="w-80" text="Per source, using each candidate's own Source field (Naukri/IIMjobs, LinkedIn, Internal Referral, Agency, Direct Outreach). Candidates who arrived through the Job Application Form are recorded as LinkedIn, so that bar includes every form applicant. Computed over all applications, not just Active. Pass rate = % that reached Interview Round 1 or later. Hire rate = % that reached Offer Accepted or later. Contribution = the source's share of all applications that have a source." />
             </div>
             <div className="px-5 py-4 space-y-4">
               {source_quality.length === 0 ? (
@@ -331,7 +335,7 @@ export default function Dashboard() {
             <div className="px-5 py-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-semibold text-gray-900">Low pipeline roles</h2>
-                <InfoTooltip align="left" text={`Open roles (Approved, Live – Sourcing, Under Review, or On Hold) with fewer than ${LOW_PIPELINE_MAX_SHORTLISTED} shortlisted candidates (past Applied and Screened) AND fewer than ${LOW_PIPELINE_MAX_ACTIVE} Active candidates in the pipeline — thinly stocked on both counts, a signal that sourcing, not just process, may be the bottleneck, regardless of whether the role is also past its Close Target. A big pool of applicants who simply haven't been shortlisted yet does not count as thin. The two bold columns decide membership. The columns walk the funnel: Pipeline = every Active candidate; Scored >60 = of those, ResumeIQ fit score above 60; Shortlisted = past Applied and Screened; Shortlisted >60 = shortlisted and scored above 60 (shown for information).`} />
+                <InfoTooltip align="left" width="w-96" text={`Open roles (Approved, Live – Sourcing, Under Review, or On Hold) with fewer than ${LOW_PIPELINE_MAX_SHORTLISTED} shortlisted candidates (past Applied and Screened) AND fewer than ${LOW_PIPELINE_MAX_ACTIVE} Active candidates in the pipeline — thinly stocked on both counts, a signal that sourcing, not just process, may be the bottleneck, regardless of whether the role is also past its Close Target. A big pool of applicants who simply haven't been shortlisted yet does not count as thin. The two bold columns decide membership. The columns walk the funnel: Pipeline = every Active candidate; Scored >60 = of those, ResumeIQ fit score above 60; Shortlisted = past Applied and Screened; Shortlisted >60 = shortlisted and scored above 60 (shown for information).`} />
               </div>
               <p className="text-xs text-gray-400 mt-0.5">Open roles with fewer than {LOW_PIPELINE_MAX_SHORTLISTED} shortlisted candidates and fewer than {LOW_PIPELINE_MAX_ACTIVE} active candidates in the pipeline</p>
             </div>
@@ -429,7 +433,7 @@ export default function Dashboard() {
               <div className="flex items-center gap-2 mb-2">
                 <TrendingDown className="w-4 h-4 text-rust-600" />
                 <span className="text-xs font-medium text-gray-500">Biggest drop-off stage</span>
-                <InfoTooltip align="left" text="Two different views of the same rejection data: highest count is the stage with the most total rejections (naturally biased toward high-volume early stages); highest rate is the stage that rejects the largest share of everyone who reaches it. Shown together since they can point at different stages." />
+                <InfoTooltip align="left" text="Highest count: the stage where the most candidates were rejected (biased toward busy early stages). Highest rate: the stage with the biggest share of its candidates rejected — rejected ÷ everyone currently or last at that stage, so people who moved on aren't counted and the rate overstates real rejection odds. Shown together because they can point at different stages." width="w-80" />
               </div>
               {velocity.biggest_drop_off ? (
                 <div className="space-y-2">

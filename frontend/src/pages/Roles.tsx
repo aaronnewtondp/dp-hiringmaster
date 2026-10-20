@@ -8,8 +8,8 @@ import { PriorityBadge, AgingBadge, StageBadge, Spinner, EmptyState } from '../c
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 
 const COLUMN_INFO: Record<string, string> = {
-  'Age': 'Days overdue past this role\'s Close Target, and days since it opened — no alert shows at all until Close Target has actually passed.',
-  'Active Shortlist': 'Candidates currently sitting at Interview Round 1 or later, still Active — not a historical total.',
+  'Age': 'How long the role has been open and, for Approved / Live – Sourcing roles only, how many days it is past its Close Target (yellow, then red; thresholds depend on priority). Nothing is flagged until the Close Target passes; if none is set the flag falls back to days open. Draft, Under Review, On Hold and Closed roles never flag.',
+  'Active Shortlist': 'Active candidates currently at Interview Round 1, Interview Round 2, Assignment Round or Founders Round. Candidates further on (Reference Check onwards) are not counted here — and it is a current figure, not a historical total.',
   'Active Candidates': 'Everyone currently Active in this role\'s pipeline, at any stage — not a lifetime total.',
 };
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';

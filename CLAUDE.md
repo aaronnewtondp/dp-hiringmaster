@@ -1198,6 +1198,20 @@ its active plan as it was (it is reconciled on that role's next real save — se
   suite — api + db + e2e + smoke, 592 tests — passed with `SOURCING_ENABLED=true` on the backend, so the existing dashboard / ingestion /
   pending-actions / role-approval specs are proven with the flag on (re-run it that way before enabling in production again if the code changes).
 
+### Help page, info markers and the User Access Guide (2026-10-19)
+`frontend/src/pages/Help.tsx` is hand-written prose, not generated: when a screen's behaviour changes, its FAQ answer has to be edited
+by hand (the October 2026 audit found about 25 answers that no longer matched the code). Its **Sourcing group is gated** (`gated:
+'sourcing'`) on `sourcingApi.status().enabled`, so it never describes screens that do not exist; the other groups are always shown.
+`Help.test.tsx` pins the gate (off, failing status call, on) and the answers that were once wrong. Inline `InfoTooltip` markers sit
+next to column headers and KPI labels on Dashboard, Roles, Candidates, Scorecard Summary, Archived Pipeline, Agencies, My Tasks and the
+candidate/role pages — their text must say what the number really counts, so change it with the query. JSX trap: a line break between
+an inline tag and the following text removes the space (`<strong>Stop using</strong>` + newline + `leaves` renders "usingleaves") —
+write `{' '}` at the line end.
+The **User Access Guide** is `DigitalPaani_HMS_User_Access_Guide.docx` (repo root, the source) and
+`frontend/public/DigitalPaani_HMS_User_Access_Guide.pdf` (what the Help page links to). Version 5 (October 2026) was edited with
+python-docx by paragraph text and converted with LibreOffice (`soffice --headless --convert-to pdf`); regenerate the PDF from the docx
+every time the docx changes, never edit the PDF alone.
+
 ### Environment variables / secrets
 - `GOOGLE_APPLICATION_CREDENTIALS` (local, file path) or
   `GOOGLE_APPLICATION_CREDENTIALS_JSON` (Vercel, full JSON as a string) — the
