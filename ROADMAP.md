@@ -258,15 +258,17 @@ live.
 - [x] **P2 leadership view + e-mails** — Dashboard "Sourcing execution" (last section), per-owner daily note and Monday leadership
       summary (both off until configured).
 - [x] **Schema applied to Supabase (2026-10-19)** — migration `20261019025305` `sourcing_execution_module_tables`: 8 tables, RLS on with
-      no policies, matches `schema.sql` object-for-object, all empty. The module is still OFF in production (`SOURCING_ENABLED` unset,
-      code not deployed). Guarded rollback: `docs/SourcingModule_Rollback.sql`.
+      no policies, matches `schema.sql` object-for-object, all empty. Guarded rollback: `docs/SourcingModule_Rollback.sql`.
 - [x] **Review fixes (2026-10-19)** — a role's status now reconciles its plan from the role's NEW status and the plan's CURRENT status
       (`planTransitionFor`), so Closed → On Hold → Approved and On Hold → Under Review → Approved no longer strand a plan; the role page
       re-reads the plan after approve / status change / field save. Docs corrected (19 inaccuracies).
-- [ ] **Enable in production** — deploy BACKEND, then frontend (until the backend is live the Dashboard shows a "Couldn't load sourcing
-      execution." card — known limitation, left as is); set `SOURCING_ENABLED=true` and redeploy; activate P0/P1 roles in waves. The Google
+- [x] **Enabled in production (2026-10-20)** — PR #9 merged (`a2f825e`), both Vercel projects deployed, `SOURCING_ENABLED=true` set on
+      `dp-hiringmaster-be` Production and the backend redeployed (`dpl_36JxBH4H…`); `/api/sourcing/status` answers `enabled:true` and the
+      34-test production smoke suite passes with it on. The go-live clock (`go_live_date`, `shadow_until` = +42 days) starts at the first
+      real use of the Sourcing queue or dashboard section. Rollback: flag false + redeploy, or Instant Rollback to `dpl_BoLi6zv…`.
+- [ ] **Activate plans in waves (HR)** — P0/P1 roles first, R016 or R019 as the dry run; tell the HR team before the first open. The Google
       Form dropdown (and the Apps Script change that goes with it) is OPTIONAL — it only tells you which channel an applicant came from.
-      Order and caveats: the runbook.
+      Digest e-mails stay off until switched on in settings. Order and caveats: the runbook.
 - [x] **Channel handling and take-down (2026-10-19, Aaron's decisions)** — a channel added to an active/paused plan gets its first
       commitment; skipped follow-ons return when the channel's activation is completed again; the card has Add channel / Bring back,
       Undo skip and Edit strategy note; the closed-role take-down task and everything chasing it was removed. 7 new db-spec tests, 10 new
@@ -278,8 +280,9 @@ live.
       is boxes, Scorecard Summary is the table inside Ready for review, the Sourcing FAQ group shows only while the module is on, a
       "What e-mails does HMS send?" item that says there is no daily pending-items mail); info-marker texts corrected on Dashboard, Roles,
       Active Candidates, Scorecard, Archived Pipeline, Agencies, My Tasks, candidate and role pages; the guide (docx + PDF) is Version 5.
-      `Help.test.tsx` pins the gate and three answers. Not done: new markers on the Gender columns, the Active Candidates subtitle and the
-      Archived Pipeline columns (additions, not corrections).
+      `Help.test.tsx` pins the gate and three answers. Follow-up (2026-10-20): new markers on the three Gender columns (one shared text,
+      `utils/columnInfo.ts`), the Active Candidates and Archived Pipeline subtitles, and the Archived Pipeline Stage / Fit / CTC → ECTC /
+      Notice / Company-Industry / Actions headers; the narrow columns were widened so the label still shows next to the icon.
 - [ ] **P3 automation** — one-click agency brief and referral push through Gmail (auto-evidence); channel effort-vs-output once
       attribution has enough tagged applications.
 - [ ] **P4 outbound** — company lists, Sheets-API prospect sync, coverage/outbound exceptions, direct-send templated outreach with

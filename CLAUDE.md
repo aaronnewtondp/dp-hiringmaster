@@ -1056,13 +1056,18 @@ hooks no-op with zero queries, the UI hides itself; `docker-compose.yml` passes 
 to `false` AND redeploy** (a Vercel env-var change only takes effect on a new deployment; or use Instant Rollback) — the tables stay,
 inert. Flag-off *hides* the module, it does not pause it: the role hook doesn't run, so a role put On Hold/Closed in that window leaves
 its active plan as it was (it is reconciled on that role's next real save — see Hooks).
-- **Production state (2026-10-19): schema in, module OFF.** The schema block was applied to Supabase as migration `20261019025305`
-  `sourcing_execution_module_tables` — 8 tables, RLS on with no policies, matching `schema.sql` object-for-object, all empty.
-  `SOURCING_ENABLED` is unset there and the code is not deployed. `docs/SourcingModule_Rollback.sql` is a guarded rollback (refuses to
-  drop while any sourcing table holds a row; touches nothing outside the 8 tables; keeps `update_updated_at()`); tested in a throwaway
-  local database. **Deploy BACKEND before FRONTEND:** until the backend is live the Dashboard's "Sourcing execution" section shows a
-  "Couldn't load sourcing execution." card (the role card and My Tasks box degrade silently) — **known limitation, left as is on
-  purpose.** Go-live order (including the Google Form order) is in the runbook.
+- **Production state (2026-10-20): schema in, code deployed, module ON.** The schema block was applied to Supabase on 2026-10-19 as
+  migration `20261019025305` `sourcing_execution_module_tables` — 8 tables, RLS on with no policies, matching `schema.sql`
+  object-for-object. The code shipped as PR #9 (squash `a2f825e`, merged 2026-10-20 09:24 UTC; both Vercel projects deployed from `main`),
+  and on 2026-10-20 `SOURCING_ENABLED=true` was added to the Production environment of `dp-hiringmaster-be` (a plain, non-secret
+  variable) and the backend redeployed (`dpl_36JxBH4H8ruREWWQkDXqe985SJct`). `GET /api/sourcing/status` answers `enabled:true`, and the
+  read-only production smoke suite (34 tests) passed with the module on. **The go-live clock has not started:** `go_live_date` and
+  `shadow_until` stay null until the engine's first run (the first Sourcing queue or `/dashboard/sourcing` load by anyone, or the daily
+  cron), which stamps today and today + 42 days. Draft plans are created lazily at that point; nothing is chased until HR activates a plan.
+  **Rollback:** set `SOURCING_ENABLED=false` and redeploy, or use Vercel *Instant Rollback* to `dpl_BoLi6zvHy7G1h3fUHpP7sRDs6Txc` (the
+  same code with the flag unset). `docs/SourcingModule_Rollback.sql` is a guarded removal of the tables (refuses to drop while any
+  sourcing table holds a row; touches nothing outside the 8 tables; keeps `update_updated_at()`); tested in a throwaway local database.
+  Going-live order (including the optional Google Form order) is in the runbook.
 - **Own tables, not `pending_actions`** (`sourcing_*`, BIGSERIAL ids → node-pg returns them as STRINGS; RLS enabled with no
   policies; all `IF NOT EXISTS`). Reusing `pending_actions` would have been hit by `resolveUnknownActionTypes`, inflated every HR
   user's My Tasks badge, shared its 100-row window and sorted priority as text. `slaChecker.ts`, the SLA KPIs, the funnel

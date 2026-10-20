@@ -12,11 +12,15 @@ it was (the plan is reconciled the next time that role is saved with a real chan
 Removing the tables is a separate, optional step: [`SourcingModule_Rollback.sql`](SourcingModule_Rollback.sql) — guarded, it refuses to
 run while any sourcing table holds a row, and it never touches anything outside the 8 `sourcing_*` tables.
 
-## Where production stands (2026-10-19)
+## Where production stands (2026-10-20)
 
-Step 1 is **done**: the schema was applied to Supabase as migration `20261019025305` (`sourcing_execution_module_tables`) — 8 tables,
-RLS on with no policies, matching `schema.sql` object-for-object, all empty. The module is **off** in production: `SOURCING_ENABLED`
-is unset and the code is not deployed. Everything from step 2 is still to do.
+Steps 1, 2 and 4 are **done**. The schema was applied to Supabase on 2026-10-19 (migration `20261019025305`, 8 tables, RLS on with no
+policies, matching `schema.sql` object-for-object). The code was merged as PR #9 (`a2f825e`) and both Vercel projects deployed;
+`SOURCING_ENABLED=true` was then added to the Production environment of `dp-hiringmaster-be` and the backend redeployed
+(`dpl_36JxBH4H8ruREWWQkDXqe985SJct`). The module is **on**: `GET /api/sourcing/status` answers `enabled:true`, and the read-only production
+smoke suite (34 tests) passes with it on. Not yet done: step 5's clock has not started (`go_live_date` / `shadow_until` are null until the
+first real use of the Sourcing queue or dashboard section, or the daily cron), no plan is activated, and the optional steps 3, 6 and 9 are
+untouched. To roll back: `SOURCING_ENABLED=false` + redeploy, or Instant Rollback to `dpl_BoLi6zvHy7G1h3fUHpP7sRDs6Txc`.
 
 ## Order matters
 
