@@ -1,6 +1,9 @@
 import { APIRequestContext } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
+import { loadSmokeEnv } from './smoke-env';
+
+loadSmokeEnv();
 
 export const BASE          = process.env.TEST_API_URL      || 'http://localhost:4000';
 export const FRONTEND_BASE = process.env.TEST_FRONTEND_URL || 'http://localhost:5173';
@@ -50,6 +53,14 @@ export const USERS = {
   leadership:  { email: 'nalin@digitalpaani.com',        password: 'password123', persona: 'leadership'      },
 };
 
+// Production smoke accounts (read-only; see helpers/smoke-env.ts). Kept OUT of USERS on purpose: tests iterate USERS expecting the
+// seed password. Empty strings when the credentials are not configured.
+export const SMOKE_USERS = {
+  smoke_lead: { email: process.env.SMOKE_LEADERSHIP_EMAIL ?? '', password: process.env.SMOKE_LEADERSHIP_PASSWORD ?? '', persona: 'leadership'    },
+  smoke_hm:   { email: process.env.SMOKE_HM_EMAIL ?? '',         password: process.env.SMOKE_HM_PASSWORD ?? '',         persona: 'hiring_manager' },
+};
+type UserKey = keyof typeof USERS | keyof typeof SMOKE_USERS;
+
 // ─── Load pre-cached tokens from globalSetup ─────────────────────────────────
 function loadCachedTokens(): Record<string, string> {
   try {
@@ -60,12 +71,12 @@ function loadCachedTokens(): Record<string, string> {
 }
 
 // In-process memory cache (avoids repeated file reads within one test file)
-const _memCache: Partial<Record<keyof typeof USERS, string>> = {};
+const _memCache: Partial<Record<UserKey, string>> = {};
 
 // ─── Get a JWT — memory → file → live login ───────────────────────────────────
 export async function getToken(
   request: APIRequestContext,
-  user: keyof typeof USERS
+  user: UserKey
 ): Promise<string> {
   if (_memCache[user]) return _memCache[user]!;
 
@@ -76,7 +87,7 @@ export async function getToken(
   }
 
   // Fallback: live login (will count against rate limiter in production)
-  const cred = USERS[user];
+  const cred = (USERS as Record<string, { email: string; password: string }>)[user] ?? (SMOKE_USERS as Record<string, { email: string; password: string }>)[user];
   const res  = await request.post(`${BASE}/api/auth/login`, {
     data: { email: cred.email, password: cred.password },
   });

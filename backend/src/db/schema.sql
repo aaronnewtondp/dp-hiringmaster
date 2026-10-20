@@ -925,6 +925,151 @@ ALTER TABLE applications
 -- undocumented here individually on purpose — the whole point of this sweep
 -- is that a class of bug like this no longer needs a bespoke writeup.
 
+-- ── Sourcing Execution & Accountability module — P1 tables (2026-10-14) ─────
+-- Spec: docs/SourcingModule_PRD_v2.md. Everything here is additive and inert until
+-- SOURCING_ENABLED=true in the backend env: no existing table, column, constraint or
+-- trigger is touched. Design rules this block encodes:
+--   * BIGSERIAL ids (not prefixed sequences) -> no LPAD/format_seq_id exposure. node-pg
+--     returns int8 as a STRING, so TS id types for these tables are `string`.
+--   * `CREATE ... IF NOT EXISTS` throughout (Docker only runs schema.sql on an empty volume).
+--   * ROW LEVEL SECURITY enabled with NO policies on every new table: the backend connects
+--     as a role that bypasses RLS (postgres / the Docker superuser), while this blocks
+--     PostgREST/anon access. (The 17 pre-existing tables are still RLS-off — flagged
+--     separately, not changed here.)
+--   * sourcing_exceptions' uniqueness covers every NON-TERMINAL status, so the engine can
+--     never insert a duplicate for a snoozed/blocked exception; correctness comes from the
+--     index, not from the engine's in-process throttle.
+--   * channel is a free TEXT validated in code (SOURCING_CHANNELS) — no CHECK, so adding a
+--     channel later (Campus) needs no migration.
+CREATE TABLE IF NOT EXISTS sourcing_settings (
+  key         TEXT PRIMARY KEY,
+  value       JSONB NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by  UUID REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS sourcing_plans (
+  id               BIGSERIAL PRIMARY KEY,
+  role_id          TEXT NOT NULL UNIQUE REFERENCES roles(id) ON DELETE CASCADE,
+  owner_user_id    UUID REFERENCES users(id),               -- UNUSED since 2026-10-19: sourcing is owned by the HR/Admin persona as a whole (column kept; no migration)
+  status           TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','active','paused','closed')),
+  strategy_note    TEXT,
+  baseline         JSONB,                                   -- frozen at activation: the "original commitment"
+  baseline_at      TIMESTAMPTZ,
+  activated_at     TIMESTAMPTZ,
+  paused_at        TIMESTAMPTZ,
+  pause_total_days INT NOT NULL DEFAULT 0,
+  closed_at        TIMESTAMPTZ,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_sourcing_plans_owner  ON sourcing_plans(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_sourcing_plans_status ON sourcing_plans(status);
+
+CREATE TABLE IF NOT EXISTS sourcing_plan_channels (
+  id              BIGSERIAL PRIMARY KEY,
+  plan_id         BIGINT NOT NULL REFERENCES sourcing_plans(id) ON DELETE CASCADE,
+  channel         TEXT NOT NULL,
+  state           TEXT NOT NULL DEFAULT 'planned' CHECK (state IN ('planned','active','excluded')),
+  excluded_reason TEXT,
+  config          JSONB NOT NULL DEFAULT '{}',
+  targets         JSONB NOT NULL DEFAULT '{}',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (plan_id, channel)
+);
+
+CREATE TABLE IF NOT EXISTS sourcing_commitments (
+  id              BIGSERIAL PRIMARY KEY,
+  plan_channel_id BIGINT NOT NULL REFERENCES sourcing_plan_channels(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL,
+  subject_key     TEXT NOT NULL DEFAULT '',
+  title           TEXT NOT NULL,
+  cadence_days    INT,                                      -- NULL = one-time; else rolling due = last done + cadence
+  due_at          TIMESTAMPTZ NOT NULL,
+  last_done_at    TIMESTAMPTZ,
+  status          TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','done','skipped','blocked')),
+  meta            JSONB NOT NULL DEFAULT '{}',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (plan_channel_id, kind, subject_key)
+);
+CREATE INDEX IF NOT EXISTS idx_sourcing_commitments_due ON sourcing_commitments(due_at) WHERE status = 'open';
+
+CREATE TABLE IF NOT EXISTS sourcing_commitment_log (
+  id            BIGSERIAL PRIMARY KEY,
+  commitment_id BIGINT NOT NULL REFERENCES sourcing_commitments(id) ON DELETE CASCADE,
+  done_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  was_due_at    TIMESTAMPTZ NOT NULL,
+  done_by       UUID REFERENCES users(id),
+  note          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sourcing_commitment_log_done ON sourcing_commitment_log(done_at);
+
+CREATE TABLE IF NOT EXISTS sourcing_evidence (
+  id          BIGSERIAL PRIMARY KEY,
+  log_id      BIGINT NOT NULL REFERENCES sourcing_commitment_log(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL,        -- url | note | attestation | count | gmail | tagged_application | sheet_sync | reactivation_event
+  ref         TEXT,
+  source      TEXT NOT NULL CHECK (source IN ('auto','self')),
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS sourcing_exceptions (
+  id                    BIGSERIAL PRIMARY KEY,
+  plan_id               BIGINT NOT NULL REFERENCES sourcing_plans(id) ON DELETE CASCADE,
+  channel               TEXT NOT NULL DEFAULT '*',          -- '*' = plan-level
+  type                  TEXT NOT NULL,
+  subject_key           TEXT NOT NULL DEFAULT '',           -- coarse: '' except BLOCKER_OVERDUE (the blocked exception's id) — NEVER per-prospect
+  severity              INT  NOT NULL DEFAULT 0,
+  is_shadow             BOOLEAN NOT NULL DEFAULT false,     -- provisional: dashboard only, no queue/HM/email
+  status                TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','snoozed','blocked','resolved')),
+  detected_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reopen_count          INT NOT NULL DEFAULT 0,
+  evidence              JSONB NOT NULL DEFAULT '{}',        -- objective facts (counts/titles only — no prospect PII)
+  owner_user_id         UUID REFERENCES users(id),          -- UNUSED since 2026-10-19 (see sourcing_plans.owner_user_id)
+  resolution_path       TEXT CHECK (resolution_path IN ('catch_up','change_strategy','blocker','auto_cleared','role_closed')),
+  reason                TEXT,
+  corrective_action     TEXT,
+  blocker_owner_user_id UUID REFERENCES users(id),
+  blocker_due           DATE,
+  snooze_until          DATE,
+  resolved_at           TIMESTAMPTZ,
+  resolved_by           UUID REFERENCES users(id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sourcing_exceptions_live
+  ON sourcing_exceptions (plan_id, channel, type, subject_key)
+  WHERE status IN ('open','snoozed','blocked');
+CREATE INDEX IF NOT EXISTS idx_sourcing_exceptions_status ON sourcing_exceptions(status);
+
+CREATE TABLE IF NOT EXISTS sourcing_plan_changes (
+  id       BIGSERIAL PRIMARY KEY,
+  plan_id  BIGINT NOT NULL REFERENCES sourcing_plans(id) ON DELETE CASCADE,
+  at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  by       UUID REFERENCES users(id),
+  change   JSONB NOT NULL,
+  reason   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sourcing_plan_changes_plan ON sourcing_plan_changes(plan_id);
+
+ALTER TABLE sourcing_settings        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_plans           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_plan_channels   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_commitments     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_commitment_log  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_evidence        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_exceptions      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_plan_changes    ENABLE ROW LEVEL SECURITY;
+
+DROP TRIGGER IF EXISTS sourcing_plans_updated_at ON sourcing_plans;
+CREATE TRIGGER sourcing_plans_updated_at BEFORE UPDATE ON sourcing_plans FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS sourcing_plan_channels_updated_at ON sourcing_plan_channels;
+CREATE TRIGGER sourcing_plan_channels_updated_at BEFORE UPDATE ON sourcing_plan_channels FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS sourcing_commitments_updated_at ON sourcing_commitments;
+CREATE TRIGGER sourcing_commitments_updated_at BEFORE UPDATE ON sourcing_commitments FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
 -- ═════════════════════════════════════════════════════════════════════════════
 -- VERIFICATION — run after applying, should return 39+ rows
 -- ═════════════════════════════════════════════════════════════════════════════

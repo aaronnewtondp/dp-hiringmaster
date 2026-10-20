@@ -111,6 +111,24 @@ export const dashboardApi = {
   slaByRole:      (params?: Record<string, string | string[]>) => api.get('/dashboard/sla-by-role', { params }),
 };
 
+// Sourcing Execution & Accountability (backend/src/routes/sourcing.ts). Every GET answers `{ enabled:false }` while the
+// module is switched off — callers hide themselves rather than treating that as an error.
+export const sourcingApi = {
+  status:            ()                                              => api.get('/sourcing/status'),
+  people:            ()                                              => api.get('/sourcing/people'),
+  plan:              (roleId: string)                                => api.get(`/sourcing/plans/${roleId}`),
+  activate:          (planId: string, data: Record<string, unknown>) => api.post(`/sourcing/plans/${planId}/activate`, data),
+  updatePlan:        (planId: string, data: Record<string, unknown>) => api.patch(`/sourcing/plans/${planId}`, data),
+  // The channel goes in the body: "Naukri/IIMjobs" contains a slash.
+  setChannel:        (planId: string, data: Record<string, unknown>) => api.put(`/sourcing/plans/${planId}/channel`, data),
+  completeCommitment:(id: string, data: Record<string, unknown>)     => api.post(`/sourcing/commitments/${id}/complete`, data),
+  skipCommitment:    (id: string, reason: string)                    => api.post(`/sourcing/commitments/${id}/skip`, { reason }),
+  reopenCommitment:  (id: string)                                    => api.post(`/sourcing/commitments/${id}/reopen`, {}),
+  resolveException:  (id: string, data: Record<string, unknown>)     => api.post(`/sourcing/exceptions/${id}/resolve`, data),
+  queue:             ()                                              => api.get('/sourcing/queue'),
+  dashboard:         (params?: Record<string, string | string[]>)    => api.get('/dashboard/sourcing', { params }),
+};
+
 export const refChecksApi = {
   list:   (applicationId: string)         => api.get('/ref-checks', { params: { application_id: applicationId } }),
   create: (data: Record<string, unknown>) => api.post('/ref-checks', data),

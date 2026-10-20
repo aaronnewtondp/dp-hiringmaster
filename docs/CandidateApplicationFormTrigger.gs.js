@@ -18,6 +18,22 @@
  * its own different YOE sub-question(s) — so it's deliberately NOT sent
  * here rather than guessed via a fragile per-role column lookup that would
  * break silently every time the form's sections change.
+ *
+ * Sourcing attribution (2026-10-14, docs/SourcingModule_PRD_v2.md §7): the form
+ * gets ONE dropdown, "How did you hear about this role?", whose options are
+ * exactly HMS's channel vocabulary — LinkedIn, Naukri/IIMjobs, Agency, Internal
+ * Referral, Direct Outreach (+ "Other"). It is forwarded as `source_tag` and the
+ * backend stores it on applications.sub_source ONLY (never candidates.source, so
+ * the existing Source-quality numbers do not move). It is the applicant's own
+ * answer — "claimed" attribution. Sending it before the question exists, or to a
+ * backend that does not know it yet, is harmless (blank → 'untagged_default'
+ * once SOURCING_ENABLED=true on the backend; sub_source stays NULL while it is off).
+ * The question MUST be listed in HANDLED_ELSEWHERE below, otherwise this script's
+ * dynamic screening-answer capture would also record it as a screening question.
+ * Rollout order (docs/SourcingModule_Runbook.md): apply these two edits to the LIVE script first
+ * (the HANDLED_ELSEWHERE entry and the source_tag line — do NOT paste this reference copy over it:
+ * its ingest secret is a placeholder and the live script may have diverged), then enable the flag on
+ * the backend, and only then add the dropdown to the form.
  */
 
 const CANDIDATE_INGEST_URL = 'https://dp-hiringmaster-be.vercel.app/api/candidates/ingest';
@@ -73,6 +89,7 @@ function onFormSubmit(e) {
     'Preferred Location': true, 'Current Company': true, 'Current Industry': true,
     'Languages Known': true, 'Role Applying For': true, 'Resume': true,
     'Mention any relevant qualifications, skills, experience to support your application': true,
+    'How did you hear about this role?': true,   // forwarded as source_tag, not a screening answer
   };
   const screening_answers = [];
   for (const header in e.namedValues) {
@@ -100,6 +117,8 @@ function onFormSubmit(e) {
     // Asked once per role branch, like "Resume" — take whichever one the
     // respondent's branch actually filled in.
     qualifications_note: firstNonEmpty('Mention any relevant qualifications, skills, experience to support your application'),
+    // Sourcing attribution — blank until the dropdown exists / when the applicant skips it.
+    source_tag: firstNonEmpty('How did you hear about this role?'),
     // Role-specific screening Q&A, captured dynamically above.
     screening_answers: screening_answers,
     // current_esops, current_designation, years_of_experience: not asked by

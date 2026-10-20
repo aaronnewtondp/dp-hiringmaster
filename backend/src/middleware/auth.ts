@@ -12,6 +12,18 @@ declare global {
   }
 }
 
+// ─── Production smoke-test accounts are READ-ONLY ─────────────────────────────
+// The suite in hms-tests-final/tests/smoke signs in with two dedicated password accounts. They live on `hms-smoke.invalid`:
+// RFC 2606 reserves `.invalid`, so no real mailbox can exist there and Google sign-in (which only admits @digitalpaani.com)
+// can never reach them. They are created by SQL and sign in only through POST /api/auth/login. Whatever persona they hold,
+// every authenticated request that could change data is refused, so a leaked smoke password can read but never write.
+export const SMOKE_EMAIL_DOMAIN = 'hms-smoke.invalid';
+const READ_ONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+export function isSmokeAccount(email: unknown): boolean {
+  return typeof email === 'string' && email.trim().toLowerCase().endsWith(`@${SMOKE_EMAIL_DOMAIN}`);
+}
+
 // ─── Verify JWT and attach user to request ───────────────────────────────────
 export function authenticate(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
@@ -27,6 +39,10 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
     if (!secret) throw new Error('JWT_SECRET not configured');
     const payload = jwt.verify(token, secret) as JwtPayload;
     req.user = payload;
+    if (isSmokeAccount(payload.email) && !READ_ONLY_METHODS.has(req.method)) {
+      res.status(403).json({ error: 'Smoke-test accounts are read-only' });
+      return;
+    }
     next();
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' });

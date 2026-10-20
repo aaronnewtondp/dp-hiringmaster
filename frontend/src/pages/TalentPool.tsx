@@ -16,7 +16,7 @@ type Mode = 'hold_for_future' | 'archived';
 const LIMIT = 50;
 
 const COLUMN_INFO: Record<string, string> = {
-  'Status': "The application's Active/Hold for Future/Rejected/Withdrawn status — this is why the row is in Archived Pipeline.",
+  'Status': "The application's status. A candidate is listed when at least one application is Hold for Future (or, under Archived, Rejected or Withdrawn); all of their applications are shown, each with its own status.",
   'Application Date': 'Days since the candidate applied to this specific role.',
   'Last Added': "When this candidate/application pair last had activity — same underlying data as Candidates' Last Updated, just relabeled here.",
 };
@@ -161,14 +161,14 @@ export default function TalentPool() {
         />
         <input
           placeholder="Skills (comma-separated)"
-          title="Exact match against parsed résumé data — may return no results until résumé parsing populates this field"
+          title="Exact match on skills/industries stored on the candidate's profile. Nothing in HMS fills these today, so this will normally find no one — use Search or Tag instead."
           value={skills}
           onChange={e => resetAndSet<string>(setSkills)(e.target.value)}
           className="input w-52"
         />
         <input
           placeholder="Industry"
-          title="Exact match against parsed résumé data — may return no results until résumé parsing populates this field"
+          title="Exact match on skills/industries stored on the candidate's profile. Nothing in HMS fills these today, so this will normally find no one — use Search or Tag instead."
           value={industry}
           onChange={e => resetAndSet<string>(setIndustry)(e.target.value)}
           className="input w-36"

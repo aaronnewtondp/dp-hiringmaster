@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { isHRTier, canSeeCompForRole, stripRestrictedFields } from './auth.js';
+import { describe, it, expect, vi } from 'vitest';
+import jwt from 'jsonwebtoken';
+import type { Request, Response } from 'express';
+import { authenticate, isHRTier, isSmokeAccount, canSeeCompForRole, stripRestrictedFields } from './auth.js';
 import { Persona } from '../types/index.js';
 
 describe('isHRTier', () => {
@@ -113,5 +115,55 @@ describe('stripRestrictedFields', () => {
     const copy = { ...sample };
     stripRestrictedFields(sample, 'hiring_manager', false);
     expect(sample).toEqual(copy);
+  });
+});
+
+describe('isSmokeAccount', () => {
+  it('is true only for an address on the reserved hms-smoke.invalid domain', () => {
+    expect(isSmokeAccount('smoke.leadership@hms-smoke.invalid')).toBe(true);
+    expect(isSmokeAccount('  Smoke.HM@HMS-SMOKE.INVALID ')).toBe(true);
+    expect(isSmokeAccount('aaron.newton@digitalpaani.com')).toBe(false);
+    expect(isSmokeAccount('x@evil-hms-smoke.invalid.com')).toBe(false);
+    expect(isSmokeAccount('x@sub.hms-smoke.invalid')).toBe(false);          // only the domain itself
+    expect(isSmokeAccount(undefined)).toBe(false);
+    expect(isSmokeAccount(42)).toBe(false);
+  });
+});
+
+describe('authenticate — smoke-test accounts are read-only', () => {
+  const SECRET = 'unit-test-secret';
+  const run = (email: string, method: string) => {
+    process.env.JWT_SECRET = SECRET;
+    const token = jwt.sign({ userId: 'u1', email, persona: 'leadership', name: 'Smoke' }, SECRET);
+    const req = { headers: { authorization: `Bearer ${token}` }, method } as unknown as Request;
+    const json = vi.fn();
+    const res = { status: vi.fn().mockReturnValue({ json }) } as unknown as Response;
+    const next = vi.fn();
+    authenticate(req, res, next);
+    return { next, status: (res.status as ReturnType<typeof vi.fn>).mock.calls[0]?.[0], body: json.mock.calls[0]?.[0] };
+  };
+
+  it('lets a smoke account read', () => {
+    for (const m of ['GET', 'HEAD', 'OPTIONS']) expect(run('smoke.hm@hms-smoke.invalid', m).next).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses every method that could change data, with a 403 that says why', () => {
+    for (const m of ['POST', 'PATCH', 'PUT', 'DELETE']) {
+      const r = run('smoke.leadership@hms-smoke.invalid', m);
+      expect(r.next, m).not.toHaveBeenCalled();
+      expect(r.status, m).toBe(403);
+      expect(r.body.error).toMatch(/read-only/i);
+    }
+  });
+
+  it('does not touch anyone else — a real user can still write', () => {
+    for (const m of ['GET', 'POST', 'PATCH', 'DELETE']) expect(run('aaron.newton@digitalpaani.com', m).next, m).toHaveBeenCalledTimes(1);
+  });
+
+  it('still answers 401 for a missing or invalid token (the guard runs only after the token is verified)', () => {
+    const json = vi.fn();
+    const res = { status: vi.fn().mockReturnValue({ json }) } as unknown as Response;
+    authenticate({ headers: {}, method: 'POST' } as unknown as Request, res, vi.fn());
+    expect((res.status as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(401);
   });
 });

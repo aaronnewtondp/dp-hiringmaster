@@ -21,8 +21,8 @@ import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 const UNMATCHED_PAGE_SIZE = 50;
 
 const COLUMN_INFO: Record<string, string> = {
-  'Fit': "ResumeIQ's AI-generated score (0-100), averaged across 8 dimensions: Technical, Experience, Industry Fit, Culture Fit, Role Alignment, Trajectory, Leadership, Communication. Computed once, automatically, as soon as a candidate applies.",
-  'CTC → ECTC': "Candidate's current fixed CTC, then the Expected CTC they quoted for this role — both read from the candidate's own profile, not this application's legacy fields.",
+  'Fit': "ResumeIQ's score (0-100): the average of its 8 dimensions (Technical, Experience, Industry Fit, Culture Fit, Role Alignment, Trajectory, Leadership, Communication) × 10. The Senior UX/Product Designer role adds a ninth, Portfolio, once that review finishes. Scored automatically when the candidate applies; 75+ also tightens SLA windows to 24h.",
+  'CTC → ECTC': "Current fixed CTC → expected CTC, both from the candidate's own profile (one figure per candidate, not per role), in ₹ lakhs. 'Over Budget' = expected CTC above the top of the role's CTC band.",
   'Application Date': 'Days since the candidate applied — not the same as Last Updated.',
   'Company / Industry': "Current company and industry from the candidate's own profile, shown as one field.",
 };

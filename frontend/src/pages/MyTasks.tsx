@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, MessageSquare, Clock, AlertCircle, ListChecks, Megaphone } from 'lucide-react';
-import { dashboardApi, rolesApi } from '../services/api.ts';
+import { ClipboardList, MessageSquare, Clock, AlertCircle, ListChecks, Megaphone, Compass } from 'lucide-react';
+import { dashboardApi, rolesApi, sourcingApi } from '../services/api.ts';
 import { PendingAction, InterviewRound, Role, FEEDBACK_DUE_ACTION_TYPES } from '../types/index.ts';
 import { Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import InterviewFeedbackModal from '../components/InterviewFeedbackModal.tsx';
@@ -12,6 +12,8 @@ import { isNamedHiringManager } from '../utils/hiringManagers.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { formatDistanceToNow } from 'date-fns';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
+import SourcingQueue from '../components/sourcing/SourcingQueue.tsx';
+import { SourcingQueue as SourcingQueueData, sourcingQueueCount } from '../types/sourcing.ts';
 
 // Sentinel role_id used when a Hiring Manager owns no roles at all — mirrors
 // applyHiringManagerRoleLock's own backend convention (roleFilters.ts) so an
@@ -19,16 +21,17 @@ import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 // than an unfiltered (i.e. everyone else's) result.
 const NO_ROLES_OWNED_SENTINEL = '__no_roles_owned__';
 
-type Section = 'ready' | 'feedback' | 'other';
+type Section = 'ready' | 'feedback' | 'other' | 'sourcing';
 
 // ─── Section selector box ─────────────────────────────────────────────────────
-function SectionBox({ label, count, active, onClick, icon: Icon, accent }: {
+function SectionBox({ label, count, active, onClick, icon: Icon, accent, hint }: {
   label: string; count: number; active: boolean; onClick: () => void;
-  icon: React.ElementType; accent?: string;
+  icon: React.ElementType; accent?: string; hint?: string;
 }) {
   return (
     <button
       type="button"
+      title={hint}
       onClick={onClick}
       aria-pressed={active}
       className={`flex-1 min-w-[180px] card p-4 text-left transition-all border-2 ${
@@ -117,6 +120,32 @@ export default function MyTasks() {
   const [section, setSection] = usePersistedState<Section>('mytasks.section', 'ready');
   const [readyCount, setReadyCount] = useState(0);
 
+  // ── Sourcing box (additive; recruiters and the Super Admin only) ───────────────────────────────────────────
+  // Leadership keeps its deliberately alerts-only box and sees sourcing on the dashboard and in the weekly email; a
+  // Hiring Manager sees only the read-only role card. The box exists only while the module is switched on.
+  const isRecruiter = user?.persona === 'hr_recruiter' || user?.persona === 'super_admin';
+  const { data: sourcingStatus, isLoading: loadingSourcingStatus } = useQuery<{ data: { enabled: boolean } }>({
+    queryKey: ['sourcing-status'],
+    queryFn:  () => sourcingApi.status(),
+    enabled:  isRecruiter,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const showSourcing = isRecruiter && sourcingStatus?.data?.enabled === true;
+  const sourcingStatusPending = isRecruiter && loadingSourcingStatus;
+  // The persisted section may be 'sourcing' for someone who no longer has the box (or never had it, on a shared device):
+  // fall back to 'ready' rather than rendering a blank panel — but not while we are still finding out.
+  const activeSection: Section = section === 'sourcing' && !sourcingStatusPending && !showSourcing ? 'ready' : section;
+  const { data: sourcingQueueData, isLoading: loadingSourcingQueue, isError: sourcingQueueFailed, refetch: refetchSourcingQueue } =
+    useQuery<{ data: SourcingQueueData }>({
+      queryKey: ['my-tasks-sourcing', user?.email],
+      queryFn:  () => sourcingApi.queue(),
+      enabled:  showSourcing,
+      retry: false,
+      refetchInterval: 5 * 60 * 1000,
+    });
+  const sourcingQueue = sourcingQueueData?.data;
+
   // Arriving via RoleDetail's "Scorecard Summary" button (?role_id=...) is an
   // explicit, deliberate intent to see that role's scorecard — override
   // whatever section was last persisted.
@@ -192,7 +221,7 @@ export default function MyTasks() {
             align="left"
             text={leadershipAlertsOnly
               ? "Leadership Alerts is company-wide role-aging/compensation notices and the Feedback-Overdue escalation — visibility, not a personal to-do list, since nobody individually resolves these here."
-              : "Other Pending Actions only counts what's genuinely yours to resolve. Role-aging/compensation notices nobody can individually act on show separately in a Leadership Alerts panel below it — visible, never hidden, just not counted toward the badge."}
+              : "Other Pending Actions counts what's genuinely yours to resolve. HR/Admin see company-wide items here (HMS loads only the 100 highest-priority, oldest open items, shared with Feedback Due, so 100 means 'at least'); a Hiring Manager sees only items assigned to them. Role-aging/compensation notices and Feedback-Overdue escalations nobody can individually act on show in a Leadership Alerts panel below — visible, never counted."}
           />
         </div>
         <p className="text-sm text-gray-400 mt-1">
@@ -211,16 +240,18 @@ export default function MyTasks() {
       <div className="flex gap-3 flex-wrap">
         <SectionBox
           label="Ready for Review"
+          hint="Candidates waiting for a shortlist decision at Applied and Screened. The table also lists scored candidates at later stages for comparison (no actions there). HR/Admin see every role, a Hiring Manager their own roles, Leadership Founder-flagged candidates plus roles they are Hiring Manager of."
           count={readyCount}
-          active={section === 'ready'}
+          active={activeSection === 'ready'}
           onClick={() => setSection('ready')}
           icon={ClipboardList}
           accent="text-dp-600"
         />
         <SectionBox
           label="Feedback Due"
+          hint="Overdue interview and assignment feedback. HR/Admin see everyone's; a Hiring Manager sees only rounds where they are an interviewer."
           count={feedbackDue.length}
-          active={section === 'feedback'}
+          active={activeSection === 'feedback'}
           onClick={() => setSection('feedback')}
           icon={Clock}
           accent={feedbackDue.some(a => a.hours_overdue > 0) ? 'text-red-500' : 'text-amber-500'}
@@ -228,13 +259,24 @@ export default function MyTasks() {
         <SectionBox
           label={leadershipAlertsOnly ? 'Leadership Alerts' : 'Other Pending Actions'}
           count={leadershipAlertsOnly ? alerts.length + otherPending.length : otherPending.length}
-          active={section === 'other'}
+          active={activeSection === 'other'}
           onClick={() => setSection('other')}
           icon={leadershipAlertsOnly ? Megaphone : ListChecks}
         />
+        {showSourcing && (
+          <SectionBox
+            label="Sourcing"
+            hint="Plans waiting to be activated + tasks due today + open exceptions — one shared list for all of HR/Admin; there is no personal queue."
+            count={sourcingQueueCount(sourcingQueue)}
+            active={activeSection === 'sourcing'}
+            onClick={() => setSection('sourcing')}
+            icon={Compass}
+            accent={(sourcingQueue?.exception_count ?? 0) > 0 ? 'text-red-500' : 'text-dp-600'}
+          />
+        )}
       </div>
 
-      {section === 'ready' && (
+      {activeSection === 'ready' && (
         // Leadership waits for the pending response: it says whether Ready for Review also covers a role they are
         // Hiring Manager of, and fetching the founder-only list first would flash the wrong rows.
         isLeadership && loadingPending
@@ -254,7 +296,7 @@ export default function MyTasks() {
           )
       )}
 
-      {section === 'feedback' && (
+      {activeSection === 'feedback' && (
         loadingPending ? (
           <div className="flex justify-center p-12"><Spinner size="lg" /></div>
         ) : (
@@ -290,7 +332,7 @@ export default function MyTasks() {
         )
       )}
 
-      {section === 'other' && (
+      {activeSection === 'other' && (
         loadingPending ? (
           <div className="flex justify-center p-12"><Spinner size="lg" /></div>
         ) : leadershipAlertsOnly ? (
@@ -383,6 +425,15 @@ export default function MyTasks() {
             )}
           </div>
         )
+      )}
+
+      {activeSection === 'sourcing' && (
+        showSourcing ? (
+          <SourcingQueue
+            queue={sourcingQueue} loading={loadingSourcingQueue} failed={sourcingQueueFailed} onRetry={() => refetchSourcingQueue()}
+            onChanged={() => { refetchSourcingQueue(); qc.invalidateQueries({ queryKey: ['sourcing-plan'] }); }}
+          />
+        ) : <div className="flex justify-center p-12"><Spinner size="lg" /></div>
       )}
 
       {feedbackRound && (

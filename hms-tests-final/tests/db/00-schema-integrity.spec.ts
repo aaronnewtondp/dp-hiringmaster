@@ -130,3 +130,64 @@ test.describe('Schema integrity (local Postgres, direct connection)', () => {
     });
   });
 });
+
+// ─── Sourcing module schema (docs/SourcingModule_PRD_v2.md) ──────────────────────
+// The module's correctness rests on the database, not on the engine's in-process throttle: a partial unique index over EVERY
+// non-terminal exception status stops two concurrent engine runs (or a run racing a person's snooze) from creating a
+// duplicate, and RLS (no policies) keeps PostgREST/anon access out of tables that hold plan notes and reasons.
+test.describe('Sourcing module schema (local Postgres, direct connection)', () => {
+  let client: Client;
+  const TABLES = ['sourcing_settings', 'sourcing_plans', 'sourcing_plan_channels', 'sourcing_commitments', 'sourcing_commitment_log',
+                  'sourcing_evidence', 'sourcing_exceptions', 'sourcing_plan_changes'];
+
+  test.beforeAll(async () => { client = new Client({ connectionString: LOCAL_DB_URL }); await client.connect(); });
+  test.afterAll(async () => { await client.end(); });
+
+  test('all eight tables exist and every one has row level security enabled', async () => {
+    const { rows } = await client.query(
+      `SELECT relname, relrowsecurity FROM pg_class WHERE relkind = 'r' AND relname = ANY($1) ORDER BY relname`, [TABLES]);
+    expect(rows.map(r => r.relname)).toEqual([...TABLES].sort());
+    expect(rows.every(r => r.relrowsecurity === true)).toBe(true);
+  });
+
+  test('live-exception uniqueness is a partial index over open, snoozed AND blocked', async () => {
+    const { rows } = await client.query(`SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_sourcing_exceptions_live'`);
+    expect(rows).toHaveLength(1);
+    const def = rows[0].indexdef as string;
+    expect(def).toContain('UNIQUE');
+    for (const s of ['open', 'snoozed', 'blocked']) expect(def).toContain(`'${s}'`);
+    expect(def).not.toContain(`'resolved'`);
+  });
+
+  test('the database itself refuses a duplicate live exception, but a resolved one frees the slot', async () => {
+    await client.query('BEGIN');
+    try {
+      const plan = (await client.query(
+        `INSERT INTO sourcing_plans (role_id) SELECT id FROM roles ORDER BY id LIMIT 1
+         ON CONFLICT (role_id) DO UPDATE SET role_id = EXCLUDED.role_id RETURNING id`)).rows[0].id;
+      const ins = (status: string) => client.query(
+        `INSERT INTO sourcing_exceptions (plan_id, channel, type, subject_key, status) VALUES ($1, 'LinkedIn', 'CHANNEL_NOT_ACTIVATED', '', $2) RETURNING id`, [plan, status]);
+      const attempt = async (status: string) => {
+        await client.query('SAVEPOINT s');
+        try { const r = await ins(status); await client.query('RELEASE SAVEPOINT s'); return { ok: true as const, id: r.rows[0].id }; }
+        catch (e) { await client.query('ROLLBACK TO SAVEPOINT s'); return { ok: false as const, code: (e as { code?: string }).code }; }
+      };
+
+      const first = await attempt('open');
+      expect(first.ok).toBe(true);
+      for (const s of ['open', 'snoozed', 'blocked']) expect(await attempt(s)).toEqual({ ok: false, code: '23505' });   // unique_violation
+      await client.query(`UPDATE sourcing_exceptions SET status = 'resolved', resolved_at = NOW() WHERE id = $1`, [(first as { id: string }).id]);
+      expect((await attempt('open')).ok).toBe(true);                                                                    // resolved no longer holds the slot
+    } finally {
+      await client.query('ROLLBACK');
+    }
+  });
+
+  test('a plan row is deleted with its role (ON DELETE CASCADE) and one role has at most one plan', async () => {
+    const { rows } = await client.query(
+      `SELECT confdeltype FROM pg_constraint WHERE conrelid = 'sourcing_plans'::regclass AND contype = 'f' AND confrelid = 'roles'::regclass`);
+    expect(rows[0].confdeltype).toBe('c');
+    const uniq = await client.query(`SELECT 1 FROM pg_constraint WHERE conrelid = 'sourcing_plans'::regclass AND contype = 'u'`);
+    expect(uniq.rowCount).toBeGreaterThan(0);
+  });
+});

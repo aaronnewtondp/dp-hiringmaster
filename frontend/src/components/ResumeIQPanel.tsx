@@ -9,7 +9,7 @@ export default function ResumeIQPanel({ app }: { app: Application }) {
     return (
       <div className="border-t border-gray-100 pt-3 mt-3">
         <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">ResumeIQ</span>
-        <p className="text-xs text-gray-400 mt-1">Not yet scored — scoring runs automatically shortly after the candidate applies.</p>
+        <p className="text-xs text-gray-400 mt-1">Not scored — the automatic scoring at application time didn't complete. HR/Admin can retry it from My Tasks → Ready for Review.</p>
       </div>
     );
   }

@@ -12,6 +12,7 @@ import { getCompBenchmark } from '../services/compBenchmark.js';
 import { computeAging } from '../utils/aging.js';
 import { ALL_BREACH_ACTION_TYPES } from '../jobs/slaChecker.js';
 import { isNamedHiringManager, normalizeHiringManagerInput, splitHiringManagerNames } from '../utils/hiringManagers.js';
+import { onRoleSaved } from '../services/sourcingPlans.js';
 
 const router = Router();
 router.use(authenticate);
@@ -446,6 +447,18 @@ router.patch('/:id', async (req: Request, res: Response) => {
 
     return result.rows[0] as Role;
   });
+
+  // Sourcing module: keep the role's sourcing plan in step (seed a draft plan on Approved, pause/resume on On Hold,
+  // close on Closed, reconcile channels when Recruitment Mode is edited). The plan is reconciled with the role's CURRENT
+  // status on every real save, not with the one hop `existing` → `updatedRole`, so a role that went through several
+  // statuses (Closed → On Hold → Approved) can't strand its plan. Runs AFTER commit and BEFORE the slow JD
+  // generation below; gated on SOURCING_ENABLED and self-contained (own try/catch, tolerant of missing tables) so it
+  // can never fail or delay a role save.
+  await onRoleSaved(
+    { id: existing.id, status: existing.status, recruitment_mode: (existing as unknown as { recruitment_mode: string[] | null }).recruitment_mode },
+    { id: updatedRole.id, status: updatedRole.status, recruitment_mode: (updatedRole as unknown as { recruitment_mode: string[] | null }).recruitment_mode },
+    req.user!.userId,
+  );
 
   // Trigger JD generation when a role transitions into Approved —
   // synchronous (awaited), NOT fire-and-forget. This used to run via

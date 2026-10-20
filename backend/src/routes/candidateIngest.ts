@@ -3,6 +3,7 @@ import { transaction } from '../db/index.js';
 import { Candidate } from '../types/index.js';
 import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
 import { classifyGender } from '../utils/genderClassifier.js';
+import { isSourcingEnabled, normalizeSourceTag } from '../utils/sourcingConfig.js';
 
 const router = Router();
 
@@ -46,7 +47,7 @@ router.post('/ingest', async (req: Request, res: Response) => {
     expected_ctc, notice_period_days, current_company, current_industry,
     current_designation, current_location, years_of_experience, resume_drive_link,
     languages_known, role_applied_for, preferred_location, qualifications_note,
-    screening_answers,
+    screening_answers, source_tag,
   } = req.body;
 
   if (!email || !full_name) {
@@ -184,9 +185,12 @@ router.post('/ingest', async (req: Request, res: Response) => {
           const appResult = await client.query(
             `INSERT INTO applications (
                candidate_id, role_id, source_channel, preferred_location, qualifications_note,
-               screening_answers, stage, status, recruiter_screening_status, stage_entry_time, sla_hours
-             ) VALUES ($1,$2,'Job Application Form',$3,$4,$5,'Applied and Screened','Active','New',NOW(),48) RETURNING *`,
-            [candidate.id, roleId, toStr(preferred_location), toStr(qualifications_note), JSON.stringify(screeningAnswers)]
+               screening_answers, stage, status, recruiter_screening_status, stage_entry_time, sla_hours, sub_source
+             ) VALUES ($1,$2,'Job Application Form',$3,$4,$5,'Applied and Screened','Active','New',NOW(),48,$6) RETURNING *`,
+            [candidate.id, roleId, toStr(preferred_location), toStr(qualifications_note), JSON.stringify(screeningAnswers),
+             // Sourcing attribution (applications.sub_source only — candidates.source and Source-quality are untouched).
+             // Off ⇒ NULL, exactly as before.
+             isSourcingEnabled() ? normalizeSourceTag(source_tag) : null]
           );
           application = appResult.rows[0];
 

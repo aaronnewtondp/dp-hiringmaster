@@ -1,5 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { runSlaCheck, sendDailyDigest } from '../jobs/slaChecker.js';
+import { runSourcingCheck } from '../jobs/sourcingChecker.js';
+import { sendSourcingDigests } from '../services/sourcingDigest.js';
+import { isSourcingEnabled } from '../utils/sourcingConfig.js';
 
 const router = Router();
 
@@ -42,5 +45,25 @@ router.post('/email-digest', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Email digest failed' });
   }
 });
+
+// GET|POST /api/cron/sourcing-check — Sourcing module exception engine. One handler for both verbs: Vercel Cron
+// issues GET (the existing /email-digest route is POST-only and therefore never fires; deliberately left alone).
+// A no-op unless SOURCING_ENABLED=true. Same engine the dashboard/queue run opportunistically, so cron and a page
+// load are equivalent.
+async function sourcingCheck(req: Request, res: Response) {
+  if (!verifyCron(req, res)) return;
+  if (!isSourcingEnabled()) { res.json({ ok: true, enabled: false }); return; }
+  try {
+    const summary = await runSourcingCheck();
+    // Internal e-mails (off until switched on in the sourcing settings). Never throws: a mail problem is reported, not fatal.
+    const digests = await sendSourcingDigests();
+    res.json({ ok: true, enabled: true, ...summary, digests });
+  } catch (err) {
+    console.error('[cron] Sourcing check failed', err);
+    res.status(500).json({ error: 'Sourcing check failed' });
+  }
+}
+router.get('/sourcing-check', sourcingCheck);
+router.post('/sourcing-check', sourcingCheck);
 
 export default router;

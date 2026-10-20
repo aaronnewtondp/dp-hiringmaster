@@ -10,6 +10,8 @@ import EditableSection from '../components/shared/EditableSection.tsx';
 import { HIRING_MANAGER_FIELD_HINT } from '../utils/hiringManagers.ts';
 import BackButton from '../components/shared/BackButton.tsx';
 import CompBenchmarkPanel from '../components/CompBenchmarkPanel.tsx';
+import SourcingCard from '../components/sourcing/SourcingCard.tsx';
+import { useSourcingPlan, sourcingChip } from '../hooks/useSourcingPlan.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { format } from 'date-fns';
 
@@ -51,6 +53,12 @@ export default function RoleDetail() {
     queryFn:  () => rolesApi.activity(id!),
   });
 
+  // Sourcing plan (null/hidden while the module is off or for someone who may not see it).
+  const { data: sourcingData } = useSourcingPlan(id);
+  const sourcingChipInfo = sourcingChip(sourcingData);
+  // Once a plan exists it owns the channel list: Recruitment Mode is mirrored FROM it, so editing it here would drift.
+  const planOwnsChannels = !!(sourcingData && sourcingData.enabled && sourcingData.plan);
+
   const role     = roleData?.data?.role;
   const pipeline = pipelineData?.data?.pipeline || {};
   const total    = pipelineData?.data?.total || 0;
@@ -69,6 +77,8 @@ export default function RoleDetail() {
       toast.success('Role approved');
       qc.invalidateQueries({ queryKey: ['role', id] });
       qc.invalidateQueries({ queryKey: ['role-activity', id] });
+      // Approving makes the server seed this role's draft sourcing plan (before it responds), so the cached "no plan" is stale.
+      qc.invalidateQueries({ queryKey: ['sourcing-plan', id] });
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
       toast.error(msg || 'Failed to approve role');
@@ -137,6 +147,9 @@ export default function RoleDetail() {
   const saveRoleFields = async (changes: Record<string, unknown>) => {
     const res = await rolesApi.update(id!, changes);
     qc.invalidateQueries({ queryKey: ['role', id] });
+    // The role route keeps the sourcing plan in step with the role (a Recruitment Mode edit reconciles its channels, a status
+    // change pauses/closes/seeds it) before it responds — and the plan is cached as "fresh" for 30 s, so re-read it explicitly.
+    qc.invalidateQueries({ queryKey: ['sourcing-plan', id] });
     // The server matches the Hiring Manager field against HMS user names; a name nobody has (a typo, a person without an
     // account yet) is saved but gets no Hiring Manager access — say so instead of failing silently.
     const unmatched: string[] = res.data?.unmatched_hiring_managers ?? [];
@@ -164,6 +177,8 @@ export default function RoleDetail() {
       }
       setShowStatusModal(false);
       qc.invalidateQueries({ queryKey: ['role', id] });
+      // On Hold pauses the sourcing plan, Closed closes it, reopening returns it to draft — all done server-side before it responds.
+      qc.invalidateQueries({ queryKey: ['sourcing-plan', id] });
     } catch { toast.error('Failed to update status'); }
     setSaving(false);
   };
@@ -197,6 +212,19 @@ export default function RoleDetail() {
               <span>{role.location}</span>
               <span>·</span>
               <AgingBadge alert={role.aging_alert} daysOpen={role.days_open} daysOverdue={role.days_overdue} />
+              {sourcingChipInfo && (
+                <a
+                  href="#sourcing"
+                  data-testid="sourcing-chip"
+                  className={`px-2 py-0.5 rounded-full border text-[11px] font-medium ${
+                    sourcingChipInfo.tone === 'red' ? 'bg-red-50 text-red-700 border-red-200'
+                    : sourcingChipInfo.tone === 'amber' ? 'bg-amber-50 text-amber-700 border-amber-200'
+                    : sourcingChipInfo.tone === 'green' ? 'bg-green-50 text-green-700 border-green-200'
+                    : 'bg-gray-100 text-gray-600 border-gray-200'}`}
+                >
+                  {sourcingChipInfo.text}
+                </a>
+              )}
             </div>
           </div>
           <div className="text-right shrink-0 space-y-2">
@@ -244,7 +272,7 @@ export default function RoleDetail() {
             { key: 'ctc_band', label: 'CTC Band', type: 'text', hidden: !canHR },
             { key: 'must_have_skills', label: 'Must-have skills', type: 'textarea' },
             { key: 'nice_to_have_skills', label: 'Nice-to-have skills', type: 'textarea' },
-            { key: 'recruitment_mode', label: 'Recruitment Mode', type: 'multiselect', options: RECRUITMENT_CHANNELS },
+            { key: 'recruitment_mode', label: planOwnsChannels ? 'Recruitment Mode (managed in the Sourcing plan)' : 'Recruitment Mode', type: 'multiselect', options: RECRUITMENT_CHANNELS, readOnly: planOwnsChannels },
           ]}
         />
         {canHR && <CompBenchmarkPanel roleId={role.id} />}
@@ -337,7 +365,7 @@ export default function RoleDetail() {
         <div className="space-y-2">
           <EditableSection
             title="Links & Assets"
-            tooltip="Long-form and Social JD are normally auto-generated once a role is Approved, and can be re-run any time via Regenerate JD below. Some roles instead have a long-form JD written entirely outside the system — for those, this link points directly at that original document, Regenerate JD doesn't appear, and ResumeIQ scores against that document's real content."
+            tooltip="Long-form and Social JD are generated automatically when a role is Approved. While it is still Approved, HR can re-run them with Regenerate JD (it overwrites both links); once the role moves on they can't be regenerated here. Some roles have a long-form JD written outside the system — for those the link points straight at that document, Regenerate JD doesn't appear, and ResumeIQ scores against it. Assignment Link is the brief emailed to the candidate by Send Assignment."
             data={role}
             onSave={saveRoleFields}
             pendingLabels={role.status === 'Approved' ? {
@@ -426,6 +454,9 @@ export default function RoleDetail() {
           </div>
         )}
       </div>
+
+      {/* Sourcing plan — channels, commitments, evidence and exceptions (renders nothing while the module is off) */}
+      <SourcingCard roleId={role.id} />
 
       {/* Activity timeline — mirrors CandidateDetail.tsx's own (item #25) */}
       <div className="card overflow-hidden">

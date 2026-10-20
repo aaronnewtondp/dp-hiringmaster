@@ -37,6 +37,41 @@ auth-rejection path (wrong/missing secret, no token), which 401s before the
 request ever reaches the database. If you ever want broader production coverage,
 extend `tests/smoke/`, don't point `test:api`/`test:db`/`test:e2e` at prod.
 
+### Production smoke accounts
+
+Every production account is Google-only (since 2026-10-19 the seed password hash was removed from the 8 users that still had one), so
+the seeded users cannot sign in to production. `test:prod` therefore signs in as **two dedicated smoke accounts**:
+
+| Account | Persona | Why |
+|---|---|---|
+| `smoke.leadership@hms-smoke.invalid` | `leadership` (HR-tier) | sees everything an HR user sees; not a sourcing-owner candidate, so it never shows up in a recruiter picker |
+| `smoke.hm@hms-smoke.invalid` | `hiring_manager`, named on no role | the restricted view: no compensation, no agencies/benchmarks, empty states everywhere |
+
+How they are kept safe:
+- **Read-only, enforced by the backend.** Any authenticated request from the reserved domain that is not GET/HEAD/OPTIONS is answered
+  `403 Smoke-test accounts are read-only` (`backend/src/middleware/auth.ts`, unit-tested, and checked live on local Docker). A leaked
+  smoke password can read but never write. The suite itself never writes either; it never prints candidate data, and traces, videos and
+  screenshots are off for the `smoke` project so nothing is written to disk.
+- **No real identity behind them.** `.invalid` is reserved by RFC 2606, so no mailbox can exist there and Google sign-in (which admits only
+  `@digitalpaani.com`) can never reach them. They exist only as rows created by SQL and sign in only through `POST /api/auth/login`.
+- **Passwords never live in the repo.** Random 32-character passwords sit in `hms-tests-final/.env.smoke.local` (git-ignored, mode 600) or the
+  environment: `SMOKE_LEADERSHIP_EMAIL/PASSWORD`, `SMOKE_HM_EMAIL/PASSWORD`. `helpers/smoke-env.ts` loads them.
+
+**Creating them in production (done once, 2026-10-19 — only needed again to rotate a password).** `node scripts/smoke-accounts.mjs` prints the SQL (bcrypt hashes only — the passwords are never printed) from the
+passwords in `.env.smoke.local`, creating that file with fresh passwords if it is missing; `--rotate` replaces both passwords. Run the SQL
+in Supabase → SQL editor. Re-running it is safe and refreshes the hash. For local Docker:
+`node scripts/smoke-accounts.mjs | docker exec -i dp_hms_db psql -U hms_user -d dp_hms`. The read-only guard only
+protects once the backend that contains it is deployed; until then the accounts are ordinary HR-tier / Hiring-Manager accounts.
+
+Do not remove `POST /api/auth/login` from the backend: the smoke accounts (and local Docker's seeded users) sign in through it.
+
+**What `test:prod` covers** (`tests/smoke/`, 34 tests): `production.spec.ts` — health, auth, the ingest/no-token rejections, roles (HR sees
+compensation, the Hiring Manager never does), one role, the dashboard, agencies / eval questions / comp benchmarks with their persona gates, the main
+list and dashboard endpoints for both personas (status and shape only), user management is Super-Admin only, sourcing status once deployed;
+`production-ui.spec.ts` — a real browser opens every main page for both personas (heading renders, no redirect to login, no 5xx, no uncaught
+page error) plus a role page, and checks that `/users` bounces both back to the dashboard. The same suite runs against local Docker with
+`npm run test:smoke` (the smoke accounts exist there too, created with the script above).
+
 ## Environment variables
 
 | Variable                  | Default                                                                    | Description                              |
@@ -45,7 +80,7 @@ extend `tests/smoke/`, don't point `test:api`/`test:db`/`test:e2e` at prod.
 | `TEST_FRONTEND_URL`        | `http://localhost:5173`                                                     | Frontend base URL                         |
 | `ROLE_INGEST_SECRET`       | matches `docker-compose.yml`'s local dev value                              | Requisition Form webhook shared secret    |
 | `CANDIDATE_INGEST_SECRET`  | matches `docker-compose.yml`'s local dev value                              | Job Application Form webhook shared secret|
-| `CRON_SECRET`              | `local_dev_cron_secret_not_for_prod`                                         | Vercel Cron auth (sla-check/email-digest) |
+| `CRON_SECRET`              | `local_dev_cron_secret_not_for_prod`                                         | Vercel Cron auth (sla-check/email-digest/sourcing-check) |
 
 The ingest-secret defaults work out of the box against local Docker. Override them
 via env var for any run against an environment with different secrets (e.g. if you
@@ -61,7 +96,8 @@ calling `/api/auth/login` individually.
 This means:
 - The rate limiter (20 logins / 15 min in production) is never hit regardless of
   test count
-- Works against both local Docker (no rate limit) and production Vercel
+- Against local Docker it logs in the 5 seeded users; against production it logs in only the two smoke accounts
+  (the seeded users are Google-only there — see "Production smoke accounts")
 - Running against local right after running against prod (or vice versa)
   regenerates fresh tokens for the new target automatically — no stale-token risk
 
@@ -124,8 +160,8 @@ tests/
 │   ├── 39-dashboard-funnel-snapshot-endpoint.spec.ts # GET /api/dashboard/funnel-snapshot
 │   ├── 40-candidate-gender.spec.ts                 # auto-tag from name, manual correction, gender filter
 │   └── 41-multiple-rejection-reasons.spec.ts       # rejection_reason_cats[]: stored '; '-joined, legacy single field, validation, HM path
-├── db/  (13 files — direct Postgres via `pg`, LOCAL ONLY, never prod)
-│   ├── 00-schema-integrity.spec.ts        # dedicated sequences, GIN indexes
+├── db/  (14 files — direct Postgres via `pg`, LOCAL ONLY, never prod)
+│   ├── 00-schema-integrity.spec.ts        # dedicated sequences, GIN indexes, sourcing tables (RLS, live-exception partial unique index, cascade)
 │   ├── 01-talent-pool-archival.spec.ts    # 90-day archival threshold (backdates last_updated directly)
 │   ├── 02-role-discard-activity-log.spec.ts
 │   ├── 03-dashboard-audit-fixes.spec.ts
@@ -137,10 +173,12 @@ tests/
 │   ├── 09-sla-by-role.spec.ts             # GET /api/dashboard/sla-by-role: shape, reconciles with funnel-snapshot, filters/owner/HM lock, stale-role move, closed roles (real breaches via backdated stage_entry_time + /api/cron/sla-check)
 │   ├── 10-leadership-role-hiring-manager.spec.ts # a Leadership user who is also a role's named HM: /pending adds that role's HM queue + hm_roles (role-scoped), applications founder_flag+or_role_id union, persona/dashboard unchanged
 │   ├── 11-co-hiring-managers.spec.ts      # several Hiring Managers in one hiring_manager_name ("A, B"): comp visibility, dashboard lock, SLA row attribution + My Tasks queue, SLA KPI, Leadership co-HM, look-alike names rejected, SQL-vs-TypeScript parity of the name rule
-│   └── 12-portfolio-score-filter.spec.ts  # GET /api/applications?min_portfolio_score (whole-number scores, inclusive, NULL never matches, 400 on junk, composes with other filters) + roles/filter-options portfolio_analysis_enabled
+│   ├── 12-portfolio-score-filter.spec.ts  # GET /api/applications?min_portfolio_score (whole-number scores, inclusive, NULL never matches, 400 on junk, composes with other filters) + roles/filter-options portfolio_analysis_enabled
+│   └── 13-sourcing-plans.spec.ts          # Sourcing module: seed/activate/complete, engine firing + clearing (no duplicates under 6 concurrent runs), the 3 resolution paths, shadow mode, HM redaction (no PII), role hooks (hold/close — nothing is queued on close — reopen, and multi-hop status chains that must not strand a plan), managing a running plan (a channel added mid-flight gets its first commitment, follow-ons revive when an activation is completed again, Undo-skip rules, owner / strategy-note edits), hooks survive missing tables, source_tag → sub_source (35 tests). NEEDS SOURCING_ENABLED=true on the backend (skips itself otherwise)
 ├── smoke/
-│   └── production.spec.ts   # safe for live Vercel — read-only + auth-rejection checks only
-└── e2e/  (7 files)
+│   ├── production.spec.ts      # safe for live Vercel — READ-ONLY API checks + auth-rejection checks, as the two smoke accounts
+│   └── production-ui.spec.ts   # the same idea in a real browser: every main page opens for both personas
+└── e2e/  (8 files)
     ├── 01-login.spec.ts
     ├── 02-dashboard.spec.ts             # + Hiring Funnel Snapshot chevron/rail/tile interactions, SLA-breaches-by-role chart (render, drill-down, table view)
     ├── 03-jd-generation.spec.ts         # slow, real JD generation through the actual UI
@@ -148,7 +186,8 @@ tests/
     ├── 05-unlinked-candidates.spec.ts   # unlinked panel + Link-to-role modal
     ├── 06-schedule-round.spec.ts        # ScheduleRoundModal — IST timezone regression, email
     │                                    # validation, stage-gated button visibility
-    └── 07-create-role-and-filters.spec.ts
+    ├── 07-create-role-and-filters.spec.ts
+    └── 08-sourcing.spec.ts              # Sourcing module in the browser: dashboard section is last, recruiter gets a My Tasks Sourcing box, Leadership gets none, role card + header chip + read-only Recruitment Mode, Hiring Manager read-only card, other-role HM gets no card. Skips itself unless SOURCING_ENABLED=true
 ```
 
 ## Module/logic-level tests (Vitest) — a separate layer from this suite
@@ -208,8 +247,9 @@ form). E2E tests work around this by:
 2. Injecting the JWT into `localStorage` via `page.evaluate()`
 3. Navigating to `/dashboard`
 
-This works against both local Docker and production because the `/api/auth/login`
-endpoint still exists in the backend (it was only removed from the frontend UI).
+This works against local Docker, where the seeded users have a password. Against production only the two
+read-only smoke accounts can sign in this way (every real account is Google-only since 2026-10-19); the `e2e` project itself is local-only,
+and `tests/smoke/production-ui.spec.ts` is its read-only production counterpart.
 
 ## Seeded data reference
 
@@ -224,7 +264,7 @@ endpoint still exists in the backend (it was only removed from the frontend UI).
 | R007 | Senior UX/Product Designer   |
 
 Test users: `aaron.newton@`, `garima@`, `alex@`, `satyadev@`, `nalin@` —
-all `@digitalpaani.com`, password `password123`.
+all `@digitalpaani.com`, password `password123` (the LOCAL Docker seed only — production accounts have no password).
 
 **Persona note**: `aaron.newton@` is genuinely seeded as `leadership` (Founders
 Office), not `hr_recruiter` — confirmed directly against the database. It's kept
