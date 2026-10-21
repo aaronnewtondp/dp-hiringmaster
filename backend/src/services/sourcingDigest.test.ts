@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // The orchestration is under test (what is sent, to whom, when — and when nothing is); SQL is answered from canned rows.
 const claimed = new Set<string>();
@@ -84,6 +84,32 @@ describe('daily HR digest — one message to the HR/Admin team, because sourcing
     expect(sqlSeen.some(q => /owner_user_id/.test(q))).toBe(false);                      // no per-owner lookup any more
   });
 
+  describe('links in the message (FRONTEND_URL)', () => {
+    const saved = process.env.FRONTEND_URL;
+    afterEach(() => { if (saved === undefined) delete process.env.FRONTEND_URL; else process.env.FRONTEND_URL = saved; });
+
+    it('each role links to its plan in the Dashboard\'s Sourcing workspace, and the old role-page anchor is gone', async () => {
+      process.env.FRONTEND_URL = 'https://hms.example.com/';
+      exceptionRows = [exc(), exc('R6')];
+      await sendSourcingDigests(WED, send);
+      expect(sent).toHaveLength(1);
+      expect(sent[0].text.match(/https?:\/\/\S+/g)).toEqual([
+        'https://hms.example.com/dashboard?sourcing_role=R5#sourcing-workspace',
+        'https://hms.example.com/dashboard?sourcing_role=R6#sourcing-workspace',
+      ]);
+      expect(sent[0].text).not.toMatch(/\/roles\/|#sourcing(?!-)/);
+      expect(sent[0].text).toContain('Sourcing plans section on the Dashboard');
+    });
+
+    it('with no FRONTEND_URL the message carries no link at all (never a broken relative one)', async () => {
+      delete process.env.FRONTEND_URL;
+      exceptionRows = [exc()];
+      await sendSourcingDigests(WED, send);
+      expect(sent[0].text).not.toContain('http');
+      expect(sent[0].text).not.toContain('sourcing_role');
+    });
+  });
+
   it('sends nothing when nobody has anything to act on', async () => {
     const r = await sendSourcingDigests(WED, send);
     expect(r.daily_sent).toBe(false);
@@ -153,6 +179,22 @@ describe('weekly summary', () => {
     expect(sent[0].text).toContain('3 of 8 open roles have an active plan; 5 still waiting to be activated.');
     expect(sent[0].text).toContain('75%');
     expect(sent[0].text).toContain('2 provisional signals');
+  });
+
+  it('every exception links to its role\'s plan in the Dashboard\'s Sourcing workspace', async () => {
+    const saved = process.env.FRONTEND_URL;
+    process.env.FRONTEND_URL = 'https://hms.example.com';
+    try {
+      exceptionRows = [exc(), exc('R6')];
+      await sendSourcingDigests(MON, send);
+      expect(sent[0].text.match(/https?:\/\/\S+/g)).toEqual([
+        'https://hms.example.com/dashboard?sourcing_role=R5#sourcing-workspace',
+        'https://hms.example.com/dashboard?sourcing_role=R6#sourcing-workspace',
+      ]);
+      expect(sent[0].text).not.toMatch(/\/roles\/|#sourcing(?!-)/);
+    } finally {
+      if (saved === undefined) delete process.env.FRONTEND_URL; else process.env.FRONTEND_URL = saved;
+    }
   });
 
   it('is skipped on other days, and only once on a Monday', async () => {

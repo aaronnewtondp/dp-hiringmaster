@@ -23,7 +23,9 @@ function activationAction(channel: string): string {
   switch (channel) {
     case 'Agency': return 'Choose the agencies, send the role brief and mark it done';
     case 'Internal Referral': return 'Launch the referral push and mark it done';
-    case 'Direct Outreach': return 'Set up the outreach list and weekly target, then mark it done';
+    case 'Direct Outreach': return 'Log the campaign link and the weekly sourcing target, then mark it done';
+    case 'LinkedIn':
+    case 'Naukri/IIMjobs': return `Log the ${channel} post link and the weekly sourcing target, then mark it done`;
     default: return `Publish on ${channel} and mark it done`;
   }
 }

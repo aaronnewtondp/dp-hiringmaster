@@ -266,6 +266,12 @@ live.
       `dp-hiringmaster-be` Production and the backend redeployed (`dpl_36JxBH4H…`); `/api/sourcing/status` answers `enabled:true` and the
       34-test production smoke suite passes with it on. The go-live clock (`go_live_date`, `shadow_until` = +42 days) starts at the first
       real use of the Sourcing queue or dashboard section. Rollback: flag false + redeploy, or Instant Rollback to `dpl_BoLi6zv…`.
+- [ ] **Sourcing workspace release (2026-10-21, Aaron's seven changes)** — BUILT on branch `feat/sourcing-workspace`, NOT yet released: the plan moved from the
+      role page to Dashboard → Sourcing plans (role switcher, history timeline); a weekly qualified target per role; AI next steps in Needs attention;
+      plan history logs every action; LinkedIn / Naukri/IIMjobs / Direct Outreach = log the post (link + weekly target) then an automatic red/green weekly
+      tracker; Close channel (summary kept, reopenable) replaces Stop using; Applications by source and the tracker read the form's "How did you hear about this opening?"
+      field. Release order and the production migration are in `docs/SourcingModule_Runbook.md` ("Release 2026-10-21"). Item 5.3 of the request was blank
+      — the portals keep their 30-day renewal task unless told otherwise.
 - [ ] **Activate plans in waves (HR)** — P0/P1 roles first, R016 or R019 as the dry run; tell the HR team before the first open. The Google
       Form dropdown (and the Apps Script change that goes with it) is OPTIONAL — it only tells you which channel an applicant came from.
       Digest e-mails stay off until switched on in settings. Order and caveats: the runbook.
@@ -279,7 +285,7 @@ live.
 - [x] **Help page, info markers and User Access Guide brought up to date (2026-10-19)** — `Help.tsx` answers rewritten against the code (My Tasks
       is boxes, Scorecard Summary is the table inside Ready for review, the Sourcing FAQ group shows only while the module is on, a
       "What e-mails does HMS send?" item that says there is no daily pending-items mail); info-marker texts corrected on Dashboard, Roles,
-      Active Candidates, Scorecard, Archived Pipeline, Agencies, My Tasks, candidate and role pages; the guide (docx + PDF) is Version 5.
+      Active Candidates, Scorecard, Archived Pipeline, Agencies, My Tasks, candidate and role pages; the guide (docx + PDF) is Version 5.1 (sourcing workspace release).
       `Help.test.tsx` pins the gate and three answers. Follow-up (2026-10-20): new markers on the three Gender columns (one shared text,
       `utils/columnInfo.ts`), the Active Candidates and Archived Pipeline subtitles, and the Archived Pipeline Stage / Fit / CTC → ECTC /
       Notice / Company-Industry / Actions headers; the narrow columns were widened so the label still shows next to the icon.

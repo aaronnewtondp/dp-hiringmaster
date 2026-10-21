@@ -18,6 +18,14 @@ describe('activationSpec — anchored to the activation date, in working days', 
   it('counts Monday–Friday only (a Friday approval is due the following Monday)', () => {
     expect(activationSpec('LinkedIn', '2026-10-16', {}).due_date).toBe('2026-10-19');
   });
+  it('LinkedIn, Naukri/IIMjobs and Direct Outreach: the first task is logging the post with its link and a weekly sourcing target', () => {
+    for (const ch of ['LinkedIn', 'Naukri/IIMjobs', 'Direct Outreach']) {
+      const s = activationSpec(ch, '2026-10-14', {});
+      expect(s.title).toMatch(/^Log the .*\(link and weekly sourcing target\)$/);
+    }
+    expect(activationSpec('Agency', '2026-10-14', {}).title).toBe('Select agencies and share the role brief');
+    expect(activationSpec('Internal Referral', '2026-10-14', {}).title).toBe('Launch the employee referral push');
+  });
   it('is always kind activate_channel and one-time', () => {
     for (const ch of ['LinkedIn', 'Agency', 'Internal Referral', 'Direct Outreach']) {
       const s = activationSpec(ch, '2026-10-14', {});
@@ -50,12 +58,12 @@ describe('followOnSpecs', () => {
     expect(s.cadence_days).toBe(14);
     expect(s.due_date).toBe('2026-10-25'); // 14 Oct + 11
   });
-  it('agency: weekly follow-up, referral: repost, outbound: weekly with a baseline window', () => {
+  it('agency: weekly follow-up, referral: repost', () => {
     expect(followOnSpecs('Agency', done, S, {})[0]).toMatchObject({ kind: 'followup_agency', cadence_days: 7, due_date: '2026-10-21', subject_key: 'all' });
     expect(followOnSpecs('Internal Referral', done, S, {})[0]).toMatchObject({ kind: 'repost_referral', cadence_days: 14, due_date: '2026-10-28' });
-    const out = followOnSpecs('Direct Outreach', done, S, {})[0];
-    expect(out).toMatchObject({ kind: 'weekly_outbound', cadence_days: 7, due_date: '2026-10-21' });
-    expect(out.meta.baseline_until).toBe('2026-11-11'); // 4 weeks
+  });
+  it('Direct Outreach has no follow-on task: the automatic weekly tracker measures it (the first version\'s "log contacts" task is gone)', () => {
+    expect(followOnSpecs('Direct Outreach', done, S, {})).toEqual([]);
   });
   it('an unknown channel has no follow-ons', () => {
     expect(followOnSpecs('Campus', done, S, {})).toEqual([]);

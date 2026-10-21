@@ -7,8 +7,28 @@ describe('describeException', () => {
       count: 1, overdue: [{ kind: 'activate_channel', title: 'Publish the posting', due: '2026-10-13', days_overdue: 1 }] } });
     expect(d.committed).toBe('LinkedIn: Publish the posting');
     expect(d.happened).toBe('Not done — 1 day overdue (was due 2026-10-13)');
-    expect(d.next_action).toBe('Publish on LinkedIn and mark it done');
+    expect(d.next_action).toBe('Log the LinkedIn post link and the weekly sourcing target, then mark it done');
+    expect(describeException({ type: 'CHANNEL_NOT_ACTIVATED', channel: 'Naukri/IIMjobs', evidence: {} }).next_action).toBe('Log the Naukri/IIMjobs post link and the weekly sourcing target, then mark it done');
+    expect(describeException({ type: 'CHANNEL_NOT_ACTIVATED', channel: 'Direct Outreach', evidence: {} }).next_action).toBe('Log the campaign link and the weekly sourcing target, then mark it done');
     expect(describeException({ type: 'CHANNEL_NOT_ACTIVATED', channel: 'Agency', evidence: {} }).next_action).toContain('Choose the agencies');
+  });
+
+  it('an overdue channel set-up tells each channel what to log or do — it never says "publish" for a tracked one', () => {
+    const next = (channel: string) => describeException({ type: 'CHANNEL_NOT_ACTIVATED', channel, evidence: {} }).next_action;
+    expect(next('Internal Referral')).toBe('Launch the referral push and mark it done');
+    expect(next('Agency')).toBe('Choose the agencies, send the role brief and mark it done');
+    for (const tracked of ['LinkedIn', 'Naukri/IIMjobs', 'Direct Outreach']) {
+      expect(next(tracked), tracked).toMatch(/^Log the .* and the weekly sourcing target, then mark it done$/);
+      expect(next(tracked), tracked).not.toMatch(/publish/i);
+    }
+    expect(next('Direct Outreach')).not.toContain('Direct Outreach post');          // an outreach campaign is not a "post"
+    expect(next('SomeNewChannel')).toBe('Publish on SomeNewChannel and mark it done');
+  });
+
+  it('a task or follow-up that is overdue keeps its own next action, whatever the channel', () => {
+    const ev = { count: 1, overdue: [{ title: 'Renew', due: '2026-10-10', days_overdue: 1 }] };
+    expect(describeException({ type: 'COMMITMENT_OVERDUE', channel: 'LinkedIn', evidence: ev }).next_action).toBe('Do it and mark it done — or choose a resolution');
+    expect(describeException({ type: 'FOLLOWUP_OVERDUE', channel: 'Agency', evidence: ev }).next_action).toBe('Send the follow-up and mark it done');
   });
 
   it('rolled-up commitments say how many more, using the worst lateness', () => {

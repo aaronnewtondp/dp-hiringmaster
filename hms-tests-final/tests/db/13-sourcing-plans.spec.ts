@@ -10,12 +10,15 @@
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
 import { getToken, authed, CRON_SECRET, BASE, CANDIDATE_INGEST_SECRET, uid } from '../helpers/api';
+import { purgeRolesFast } from '../helpers/sourcing-db';
 
 const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
 const SENTINEL = 'SENTINEL-note-must-not-reach-a-hiring-manager';
 const SENTINEL_URL = 'https://example.com/SENTINEL-url';
 
 type Json = Record<string, any>;
+// LinkedIn / Naukri/IIMjobs / Direct Outreach: logging the post needs a link and a weekly sourcing target (spec 14 tests that rule itself).
+const LOG = { url: 'https://example.com/posts/spec13', weekly_target: 10 };
 
 test.describe('Sourcing module', () => {
   test.describe.configure({ mode: 'serial' });
@@ -69,6 +72,9 @@ test.describe('Sourcing module', () => {
     satyadev = await getToken(request, 'hm_satyadev'); lead = await getToken(request, 'leadership');
     aaronId = (await client.query(`SELECT id FROM users WHERE email='aaron.newton@digitalpaani.com'`)).rows[0].id;
     savedSettings = (await client.query(`SELECT key, value FROM sourcing_settings`)).rows;
+    // The local database is in real use now (the engine has stamped a go-live date in the past), which would make every throwaway draft
+    // role raise PLAN_NOT_ACTIVATED. Pin the go-live date to the future for the run; afterAll puts the saved value back.
+    await client.query(`INSERT INTO sourcing_settings (key, value) VALUES ('go_live_date', $1::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify(ymd(60))]);
     roleId = await newRole();
   });
 
@@ -82,11 +88,8 @@ test.describe('Sourcing module', () => {
       for (const s of savedSettings.filter(s => ['shadow_until', 'go_live_date', 'qualified_rule'].includes(s.key))) {
         await client.query(`INSERT INTO sourcing_settings (key, value) VALUES ($1, $2::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [s.key, JSON.stringify(s.value)]);
       }
-      if (roleIds.length) {
-        await client.query(`DELETE FROM applications WHERE role_id = ANY($1)`, [roleIds]);
-        await client.query(`DELETE FROM roles WHERE id = ANY($1)`, [roleIds]);                   // plans cascade
-      }
-      if (candidateEmails.length) await client.query(`DELETE FROM candidates WHERE email = ANY($1)`, [candidateEmails]);
+      // one transaction without per-row foreign-key scans of the (huge) pending_actions table — see helpers/sourcing-db.ts
+      await purgeRolesFast(client, roleIds, candidateEmails);
     }
     await client.end();
   });
@@ -139,7 +142,7 @@ test.describe('Sourcing module', () => {
     const r = await post(request, hr, `/api/sourcing/plans/${planId}/activate`, {
       strategy_note: SENTINEL,
       channels: [
-        { channel: 'LinkedIn', already_running: true, posted_at: posted, url: SENTINEL_URL },
+        { channel: 'LinkedIn', already_running: true, posted_at: posted, url: SENTINEL_URL, weekly_target: 20 },
         { channel: 'Agency' },
         { channel: 'Naukri/IIMjobs' },
         { channel: 'Internal Referral', exclude_reason: 'Not needed for this role' },
@@ -155,6 +158,9 @@ test.describe('Sourcing module', () => {
     expect(v.plan.baseline.channels.map((c: Json) => c.channel).sort()).toEqual(['Agency', 'Internal Referral', 'LinkedIn', 'Naukri/IIMjobs']);
     expect(channel(v, 'LinkedIn').state).toBe('active');
     expect(commitment(v, 'LinkedIn', 'activate_channel').status).toBe('done');
+    // attesting a tracked channel as running stores its link and weekly target and starts its weekly tracker today
+    expect(channel(v, 'LinkedIn').tracker).toMatchObject({ applicable: true, target: 20, link: SENTINEL_URL, anchor: ymd(0) });
+    expect(channel(v, 'Agency').tracker).toMatchObject({ applicable: false, target: null, anchor: null });
     // the renewal clock starts at the posting's own date (30 days live − 3 days lead = 27 days)
     const renew = commitment(v, 'LinkedIn', 'renew_posting');
     expect(renew.status).toBe('open');
@@ -177,7 +183,7 @@ test.describe('Sourcing module', () => {
   });
 
   test('completing a channel activation spawns that channel\'s follow-on; completing twice is refused', async ({ request }) => {
-    const done = await post(request, hr, `/api/sourcing/commitments/${ids.naukriActivate}/complete`, { url: 'https://www.naukri.com/job-listings-test', posted_at: ymd(0) });
+    const done = await post(request, hr, `/api/sourcing/commitments/${ids.naukriActivate}/complete`, { url: 'https://www.naukri.com/job-listings-test', weekly_target: 15, posted_at: ymd(0) });
     expect(done.status).toBe(200);
     const v = await plan(request);
     expect(channel(v, 'Naukri/IIMjobs').state).toBe('active');
@@ -284,7 +290,8 @@ test.describe('Sourcing module', () => {
     expect(res.status).toBe(200);
     await cron(request);
     const v = await plan(request);
-    expect(channel(v, 'Agency').state).toBe('excluded');
+    // dropping the channel while resolving CLOSES it: reported as 'closed' with the resolution reason as the close reason (not a "left out" channel)
+    expect(channel(v, 'Agency')).toMatchObject({ state: 'closed', closed_reason: 'Agencies are not right for this role', excluded_reason: null });
     expect(channel(v, 'Agency').commitments.every((m: Json) => m.status === 'skipped')).toBe(true);
     // the BLOCKER_OVERDUE row is keyed to the blocked one, which is now resolved ⇒ it clears too
     expect((await liveExceptions()).filter(e => e.channel === 'Agency')).toHaveLength(0);
@@ -319,7 +326,7 @@ test.describe('Sourcing module', () => {
     await cron(request);
     const draftGap = await client.query(`SELECT e.is_shadow FROM sourcing_exceptions e JOIN sourcing_plans p ON p.id=e.plan_id WHERE p.role_id=$1 AND e.type='VOLUME_GAP'`, [draftRole]);
     expect(draftGap.rows[0].is_shadow).toBe(true);
-    // P2/P3 roles have no volume target in the SOP
+    // P2/P3 roles have no volume target until someone sets one on the plan (spec 14 covers the per-role target)
     const p2 = await newRole({ title: 'P2 volume', priority: 'P2' });
     await cron(request);
     expect((await client.query(`SELECT 1 FROM sourcing_exceptions e JOIN sourcing_plans p ON p.id=e.plan_id WHERE p.role_id=$1`, [p2])).rowCount).toBe(0);
@@ -337,7 +344,7 @@ test.describe('Sourcing module', () => {
     await cron(request);
     expect((await liveExceptions()).find(e => e.type === 'VOLUME_GAP')).toBeUndefined();             // 5 ≥ 5 today ⇒ no gap
     const v = await plan(request);
-    expect(v.volume).toMatchObject({ weekly_qualified: 5, scored: 5, shortlisted: 0, min: 5, applicable: true });
+    expect(v.volume).toMatchObject({ weekly_qualified: 5, scored: 5, shortlisted: 0, min: 5, applicable: true, target_source: 'default', role_target: null, default_target: 5 });   // a P1 role with no target of its own: the SOP default
     await client.query(`DELETE FROM applications WHERE role_id=$1`, [roleId]);
     await cron(request);
     expect((await liveExceptions()).find(e => e.type === 'VOLUME_GAP')).toBeTruthy();                // and it comes back when they go
@@ -375,7 +382,7 @@ test.describe('Sourcing module', () => {
   });
 
   // ── Role-change hooks ───────────────────────────────────────────────────────────────────────────
-  test('role On Hold pauses the plan and stops its clocks; resuming shifts due dates by the time paused', async ({ request }) => {
+  test('role On Hold pauses the plan and stops its clocks; resuming shifts due dates by the whole days it sat paused', async ({ request }) => {
     const before = (await client.query(`SELECT due_at FROM sourcing_commitments WHERE id=$1`, [ids.linkedinRenew])).rows[0].due_at as Date;
     expect((await authed(request, hr).patch(`/api/roles/${roleId}`, { status: 'On Hold' })).status()).toBe(200);
     expect((await plan(request)).plan.status).toBe('paused');
@@ -681,7 +688,7 @@ test.describe('Sourcing module', () => {
     const first = await activations(pid, 'Direct Outreach');
     expect(first).toHaveLength(1);                                                                    // it used to have none: nothing was due, nothing chased
     expect(first[0].status).toBe('open');
-    expect(first[0].title).toMatch(/outbound/i);
+    expect(first[0].title).toMatch(/Direct Outreach campaign/i);
     expect(commitment(v, 'Direct Outreach', 'activate_channel').due_date >= ymd(1)).toBe(true);       // due from today, never already overdue
     expect(channel(v, 'LinkedIn').commitments).toHaveLength(1);                                       // the channel that was already there is untouched
     expect(await changeCount(rid, 'channels_added_on_role')).toBe(1);
@@ -722,12 +729,14 @@ test.describe('Sourcing module', () => {
     // Agency's first task is 2 working days after the day the channel was added; resuming moves every open date by the pause. Anchored to
     // the day the pause began it ends up ≤ 4 calendar days after resume (2 working days across a weekend). Anchored to "today" it would be
     // 7–9 days out — the whole 5-day pause later, so a long hold meant the channel was never chased.
+    // (The shift moves an end-of-IST-day timestamp by the pause plus the few seconds the test took, so the date can roll over midnight into
+    // the next day: the bound is today + 5, not + 4. Anchored to "today" it is never below today + 7.)
     const due = commitment(v, 'Agency', 'activate_channel').due_date as string;
-    expect(due >= ymd(1) && due <= ymd(4), `Agency activation due ${due}`).toBe(true);
+    expect(due >= ymd(1) && due <= ymd(5), `Agency activation due ${due}`).toBe(true);
   });
 
   test('PUT …/channel: adding is validated, never changes a channel that is already in the plan, and starts the first commitment from today', async ({ request }) => {
-    const { rid, pid } = await activeRole(request, 'Channel PUT', ['LinkedIn'], [{ channel: 'LinkedIn', already_running: true, posted_at: ymd(-2) }]);
+    const { rid, pid } = await activeRole(request, 'Channel PUT', ['LinkedIn'], [{ channel: 'LinkedIn', already_running: true, posted_at: ymd(-2), ...LOG }]);
     const add = (b: object, tok = hr) => put(request, tok, `/api/sourcing/plans/${pid}/channel`, b);
     expect((await add({ channel: 'Telegram', state: 'planned' })).status).toBe(400);
     expect((await add({ channel: 'Agency', state: 'maybe' })).status).toBe(400);
@@ -762,7 +771,7 @@ test.describe('Sourcing module', () => {
   });
 
   test('a skipped follow-on comes back when its channel is brought back and the activation is completed again — a follow-on that is already running is left alone', async ({ request }) => {
-    const { rid, pid } = await activeRole(request, 'Follow-on revival', ['LinkedIn'], [{ channel: 'LinkedIn', already_running: true, posted_at: ymd(-2) }]);
+    const { rid, pid } = await activeRole(request, 'Follow-on revival', ['LinkedIn'], [{ channel: 'LinkedIn', already_running: true, posted_at: ymd(-2), ...LOG }]);
     const renewId = commitment(await plan(request, hr, rid), 'LinkedIn', 'renew_posting').id as string;
     const state = async () => (await client.query(`SELECT status, due_at FROM sourcing_commitments WHERE id=$1`, [renewId])).rows[0];
 
@@ -775,7 +784,7 @@ test.describe('Sourcing module', () => {
     expect((await state()).status).toBe('skipped');
 
     // completing the activation again re-runs the channel: the follow-on is open again with a fresh due date (it used to stay skipped for good)
-    expect((await post(request, hr, `/api/sourcing/commitments/${act.id}/complete`, { posted_at: ymd(0) })).status).toBe(200);
+    expect((await post(request, hr, `/api/sourcing/commitments/${act.id}/complete`, { posted_at: ymd(0), ...LOG })).status).toBe(200);
     const revived = await state();
     expect(revived.status).toBe('open');
     expect(commitment(await plan(request, hr, rid), 'LinkedIn', 'renew_posting').due_date).toBe(ymd(27));
@@ -784,24 +793,24 @@ test.describe('Sourcing module', () => {
     await client.query(`UPDATE sourcing_commitments SET due_at = NOW() + INTERVAL '10 days' WHERE id=$1`, [renewId]);
     const pinned = +new Date((await state()).due_at);
     expect((await post(request, hr, `/api/sourcing/commitments/${act.id}/reopen`)).status).toBe(200);
-    expect((await post(request, hr, `/api/sourcing/commitments/${act.id}/complete`, { posted_at: ymd(0) })).status).toBe(200);
+    expect((await post(request, hr, `/api/sourcing/commitments/${act.id}/complete`, { posted_at: ymd(0), ...LOG })).status).toBe(200);
     expect(+new Date((await state()).due_at)).toBe(pinned);
   });
 
   test('role closed → reopened → re-activated with "already running": the follow-ons skipped by the close run again', async ({ request }) => {
-    const { rid, pid } = await activeRole(request, 'Close reopen reactivate', ['LinkedIn'], [{ channel: 'LinkedIn', already_running: true, posted_at: ymd(-2) }]);
+    const { rid, pid } = await activeRole(request, 'Close reopen reactivate', ['LinkedIn'], [{ channel: 'LinkedIn', already_running: true, posted_at: ymd(-2), ...LOG }]);
     await setStatus(request, rid, 'Closed – Filled');
     expect(commitment(await plan(request, hr, rid), 'LinkedIn', 'renew_posting').status).toBe('skipped');
     await setStatus(request, rid, 'Live – Sourcing');
     expect((await planRow(rid)).status).toBe('draft');
-    expect((await post(request, hr, `/api/sourcing/plans/${pid}/activate`, { channels: [{ channel: 'LinkedIn', already_running: true, posted_at: ymd(-1) }] })).status).toBe(200);
+    expect((await post(request, hr, `/api/sourcing/plans/${pid}/activate`, { channels: [{ channel: 'LinkedIn', already_running: true, posted_at: ymd(-1), ...LOG }] })).status).toBe(200);
     const v = await plan(request, hr, rid);
     expect(commitment(v, 'LinkedIn', 'renew_posting').status).toBe('open');                           // it used to stay skipped: the role was chased for nothing
     expect(commitment(v, 'LinkedIn', 'renew_posting').due_date).toBe(new Date(new Date(`${ymd(-1)}T12:00:00Z`).getTime() + 27 * 86400000).toISOString().slice(0, 10));
   });
 
   test('POST …/reopen: only a plan that is active, a commitment that is not open, a channel that is in the plan, and only HR', async ({ request }) => {
-    const { rid, pid } = await activeRole(request, 'Reopen rules', ['LinkedIn', 'Agency'], [{ channel: 'LinkedIn', already_running: true, posted_at: ymd(-2) }, { channel: 'Agency' }]);
+    const { rid, pid } = await activeRole(request, 'Reopen rules', ['LinkedIn', 'Agency'], [{ channel: 'LinkedIn', already_running: true, posted_at: ymd(-2), ...LOG }, { channel: 'Agency' }]);
     const v = await plan(request, hr, rid);
     const renewId = commitment(v, 'LinkedIn', 'renew_posting').id as string;
     const agencyId = commitment(v, 'Agency', 'activate_channel').id as string;
@@ -858,7 +867,7 @@ test.describe('Sourcing module', () => {
   });
 
   test('completing is refused for a SKIPPED recurring commitment, a channel that is left out, a closed plan and a draft — and a paused plan cannot be "activated"', async ({ request }) => {
-    const { rid, pid } = await activeRole(request, 'Complete guards', ['LinkedIn', 'Agency'], [{ channel: 'LinkedIn', already_running: true, posted_at: ymd(-2) }, { channel: 'Agency' }]);
+    const { rid, pid } = await activeRole(request, 'Complete guards', ['LinkedIn', 'Agency'], [{ channel: 'LinkedIn', already_running: true, posted_at: ymd(-2), ...LOG }, { channel: 'Agency' }]);
     const v = await plan(request, hr, rid);
     const renewId = commitment(v, 'LinkedIn', 'renew_posting').id as string;
     const agencyId = commitment(v, 'Agency', 'activate_channel').id as string;
@@ -942,7 +951,7 @@ test.describe('Sourcing module', () => {
     expect((await client.query(`SELECT owner_user_id FROM sourcing_plans WHERE id=$1`, [dv.plan.id])).rows[0].owner_user_id).toBeNull();
     // any HR user — not just whoever activated it — can complete, skip and edit: the persona owns the plan
     const renew = commitment(await plan(request, hr, draft), 'LinkedIn', 'activate_channel').id as string;
-    expect((await post(request, hr2, `/api/sourcing/commitments/${renew}/complete`, { note: 'done by another recruiter' })).status).toBe(200);
+    expect((await post(request, hr2, `/api/sourcing/commitments/${renew}/complete`, { note: 'done by another recruiter', ...LOG })).status).toBe(200);
     expect((await patchPlan(request, hr2, dv.plan.id, { strategy_note: 'Edited by another recruiter' })).status).toBe(200);
     // the people list (for naming who must unblock a blocker) hides the smoke accounts and is HR-only
     const people = await get(request, hr, '/api/sourcing/people');
@@ -953,7 +962,7 @@ test.describe('Sourcing module', () => {
 
   test('commitment-level actions race safely with plan-level ones: complete / skip / reopen against excluding the channel or closing the role never deadlock and never leave open work on a left-out channel or a closed plan', async ({ request }) => {
     for (let round = 0; round < 5; round++) {
-      const { rid, pid } = await activeRole(request, `Race ${round}`, ['LinkedIn'], [{ channel: 'LinkedIn', already_running: true, posted_at: ymd(-2) }]);
+      const { rid, pid } = await activeRole(request, `Race ${round}`, ['LinkedIn'], [{ channel: 'LinkedIn', already_running: true, posted_at: ymd(-2), ...LOG }]);
       const v = await plan(request, hr, rid);
       const renewId = commitment(v, 'LinkedIn', 'renew_posting').id as string;
       const actId = commitment(v, 'LinkedIn', 'activate_channel').id as string;

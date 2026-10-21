@@ -1,6 +1,6 @@
 # Sourcing Execution & Accountability — Product Spec (current state)
 
-**Document status:** reflects the system **as built on 19 October 2026**. Phases P0–P2 are built, tested and verified locally; the database schema is applied in production; the feature is **switched off** in production and the code is not yet deployed. P3 and P4 are specified here but not built. · **Owner:** Aaron Newton (Founders Office) · **Origin:** Mansi Jain's seed PRD · **Supersedes:** the 14 October 2026 design spec (whose "as built" notes are folded in below).
+**Document status:** reflects the system **as built on 21 October 2026**. Phases P0–P2 are live in production (switched on 20 October). The 21 October **workspace release** — the Dashboard sourcing workspace, per-role qualified target, weekly channel trackers, Close/Reopen channel, plan history and AI next steps — is built and tested locally on a branch and is **not yet merged or deployed**; its database change is not yet applied in production. P3 and P4 are specified here but not built. · **Owner:** Aaron Newton (Founders Office) · **Origin:** Mansi Jain's seed PRD · **Supersedes:** the 14 October 2026 design spec (whose "as built" notes are folded in below).
 
 ---
 
@@ -48,7 +48,8 @@ It is an **execution-management layer**, not another candidate-pipeline dashboar
 | **Public holidays are not modelled**; working days are Monday–Friday | Aaron, 19 Oct 2026 |
 | E-mail digests stay **off** | Aaron, 19 Oct 2026 |
 | Stay on Vercel Hobby as is; leave the dormant e-mail-digest cron alone | Aaron, 19 Oct 2026 |
-| The Google Form change (the "How did you hear about this role?" dropdown) is **optional** — it only improves channel attribution | 19 Oct 2026 |
+| The Google Form change (the "How did you hear about this opening?" dropdown) was optional on 19 Oct; from 21 Oct it also feeds the weekly channel tracker, so it is needed for the tracker to count | 19 / 21 Oct 2026 |
+| Channel tasks: log the post (link + weekly sourcing target), then an automatic weekly tracker (red/green); Close channel replaces Stop using and keeps a summary; the qualified target is per role; Needs attention gives AI-written next steps; the plan history logs every action; the whole plan moved from the role page to a Dashboard workspace | 21 Oct 2026 |
 
 ## 5. Who can do what
 
@@ -110,17 +111,33 @@ The plan is reconciled from the role's **new status** and the plan's **current s
 
 ### 7.2 Managing a running plan
 
-On an **active or paused** plan, HR-tier users have these controls on the role's Sourcing card (a draft chooses its channels at activation; a closed plan is finished; a Hiring Manager sees none):
+On an **active or paused** plan, HR-tier users have these controls in the plan's panel on the Dashboard (a draft chooses its channels at activation; a closed plan is finished; a Hiring Manager sees none):
 
 | Control | What it does |
 |---|---|
 | **Add channel** | Adds a channel that is not in the plan. Its first task falls due in 1–2 working days from today (on a paused plan, 1–2 working days after the role is back on). Adding a channel already in the plan is refused. |
 | **Bring back** | Restores a channel that was left out, showing the earlier reason. Completing its first task again brings its follow-ons back with fresh dates; ones already running are left alone. |
 | **Undo skip** | Reopens a skipped task: a skipped follow-up is due tomorrow, a skipped first task gets its normal 1–2 working days. Not offered for a channel that is left out. |
-| **Stop using** | Leaves a channel out, with a required reason; its open tasks are skipped. |
-| **Edit strategy note** | The note HR sees on the card; every change is written to the plan history. |
+| **Close channel** | Stops a channel, with a required reason. Its open tasks are skipped and nothing is chased, but the post link, the targets and every weekly result stay on the plan as a summary (§7.3). Replaces "Stop using". |
+| **Reopen channel** | Brings a closed channel back: its follow-up tasks return and the weekly tracker restarts from that day (the next day if it was closed the same day) with the same target. |
+| **Edit target and link** | On a live LinkedIn / Naukri/IIMjobs / Direct Outreach channel: changes the weekly sourcing target and the post link (§7.3). |
+| **Edit plan** | The strategy note (HR only) and this role's weekly qualified target (§7.4); every change is written to the plan history. |
 
 Rules enforced by the server: a task that was skipped, or belongs to a channel that is left out or a closed plan, cannot be marked done; a plan can be activated only while it is a draft; every action on a task takes the plan's lock first, so two people acting at once can neither deadlock nor leave open work on a closed plan or a left-out channel.
+
+### 7.3 LinkedIn, Naukri/IIMjobs and Direct Outreach: log the post, then a weekly tracker
+
+These three channels run as **two** things (21 Oct 2026). The first task is *logging the post* — the job post, or the outreach campaign. To complete it (or to tick "already running" at activation) HR must give the **link** and a **weekly sourcing target**: a whole number of applicants per week, qualified and unqualified together. The tracker starts the day it is logged.
+
+From then on HMS measures the channel automatically. It counts every application to the role whose **"How did you hear about this opening?"** answer on the application form maps to that channel, in consecutive 7-day periods from the logging day (India dates). When a week ends it records **actual vs target** — **green "Met"** at or above the target, **red "Missed"** below — as one line on the channel, and as an entry in the plan history; the week in progress shows live above them. Nobody types the numbers in. The renewal reminder for the two portals (every ~30 days) stays; Direct Outreach's earlier "log this week's contacts" task is gone because the tracker replaces it; Agency and Internal Referral are unchanged.
+
+A target can be changed on a live channel (**Edit target and link**): weeks that already finished keep the target they were measured against. A tracker runs only while its channel is live and its plan is active. Anything that stops one — closing the channel, leaving it out, removing it from the role's Recruitment Mode, the role going On Hold, the role closing — records the weeks that had ended and then the week in progress as **"cut short"** (shown, but neither met nor missed, and not counted in the totals) and stops the tracker; starting again (logging the post again, Reopen channel, the role coming back) begins a fresh tracker from that day. A channel that is live but has no target (it was logged before this release) has its "log the post" task handed back with a due date two days after the release, and tracking starts when HR completes it with a link and a target.
+
+**Close channel keeps the story.** A closed channel shows its summary: closing date and reason, the post link, the weekly target, weeks tracked and how many were on target, how many applicants carried its tag (and how many qualified), and the weekly results. **Reopen channel** continues it.
+
+### 7.4 The weekly qualified target is per role
+
+Each plan carries its own target of qualified candidates in the last 7 days (**Edit plan**, or at activation; 1–500). Blank means the default: **5 for a P0/P1 role** (the SOP), **none for a P2/P3 role** — and a P2/P3 role is checked like any other once it has one. The panel shows "X / Y qualified in the last 7 days" and says whether Y is the role's own or the default. The "not enough qualified candidates" signal, the My Tasks volume line and the workspace pills all use it. It is separate from a channel's weekly sourcing target (§7.3).
 
 **Recruitment Mode.** The role's own "Recruitment Mode" field is read-only on the role page once a plan exists; the plan is authoritative and mirrors one way, into the role, through the audited role edit. A channel added to the role by any other route joins the plan with its first task; one removed there is left out (the automatic reason is matched exactly, so a recruiter's own reason is never overridden).
 
@@ -131,8 +148,8 @@ Computed on read, idempotent and isolated: it uses its own tables, its own 3-min
 | Exception | Raised when | Live or provisional |
 |---|---|---|
 | **Plan not activated** | A role approved **after go-live** still has no active plan more than 1 working day later (existing roles appear in the "Plans to activate" list instead, so they can be rolled out in waves) | Live |
-| **Channel not live** | A channel's first task is overdue | Live |
-| **Task overdue** | Any other open task is past its due day (renewal, repost, weekly outbound) | Live |
+| **Channel set-up overdue** | A channel's first task is overdue (for LinkedIn, Naukri/IIMjobs and Direct Outreach that is logging the post: link and weekly target) | Live |
+| **Task overdue** | Any other open task is past its due day (renewal, repost, follow-up) | Live |
 | **Follow-up overdue** | The agency follow-up is overdue | Live |
 | **Not enough qualified candidates** | An open P0/P1 role has fewer than 5 qualified in the rolling 7 days on **each** of the last 5 working days | **Provisional** until `shadow_until` |
 | **Blocker overdue** | A recorded blocker's deadline has passed | Live |
@@ -153,16 +170,24 @@ Provisional signals cannot be resolved. System facts and the recruiter's stated 
 
 ## 9. Where it appears
 
-1. **Role page → Sourcing card** (between Pipeline and Activity) and a header chip ("Sourcing on track", "Sourcing: 2 issues", "Sourcing paused", "Sourcing plan not activated"). The card shows the plan state and "Owner: HR", the volume gauge with both qualified parts, "Needs attention" exceptions, each channel with its tasks and evidence badges, applications by source, and the plan history.
+1. **Dashboard → Sourcing plans** — the **last** section, below "Sourcing execution" (moved here from the role page on 21 Oct 2026). A pill for every role with an active or paused plan switches the panel below: the plan state and "Owner: HR", the target gauge with both qualified parts, **Needs attention** (each problem with its recommended next steps — §9.1), each channel with its weekly tracker (red/green weeks), tasks and close/reopen, applications by source, and the **plan history** timeline. Plans waiting to be activated are listed under the pills so they can be opened and activated. The role page keeps only a header chip ("Sourcing on track", "Sourcing: 2 issues", "Sourcing paused", "Sourcing plan not activated") that opens the role's plan there. A Hiring Manager sees the same panel for their own roles, read-only and without links, notes, closing reasons, history or recommended steps.
 2. **My Tasks → Sourcing** (HR/Admin and Super Admin): plans to activate, tasks due today, open exceptions grouped by role (top 5 and "show N more"), a count of those catching up or blocked, and this week's volume against target. One shared queue for all of HR.
-3. **Dashboard → Sourcing execution** — the **last** section, after Operational velocity: a one-line summary (active plans / open roles, on-time % over 14 days, overdue count, open exceptions by priority) and an exceptions table (top 10, "show all") with *committed / what happened / next action / age*. Hiring Managers see only their own roles, without provisional rows or blocker dates.
+3. **Dashboard → Sourcing execution** — after Operational velocity: a one-line summary (active plans / open roles, on-time % over 14 days, overdue count, open exceptions by priority) and an exceptions table (top 10, "show all") with *committed / what happened / next action / age*. Hiring Managers see only their own roles, without provisional rows or blocker dates.
 4. **E-mails** (internal only, from hr@, **off by default**): one daily note to all active HR/Admin users when something needs doing (weekdays), and a Monday summary to the configured leadership addresses. Each kind is claimed for the day first, so a retried cron cannot send twice.
 
-## 10. Attribution (optional)
+### 9.1 Recommended next steps (AI)
 
-Today every Job Application Form applicant is stamped `LinkedIn` by the ingest, so **channel yield cannot be trusted**. The optional fix is a visible dropdown on the form, **"How did you hear about this role?"** (LinkedIn, Naukri/IIMjobs, Agency, Internal Referral, Direct Outreach, Other), mapped by the Apps Script to a `source_tag` and stored in `applications.sub_source`; untagged applicants are labelled "Not tagged". It is the applicant's own answer, so it is *claimed* attribution; sources with fewer than five applications are flagged "too few to judge". `candidates.source` and the existing Source quality figures are untouched.
+Under **Needs attention**, each problem's **Next** box and a short plan-level box give concrete steps written from the role's actual situation: which channel, what to do, by when. HMS hands an AI model (Claude) a *facts pack* — the role, its target and the gap, the pipeline **as counts** (waiting for a shortlist decision, scored above 60, over 48 hours, interviewing, new this week, the Hold-for-Future pool on other roles), each channel's weekly target, this week, last four weeks and open tasks, and the open problems. It contains **no candidate names, e-mails, phone numbers or links**. The answer is validated (a step may only name one of the five channels or one of the problems it was given), saved, and reused for up to a day while the numbers are the same; it is written again when they change (at once when a *new* problem appears) and on **Refresh** (once a minute at most). If the AI is unavailable or has no key, rule-based steps from the same facts are shown and labelled. HR/Admin and Leadership only.
 
-**This is optional.** Without it the module works completely — plans, tasks, exceptions, the queue and the dashboard — and only the "Applications by source" table cannot say where applicants came from. If done: update the live Apps Script first (two edits; never paste the reference copy over it), enable the module, then add the dropdown.
+### 9.2 Plan history
+
+Every action on a plan is logged and shown as a timeline with who did it: tasks done, skipped or undone; channels added, closed or reopened; target and link edits; the strategy note; activation, hold, resume, close; resolutions (catch up, blocker, change plan). HMS adds its own entries, marked **System**: a problem it flagged or saw clear by itself (provisional signals are not logged), and the result of each finished tracker week. Filter by tasks, channels, weekly results, targets, alerts or plan; the latest 200 are loaded. HR/Admin and Leadership only.
+
+## 10. Attribution
+
+Today every Job Application Form applicant is stamped `LinkedIn` by the ingest, so **channel yield cannot be trusted**. The fix is a visible dropdown on the form, **"How did you hear about this opening?"**, with the options **Linkedin, Naukri/IIMJobs, DigitalPaani HR Outreach, Hiring Agency, DigitalPaani Employee Referral**. The Apps Script forwards it as a `source_tag` and the backend maps each option to a channel — Linkedin → LinkedIn, Naukri/IIMJobs → Naukri/IIMjobs, **DigitalPaani HR Outreach → Direct Outreach, Hiring Agency → Agency, DigitalPaani Employee Referral → Internal Referral** — and stores it in `applications.sub_source` (spelling and case are forgiven; a form with no answer, or an answer that is none of these, is labelled "Not tagged" or "Other"). Since 21 Oct 2026 it also **drives the weekly channel tracker** (§7.3), so each job post or campaign should link to the form with its option pre-filled (Google Forms → "Get pre-filled link"). It is the applicant's own answer, so it is *claimed* attribution; sources with fewer than five applications are flagged "too few to judge". `candidates.source` and the existing Source quality figures are untouched.
+
+**Without it** the module still works — plans, tasks, exceptions, the queue and the dashboard — but the weekly trackers count nothing (every week would read as missed) and "Applications by source" cannot say where applicants came from, so add the field before relying on the tracker. Order: update the live Apps Script first (the two HANDLED_ELSEWHERE entries and the `source_tag` line; never paste the reference copy over it), have the module on, then add the dropdown.
 
 ## 11. Data model
 
@@ -205,7 +230,7 @@ All routes answer `{ enabled: false }` (reads) or 503 (writes) while the module 
 - **One switch.** Without `SOURCING_ENABLED=true` on the backend the module is inert: reads say "disabled", writes are refused, the role hook runs no queries, the UI hides itself. **Rollback** = set it to false and redeploy (tables stay, inert); a guarded script removes them.
 - **Hooks never break existing flows.** The sourcing hook on a role save runs after the save commits and before JD generation, has its own error handling and tolerates missing tables — proven by a test that renames a sourcing table and shows a role save still succeeds.
 - **PII.** Plan payloads carry no candidate personal data, and the Hiring Manager view is redacted (see §5).
-- **Production today.** The schema is applied in Supabase (migration `20261019025305`, eight empty tables, matching the repo exactly). The code was merged on 20 October (PR #9) and `SOURCING_ENABLED=true` was set on the production backend the same day, so the module is on; its go-live clock starts at the first real use and no plan is activated yet. Six production roles' Hiring Manager names were corrected to the users' full names on 19 October (R003, R005, R007, R012, R0015, R020) so the Hiring Manager rules match.
+- **Production today.** The schema is applied in Supabase (migration `20261019025305`, eight empty tables, matching the repo exactly). The code was merged on 20 October (PR #9) and `SOURCING_ENABLED=true` was set on the production backend the same day, so the module is on; its go-live clock starts at the first real use. As of 21 October one plan (R003) has been activated by HR. Six production roles' Hiring Manager names were corrected to the users' full names on 19 October (R003, R005, R007, R012, R0015, R020) so the Hiring Manager rules match.
 - **Go-live order.** Deploy the backend, then the frontend (the dashboard shows a "couldn't load" card until the backend is live); set the flag and redeploy; activate P0/P1 roles in waves, with R016 as a dry run. (Optional: the Google Form change in §10.)
 - **Vercel Hobby** is non-commercial and allows one cron run a day; the engine therefore also runs whenever the queue or dashboard is opened. Staying on Hobby was a deliberate choice.
 

@@ -15,7 +15,7 @@ import {
 import {
   isSourcingEnabled, OPEN_ROLE_STATUSES, PRIORITY_SEVERITY, QualifiedRule, SourcingSettings,
 } from '../utils/sourcingConfig.js';
-import { ensureDraftPlansForOpenRoles } from '../services/sourcingPlans.js';
+import { ensureDraftPlansForOpenRoles, logChangeQ, syncChannelWeeksSafe } from '../services/sourcingPlans.js';
 import { loadSettings, stampGoLiveDefaults } from '../services/sourcingSettings.js';
 import { qualifiedAt, QualifiedInput, QUALIFIED_TIMESTAMPS_SQL } from '../utils/sourcingQualified.js';
 
@@ -164,13 +164,16 @@ export interface RoleForVolumeCheck {
   plan_id: string;
   role_id: string;
   priority: string;
+  /** This role's own weekly qualified target (sourcing_plans.weekly_qualified_target). Absent ⇒ the default, which exists for P0/P1 only. */
+  target?: number | null;
   apps: QualifiedInput[];
 }
 
 /**
  * Breach when the rolling-7-day qualified count is below the minimum on EACH of the last N working days.
  * Computed from immutable timestamps (never snapshots), so a window can be rebuilt for any past day.
- * Only P0/P1 (the SOP sets no volume target for P2/P3). Threshold-based ⇒ shadow until `shadow_until`.
+ * The target is the role's own (set on its plan) or, failing that, the SOP default for P0/P1 — a P2/P3 role is checked only once someone
+ * has given it a target. Threshold-based ⇒ shadow until `shadow_until`.
  */
 export function detectVolumeGap(
   roles: RoleForVolumeCheck[], now: Date, settings: SourcingSettings, lowPipelineRoles: ReadonlySet<string> = new Set(),
@@ -182,7 +185,8 @@ export function detectVolumeGap(
   const out: DetectedException[] = [];
 
   for (const r of roles) {
-    if (r.priority !== 'P0' && r.priority !== 'P1') continue;
+    const min = r.target ?? (r.priority === 'P0' || r.priority === 'P1' ? settings.volume_min_qualified : null);
+    if (min === null || min < 1) continue;
     const qual = r.apps
       .map(a => qualifiedAt(a, settings.qualified_rule))
       .filter((d): d is Date => d !== null);
@@ -192,7 +196,7 @@ export function detectVolumeGap(
       const start = endOfIstDay(addCalendarDays(d, -settings.volume_window_days)).getTime();
       return { date: d, count: qual.filter(q => q.getTime() > start && q.getTime() <= end).length };
     });
-    if (perDay.length === 0 || !perDay.every(p => p.count < settings.volume_min_qualified)) continue;
+    if (perDay.length === 0 || !perDay.every(p => p.count < min)) continue;
 
     const latest = perDay[perDay.length - 1];
     const endLatest = endOfIstDay(latest.date).getTime();
@@ -203,7 +207,7 @@ export function detectVolumeGap(
       severity: severityFor(r.priority, settings.volume_gap_working_days, lowPipelineRoles.has(r.role_id)),
       is_shadow: shadow,
       evidence: {
-        rule: settings.qualified_rule, min: settings.volume_min_qualified, window_days: settings.volume_window_days,
+        rule: settings.qualified_rule, min, window_days: settings.volume_window_days,
         weekly_qualified: latest.count,
         shortlisted: r.apps.filter(a => inWindow(a.shortlisted_at)).length,
         scored: r.apps.filter(a => inWindow(a.scored_at)).length,
@@ -262,6 +266,9 @@ export async function runSourcingCheck(now: Date = new Date()): Promise<Sourcing
   await stampGoLiveDefaults(today);   // first enabled run: go-live = today, threshold detectors shadow for 6 weeks
   const settings = await loadSettings();
 
+  // Finish every channel-tracker week that has ended (one cheap query when nothing is pending) — also the daily cron's job.
+  await syncChannelWeeksSafe(null, now);          // never throws: a fault in the weekly tracker must not stop exception detection
+
   // A role that reached Approved without a draft plan (hook failed, or pre-existing) gets one here — idempotent.
   await ensureDraftPlansForOpenRoles();
 
@@ -284,10 +291,10 @@ export async function runSourcingCheck(now: Date = new Date()): Promise<Sourcing
 
   // Wave 2 — volume inputs + blocked exceptions (2 concurrent).
   const [volumeRoles, blockedRows] = await Promise.all([
-    query<{ plan_id: string; plan_status: string; role_id: string; priority: string }>(
-      `SELECT p.id::text AS plan_id, p.status AS plan_status, p.role_id, r.priority
+    query<{ plan_id: string; plan_status: string; role_id: string; priority: string; target: number | null }>(
+      `SELECT p.id::text AS plan_id, p.status AS plan_status, p.role_id, r.priority, p.weekly_qualified_target AS target
          FROM sourcing_plans p JOIN roles r ON r.id = p.role_id
-        WHERE r.status = ANY($1::text[]) AND p.status IN ('draft','active') AND r.priority IN ('P0','P1')`,
+        WHERE r.status = ANY($1::text[]) AND p.status IN ('draft','active') AND (r.priority IN ('P0','P1') OR p.weekly_qualified_target IS NOT NULL)`,
       [OPEN_ROLE_STATUSES as unknown as string[]]),
     query<BlockedException & { original_type: string }>(
       `SELECT e.id::text AS id, e.plan_id::text AS plan_id, e.channel, r.priority, to_char(e.blocker_due,'YYYY-MM-DD') AS blocker_due,
@@ -356,40 +363,66 @@ export async function reconcileExceptions(desired: DetectedException[], today: s
     evidence: desired.map(d => JSON.stringify(d.evidence)),
   };
 
-  const inserted = await query<{ id: string }>(
+  // A provisional (shadow) signal that has gone live — its shadow period ended, or its plan was activated — becomes visible to HR at this moment, so
+  // this is when it is logged as flagged (a signal that was never flagged in the history must not later read "cleared"). One atomic UPDATE: when
+  // two runs race only the one that flipped the row logs it.
+  const wentLive = await query<{ id: string; plan_id: string; channel: string; type: string }>(
+    `UPDATE sourcing_exceptions e SET is_shadow = false, last_seen_at = NOW()
+       FROM unnest($1::bigint[], $2::text[], $3::text[], $4::text[], $5::bool[]) AS d(plan_id, channel, type, subject_key, is_shadow)
+      WHERE e.status = 'open' AND e.is_shadow AND NOT d.is_shadow
+        AND e.plan_id = d.plan_id AND e.channel = d.channel AND e.type = d.type AND e.subject_key = d.subject_key
+      RETURNING e.id::text AS id, e.plan_id::text AS plan_id, e.channel, e.type`,
+    [cols.plan, cols.channel, cols.type, cols.subject, cols.shadow],
+  );
+
+  const inserted = await query<{ id: string; plan_id: string; channel: string; type: string; is_shadow: boolean }>(
     `INSERT INTO sourcing_exceptions (plan_id, channel, type, subject_key, severity, is_shadow, evidence, status)
      SELECT d.plan_id, d.channel, d.type, d.subject_key, d.severity, d.is_shadow, d.evidence::jsonb, 'open'
        FROM unnest($1::bigint[], $2::text[], $3::text[], $4::text[], $5::int[], $6::bool[], $7::text[])
             AS d(plan_id, channel, type, subject_key, severity, is_shadow, evidence)
+      -- A sweep that read its data before a channel was closed must not re-create what the close just cleared, nor raise anything on a paused plan.
+      WHERE NOT EXISTS (SELECT 1 FROM sourcing_plan_channels ch WHERE ch.plan_id = d.plan_id AND ch.channel = d.channel AND ch.state = 'excluded')
+        AND NOT EXISTS (SELECT 1 FROM sourcing_plans p WHERE p.id = d.plan_id AND p.status = 'paused')
      ON CONFLICT (plan_id, channel, type, subject_key) WHERE status IN ('open','snoozed','blocked')
      DO UPDATE SET last_seen_at = NOW(), severity = EXCLUDED.severity, is_shadow = EXCLUDED.is_shadow,
                    evidence = EXCLUDED.evidence
         WHERE sourcing_exceptions.status = 'open'
-     RETURNING id::text AS id, (xmax = 0) AS inserted`,
+     RETURNING id::text AS id, plan_id::text AS plan_id, channel, type, is_shadow, (xmax = 0) AS inserted`,
     [cols.plan, cols.channel, cols.type, cols.subject, cols.severity, cols.shadow, cols.evidence],
   );
 
-  const reopened = await query<{ id: string }>(
+  const reopened = await query<{ id: string; plan_id: string; channel: string; type: string }>(
     `UPDATE sourcing_exceptions e
         SET status = 'open', reopen_count = e.reopen_count + 1, last_seen_at = NOW(), snooze_until = NULL
        FROM unnest($1::bigint[], $2::text[], $3::text[], $4::text[]) AS d(plan_id, channel, type, subject_key)
       WHERE e.status = 'snoozed' AND e.snooze_until < $5::date
         AND e.plan_id = d.plan_id AND e.channel = d.channel AND e.type = d.type AND e.subject_key = d.subject_key
-      RETURNING e.id::text AS id`,
+      RETURNING e.id::text AS id, e.plan_id::text AS plan_id, e.channel, e.type`,
     [cols.plan, cols.channel, cols.type, cols.subject, today],
   );
 
-  const cleared = await query<{ id: string }>(
+  const cleared = await query<{ id: string; plan_id: string; channel: string; type: string; is_shadow: boolean }>(
     `UPDATE sourcing_exceptions e
         SET status = 'resolved', resolution_path = COALESCE(e.resolution_path, 'auto_cleared'), resolved_at = NOW()
       WHERE e.status IN ('open','snoozed','blocked')
+        AND NOT EXISTS (SELECT 1 FROM sourcing_plans p WHERE p.id = e.plan_id AND p.status = 'paused')   -- a plan on hold is not checked: what was open (a blocker, a catch-up date) waits unchanged
         AND NOT EXISTS (
           SELECT 1 FROM unnest($1::bigint[], $2::text[], $3::text[], $4::text[]) AS d(plan_id, channel, type, subject_key)
            WHERE e.plan_id = d.plan_id AND e.channel = d.channel AND e.type = d.type AND e.subject_key = d.subject_key)
-      RETURNING e.id::text AS id`,
+      RETURNING e.id::text AS id, e.plan_id::text AS plan_id, e.channel, e.type, e.is_shadow`,
     [cols.plan, cols.channel, cols.type, cols.subject],
   );
 
-  const opened = (inserted as unknown as Array<{ inserted: boolean }>).filter(r => r.inserted).length;
-  return { desired: desired.length, opened, reopened: reopened.length, cleared: cleared.length };
+  // The plan's history records what the system noticed: a problem flagged, a catch-up date that lapsed, a problem that cleared by itself.
+  // Provisional (shadow) signals are not shown to recruiters, so they are not logged either. History is best-effort: it never fails a check.
+  const openedNow = (inserted as unknown as Array<{ inserted: boolean; plan_id: string; channel: string; type: string; is_shadow: boolean }>).filter(r => r.inserted);
+  try {
+    for (const r of wentLive) await logChangeQ(r.plan_id, null, { type: 'exception_opened', exception_type: r.type, channel: r.channel });
+    for (const r of openedNow) if (!r.is_shadow) await logChangeQ(r.plan_id, null, { type: 'exception_opened', exception_type: r.type, channel: r.channel });
+    for (const r of reopened) await logChangeQ(r.plan_id, null, { type: 'exception_reopened', exception_type: r.type, channel: r.channel });
+    for (const r of cleared) if (!r.is_shadow) await logChangeQ(r.plan_id, null, { type: 'exception_cleared', exception_type: r.type, channel: r.channel });
+  } catch (err) {
+    console.error('[Sourcing] could not write exception history (ignored):', err);
+  }
+  return { desired: desired.length, opened: openedNow.length, reopened: reopened.length, cleared: cleared.length };
 }

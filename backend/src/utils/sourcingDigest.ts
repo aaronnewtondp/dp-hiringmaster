@@ -9,7 +9,7 @@ export interface DigestException {
 export interface DigestDue { role_id: string; role_title: string; channel: string; title: string; overdue: boolean }
 export interface Email { subject: string; text: string }
 
-const link = (baseUrl: string | undefined, roleId: string) => (baseUrl ? `${baseUrl.replace(/\/+$/, '')}/roles/${roleId}#sourcing` : '');
+const link = (baseUrl: string | undefined, roleId: string) => (baseUrl ? `${baseUrl.replace(/\/+$/, '')}/dashboard?sourcing_role=${encodeURIComponent(roleId)}#sourcing-workspace` : '');
 
 /**
  * Daily note to the HR team (sourcing belongs to the HR/Admin persona as a whole, so one message goes to everyone in it). Returns null
@@ -35,7 +35,7 @@ export function buildHrDigest(i: { today: string; baseUrl?: string; dueToday: Di
     for (const d of due) lines.push(`• ${d.role_title} — ${d.channel}: ${d.title}`);
     lines.push('');
   }
-  lines.push('Mark things done, or choose how to resolve them, from the role\'s Sourcing card in HMS (My Tasks → Sourcing).');
+  lines.push('Mark things done, or choose how to resolve them, from the Sourcing plans section on the Dashboard in HMS (or My Tasks → Sourcing).');
 
   const n = i.exceptions.length;
   const bits = [n ? `${plural(n, 'item')} ${n === 1 ? 'needs' : 'need'} attention` : '', due.length ? `${due.length} due today` : ''].filter(Boolean);

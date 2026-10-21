@@ -10,7 +10,6 @@ import EditableSection from '../components/shared/EditableSection.tsx';
 import { HIRING_MANAGER_FIELD_HINT } from '../utils/hiringManagers.ts';
 import BackButton from '../components/shared/BackButton.tsx';
 import CompBenchmarkPanel from '../components/CompBenchmarkPanel.tsx';
-import SourcingCard from '../components/sourcing/SourcingCard.tsx';
 import { useSourcingPlan, sourcingChip } from '../hooks/useSourcingPlan.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { format } from 'date-fns';
@@ -213,8 +212,9 @@ export default function RoleDetail() {
               <span>·</span>
               <AgingBadge alert={role.aging_alert} daysOpen={role.days_open} daysOverdue={role.days_overdue} />
               {sourcingChipInfo && (
-                <a
-                  href="#sourcing"
+                <Link
+                  to={`/dashboard?sourcing_role=${role.id}#sourcing-workspace`}
+                  title="Open this role's sourcing plan on the Dashboard"
                   data-testid="sourcing-chip"
                   className={`px-2 py-0.5 rounded-full border text-[11px] font-medium ${
                     sourcingChipInfo.tone === 'red' ? 'bg-red-50 text-red-700 border-red-200'
@@ -223,7 +223,7 @@ export default function RoleDetail() {
                     : 'bg-gray-100 text-gray-600 border-gray-200'}`}
                 >
                   {sourcingChipInfo.text}
-                </a>
+                </Link>
               )}
             </div>
           </div>
@@ -455,8 +455,6 @@ export default function RoleDetail() {
         )}
       </div>
 
-      {/* Sourcing plan — channels, commitments, evidence and exceptions (renders nothing while the module is off) */}
-      <SourcingCard roleId={role.id} />
 
       {/* Activity timeline — mirrors CandidateDetail.tsx's own (item #25) */}
       <div className="card overflow-hidden">

@@ -58,7 +58,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
             and Operational
             Velocity (turnaround time per stage,
             Interview→Offer ratio, and the biggest drop-off stage shown both by raw count and by
-            rejection rate, since those two can point at different stages). When the Sourcing module is switched on, a final <strong>Sourcing execution</strong> section lists the sourcing exceptions (see the Sourcing group below).</p>
+            rejection rate, since those two can point at different stages). When the Sourcing module is switched on, the last two sections are <strong>Sourcing execution</strong> (the sourcing exceptions across roles) and <strong>Sourcing plans</strong> (one role's whole plan at a time) — see the Sourcing group below.</p>
             <p className="mt-2">Filters at the top (Department, Location, Recruitment Mode,
             Priority, Role) scope every section together. <strong>A Hiring Manager's dashboard is
             locked to their own role(s)</strong> — the Role filter is replaced with a fixed
@@ -427,18 +427,20 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         question: 'What is Sourcing execution, and where do I find it?',
         answer: (
           <p>Every open role gets a <strong>sourcing plan</strong>: the channels HR will use
-          (LinkedIn, Naukri/IIMjobs, Agency, Internal Referral, Direct Outreach) and dated tasks
-          for each. When something that was promised isn't done, HMS raises an <em>exception</em>.
-          You'll find it in three places: the <strong>Sourcing</strong> card on a role's page
-          (between Pipeline and Activity), the <strong>Sourcing</strong> box in My Tasks (HR/Admin
-          and Super Admin), and the last section of the Dashboard, <strong>Sourcing execution</strong>.</p>
+          (LinkedIn, Naukri/IIMjobs, Agency, Internal Referral, Direct Outreach), dated tasks for
+          each, and a weekly target. When something that was promised isn't done, HMS raises an{' '}
+          <em>exception</em>. It all lives on the <strong>Dashboard</strong>: the last two sections are{' '}
+          <strong>Sourcing execution</strong> (what is slipping, across roles) and{' '}
+          <strong>Sourcing plans</strong> (pick a role at the top to see its whole plan). The{' '}
+          <strong>Sourcing</strong> box in My Tasks (HR/Admin and Super Admin) is the to-do list. A
+          role's own page shows only a chip that opens its plan.</p>
         ),
       },
       {
         id: 'sourcing-owner',
         question: 'Who owns a sourcing plan?',
         answer: (
-          <p>HR/Admin as a whole — never an individual. A plan has no owner field: the card says
+          <p>HR/Admin as a whole — never an individual. A plan has no owner field: it says
           "Owner: HR", every HR user sees the same Sourcing queue in My Tasks, and anyone in HR can
           complete, skip or resolve anything on any plan.</p>
         ),
@@ -449,20 +451,97 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         answer: (
           <>
             <ol className="list-decimal pl-5 space-y-1">
-              <li>Open the role's Sourcing card (or My Tasks → Sourcing → Plans to activate) and click{' '}
-              <strong>Activate plan</strong>. Tick the channels you'll use; for any that is already live,
-              tick <strong>Already running before today</strong> and enter the posting date, so it
-              isn't shown as overdue and the renewal reminder counts from that date. Leaving a
-              suggested channel out needs a reason.</li>
-              <li>Work the list in My Tasks → Sourcing: <strong>Mark done</strong> (a link or note is
-              optional), <strong>Skip</strong> (with a reason) or <strong>Undo skip</strong>.</li>
-              <li>On the role's card, <strong>Add channel</strong> / <strong>Bring back</strong> adds one
-              mid-flight (its first task falls due in 1–2 working days), <strong>Stop using</strong>{' '}
-              leaves one out (with a reason) and <strong>Edit strategy note</strong> changes the note.</li>
+              <li>On the Dashboard, open <strong>Sourcing plans</strong>, pick the role (a role waiting for
+              a plan is listed under "plans waiting to be activated") and click <strong>Activate plan</strong>.
+              Tick the channels you'll use and optionally set this role's weekly qualified target. For a
+              LinkedIn, Naukri/IIMjobs or Direct Outreach channel that is already live, tick{' '}
+              <strong>Already running before today</strong> and give the post link and the weekly sourcing
+              target. Leaving a suggested channel out needs a reason.</li>
+              <li>Work the tasks on each channel (or from My Tasks → Sourcing): <strong>Mark done</strong>,{' '}
+              <strong>Skip</strong> (with a reason) or <strong>Undo skip</strong>.</li>
+              <li><strong>Add channel</strong> adds one mid-flight, <strong>Close channel</strong> stops one,{' '}
+              <strong>Edit target and link</strong> changes a live channel's weekly target or post link, and{' '}
+              <strong>Edit plan</strong> changes the strategy note and the role's weekly qualified target.</li>
             </ol>
-            <p className="mt-2">A role going On Hold pauses its plan; closing the role closes it and
+            <p className="mt-2">A role going On Hold pauses its plan: the weekly trackers stop (the week in progress is
+            kept as "cut short") and start again the day the role is back on. Closing the role closes the plan and
             queues nothing else. Reopening a role returns its plan to a draft to activate again.</p>
           </>
+        ),
+      },
+      {
+        id: 'sourcing-tracker',
+        question: 'How does the weekly tracker work for LinkedIn, Naukri/IIMjobs and Direct Outreach?',
+        answer: (
+          <>
+            <p>The first task on each of these channels is <strong>logging the post</strong> (the job post
+            or outreach campaign). To complete it you must give the <strong>link</strong> and a{' '}
+            <strong>weekly sourcing target</strong>: how many applicants, qualified and unqualified
+            together, you want that channel to bring in each week.</p>
+            <p className="mt-2">From that day HMS counts every application to the role whose answer to “How did you
+            hear about this opening?” on the application form is that channel (LinkedIn, Naukri/IIMJobs, HR Outreach → Direct Outreach, Hiring Agency → Agency,
+            Employee Referral → Internal Referral). At the end of each 7-day week it
+            adds a line to the channel: <strong>green "Met"</strong> if the count reached the target,{' '}
+            <strong>red "Missed"</strong> if not. Nothing is typed in — the numbers come from the form.
+            The week in progress shows live above the finished weeks, and the tracker runs until the
+            channel is closed. If you change a target, weeks that already finished keep the target they
+            were measured against. A week cut short — the channel was closed or the role put on hold — is
+            listed but is neither met nor missed.</p>
+            <p className="mt-2">A channel that was already live before the tracker existed shows “No weekly sourcing
+            target is set”, and its “Log the … post” task is waiting: complete it (or use{' '}
+            <strong>Add the target and post link</strong>) with the link and the target to start the tracker.</p>
+          </>
+        ),
+      },
+      {
+        id: 'sourcing-target',
+        question: 'Can the qualified-candidate target differ by role?',
+        answer: (
+          <p>Yes. Each role's plan shows "X / Y qualified in the last 7 days"; click <strong>Edit
+          plan</strong> to set Y for that role (1–500), or clear it to go back to the default. The
+          default is 5 for P0 and P1 roles; a P2 or P3 role has no target until you set one, and then
+          it is checked like any other. "Qualified" means shortlisted by a person or scored above 60 by
+          ResumeIQ. This is separate from each channel's weekly sourcing target above.</p>
+        ),
+      },
+      {
+        id: 'sourcing-next',
+        question: 'Where do the recommended next steps come from?',
+        answer: (
+          <>
+            <p>Under <strong>Needs attention</strong>, each problem has a <strong>Next</strong> box. HMS
+            gives an AI model the role's target, the candidate pipeline as counts (how many are waiting
+            for a decision, how many scored above 60 and so on), each channel's weekly results, and the
+            open problems, and asks for concrete steps — which channel, what to do, by when. No candidate
+            names or contact details are shared with it.</p>
+            <p className="mt-2">The steps are saved and reused for up to a day while the numbers are the
+            same, written again when they change (straight away when a new problem appears), and{' '}
+            <strong>Refresh</strong> asks for new ones (at most once a minute). If the AI is unavailable
+            you get rule-based steps instead, labelled as such. Only HR/Admin and Leadership see them.</p>
+          </>
+        ),
+      },
+      {
+        id: 'sourcing-close',
+        question: 'What does "Close channel" do, and can I undo it?',
+        answer: (
+          <p>Closing a channel (with a short reason) stops its open tasks and nothing more is chased for
+          it. It is not deleted: the post link, the targets and every weekly result stay on the plan as
+          a summary, and the week in progress is recorded as "cut short". <strong>Reopen channel</strong>{' '}
+          brings back its follow-up tasks and restarts the weekly tracker from that day (the next day if it was
+          closed the same day) with the same
+          target; the weeks already recorded stay as they are.</p>
+        ),
+      },
+      {
+        id: 'sourcing-history',
+        question: 'What is in the Plan history?',
+        answer: (
+          <p>Every action on the plan, newest first, with who did it: tasks done or skipped, channels
+          added, closed or reopened, target changes, problems resolved or put off, and the strategy note
+          edits. HMS adds its own entries too (marked "System"): a problem it flagged or saw clear
+          by itself, and the result of each finished tracker week. Filter by tasks, channels, weekly
+          results, targets or alerts. Only HR/Admin and Leadership see it.</p>
         ),
       },
       {
@@ -471,12 +550,12 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         answer: (
           <>
             <p>An exception is something promised and not done: a plan not activated in time, a channel
-            that isn't live, an overdue task or follow-up, too few qualified candidates (an open P0/P1
-            role with fewer than 5 in the last 7 days on each of the last 5 working days), or a blocker
-            past its deadline. "Qualified" means shortlisted by a person or scored above 60 by ResumeIQ.</p>
+            whose set-up is overdue, an overdue task or follow-up, too few qualified candidates (fewer than the
+            role's target in the last 7 days on each of the last 5 working days), or a blocker past its
+            deadline.</p>
             <p className="mt-2">Resolve each one of three ways: <strong>I'll catch up</strong> (a reason and
             a date within 14 days — it comes back if still true), <strong>Change the plan</strong> (a
-            reason; optionally stop using the channel) or <strong>I'm blocked</strong> (a reason, who must
+            reason; optionally close the channel) or <strong>I'm blocked</strong> (a reason, who must
             unblock it, and a deadline within 60 days).</p>
           </>
         ),
@@ -486,8 +565,8 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         question: 'What does "Provisional" mean on a sourcing signal?',
         answer: (
           <p>A new threshold signal, such as "not enough qualified candidates", that is still being
-          calibrated for its first 6 weeks. HR/Admin and Leadership see it greyed out on the dashboard
-          and the role card, but it raises no tasks, sends no e-mail and can't be resolved yet.</p>
+          calibrated for its first 6 weeks. HR/Admin and Leadership see it greyed out on the Dashboard,
+          but it raises no tasks, sends no e-mail and can't be resolved yet.</p>
         ),
       },
       {
@@ -495,30 +574,33 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         question: 'How are due dates worked out?',
         answer: (
           <p>From the day the plan is activated, in working days — Monday to Friday, India time.
-          Public holidays aren't modelled. A task is overdue only after its due day ends. Following
-          tasks are created when the first one is completed: portal postings are renewed before they
-          expire (every 30 days), agencies are followed up weekly, referrals reposted every 14 days,
-          and weekly outbound contacts are logged (the first 4 weeks only record a baseline).</p>
+          Public holidays aren't modelled. A task is overdue only after its due day ends. After the
+          first task is done: a LinkedIn or Naukri/IIMjobs posting is renewed before it expires (every
+          30 days), agencies are followed up weekly and referrals reposted every 14 days. The weekly
+          numbers for LinkedIn, Naukri/IIMjobs and Direct Outreach are not tasks: the tracker fills them
+          in automatically.</p>
         ),
       },
       {
         id: 'sourcing-attribution',
         question: 'Why does "Applications by source" say "Not tagged"?',
         answer: (
-          <p>The table counts applicants by what they answer to an optional "How did you hear about
-          this role?" question on the Job Application Form. Without that question every form
-          applicant is recorded as LinkedIn, so applicants show as "Not tagged" and the table can't
-          say where they came from. It's the applicant's own answer, so treat it as a claim.</p>
+          <p>The table, and the weekly tracker, count applicants by their answer to the{' '}
+          <strong>How did you hear about this opening?</strong> question on the Job Application Form. An application with no
+          answer shows as "Not tagged" and counts toward no channel, so link each job post or campaign
+          to the form with its channel pre-filled. It is the applicant's own answer, so treat it as a
+          claim.</p>
         ),
       },
       {
         id: 'sourcing-hm',
         question: 'What does a Hiring Manager see?',
         answer: (
-          <p>A read-only "View only" card on their own roles: channels, tasks, dates and counts, but
-          no strategy note, links, completion notes or provisional signals. A channel's excluded
-          reason and an exception's resolution path and dates are still shown. A Hiring Manager of
-          another role sees nothing.</p>
+          <p>A read-only "View only" plan for their own roles on the Dashboard: channels, tasks, dates,
+          weekly results and counts, but no strategy note, post links, notes, closing reasons, plan
+          history, recommended steps or provisional signals. A channel's reason for being left out and an
+          exception's resolution path and dates are still shown. A Hiring Manager of another role sees
+          nothing.</p>
         ),
       },
     ],

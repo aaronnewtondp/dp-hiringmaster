@@ -1,5 +1,6 @@
--- WHEN TO USE: only to remove the Sourcing module from a database (e.g. Supabase) once SOURCING_ENABLED is false and redeployed and you want the 8 sourcing_* tables gone; it refuses to run while any of them holds a row. Not needed to switch the module off.
--- ROLLBACK of the Sourcing module tables (8 x sourcing_*). No CASCADE anywhere.
+-- WHEN TO USE: only to remove the Sourcing module from a database (e.g. Supabase) once SOURCING_ENABLED is false and redeployed and you want the 10 sourcing_* tables gone; it refuses to run while any of them holds a row. Not needed to switch the module off.
+-- ROLLBACK of the Sourcing module tables (10 x sourcing_*: the original 8, plus sourcing_channel_weeks and sourcing_advice from the
+-- 21 Oct 2026 workspace release). No CASCADE anywhere.
 BEGIN;
 
 -- Fail fast instead of queueing behind a long transaction on roles/users
@@ -16,6 +17,7 @@ DECLARE
 BEGIN
   FOREACH t IN ARRAY ARRAY[
     'sourcing_evidence','sourcing_commitment_log','sourcing_commitments',
+    'sourcing_channel_weeks','sourcing_advice',
     'sourcing_plan_channels','sourcing_exceptions','sourcing_plan_changes',
     'sourcing_plans','sourcing_settings'
   ] LOOP
@@ -38,6 +40,8 @@ $guard$;
 DROP TABLE IF EXISTS public.sourcing_evidence;        -- FK -> sourcing_commitment_log
 DROP TABLE IF EXISTS public.sourcing_commitment_log;  -- FK -> sourcing_commitments
 DROP TABLE IF EXISTS public.sourcing_commitments;     -- FK -> sourcing_plan_channels
+DROP TABLE IF EXISTS public.sourcing_channel_weeks;   -- FK -> sourcing_plan_channels
+DROP TABLE IF EXISTS public.sourcing_advice;          -- FK -> sourcing_plans
 DROP TABLE IF EXISTS public.sourcing_plan_channels;   -- FK -> sourcing_plans
 DROP TABLE IF EXISTS public.sourcing_exceptions;      -- FK -> sourcing_plans
 DROP TABLE IF EXISTS public.sourcing_plan_changes;    -- FK -> sourcing_plans

@@ -164,6 +164,31 @@ describe('detectVolumeGap', () => {
     expect(qualifiedAt({ shortlisted_at: null, scored_at: null }, 'either')).toBeNull();
   });
 
+  describe('per-role target (sourcing_plans.weekly_qualified_target)', () => {
+    const withTarget = (apps: QualifiedInput[], target: number | null, priority = 'P1') => ({ plan_id: '1', role_id: 'R001', priority, apps, target });
+
+    it('a role\'s own target replaces the default: 6 qualified is a gap against 8, and fine against the default 5', () => {
+      const six = Array.from({ length: 6 }, () => scored('2026-10-14T03:00:00Z'));
+      const [e] = detectVolumeGap([withTarget(six, 8)], WED, S());
+      expect(e.evidence).toMatchObject({ min: 8, weekly_qualified: 6 });
+      expect(detectVolumeGap([withTarget(six, null)], WED, S())).toEqual([]);
+    });
+    it('a lower target is respected too: 2 qualified meets a target of 2 even though the default is 5', () => {
+      const two = Array.from({ length: 2 }, () => scored('2026-10-14T03:00:00Z'));
+      expect(detectVolumeGap([withTarget(two, 2)], WED, S())).toEqual([]);
+      expect(detectVolumeGap([withTarget(two, null)], WED, S())).toHaveLength(1);
+    });
+    it('a P2/P3 role is checked once it has a target of its own, and not before', () => {
+      expect(detectVolumeGap([withTarget([], null, 'P2')], WED, S())).toEqual([]);
+      const [e] = detectVolumeGap([withTarget([], 3, 'P3')], WED, S());
+      expect(e).toMatchObject({ type: 'VOLUME_GAP' });
+      expect(e.evidence.min).toBe(3);
+    });
+    it('the default follows the setting for a role with no target of its own', () => {
+      expect(detectVolumeGap([withTarget([], null)], WED, S({ volume_min_qualified: 9 }))[0].evidence.min).toBe(9);
+    });
+  });
+
   it('the 5-working-day lookback skips weekends only', () => {
     const days = detectVolumeGap([role([])], WED, S())[0].evidence.per_day as Array<{ date: string }>;
     expect(days.map(d => d.date)).toEqual(['2026-10-08', '2026-10-09', '2026-10-12', '2026-10-13', '2026-10-14']);   // Thu, Fri, then Mon–Wed

@@ -775,7 +775,7 @@ router.get('/sourcing', async (req: Request, res: Response) => {
           ORDER BY e.is_shadow, e.severity DESC, e.detected_at`, [...params, OPEN]),
       query<{ status: string; n: string }>(
         `SELECT p.status, count(*) AS n FROM sourcing_plans p JOIN roles r ON r.id = p.role_id
-          WHERE r.status = ANY(${openParam}::text[])${scope} GROUP BY p.status`, [...params, OPEN]),
+          WHERE (r.status = ANY(${openParam}::text[]) OR p.status = 'paused')${scope} GROUP BY p.status`, [...params, OPEN]),
       queryOne<{ n: string }>(`SELECT count(*) AS n FROM roles r WHERE r.status = ANY(${openParam}::text[])${scope}`, [...params, OPEN]),
       queryOne<{ done: string; on_time: string }>(
         `SELECT count(*) AS done, count(*) FILTER (WHERE l.done_at <= l.was_due_at) AS on_time
