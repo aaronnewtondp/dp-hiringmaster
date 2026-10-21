@@ -1068,6 +1068,11 @@ its active plan as it was (it is reconciled on that role's next real save — se
   same code with the flag unset). `docs/SourcingModule_Rollback.sql` is a guarded removal of the tables (refuses to drop while any
   sourcing table holds a row; touches nothing outside the 8 tables; keeps `update_updated_at()`); tested in a throwaway local database.
   Going-live order (including the optional Google Form order) is in the runbook.
+  **Workspace schema block applied to Supabase on 2026-10-22** (Aaron's go-ahead) as migration `20261021205937` `sourcing_workspace_tracker_target_advice`,
+  ahead of the PR #11 deploy: the new columns and the two new tables (RLS on) exist, nothing is tracked yet (no anchors, no weeks, no advice rows), the one
+  open `weekly_outbound` task (R003 Direct Outreach) is skipped, and R003's Naukri/IIMjobs and Direct Outreach "Log the … post (link and weekly sourcing
+  target)" tasks are open again, due 2026-10-24 23:59 IST. The still-deployed backend ignores all of it; until PR #11 deploys, completing the re-opened
+  Direct Outreach task on the OLD backend would revive the skipped `weekly_outbound` (see the runbook).
 - **Own tables, not `pending_actions`** (`sourcing_*`, BIGSERIAL ids → node-pg returns them as STRINGS; RLS enabled with no
   policies; all `IF NOT EXISTS`). Reusing `pending_actions` would have been hit by `resolveUnknownActionTypes`, inflated every HR
   user's My Tasks badge, shared its 100-row window and sorted priority as text. `slaChecker.ts`, the SLA KPIs, the funnel
