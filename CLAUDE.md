@@ -1068,6 +1068,11 @@ its active plan as it was (it is reconciled on that role's next real save — se
   same code with the flag unset). `docs/SourcingModule_Rollback.sql` is a guarded removal of the tables (refuses to drop while any
   sourcing table holds a row; touches nothing outside the 8 tables; keeps `update_updated_at()`); tested in a throwaway local database.
   Going-live order (including the optional Google Form order) is in the runbook.
+  **Workspace schema block applied to Supabase on 2026-10-22** (Aaron's go-ahead) as migration `20261021205937` `sourcing_workspace_tracker_target_advice`,
+  ahead of the PR #11 deploy: the new columns and the two new tables (RLS on) exist, nothing is tracked yet (no anchors, no weeks, no advice rows), the one
+  open `weekly_outbound` task (R003 Direct Outreach) is skipped, and R003's Naukri/IIMjobs and Direct Outreach "Log the … post (link and weekly sourcing
+  target)" tasks are open again, due 2026-10-24 23:59 IST. The still-deployed backend ignores all of it; until PR #11 deploys, completing the re-opened
+  Direct Outreach task on the OLD backend would revive the skipped `weekly_outbound` (see the runbook).
 - **Own tables, not `pending_actions`** (`sourcing_*`, BIGSERIAL ids → node-pg returns them as STRINGS; RLS enabled with no
   policies; all `IF NOT EXISTS`). Reusing `pending_actions` would have been hit by `resolveUnknownActionTypes`, inflated every HR
   user's My Tasks badge, shared its 100-row window and sorted priority as text. `slaChecker.ts`, the SLA KPIs, the funnel
@@ -1091,7 +1096,7 @@ its active plan as it was (it is reconciled on that role's next real save — se
   (plan, channel, type, subject_key), not strictly one row per (plan, channel). Evidence is counts and titles only.
   Launch set: `PLAN_NOT_ACTIVATED`, `CHANNEL_NOT_ACTIVATED`, `COMMITMENT_OVERDUE`, `FOLLOWUP_OVERDUE`, `VOLUME_GAP`, `BLOCKER_OVERDUE`.
 - **Shadow mode.** Threshold detectors (`VOLUME_GAP`, later others) are `is_shadow` = *provisional*: shown to HR-tier users only (a
-  greyed "Provisional" on the dashboard and on the role's Sourcing card; not in the header chip), no My Tasks item, no Hiring-Manager
+  greyed "Provisional" on the dashboard and in the role's plan on the Dashboard; not in the header chip), no My Tasks item, no Hiring-Manager
   view, never listed in an e-mail (the Monday summary only states how many exist), not resolvable. The first enabled engine run
   **stamps** `go_live_date = today` and `shadow_until = today + 42 days` (`stampGoLiveDefaults`, `ON CONFLICT DO NOTHING` — an
   explicit `null` set by an admin means "live" and is never overwritten); without that a bare `SOURCING_ENABLED=true` would make most
@@ -1130,8 +1135,10 @@ its active plan as it was (it is reconciled on that role's next real save — se
   `role_edit_log`); the role page shows it read-only once a plan exists, and now re-reads the plan after every approve / status change /
   field save (`RoleDetail.tsx` invalidates `['sourcing-plan', id]` beside `['role', id]`), so the header chip and card match the server straight
   after those actions instead of waiting out `useSourcingPlan`'s 30 s `staleTime`.
-- **Attribution** (`applications.sub_source` only): `candidateIngest.ts` accepts an optional `source_tag` (the form's "How did you hear
-  about this role?" dropdown) → a known channel, `Other`, or `untagged_default`; written only while the flag is on (with it off
+- **Attribution** (`applications.sub_source` only): `candidateIngest.ts` accepts an optional `source_tag` (the form's **"How did you hear about this opening?"**
+  dropdown — options Linkedin, Naukri/IIMJobs, DigitalPaani HR Outreach, Hiring Agency, DigitalPaani Employee Referral; the reference script also still
+  reads the earlier titles "Sourcing Channel" and "How did you hear about this role?") → a channel (case/spacing-insensitive, plus the aliases in
+  `normalizeSourceTag`: HR Outreach → Direct Outreach, Hiring Agency → Agency, DigitalPaani Employee Referral → Internal Referral, …), `Other`, or `untagged_default`; written only while the flag is on (with it off
   `sub_source` stays NULL). It is the applicant's own answer — *claimed* attribution; yield claims start from the day tagging starts:
   every earlier Job Application Form applicant carries `candidates.source = 'LinkedIn'` (the ingest hard-codes it), but their
   `applications.sub_source` is NULL and shows as "(untagged)" on the role card. `candidates.source` is not changed. The Apps Script
@@ -1155,10 +1162,16 @@ its active plan as it was (it is reconciled on that role's next real save — se
   not widen what a Hiring Manager sees. The My Tasks "Sourcing" box is `hr_recruiter` + `super_admin` only (Leadership has none); `GET /sourcing/queue` is
   HR-tier and returns the SAME queue to everyone — there is no "mine" and no scope parameter (an old client's `scope=all` is ignored).
   Settings: the full read (`GET /sourcing/settings`) is HR-tier, writes are Leadership/Super Admin; `GET /sourcing/status`, open to every signed-in user, returns `go_live_date`, `shadow_until`, `qualified_rule`, `volume_min_qualified` and `referral_audience_email`; `digest_recipients` must be company addresses.
-- **Surfaces:** RoleDetail `SourcingCard` (between Pipeline and Activity) + header chip; My Tasks 4th box (`mytasks.section` value
-  `'sourcing'` is clamped to `'ready'` for anyone without it, and not flashed while the status loads); Dashboard "Sourcing execution"
-  as the LAST section (own lazy endpoint `GET /dashboard/sourcing`, same master filters and Hiring-Manager lock; `KpiCard` was
-  extracted to `components/shared/`). Channel goes in the BODY of `PUT /sourcing/plans/:id/channel` — `Naukri/IIMjobs` contains a slash.
+- **Surfaces (moved 2026-10-21):** the plan no longer lives on the role page. The Dashboard ends with two sections: "Sourcing execution"
+  (the cross-role KPI tile + exceptions table, own lazy endpoint `GET /dashboard/sourcing`, same master filters and Hiring-Manager lock; `KpiCard`
+  was extracted to `components/shared/`) and **"Sourcing plans"** (`SourcingWorkspace.tsx`): a pill per role with an active/paused plan
+  (`GET /sourcing/workspace`; HR-tier also gets the draft plans listed under "N roles have a plan waiting to be activated", capped at 40 +
+  `drafts_total`; a Hiring Manager gets only the roles named on them, read-only) and, for the picked role, `SourcingPlanPanel.tsx` — target,
+  Needs attention with the advisor's steps, one `SourcingChannelBlock` per channel (weekly tracker, close/reopen), applications by source and
+  the `SourcingTimeline`. The picked role is `?sourcing_role=` (wins) or `sessionStorage hms:sourcing.role`; `#sourcing-workspace` scrolls to it.
+  The role page keeps only its header chip (`data-testid="sourcing-chip"`, a `<Link>` to `/dashboard?sourcing_role=<id>#sourcing-workspace`); My Tasks
+  and the exceptions table link the same way. My Tasks 4th box is unchanged (`mytasks.section` value `'sourcing'` is clamped to `'ready'` for
+  anyone without it, and not flashed while the status loads). Channel goes in the BODY of the channel routes — `Naukri/IIMjobs` contains a slash.
 - **E-mails** (`services/sourcingDigest.ts`, from hr@ via the existing Gmail service, internal only, **off by default**): ONE daily note
   to the HR team — every active `hr_recruiter` + `super_admin` with a company address, in a single message, only when something needs doing
   (`daily_digest_enabled`; weekdays only) — and a Monday summary to
@@ -1167,10 +1180,10 @@ its active plan as it was (it is reconciled on that role's next real save — se
 - **Not built (specified in the PRD):** P3 one-click agency brief / referral push through Gmail with auto-evidence; P4 company lists,
   Sheets-API prospect sync, direct-send templated outreach with its guardrails, `/sourcing` page. Free external APIs were verified:
   only Google Workspace APIs HMS already holds are both free and automatable; LinkedIn/Naukri/Indeed are never scraped or polled.
-- **Managing a running plan (2026-10-19).** On an ACTIVE or PAUSED plan the card (HR-tier only; not on a draft — activation chooses the
-  channels — and not on a closed plan) offers **Add channel** (and **Bring back** on a channel that was left out), **Undo skip** on a
-  skipped commitment of a channel that is in the plan, and **Edit strategy note** (the note is shown on the card to HR
-  only). Rules behind them, all in `services/sourcingPlans.ts`: `PUT /sourcing/plans/:id/channel` with `planned` starts the channel's
+- **Managing a running plan (2026-10-19, controls renamed 2026-10-21).** On an ACTIVE or PAUSED plan the panel (HR-tier only; not on a draft —
+  activation chooses the channels — and not on a closed plan) offers **Add channel** (and **Bring back** on a channel that was left out),
+  **Close channel** / **Reopen channel** (below), **Undo skip** on a skipped commitment of a channel that is in the plan, **Edit target and
+  link** on a live tracked channel and **Edit plan** (strategy note — shown to HR only — and the role's weekly qualified target). Rules behind them, all in `services/sourcingPlans.ts`: `PUT /sourcing/plans/:id/channel` with `planned` starts the channel's
   first commitment from today (`startChannel` — active and paused plans; a draft plan commits nothing, activation does) and answers 409
   `already in this plan` for a channel that is already in it (it used to re-open a FINISHED activation and chase it again). A channel that
   joins through the role's Recruitment Mode (`reconcileChannelsFromRole` — API or a stale tab) gets the same first commitment, and one
@@ -1188,20 +1201,87 @@ its active plan as it was (it is reconciled on that role's next real save — se
   lock first (`lockPlanOfCommitment` / `lockPlanOfException`) and read state after it; with only their own row locked they deadlocked against
   excluding a channel (a 500) or committed an open commitment on a closed plan. The "removed from the role" marker is matched EXACTLY
   (`REMOVED_ON_ROLE`), not by prefix, so a recruiter's own reason can never be mistaken for it. `PATCH /plans/:id` edits the strategy note only and logs `strategy_note_changed` once per real change; a malformed blocker-owner id is a 400 (it was a 500).
+- **Channel task model and the weekly tracker (2026-10-21).** LinkedIn, Naukri/IIMjobs and Direct Outreach are the *tracked* channels
+  (`TRACKED_CHANNELS`). Their first task (`activate_channel`) is "Log the … post (link and weekly sourcing target)": completing it — by the task, or by
+  ticking "already running" at activation — REQUIRES a valid http(s) link and a whole-number weekly sourcing target (applicants per week, qualified
+  + unqualified; 1–10000), else a 400 (the whole activation rolls back). It stores `targets.weekly_target`, `config.posting_url`, and sets
+  `sourcing_plan_channels.tracker_anchor` = today (IST) — the day the post is LOGGED, not the posting's own date. From the anchor the tracker runs in
+  consecutive 7-day IST windows (`utils/sourcingWeeks.ts`); a window is finished when its last day has ended. `syncChannelWeeks()` writes one
+  immutable `sourcing_channel_weeks` row per finished window (target vs applications to the role with `sub_source` = the channel and `application_date`
+  in the window; `qualified` = ai_fit_score > 60 OR past Applied and Screened) and a `weekly_result` history entry stamped with the day the week ended;
+  it runs when a plan is read, on close/edit, and in every engine run / the daily cron, only for LIVE channels of ACTIVE plans, never throws
+  (`syncChannelWeeksSafe` — a data fault in the tracker must not take the engine, a plan read or a role save down), and is idempotent (UNIQUE +
+  `ON CONFLICT DO NOTHING`; only the inserting writer logs). **Never call it (or `logChangeQ`) while holding a plan row lock** — the history insert's
+  foreign key waits on the lock. Met = actual >= target (green), else red.
+  **A tracker runs only while its channel is `active` AND its plan is `active`.** Every path that stops one — Close channel, `PUT …/channel` excluded,
+  an exception resolved with "stop using the channel", a channel removed from the role's Recruitment Mode, a done activation task re-opened, the
+  role going On Hold, the role closing — goes through `stopTrackersInTx` → `finalizeWeeksInTx` inside the plan-locked transaction: it writes the weeks
+  that had ended but were not yet recorded (with the target that applies now), then the week in progress as a *cut-short* (`partial`) row, then clears
+  `tracker_anchor`. A cut-short week is listed ("Cut short") but is neither met nor missed and is left out of the totals (`summarizeWeeks`, the
+  `channel_closed` history counts); a stop on the very day the tracker started, before anything arrived, writes no row. Starting again — completing
+  the first task again, Reopen channel, or the role coming back — begins a fresh tracker from that day (`effectiveAnchor` keeps it from overlapping what
+  was already recorded, so a restart on the same day as a stop counts from the next day). **Pause/resume:** On Hold = sync, stop every tracker, log
+  `paused`; the plan view shows no running week meanwhile; resume gives every `active` channel that has a target `tracker_anchor` = today (a post
+  logged during the hold included) and shifts open task due dates by the WHOLE days of the pause (`pause_total_days` and the `resumed` entry use the same rounded number, so a hold of seconds moves nothing). Exceptions of a paused plan are left exactly as they are by the engine (a blocker or catch-up date survives a hold); the plan view's `tracker.anchor` is the *effective* start (`effectiveAnchor`: tomorrow after a same-day stop), and the UI says when tracking restarts.
+  The first version shifted each anchor by `ceil(pause days)`, which cost a whole day on a few-second toggle, dropped the days before the hold and
+  swallowed a week that had ended but not yet been recorded. Direct Outreach no longer gets the first version's "log this week's contacts" task (`weekly_outbound` stays a known kind only for
+  legacy rows); portals still get the 30-day `renew_posting`; Agency / Internal Referral are unchanged. A live tracked channel with no target (data from
+  the first version — in production R003's Naukri/IIMjobs and Direct Outreach) is handled by the migration block: it re-opens that channel's done
+  "log the post" task, due two days after the migration, so HR is asked once for the link and the target (completing it, or giving both through **Edit
+  target and link** — `PATCH /sourcing/plans/:id/channel-settings`, which then completes the open task itself — starts the tracker); the old Direct
+  Outreach `weekly_contacts` counted outbound CONTACTS, not applicants, so it is deliberately NOT carried over as a target, and the retired
+  `weekly_outbound` task is skipped (and hidden from the plan view). Until the task is done the channel shows a "no weekly target" prompt. The week's
+  numbers are only as good as the form tagging: an application with no "How did you hear about this opening?" answer counts toward no channel.
+- **Close / reopen a channel (2026-10-21, replaces "Stop using").** `POST /plans/:id/channel/close {channel, reason}` and `/channel/reopen`. A CLOSED
+  channel is stored as `state='excluded'` with `closed_at` set (so every existing `excluded` guard — engine, queue, completion refusal, role-mode
+  reconcile — applies without change) and reported to the API as `state:'closed'` (`excluded_reason` is null; `closed_reason` is HR-only). Close records
+  the week in progress as a partial row, skips the open tasks flagging `meta.closed_with_channel`, resolves the channel's open exceptions at once
+  (`auto_cleared`, "Channel closed"), and clears `tracker_anchor`; the post link, targets and every week stay as the summary. Resolving an exception with "close the channel" (`change_strategy` + `exclude_channel`) closes it the same way — it is no longer a plain exclusion. Reopen restores `active` (its activation task was done) or `planned` + a fresh activation task, revives ONLY the
+  flagged tasks (`due_at = GREATEST(old, tomorrow)`, so nothing is instantly overdue) and restarts the tracker from that day (the next day if it was closed the same day) with the old target. `PUT …/channel`
+  on a closed channel is a 409 ("reopen it instead"); a draft or closed plan cannot close a channel.
+- **Per-role weekly qualified target (2026-10-21).** `sourcing_plans.weekly_qualified_target` (1–500, NULL = default), set at activation or by
+  `PATCH /plans/:id` ("Edit plan"). `effectiveTarget()`: the role's own, else `settings.volume_min_qualified` (5) for P0/P1, else none — a P2/P3 role is
+  checked only once it has one. The plan view's `volume` carries `target_source` (`role|default|none`), `role_target`, `default_target`; the VOLUME_GAP
+  detector, the My Tasks queue's volume rows and the workspace pills all use it. This is separate from a channel's weekly sourcing target.
+- **Plan history logs everything (2026-10-21).** `sourcing_plan_changes` gets an entry for each action: task done / skipped / undone (with link and target),
+  channel added / left out / closed / reopened, target and link edits, strategy note, activation, pause / resume / role closed / reopened,
+  catch-up and blocker resolutions, plus SYSTEM entries (`by` null): exception opened / cleared / reopened (provisional signals are not logged) and each
+  finished tracker week. `utils/sourcingTimeline.ts` `describeChange` renders each as one sentence + a category; the plan view returns the latest 200
+  (`HISTORY_LIMIT`) with `changes_total`. HR-tier only (the Hiring Manager view carries none).
+- **AI next steps (2026-10-21).** `services/sourcingAdvisor.ts`, `GET /sourcing/plans/:roleId/advice[?refresh=1]` (HR-tier only). It builds a facts pack —
+  the role, effective target and gap, the pipeline as COUNTS (waiting for a shortlist decision, scored above 60, over 48 h, interviewing, new this week,
+  the Hold-for-Future pool on other roles), each live channel's target / this week / last four weeks / open tasks, and the open non-provisional exceptions
+  (ids, labels, plain text) — with no names, e-mails, phone numbers or links, and asks `claude-sonnet-4-5` (`SOURCING_ADVICE_MODEL`) for JSON: a headline
+  and steps (title, detail, channel, `exception_id`, impact, owner). `validateAdvice` never trusts the answer: an unknown channel or an exception id it was
+  not given becomes null; empty/over-long fields are dropped. Cached in `sourcing_advice` (PK plan) against a hash of the facts that leaves out day counters
+  (`decideAdviceAction`): reused 24 h while unchanged; rewritten when the facts change but not within 15 min; **at once when an open problem appears that the
+  cached advice was not written for** (`meta.exception_ids`); `?refresh=1` after a 60 s cool-down; rule-based advice (`rulesAdvice`, labelled so) when
+  the model is unavailable or has no key, retried after 10 min. One in-flight generation per plan (a Map); awaited inline, never fire-and-forget. The panel
+  shows plan-level steps in a box under "Needs attention" and each exception's own steps in its Next box (falling back to the plain `next_action` while loading
+  or if it fails). A DB `Date` for `activated_at` once broke the facts builder (the type says string) — normalise with `new Date(...)`.
 - **No take-down task (removed 2026-10-19, Aaron's call: not worth the complexity).** Closing a role skips every open commitment and
   clears its exceptions; nothing is queued, so nobody is chased to take postings down, and the commitment detector looks at ACTIVE plans only (draft plans still raise PLAN_NOT_ACTIVATED, a draft's volume signal and blockers).
   Taking a posting down on the portal is the recruiter's own job; the plan does not track it.
 - **Known gaps:** none open in the plan/channel/commitment workflow.
-- Pinned by `hms-tests-final/tests/db/13-sourcing-plans.spec.ts` (39 tests: 5 on multi-hop role-status chains and idempotency, 11 on managing a running plan — channel add / bring back, follow-on revival, reopen, strategy-note edits, the no-owner rule, the complete / activate guards, an exact-marker check and a concurrency race; three older ones also cover hold / close / recruitment-mode; skips itself if the
-  flag is off), `tests/e2e/08-sourcing.spec.ts` (6 browser tests, also skips itself) and the sourcing block (4 tests) in
-  `tests/db/00-schema-integrity.spec.ts`. Vitest — backend: pure detectors/utils and the digest service (`sourcingChecker`,
-  `workingDays`, `sourcingTemplates`, `sourcingDescribe`, `sourcingDigest` util + service, `sourcingPlanTransitions`: 7 files, 129
-  tests; the read-only guard for the smoke accounts is in `middleware/auth.test.ts`); `services/sourcingPlans.ts` (lifecycle, activation, resolution, hook), `services/sourcingSettings.ts` and
-  `routes/sourcing.ts` have NO Vitest and are covered only by the Playwright db spec, and `utils/sourcingConfig.ts` /
-  `sourcingQualified.ts` only indirectly. Frontend: 6 files, 78 tests (`useSourcingPlan`, `sourcingFormat`, `SourcingCard` (36),
-  `SourcingExecution`, `RoleDetail.sourcing`, and `MyTasks`, whose 20 cover the whole page). **Regression with the module ON (2026-10-19):** the whole local
-  suite — api + db + e2e + smoke, 592 tests — passed with `SOURCING_ENABLED=true` on the backend, so the existing dashboard / ingestion /
-  pending-actions / role-approval specs are proven with the flag on (re-run it that way before enabling in production again if the code changes).
+- Pinned by Playwright `hms-tests-final/tests/db/13-sourcing-plans.spec.ts` (39 tests: plan lifecycle, role-status chains, managing a running plan, the guards,
+  concurrency races) and `tests/db/14-sourcing-workspace.spec.ts` (83 serial tests, all through the real API and DB: the first task's link + target, the
+  weekly weeks (target met / missed, IST edges, idempotent and race-safe sync), Close / Reopen, every path that stops a tracker, hold and resume, the
+  per-role target, the plan history, the workspace and its summary, channel settings, the AI advice cache, the Hiring Manager redaction, a stop racing the
+  sync, the form's source tags, and the data migration run against production-shaped rows inside a rolled-back transaction), `tests/e2e/08-sourcing.spec.ts`
+  (11 browser tests) and the sourcing block (4 tests) in `tests/db/00-schema-integrity.spec.ts`; all of them skip themselves when the flag is off. Helper:
+  `tests/helpers/sourcing-db.ts` (`purgeRolesFast` — the local `pending_actions` table is millions of rows with unindexed foreign keys, so deleting
+  an application or role one by one costs ~0.5 s each). Vitest — backend 641 tests / 36 files, of which the sourcing ones are `sourcingChecker` (28),
+  `sourcingAdvisor` (58 + 14 for the model call), `sourcingConfig` (32), `sourcingTimeline` (35), `sourcingWeeks` (42), `sourcingPlanTransitions` (42),
+  `sourcingTemplates` (19), `sourcingDigest` util + service (16 + 16), `sourcingDescribe` (9) and `workingDays`; the read-only guard for the smoke accounts is in
+  `middleware/auth.test.ts`. `services/sourcingPlans.ts` (lifecycle, activation, resolution, hook), `services/sourcingSettings.ts`, `services/sourcingWorkspace.ts`
+  and `routes/sourcing.ts` have NO Vitest and are covered only by the Playwright db specs. Frontend 581 tests / 24 files, of which the sourcing ones are
+  `SourcingPlanPanel` (100), `SourcingModals` (103), `SourcingChannelBlock` (74), `SourcingWorkspace` (36), `SourcingTimeline` (18), `SourcingExecution` (10),
+  `useSourcingPlan` (24), `sourcingFormat` (7), `RoleDetail.sourcing` (17), and the Sourcing / Help parts of `MyTasks` (31) and `Help` (26).
+  **Regression run of the finished branch (2026-10-21/22):** the whole local suite (api + db + e2e, `npm run test:local`, `SOURCING_ENABLED=true`) — 646
+  tests, 645 passed. The one failure is `tests/e2e/05-unlinked-candidates.spec.ts` ("candidate with zero applications appears in the Unmatched Candidates
+  panel"): none of its files are touched by this branch; the panel's query (`utils/unmatchedCandidates.ts`) takes ~3.6 s on this local database because
+  it now holds ~1,975 zero-application candidates left by months of test runs (the panel was still at "(0)" when the test's 5 s expect timed out). It is
+  a pre-existing fragility of that test + that query on a large local database, not a regression; watch the query's cost as production's count grows.
 
 ### Help page, info markers and the User Access Guide (2026-10-19)
 `frontend/src/pages/Help.tsx` is hand-written prose, not generated: when a screen's behaviour changes, its FAQ answer has to be edited
@@ -1213,7 +1293,7 @@ candidate/role pages — their text must say what the number really counts, so c
 an inline tag and the following text removes the space (`<strong>Stop using</strong>` + newline + `leaves` renders "usingleaves") —
 write `{' '}` at the line end.
 The **User Access Guide** is `DigitalPaani_HMS_User_Access_Guide.docx` (repo root, the source) and
-`frontend/public/DigitalPaani_HMS_User_Access_Guide.pdf` (what the Help page links to). Version 5 (October 2026) was edited with
+`frontend/public/DigitalPaani_HMS_User_Access_Guide.pdf` (what the Help page links to). Version 5.1 (October 2026, brought up to the 21 October sourcing workspace release) was edited with
 python-docx by paragraph text and converted with LibreOffice (`soffice --headless --convert-to pdf`); regenerate the PDF from the docx
 every time the docx changes, never edit the PDF alone.
 

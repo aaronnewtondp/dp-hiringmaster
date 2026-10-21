@@ -1131,3 +1131,75 @@ CREATE TABLE IF NOT EXISTS portfolio_analyses (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ─── Sourcing workspace: per-role target, channel weekly tracker, advice cache (2026-10-21) ───
+-- Additive and idempotent (safe to run on a database that already holds sourcing data). Nothing here changes an existing
+-- constraint: a CLOSED channel is state='excluded' with closed_at set (the engine, queue and guards already treat 'excluded' as
+-- "not in the plan", so a closed channel can never be chased by mistake); the API reports it as state 'closed'.
+--   sourcing_plans.weekly_qualified_target  per-role target of qualified candidates in the last 7 days (NULL = the default for P0/P1, none for P2/P3)
+--   sourcing_plan_channels.closed_*         Close Channel: when/who/why. The posting link, target and weekly results stay for the summary.
+--   sourcing_plan_channels.tracker_anchor   first day of the channel's weekly tracker (LinkedIn / Naukri / Direct Outreach); NULL = not tracking
+--   sourcing_channel_weeks                  one immutable row per FINISHED week of a tracked channel (target vs applications tagged with the channel)
+--   sourcing_advice                         cached AI "next steps" for a plan, keyed by a hash of the facts it was written from
+ALTER TABLE sourcing_plans
+  ADD COLUMN IF NOT EXISTS weekly_qualified_target INT;
+ALTER TABLE sourcing_plans DROP CONSTRAINT IF EXISTS sourcing_plans_weekly_qualified_target_check;
+ALTER TABLE sourcing_plans
+  ADD CONSTRAINT sourcing_plans_weekly_qualified_target_check CHECK (weekly_qualified_target IS NULL OR weekly_qualified_target BETWEEN 1 AND 500);
+
+ALTER TABLE sourcing_plan_channels
+  ADD COLUMN IF NOT EXISTS closed_at      TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS closed_by      UUID REFERENCES users(id),
+  ADD COLUMN IF NOT EXISTS closed_reason  TEXT,
+  ADD COLUMN IF NOT EXISTS tracker_anchor DATE;
+
+CREATE TABLE IF NOT EXISTS sourcing_channel_weeks (
+  id              BIGSERIAL PRIMARY KEY,
+  plan_channel_id BIGINT NOT NULL REFERENCES sourcing_plan_channels(id) ON DELETE CASCADE,
+  week_start      DATE NOT NULL,                       -- IST calendar dates, week_end inclusive
+  week_end        DATE NOT NULL,
+  target          INT  NOT NULL,
+  actual          INT  NOT NULL,                       -- applications to the role tagged with this channel in the window (qualified + unqualified)
+  qualified       INT  NOT NULL DEFAULT 0,
+  partial         BOOLEAN NOT NULL DEFAULT false,      -- the channel was closed (or the role closed) before the week ended
+  finalized_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (plan_channel_id, week_start)
+);
+
+CREATE TABLE IF NOT EXISTS sourcing_advice (
+  plan_id      BIGINT PRIMARY KEY REFERENCES sourcing_plans(id) ON DELETE CASCADE,
+  facts_hash   TEXT NOT NULL,
+  source       TEXT NOT NULL CHECK (source IN ('ai','rules')),
+  model        TEXT,
+  advice       JSONB NOT NULL,
+  generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE sourcing_channel_weeks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_advice        ENABLE ROW LEVEL SECURITY;
+
+-- Data left behind by the first version of the tracker. Direct Outreach logged "weekly contacts" by hand — a count of outbound CONTACTS, which
+-- is not what the weekly tracker measures (APPLICANTS who named the channel on the application form), so the old number is deliberately NOT
+-- reused as the new target and no tracker is started on anyone's behalf. Instead:
+--   1. the retired "log this week's contacts" task stops chasing (skipped; its completion log stays, the plan view no longer shows it), and a
+--      first task of these channels that is still OPEN (created by the first version) is retitled to what the form now asks for;
+--   2. every LIVE LinkedIn / Naukri/IIMjobs / Direct Outreach channel that has no weekly sourcing target gets its first task back —
+--      "Log the … post (link and weekly sourcing target)", due in two days — so HR is asked once for the link and the target; completing it
+--      (or adding both through "Edit target and link") starts the tracker. Without this such a channel would be live but never measured.
+-- Idempotent: once the target exists (or the task was skipped by HR) neither statement matches again.
+UPDATE sourcing_commitments SET status = 'skipped' WHERE kind = 'weekly_outbound' AND status = 'open';
+UPDATE sourcing_commitments c
+   SET title = CASE WHEN ch.channel = 'Direct Outreach' THEN 'Log the Direct Outreach campaign (link and weekly sourcing target)'
+                    ELSE 'Log the ' || ch.channel || ' post (link and weekly sourcing target)' END
+  FROM sourcing_plan_channels ch
+ WHERE c.plan_channel_id = ch.id AND c.kind = 'activate_channel' AND c.status = 'open'
+   AND ch.channel IN ('LinkedIn','Naukri/IIMjobs','Direct Outreach') AND c.title NOT LIKE 'Log the %';
+UPDATE sourcing_commitments c
+   SET status = 'open',
+       title  = CASE WHEN ch.channel = 'Direct Outreach' THEN 'Log the Direct Outreach campaign (link and weekly sourcing target)'
+                     ELSE 'Log the ' || ch.channel || ' post (link and weekly sourcing target)' END,
+       due_at = (((NOW() AT TIME ZONE 'Asia/Kolkata')::date + 3)::timestamp AT TIME ZONE 'Asia/Kolkata') - INTERVAL '1 millisecond'
+  FROM sourcing_plan_channels ch JOIN sourcing_plans p ON p.id = ch.plan_id
+ WHERE c.plan_channel_id = ch.id AND c.kind = 'activate_channel' AND c.status = 'done'
+   AND ch.channel IN ('LinkedIn','Naukri/IIMjobs','Direct Outreach') AND ch.state = 'active'
+   AND ch.tracker_anchor IS NULL AND NOT (ch.targets ? 'weekly_target') AND p.status IN ('active','paused');

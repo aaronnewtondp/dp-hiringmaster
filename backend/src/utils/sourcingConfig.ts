@@ -7,6 +7,32 @@ export type SourcingChannel = typeof SOURCING_CHANNELS[number];
 
 export const PORTAL_CHANNELS: readonly string[] = ['LinkedIn', 'Naukri/IIMjobs'];
 
+/**
+ * Channels run as "log the post → weekly performance tracker": task 1 records the link and a numeric weekly sourcing target
+ * (qualified + unqualified applicants), and from then on the system measures every finished week against that target using the
+ * applications tagged with the channel on the application form. Agency and Internal Referral keep their own follow-ups.
+ */
+export const TRACKED_CHANNELS: readonly string[] = ['LinkedIn', 'Naukri/IIMjobs', 'Direct Outreach'];
+export function isTrackedChannel(channel: string): boolean { return TRACKED_CHANNELS.includes(channel); }
+
+/** A weekly sourcing target (applicants per week for one channel) is a whole number in this range. */
+export const MIN_WEEKLY_TARGET = 1;
+export const MAX_WEEKLY_TARGET = 10000;
+/** The per-role "qualified in the last 7 days" target. */
+export const MIN_QUALIFIED_TARGET = 1;
+export const MAX_QUALIFIED_TARGET = 500;
+
+export function parseWeeklyTarget(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  const n = Math.round(v);
+  return n >= MIN_WEEKLY_TARGET && n <= MAX_WEEKLY_TARGET ? n : null;
+}
+export function parseQualifiedTarget(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  const n = Math.round(v);
+  return n >= MIN_QUALIFIED_TARGET && n <= MAX_QUALIFIED_TARGET ? n : null;
+}
+
 export function isSourcingChannel(v: unknown): v is SourcingChannel {
   return typeof v === 'string' && (SOURCING_CHANNELS as readonly string[]).includes(v);
 }
@@ -120,15 +146,33 @@ export const UNTAGGED_SOURCE = 'untagged_default';
 /** A tag the applicant chose that is not one of our channels (e.g. "Other") — claimed attribution, kept distinct from untagged. */
 export const OTHER_SOURCE = 'Other';
 
+/** Spellings applicants (and the form's own dropdown) use for each channel, matched after lower-casing and tidying spaces around "/".
+    The Job Application Form's question "How did you hear about this opening?" offers: Linkedin · Naukri/IIMJobs · DigitalPaani HR Outreach ·
+    Hiring Agency · DigitalPaani Employee Referral — each of those lands on a channel through this table (or the exact-name match). */
+const SOURCE_ALIASES: Record<string, string> = {
+  'linkedin': 'LinkedIn', 'linked in': 'LinkedIn', 'linkedin.com': 'LinkedIn',
+  'naukri': 'Naukri/IIMjobs', 'naukri.com': 'Naukri/IIMjobs', 'iimjobs': 'Naukri/IIMjobs', 'iim jobs': 'Naukri/IIMjobs', 'naukri/iimjobs': 'Naukri/IIMjobs',
+  'naukri/iim jobs': 'Naukri/IIMjobs', 'naukri / iimjobs': 'Naukri/IIMjobs',
+  'agency': 'Agency', 'hiring agency': 'Agency', 'recruitment agency': 'Agency', 'placement agency': 'Agency',
+  'internal referral': 'Internal Referral', 'employee referral': 'Internal Referral', 'digitalpaani employee referral': 'Internal Referral',
+  'referral': 'Internal Referral', 'referred by an employee': 'Internal Referral',
+  'direct outreach': 'Direct Outreach', 'digitalpaani hr outreach': 'Direct Outreach', 'hr outreach': 'Direct Outreach',
+  'outreach': 'Direct Outreach', 'direct message': 'Direct Outreach', 'cold outreach': 'Direct Outreach',
+};
+const aliasOf = (key: string): string | undefined => Object.prototype.hasOwnProperty.call(SOURCE_ALIASES, key) ? SOURCE_ALIASES[key] : undefined;
+
 /**
- * Normalise the optional "How did you hear about this role?" answer the Apps Script forwards as `source_tag`.
- * A known channel (case/whitespace-insensitive) → its canonical spelling; blank/missing → UNTAGGED_SOURCE (so yield can
- * exclude it); anything else the applicant picked → OTHER_SOURCE. Never throws, never returns free text.
+ * Normalise the optional "How did you hear about this opening?" answer the Apps Script forwards as `source_tag` (the older "Sourcing Channel" /
+ * "How did you hear about this role?" titles are still accepted by the script). A known channel (case/whitespace-insensitive, plus the common
+ * spellings above) → its canonical name; blank/missing → UNTAGGED_SOURCE (so yield can exclude it); anything else the applicant picked →
+ * OTHER_SOURCE. Never throws, never returns free text — and never an inherited property of the alias table ("constructor", "__proto__").
  */
 export function normalizeSourceTag(raw: unknown): string {
   if (typeof raw !== 'string') return UNTAGGED_SOURCE;
   const t = raw.trim().replace(/\s+/g, ' ');
   if (!t) return UNTAGGED_SOURCE;
-  const hit = (SOURCING_CHANNELS as readonly string[]).find(c => c.toLowerCase() === t.toLowerCase());
-  return hit ?? OTHER_SOURCE;
+  const lower = t.toLowerCase();
+  const exact = (SOURCING_CHANNELS as readonly string[]).find(c => c.toLowerCase() === lower);
+  if (exact) return exact;
+  return aliasOf(lower) ?? aliasOf(lower.replace(/\s*\/\s*/g, '/')) ?? OTHER_SOURCE;
 }

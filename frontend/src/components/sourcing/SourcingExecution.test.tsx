@@ -41,17 +41,35 @@ describe('Dashboard → Sourcing execution', () => {
     expect(dashboard).toHaveBeenCalledWith({ priority: ['P0'], role_id: ['R7'] });
   });
 
-  it('shows the summary tile and an exception row as committed → what happened → next, linking to the role\'s Sourcing card', async () => {
+  it('shows the summary tile and an exception row as committed → what happened → next, linking to the role\'s plan in the Sourcing workspace', async () => {
     mount(payload());
     expect(await screen.findByText('Plans active')).toBeInTheDocument();
     expect(screen.getByText('6 / 14')).toBeInTheDocument();
     expect(screen.getByText('80%')).toBeInTheDocument();
     const link = screen.getByRole('link', { name: 'Role 1' });
-    expect(link).toHaveAttribute('href', '/roles/R1#sourcing');
+    expect(link).toHaveAttribute('href', '/dashboard?sourcing_role=R1#sourcing-workspace');
     expect(screen.getByText('LinkedIn: Publish the posting (1)')).toBeInTheDocument();
     expect(screen.getByText('Not done — 2 days overdue')).toBeInTheDocument();
     expect(screen.getByText('Publish on LinkedIn and mark it done')).toBeInTheDocument();
     expect(screen.queryByText('Aaron Newton')).not.toBeInTheDocument();
+  });
+
+  it('every row links to its own role\'s plan in the workspace — never to the role page', async () => {
+    mount(payload({}, [row(1), row(2, { role_title: 'Sr. Backend Developer', role_id: 'R019' }), row(3, { provisional: true, type: 'VOLUME_GAP', channel: '*', role_id: 'R7', role_title: 'Designer' })]));
+    await screen.findByText('Role 1');
+    const hrefs = Object.fromEntries(screen.getAllByRole('link').map(a => [a.textContent, a.getAttribute('href')]));
+    expect(hrefs['Role 1']).toBe('/dashboard?sourcing_role=R1#sourcing-workspace');
+    expect(hrefs['Sr. Backend Developer']).toBe('/dashboard?sourcing_role=R019#sourcing-workspace');
+    expect(hrefs['Designer']).toBe('/dashboard?sourcing_role=R7#sourcing-workspace');
+    expect(screen.getAllByRole('link').some(a => a.getAttribute('href')?.startsWith('/roles/'))).toBe(false);
+  });
+
+  it('two exceptions on one role give two rows with the same link', async () => {
+    mount(payload({}, [row(1, { id: 'a', type: 'CHANNEL_NOT_ACTIVATED' }), row(1, { id: 'b', type: 'COMMITMENT_OVERDUE', channel: 'Agency' })]));
+    await screen.findAllByRole('link', { name: 'Role 1' });
+    const links = screen.getAllByRole('link', { name: 'Role 1' });
+    expect(links).toHaveLength(2);
+    for (const l of links) expect(l).toHaveAttribute('href', '/dashboard?sourcing_role=R1#sourcing-workspace');
   });
 
   it('provisional rows are marked and explained with the date they go live', async () => {

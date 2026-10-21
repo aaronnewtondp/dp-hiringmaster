@@ -12,6 +12,17 @@ it was (the plan is reconciled the next time that role is saved with a real chan
 Removing the tables is a separate, optional step: [`SourcingModule_Rollback.sql`](SourcingModule_Rollback.sql) — guarded, it refuses to
 run while any sourcing table holds a row, and it never touches anything outside the 8 `sourcing_*` tables.
 
+## Release 2026-10-21 — workspace, weekly tracker, per-role target, AI next steps
+
+What it changes for users: the plan moves from the role page to **Dashboard → Sourcing plans**; LinkedIn / Naukri/IIMjobs / Direct Outreach get "log the post (link + weekly target)" and an automatic red/green weekly tracker; "Stop using" becomes **Close channel** (summary kept, reopenable); each role has its own weekly qualified target; Needs attention gets AI-written next steps; the plan history logs every action; the form field is **How did you hear about this opening?**.
+
+Order (each step is safe on its own; do them in this order):
+1. **Schema first.** Apply the last block of `backend/src/db/schema.sql` ("Sourcing workspace: per-role target, channel weekly tracker, advice cache", 2026-10-21) to Supabase. It is additive and idempotent (`ADD COLUMN IF NOT EXISTS`, `CREATE TABLE IF NOT EXISTS`, a re-creatable CHECK, RLS on the two new tables) and ends with a small data repair for the first version's rows: every open "log this week's contacts" (`weekly_outbound`) task is skipped (its log stays), and every LIVE LinkedIn / Naukri/IIMjobs / Direct Outreach channel that has no weekly target gets its first task back — "Log the … post (link and weekly sourcing target)", due 23:59 IST two days after the run — so HR is asked once for the link and the target. Direct Outreach's old `weekly_contacts` number is deliberately NOT turned into a target: it counted outbound contacts, the tracker counts applicants. In production this touches R003 only (Naukri/IIMjobs and Direct Outreach). The block is idempotent and was tested on production-shaped rows inside a rolled-back transaction. The previous backend ignores the new columns and tables, and treats a re-opened task as any other open task (it shows in the old card/queue and goes overdue after two days), so nothing breaks while it is in — but apply the block **immediately before the backend deploy** (the new code needs the columns, and if someone completes the re-opened Direct Outreach task on the OLD backend, that backend's follow-on logic revives the skipped `weekly_outbound`). After the deploy, check `SELECT count(*) FROM sourcing_commitments WHERE kind = 'weekly_outbound' AND status = 'open'` is 0; if not, re-run the first statement of the block (it is idempotent). Run it in one transaction (`apply_migration` does). Verify: the two new tables exist, `sourcing_plans.weekly_qualified_target` and the four `sourcing_plan_channels` columns exist, and for R003 `SELECT ch.channel, c.kind, c.status, c.title, c.due_at FROM sourcing_plan_channels ch JOIN sourcing_commitments c ON c.plan_channel_id = ch.id WHERE ch.plan_id = 5 ORDER BY 1, 2` shows the two re-opened `activate_channel` tasks and the skipped `weekly_outbound`.
+2. **Merge the PR** (backend and frontend deploy from `main`). Nothing else to switch: `SOURCING_ENABLED` is already on. `ANTHROPIC_API_KEY` is already set on the backend (the advisor uses it; without it the steps are rule-based and say so; `SOURCING_ADVICE_MODEL` overrides the model).
+3. **Application form — update the Apps Script BEFORE the next applicant.** The form now has the dropdown **"How did you hear about this opening?"** (Linkedin, Naukri/IIMJobs, DigitalPaani HR Outreach, Hiring Agency, DigitalPaani Employee Referral). The live script files every column it does not recognise under `screening_answers`, so until it is edited the answer is stored as a screening question and `source_tag` stays blank. In the response sheet's Apps Script: (a) add `'How did you hear about this opening?': true,` to `HANDLED_ELSEWHERE`; (b) set `source_tag` to `firstNonEmpty('How did you hear about this opening?') || firstNonEmpty('Sourcing Channel') || firstNonEmpty('How did you hear about this role?')`. Reference copy: `docs/CandidateApplicationFormTrigger.gs.js` (do not paste it over the live script — its secret is a placeholder). The backend maps the options to channels (HR Outreach → Direct Outreach, Hiring Agency → Agency, Employee Referral → Internal Referral); link each job post or campaign to the form with its option pre-filled. Until the field reaches HMS every week reads as missed. If any applicant submitted before the script was edited, their answer sits in `screening_answers` — a one-off backfill can copy it into `sub_source` (ask).
+4. **HR logs what is already live.** A channel that was live before the release has no weekly target: its panel shows "No weekly sourcing target is set…" and its "Log the … post" task is open (step 1). Completing the task — or the prompt's **Add the target and post link**, which opens that task — asks for the link and the target and starts the tracker. Until then nothing about that channel is measured, and if the task goes overdue it appears as a "Channel set-up overdue" alert ("Log the … post link and the weekly sourcing target") on a channel that is in fact live: that is the reminder to log the post.
+Rollback: the new columns and tables are harmless to the previous code; redeploy the previous deployment.
+
 ## Where production stands (2026-10-20)
 
 Steps 1, 2 and 4 are **done**. The schema was applied to Supabase on 2026-10-19 (migration `20261019025305`, 8 tables, RLS on with no
@@ -34,7 +45,7 @@ untouched. To roll back: `SOURCING_ENABLED=false` + redeploy, or Instant Rollbac
    (`dp-hiring-master-*.json`, gitignored). **Backend first, and let it finish before the frontend ships.** *Known limitation, left as is
    on purpose:* until the backend is live, every Dashboard load shows a "Couldn't load sourcing execution." card (the role page and
    My Tasks degrade silently). With the flag still off nothing else is visible.
-3. **(Optional — only if you want to know which channel produced a candidate.) Update the Apps Script — before the flag and before the form changes.** The module works fully without steps 3 and 6; skipping them only means *Applications by source* cannot say where applicants came from, because the live ingest stamps every form applicant `LinkedIn`. Make two edits to the LIVE script in the response sheet's Apps Script — **do not paste the reference copy `CandidateApplicationFormTrigger.gs.js` over it** (its `CANDIDATE_INGEST_SECRET` is only a placeholder, so every submission would be rejected, and the live script may have diverged from the copy): add the `'How did you hear about this role?': true` entry to `HANDLED_ELSEWHERE`, and the line `source_tag: firstNonEmpty('How did you hear about this role?')` to `payload`. Until the question exists it sends a blank tag, which is harmless. The order matters: the live script puts every form
+3. **(Needed for the weekly channel tracker since 2026-10-21 — see the release section above; optional before that.) Update the Apps Script — before the flag and before the form changes.** The module works fully without steps 3 and 6; skipping them only means *Applications by source* cannot say where applicants came from, because the live ingest stamps every form applicant `LinkedIn`. Make two edits to the LIVE script in the response sheet's Apps Script — **do not paste the reference copy `CandidateApplicationFormTrigger.gs.js` over it** (its `CANDIDATE_INGEST_SECRET` is only a placeholder, so every submission would be rejected, and the live script may have diverged from the copy): add the `'How did you hear about this role?': true` entry to `HANDLED_ELSEWHERE`, and the line `source_tag: firstNonEmpty('How did you hear about this role?')` to `payload`. Until the question exists it sends a blank tag, which is harmless. The order matters: the live script puts every form
    column it does not recognise into `screening_answers`, so a dropdown added first would be stored as a screening question for every
    applicant.
 4. **Set env on the backend project:** `SOURCING_ENABLED=true`, **then redeploy** (the variable is read at request time but a new
@@ -43,7 +54,7 @@ untouched. To roll back: `SOURCING_ENABLED=false` + redeploy, or Instant Rollbac
 5. **First engine run stamps the clock.** The first time the engine runs enabled (any queue/dashboard load, or the daily cron) it
    records `go_live_date = today` and `shadow_until = today + 42 days` in `sourcing_settings` — never overwriting a value that is
    already there. Until `shadow_until`, threshold signals (volume gap) are *provisional*: shown to HR-tier users only (a greyed
-   "Provisional" on the dashboard and on the role's Sourcing card), no My Tasks item, no Hiring-Manager view, never listed in an e-mail
+   "Provisional" on the dashboard and in the role's plan on the Dashboard), no My Tasks item, no Hiring-Manager view, never listed in an e-mail
    (the Monday summary only states how many exist), not resolvable. **Settings cannot be written while the flag is off** (`PUT
    /api/sourcing/settings` answers 503), so the go-live date and `shadow_until` cannot be pre-set through the API. Either accept the
    stamp, or pre-insert rows into `sourcing_settings` (`key TEXT`, `value JSONB`) by SQL BEFORE the first engine run (before step 4's redeploy, or at the very latest before anyone opens the Dashboard or My Tasks, or the cron fires, after it); the stamp never overwrites a key that exists. Adjust later with `PUT /api/sourcing/settings` (Leadership / Super Admin).
@@ -58,7 +69,7 @@ untouched. To roll back: `SOURCING_ENABLED=false` + redeploy, or Instant Rollbac
    shows them as "(untagged)"), so per-channel yield figures start only from the day tagging starts.
 7. **Draft plans** appear for every open role automatically; `npx tsx src/scripts/backfillSourcingPlans.ts [--dry-run]` does it in
    one go if you want the "Plans to activate" list complete before anyone opens the app.
-8. **Activate in waves** (P0/P1 first). On a role page → Sourcing → *Activate plan*: tick the channels (there is no owner to pick — sourcing belongs to HR/Admin as a whole, and every HR user sees and can act on every plan), and for
+8. **Activate in waves** (P0/P1 first). On **Dashboard → Sourcing plans** (pick the role) → *Activate plan*: tick the channels (there is no owner to pick — sourcing belongs to HR/Admin as a whole, and every HR user sees and can act on every plan), and for
    anything already running tick *Already running before today* (+ posting date) — it is recorded as done and the renewal clock
    starts from the posting date. A first role (R016 or R019) before the rest is the sensible dry run. Nothing here is final: after
    activation channels can still be added or brought back and the strategy note edited (see *Managing a running plan* below).
@@ -112,17 +123,33 @@ Before enabling in production, also re-run the existing dashboard / ingestion / 
 ## Managing a running plan
 
 On an **active or paused** plan (not a draft — activation chooses the channels — and not a closed one) a recruiter or Leadership user has
-these controls on the role's Sourcing card:
+these controls in the plan's panel (**Dashboard → Sourcing plans**, pick the role):
 
 * **Add channel** — pick a channel that is not in the plan. Tracking starts today; its first task falls due in 1–2 working days (on a
   paused plan the clock starts when the role is back on). A channel that is already in the plan cannot be added again (409).
 * **Bring back** (on a channel that was left out) — the same, with the earlier reason shown. Completing the channel's first task again
-  brings its follow-ons back (renewal, follow-up, repost, weekly outbound) with fresh due dates; ones that are running are left alone.
-* **Undo skip** (on a skipped task) — a skipped follow-up is due tomorrow; a skipped first task gets its normal 1–2 working days. Not offered for a channel that is left out (bring the channel back first)
-  or on a plan that is not active.
-* **Edit strategy note** — the note shown on the card to HR (the Hiring Manager never sees it); the change is written to the plan's history.
+  brings its follow-ons back (renewal, follow-up, repost) with fresh due dates; ones that are running are left alone.
+* **Close channel** (replaces "Stop using") — needs a reason. The channel's open tasks are skipped and nothing is chased, but the post
+  link, the weekly target and every tracked week stay as a summary on the plan. **Reopen channel** brings it back: the tasks the close skipped
+  return (a recurring one that fell due while closed is due tomorrow), and the weekly tracker restarts from that day with the same target (from the next day if it was closed the same day, because the week cut short already covers today). Closing also clears the channel's open alerts at once.
+* **Edit target and link** (live LinkedIn / Naukri/IIMjobs / Direct Outreach channels) — change the weekly sourcing target and/or the post
+  link. Weeks that already finished keep the target they were measured against. This is also how a channel logged before the 2026-10-21 release
+  gets its first target.
+* **Undo skip** (on a skipped task) — a skipped follow-up is due tomorrow; a skipped first task gets its normal 1–2 working days. Not offered for
+  a channel that is left out or closed (bring it back / reopen it first) or on a plan that is not active.
+* **Edit plan** — the strategy note (shown to HR; the Hiring Manager never sees it) and this role's weekly qualified target (blank = the
+  default: 5 for P0/P1, none for P2/P3). Changes are written to the plan's history.
   There is no owner to change: **sourcing is owned by the HR/Admin persona as a whole**, not by individuals. Every HR user sees the same
-  My Tasks → Sourcing queue and can complete, skip or resolve anything on any plan; the card shows "Owner: HR".
+  My Tasks → Sourcing queue and can complete, skip or resolve anything on any plan; the panel shows "Owner: HR".
+
+**The weekly tracker** (LinkedIn, Naukri/IIMjobs, Direct Outreach): the first task logs the post — link and a whole-number weekly sourcing
+target are required. From that day each 7-day week (India dates) is measured against the target using the applications to the role whose
+"How did you hear about this opening?" answer maps to that channel: green when met, red when missed, recorded as one line on the channel and one in the plan history. The
+engine and the daily cron finish any week that has ended; reading a plan does too. Closing a channel or the role cuts the week in progress short.
+
+**Recommended next steps** (AI): see CLAUDE.md → Sourcing → *AI next steps*. They are cached per plan (a day while the numbers are unchanged, rewritten
+when they change, at once for a new problem, **Refresh** at most once a minute); `ANTHROPIC_API_KEY` must be set on the backend or the steps are
+rule-based (labelled). Nothing personal is sent to the model.
 
 Also enforced by the server (these are API rules the screens never trip): a task that was skipped, or that belongs to a channel that is left out
 or a closed plan, cannot be marked done (409); a plan can only be activated while it is a draft (a paused plan resumes with its role); and a

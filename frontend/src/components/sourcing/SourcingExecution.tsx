@@ -99,7 +99,7 @@ export default function SourcingExecution({ masterFilterParams }: { masterFilter
                     <td className="table-td">
                       <div className="flex items-center gap-2">
                         <PriorityBadge priority={r.priority} />
-                        <Link to={`/roles/${r.role_id}#sourcing`} className="font-medium text-gray-900 hover:text-dp-600">{r.role_title}</Link>
+                        <Link to={`/dashboard?sourcing_role=${r.role_id}#sourcing-workspace`} className="font-medium text-gray-900 hover:text-dp-600">{r.role_title}</Link>
                       </div>
                       <div className="text-[11px] text-gray-400 mt-0.5 flex flex-wrap gap-x-2">
                         <span>{exceptionLabel(r.type)}</span>

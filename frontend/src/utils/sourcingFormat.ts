@@ -1,10 +1,10 @@
 // Display helpers for the Sourcing module — labels and small formatting rules shared by the role card, My Tasks box and
 // dashboard section so they always say the same thing.
-import { ExceptionType, PORTAL_CHANNELS } from '../types/sourcing.ts';
+import { ExceptionType, PORTAL_CHANNELS, TRACKED_CHANNELS } from '../types/sourcing.ts';
 
 export const EXCEPTION_LABELS: Record<ExceptionType, string> = {
   PLAN_NOT_ACTIVATED:    'Plan not activated',
-  CHANNEL_NOT_ACTIVATED: 'Channel not live',
+  CHANNEL_NOT_ACTIVATED: 'Channel set-up overdue',
   COMMITMENT_OVERDUE:    'Commitment overdue',
   FOLLOWUP_OVERDUE:      'Follow-up overdue',
   VOLUME_GAP:            'Not enough qualified candidates',
@@ -15,16 +15,25 @@ export const exceptionLabel = (t: string): string => EXCEPTION_LABELS[t as Excep
 /** One line on what "activating" this channel means in practice (shown on the activation screen). */
 export function channelBlurb(channel: string): string {
   switch (channel) {
-    case 'LinkedIn':          return 'Publish the job posting and note the date — HMS reminds you before it expires.';
-    case 'Naukri/IIMjobs':    return 'Publish the job posting and note the date — HMS reminds you before it expires.';
+    case 'LinkedIn':          return 'Log the job post with its link and a weekly sourcing target. HMS then measures every week against it, automatically.';
+    case 'Naukri/IIMjobs':    return 'Log the job post with its link and a weekly sourcing target. HMS then measures every week against it, automatically.';
     case 'Agency':            return 'Choose the agencies and send them the role brief; HMS tracks follow-ups.';
     case 'Internal Referral': return 'Launch the referral push to the team and repost it every couple of weeks.';
-    case 'Direct Outreach':   return 'Work a target-company list weekly. The first 4 weeks only record your baseline.';
+    case 'Direct Outreach':   return 'Log the outreach campaign with a link and a weekly sourcing target. HMS then measures every week against it, automatically.';
     default:                  return '';
   }
 }
 
 export const isPortal = (channel: string): boolean => PORTAL_CHANNELS.includes(channel);
+/** LinkedIn, Naukri/IIMjobs and Direct Outreach: logged with a link and a weekly target, then tracked automatically week by week. */
+export const isTracked = (channel: string): boolean => TRACKED_CHANNELS.includes(channel);
+
+/** "21 Oct" from an IST 'YYYY-MM-DD'. */
+export function shortDate(d: string | null | undefined): string {
+  if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return d ?? '';
+  return new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+}
+export const weekLabel = (start: string, end: string): string => `${shortDate(start)} – ${shortDate(end)}`;
 
 /** "Due today" / "Due tomorrow" / "Due 12 Oct" / "3 days overdue" — from an IST 'YYYY-MM-DD' date and today's. */
 export function dueLabel(dueDate: string, today: string): string {

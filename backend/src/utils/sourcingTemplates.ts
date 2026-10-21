@@ -1,7 +1,7 @@
 // Commitment templates — pure, so every due date can be unit-tested.
 //
 // Only `activate_channel` is created at plan activation. Completing it spawns the channel's
-// follow-on commitments (renewal / agency follow-up / referral repost / weekly outbound), so a
+// follow-on commitments (portal renewal / agency follow-up / referral repost), so a
 // commitment never exists before its evidence path does and a recruiter who attests "already
 // running" at activation gets the right next due date immediately.
 import { addCalendarDays, addWorkingDays, endOfIstDay, istDate, WorkingCalendar } from './workingDays.js';
@@ -31,7 +31,7 @@ export function dueAtFor(spec: Pick<CommitmentSpec, 'due_date'>): Date {
 /** The single commitment created when a channel is activated on a plan. Anchored to the activation date. */
 export function activationSpec(channel: string, activationDate: string, cal: WorkingCalendar): CommitmentSpec {
   if (PORTAL_CHANNELS.includes(channel)) {
-    return { kind: 'activate_channel', subject_key: '', title: `Publish the posting on ${channel}`, cadence_days: null, due_date: addWorkingDays(activationDate, 1, cal), meta: {} };
+    return { kind: 'activate_channel', subject_key: '', title: `Log the ${channel} post (link and weekly sourcing target)`, cadence_days: null, due_date: addWorkingDays(activationDate, 1, cal), meta: {} };
   }
   if (channel === 'Agency') {
     return { kind: 'activate_channel', subject_key: '', title: 'Select agencies and share the role brief', cadence_days: null, due_date: addWorkingDays(activationDate, 2, cal), meta: {} };
@@ -40,7 +40,7 @@ export function activationSpec(channel: string, activationDate: string, cal: Wor
     return { kind: 'activate_channel', subject_key: '', title: 'Launch the employee referral push', cadence_days: null, due_date: addWorkingDays(activationDate, 1, cal), meta: {} };
   }
   if (channel === 'Direct Outreach') {
-    return { kind: 'activate_channel', subject_key: '', title: 'Start outbound outreach and set the weekly contact target', cadence_days: null, due_date: addWorkingDays(activationDate, 2, cal), meta: {} };
+    return { kind: 'activate_channel', subject_key: '', title: 'Log the Direct Outreach campaign (link and weekly sourcing target)', cadence_days: null, due_date: addWorkingDays(activationDate, 2, cal), meta: {} };
   }
   return { kind: 'activate_channel', subject_key: '', title: `Activate ${channel}`, cadence_days: null, due_date: addWorkingDays(activationDate, 1, cal), meta: {} };
 }
@@ -75,13 +75,8 @@ export function followOnSpecs(
       cadence_days: settings.referral_repost_days, due_date: addCalendarDays(doneDate, settings.referral_repost_days), meta: { lead_days: 0 },
     }];
   }
-  if (channel === 'Direct Outreach') {
-    return [{
-      kind: 'weekly_outbound', subject_key: '', title: 'Log this week’s outbound contacts against the target',
-      cadence_days: 7, due_date: addCalendarDays(doneDate, 7),
-      meta: { lead_days: 0, baseline_until: addCalendarDays(doneDate, settings.weekly_baseline_weeks * 7) },
-    }];
-  }
+  // Direct Outreach (like the portals' weekly numbers) is measured by the automatic weekly tracker — see utils/sourcingWeeks.ts —
+  // so it has no follow-on task. (`weekly_outbound` remains a known kind only for rows created by the first version.)
   return [];
 }
 

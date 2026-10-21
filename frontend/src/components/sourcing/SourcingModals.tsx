@@ -6,9 +6,9 @@ import { sourcingApi } from '../../services/api.ts';
 import { Spinner } from '../shared/Badges.tsx';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import {
-  ActivationChannelInput, ResolutionPath, SOURCING_CHANNELS, SourcingPerson, SourcingPlan, SourcingPlanChannel,
+  ActivationChannelInput, MAX_WEEKLY_TARGET, ResolutionPath, SOURCING_CHANNELS, SourcingPerson, SourcingPlan, SourcingPlanChannel,
 } from '../../types/sourcing.ts';
-import { channelBlurb, isPortal, plural, ymd } from '../../utils/sourcingFormat.ts';
+import { channelBlurb, isPortal, isTracked, plural, shortDate, ymd } from '../../utils/sourcingFormat.ts';
 
 export const apiError = (err: unknown, fallback: string): string =>
   (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? fallback;
@@ -74,8 +74,12 @@ function usePeople() {
 interface Row { included: boolean; reason: string; running: boolean; url: string; postedAt: string; target: string }
 const emptyRow = (): Row => ({ included: false, reason: '', running: false, url: '', postedAt: '', target: '' });
 
-export function ActivatePlanModal({ plan, channels, onClose, onDone }: {
-  plan: SourcingPlan; channels: SourcingPlanChannel[]; onClose: () => void; onDone: () => void;
+const isUrl = (v: string): boolean => { try { const u = new URL(v.trim()); return u.protocol === 'https:' || u.protocol === 'http:'; } catch { return false; } };
+const wholeTarget = (v: string): number | null => { const n = Number(v); return v.trim() !== '' && Number.isInteger(n) && n >= 1 && n <= MAX_WEEKLY_TARGET ? n : null; };
+
+export function ActivatePlanModal({ plan, channels, defaultTarget, onClose, onDone }: {
+  plan: SourcingPlan; channels: SourcingPlanChannel[]; /** the default qualified target for this role (5 for P0/P1, none for P2/P3) */ defaultTarget?: number | null;
+  onClose: () => void; onDone: () => void;
 }) {
   const seeded = new Set(channels.map(c => c.channel));
 
@@ -88,33 +92,41 @@ export function ActivatePlanModal({ plan, channels, onClose, onDone }: {
     return init;
   });
   const [note, setNote] = useState(plan.strategy_note ?? '');
+  const [qualified, setQualified] = useState(plan.weekly_qualified_target ? String(plan.weekly_qualified_target) : '');
   const [saving, setSaving] = useState(false);
 
   const set = (ch: string, patch: Partial<Row>) => setRows(r => ({ ...r, [ch]: { ...r[ch], ...patch } }));
   const included = SOURCING_CHANNELS.filter(c => rows[c].included);
   const droppedSeeded = SOURCING_CHANNELS.filter(c => seeded.has(c) && !rows[c].included);
   const missingReason = droppedSeeded.filter(c => rows[c].reason.trim().length < 3);
+  // A channel that is already running is logged right now, so it needs what logging needs: the post's link and the weekly sourcing target.
+  const incompleteRunning = included.filter(c => isTracked(c) && rows[c].running && (!isUrl(rows[c].url) || wholeTarget(rows[c].target) === null));
+  const qualifiedBad = qualified.trim() !== '' && (!Number.isInteger(Number(qualified)) || Number(qualified) < 1 || Number(qualified) > 500);
   const problem = included.length === 0 ? 'Keep at least one channel in the plan.'
-    : missingReason.length ? `Say why ${missingReason.join(', ')} ${missingReason.length === 1 ? 'is' : 'are'} not being used.` : '';
+    : missingReason.length ? `Say why ${missingReason.join(', ')} ${missingReason.length === 1 ? 'is' : 'are'} not being used.`
+    : incompleteRunning.length ? `${incompleteRunning.join(', ')}: add the post link and a whole-number weekly sourcing target for what is already running.`
+    : qualifiedBad ? 'The weekly qualified target is a whole number from 1 to 500 (or leave it blank).' : '';
 
   const submit = async () => {
     if (problem) return;
     const payload: ActivationChannelInput[] = [
       ...included.map(ch => {
         const r = rows[ch];
-        const target = Number(r.target);
         return {
           channel: ch, already_running: r.running,
           ...(r.running && r.postedAt ? { posted_at: r.postedAt } : {}),
           ...(r.running && r.url.trim() ? { url: r.url.trim() } : {}),
-          ...(ch === 'Direct Outreach' && target > 0 ? { weekly_target: target } : {}),
+          ...(r.running && isTracked(ch) && wholeTarget(r.target) !== null ? { weekly_target: wholeTarget(r.target)! } : {}),
         } as ActivationChannelInput;
       }),
       ...droppedSeeded.map(ch => ({ channel: ch, exclude_reason: rows[ch].reason.trim() })),
     ];
     setSaving(true);
     try {
-      await sourcingApi.activate(plan.id, { strategy_note: note.trim() || null, channels: payload });
+      await sourcingApi.activate(plan.id, {
+        strategy_note: note.trim() || null, channels: payload,
+        ...(qualified.trim() !== '' ? { weekly_qualified_target: Number(qualified) } : {}),
+      });
       toast.success('Sourcing plan activated');
       onDone();
     } catch (err) { toast.error(apiError(err, 'Could not activate the plan')); }
@@ -150,21 +162,16 @@ export function ActivatePlanModal({ plan, channels, onClose, onDone }: {
                     <input type="checkbox" checked={r.running} onChange={e => set(ch, { running: e.target.checked })} />
                     Already running before today
                   </label>
-                  <p className="text-[11px] text-gray-400 ml-6 -mt-1">Recorded as done so it does not show as overdue; the next reminder counts from the posting date you enter (or from today).</p>
-                  {r.running && (
+                  <p className="text-[11px] text-gray-400 ml-6 -mt-1">Recorded as done so it does not show as overdue; the next reminder counts from today{isPortal(ch) ? ' (or the posting date you enter)' : ''}.</p>
+                  {r.running && isTracked(ch) && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {isPortal(ch) && (
-                        <>
-                          <input className="input text-xs" type="date" aria-label={`${ch} posting date`} max={ymd(0)} value={r.postedAt} onChange={e => set(ch, { postedAt: e.target.value })} />
-                          <input className="input text-xs" type="url" placeholder="Posting link (optional)" aria-label={`${ch} posting link`} value={r.url} onChange={e => set(ch, { url: e.target.value })} />
-                        </>
-                      )}
-                      {!isPortal(ch) && <p className="text-xs text-gray-400 sm:col-span-2">Recorded as done; the follow-up clock starts today.</p>}
+                      <input className="input text-xs sm:col-span-2" type="url" placeholder={ch === 'Direct Outreach' ? 'Link to the outreach campaign or list (required)' : 'Link to the job post (required)'} aria-label={`${ch} post link`} value={r.url} onChange={e => set(ch, { url: e.target.value })} />
+                      <input className="input text-xs" type="number" min={1} max={MAX_WEEKLY_TARGET} step={1} placeholder="Weekly sourcing target (required)" aria-label={`${ch} weekly sourcing target`} value={r.target} onChange={e => set(ch, { target: e.target.value })} />
+                      {isPortal(ch) && <input className="input text-xs" type="date" aria-label={`${ch} posting date`} max={ymd(0)} value={r.postedAt} onChange={e => set(ch, { postedAt: e.target.value })} />}
+                      <p className="text-[11px] text-gray-400 sm:col-span-2">The weekly target is the number of applicants (qualified and unqualified) you want this channel to bring in each week. HMS counts them from the “How did you hear about this opening?” answer on the application form and shows each finished week as met or missed.</p>
                     </div>
                   )}
-                  {ch === 'Direct Outreach' && (
-                    <input className="input text-xs w-48" type="number" min={1} placeholder="Weekly contact target (optional)" aria-label="Weekly unique-contact target" value={r.target} onChange={e => set(ch, { target: e.target.value })} />
-                  )}
+                  {r.running && !isTracked(ch) && <p className="text-xs text-gray-400">Recorded as done; the follow-up clock starts today.</p>}
                 </div>
               )}
 
@@ -178,6 +185,10 @@ export function ActivatePlanModal({ plan, channels, onClose, onDone }: {
         })}
       </fieldset>
 
+      <Field label="Weekly qualified target for this role" optional
+        hint={defaultTarget ? `Qualified candidates wanted in any 7 days. Leave it blank to use the default of ${defaultTarget}.` : 'Qualified candidates wanted in any 7 days. Without one, nothing is flagged for this role.'}>
+        <input type="number" min={1} max={500} step={1} className="input text-sm w-32" value={qualified} onChange={e => setQualified(e.target.value)} />
+      </Field>
       <Field label="Strategy note" optional hint="Anything leadership should know about how you'll source this role. The Hiring Manager does not see it.">
         <textarea className="input text-sm h-20 resize-none" value={note} onChange={e => setNote(e.target.value)} />
       </Field>
@@ -190,45 +201,53 @@ export function ActivatePlanModal({ plan, channels, onClose, onDone }: {
 export function CompleteCommitmentModal({ commitment, channel, onClose, onDone }: {
   commitment: { id: string; kind: string; title: string }; channel: string; onClose: () => void; onDone: () => void;
 }) {
-  const portalActivation = isPortal(channel) && (commitment.kind === 'activate_channel' || commitment.kind === 'renew_posting');
-  const outreachTarget = channel === 'Direct Outreach' && (commitment.kind === 'activate_channel' || commitment.kind === 'weekly_outbound');
+  // The first task of LinkedIn / Naukri/IIMjobs / Direct Outreach logs the post: its link and the weekly sourcing target are required, because the
+  // target is what the automatic weekly tracker measures from then on.
+  const logsPost = isTracked(channel) && commitment.kind === 'activate_channel';
+  const portalPosting = isPortal(channel) && (commitment.kind === 'activate_channel' || commitment.kind === 'renew_posting');
   const [url, setUrl] = useState('');
-  const [postedAt, setPostedAt] = useState(portalActivation ? ymd(0) : '');
+  const [postedAt, setPostedAt] = useState(portalPosting ? ymd(0) : '');
   const [target, setTarget] = useState('');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
+  const t = wholeTarget(target);
+  const problem = logsPost ? (!isUrl(url) ? 'Add the link to the post.' : t === null ? 'Add a whole-number weekly sourcing target.' : '') : '';
 
   const submit = async () => {
+    if (problem) return;
     setSaving(true);
     try {
-      const t = Number(target);
       await sourcingApi.completeCommitment(commitment.id, {
         attest: true, url: url.trim() || null, note: note.trim() || null,
-        ...(portalActivation && postedAt ? { posted_at: postedAt } : {}),
-        ...(outreachTarget && t > 0 ? { weekly_target: t } : {}),
+        ...(portalPosting && postedAt ? { posted_at: postedAt } : {}),
+        ...(logsPost && t !== null ? { weekly_target: t } : {}),
       });
-      toast.success('Marked done');
+      toast.success(logsPost ? 'Post logged — weekly tracking is set up' : 'Marked done');
       onDone();
     } catch (err) { toast.error(apiError(err, 'Could not mark it done')); }
     setSaving(false);
   };
 
   return (
-    <ModalShell title="Mark done" subtitle={`${channel} · ${commitment.title}`} onClose={onClose}
+    <ModalShell title={logsPost ? `Log the ${channel} post` : 'Mark done'} subtitle={`${channel} · ${commitment.title}`} onClose={onClose}
       footer={<>
         <button type="button" onClick={onClose} className="btn-secondary text-sm">Cancel</button>
-        <button type="button" onClick={submit} disabled={saving} className="btn-primary text-sm">{saving ? <Spinner size="sm" /> : 'Mark done'}</button>
+        <button type="button" onClick={submit} disabled={saving || !!problem} title={problem || undefined} className="btn-primary text-sm">{saving ? <Spinner size="sm" /> : logsPost ? 'Log post' : 'Mark done'}</button>
       </>}>
-      <p className="text-xs text-gray-500">Confirming that this is done. Evidence is optional — add a link or a line if it helps whoever reviews the plan.</p>
-      {portalActivation && (
+      {logsPost
+        ? <p className="text-xs text-gray-500">From today HMS counts the applications whose “How did you hear about this opening?” answer means {channel} and, at the end of each 7-day week, shows whether the weekly target was met (green) or missed (red).</p>
+        : <p className="text-xs text-gray-500">Confirming that this is done. Evidence is optional — add a link or a line if it helps whoever reviews the plan.</p>}
+      {portalPosting && (
         <Field label="Posted on" hint="The posting's own date — the renewal reminder counts from here.">
           <input type="date" className="input text-sm" max={ymd(0)} value={postedAt} onChange={e => setPostedAt(e.target.value)} />
         </Field>
       )}
-      <Field label="Link" optional><input type="url" className="input text-sm" placeholder="https://…" value={url} onChange={e => setUrl(e.target.value)} /></Field>
-      {outreachTarget && (
-        <Field label="Weekly unique-contact target" optional hint="You set this. Until 4 weeks of data exist it is only recorded, never flagged.">
-          <input type="number" min={1} className="input text-sm w-40" value={target} onChange={e => setTarget(e.target.value)} />
+      <Field label={logsPost ? (channel === 'Direct Outreach' ? 'Link to the outreach campaign or list' : 'Link to the job post') : 'Link'} optional={!logsPost}>
+        <input type="url" className="input text-sm" placeholder="https://…" value={url} onChange={e => setUrl(e.target.value)} />
+      </Field>
+      {logsPost && (
+        <Field label="Weekly sourcing target" hint="Applicants per week from this channel — qualified and unqualified together. You can change it later.">
+          <input type="number" min={1} max={MAX_WEEKLY_TARGET} step={1} className="input text-sm w-40" value={target} onChange={e => setTarget(e.target.value)} />
         </Field>
       )}
       <Field label="Note" optional><textarea className="input text-sm h-16 resize-none" value={note} onChange={e => setNote(e.target.value)} /></Field>
@@ -344,7 +363,7 @@ export function ResolveExceptionModal({ exception, onClose, onDone }: {
       {path === 'change_strategy' && exception.channel !== '*' && (
         <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
           <input type="checkbox" checked={dropChannel} onChange={e => setDropChannel(e.target.checked)} />
-          Stop using {exception.channel} for this role
+          Close {exception.channel} for this role
         </label>
       )}
 
@@ -360,8 +379,10 @@ export function ResolveExceptionModal({ exception, onClose, onDone }: {
   );
 }
 
-// ═══ Exclude a channel (or take it back) ═══════════════════════════════════════════════════════════
-export function ExcludeChannelModal({ planId, channel, onClose, onDone }: {
+// ═══ Close a channel, reopen it, edit its target and link ═══════════════════════════════════════════
+// Closing keeps everything the channel produced (the post link, the weekly target and every tracked week) as a summary on the plan, and the
+// channel can be reopened. It replaces "Stop using", which threw that history away.
+export function CloseChannelModal({ planId, channel, onClose, onDone }: {
   planId: string; channel: string; onClose: () => void; onDone: () => void;
 }) {
   const [reason, setReason] = useState('');
@@ -371,21 +392,91 @@ export function ExcludeChannelModal({ planId, channel, onClose, onDone }: {
     if (!ok) return;
     setSaving(true);
     try {
-      await sourcingApi.setChannel(planId, { channel, state: 'excluded', excluded_reason: reason.trim() });
-      toast.success(`${channel} left out of the plan`);
+      await sourcingApi.closeChannel(planId, channel, reason.trim());
+      toast.success(`${channel} closed — its summary stays on the plan`);
       onDone();
-    } catch (err) { toast.error(apiError(err, 'Could not update the channel')); }
+    } catch (err) {
+      toast.error(apiError(err, 'Could not close the channel'));
+      if ((err as { response?: { status?: number } })?.response?.status === 409) onDone();
+    }
     setSaving(false);
   };
   return (
-    <ModalShell title={`Stop using ${channel}`} subtitle="Its open commitments are cancelled and nothing more is chased for it." onClose={onClose}
+    <ModalShell title={`Close ${channel}`} subtitle="Its open tasks stop and nothing more is chased. The post link, targets and weekly results stay on the plan, and you can reopen it any time." onClose={onClose}
       footer={<>
         <button type="button" onClick={onClose} className="btn-secondary text-sm">Cancel</button>
-        <button type="button" onClick={submit} disabled={saving || !ok} className="btn-primary text-sm">{saving ? <Spinner size="sm" /> : 'Leave it out'}</button>
+        <button type="button" onClick={submit} disabled={saving || !ok} className="btn-primary text-sm">{saving ? <Spinner size="sm" /> : 'Close channel'}</button>
       </>}>
-      <Field label="Why?" hint="Recorded in the plan's history.">
+      <Field label="Why is it being closed?" hint="Recorded in the plan's history.">
         <textarea className="input text-sm h-20 resize-none" value={reason} onChange={e => setReason(e.target.value)} />
       </Field>
+    </ModalShell>
+  );
+}
+
+export function ReopenChannelModal({ planId, channel, target, onClose, onDone }: {
+  planId: string; channel: string; target: number | null; onClose: () => void; onDone: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    setSaving(true);
+    try { await sourcingApi.reopenChannel(planId, channel); toast.success(`${channel} reopened`); onDone(); }
+    catch (err) {
+      toast.error(apiError(err, 'Could not reopen the channel'));
+      if ((err as { response?: { status?: number } })?.response?.status === 409) onDone();
+    }
+    setSaving(false);
+  };
+  return (
+    <ModalShell title={`Reopen ${channel}`} subtitle="Carry on using it." onClose={onClose}
+      footer={<>
+        <button type="button" onClick={onClose} className="btn-secondary text-sm">Cancel</button>
+        <button type="button" onClick={submit} disabled={saving} className="btn-primary text-sm">{saving ? <Spinner size="sm" /> : 'Reopen channel'}</button>
+      </>}>
+      <p className="text-sm text-gray-600">Its follow-up tasks come back{target ? ` and weekly tracking restarts with the same target of ${target} a week — today, or tomorrow if the channel was closed today` : ''}. The weeks already recorded stay as they are.</p>
+    </ModalShell>
+  );
+}
+
+/** Change a live channel's weekly sourcing target and/or post link. Weeks that already finished keep the target they were measured against. */
+export function EditChannelModal({ planId, channel, target, link, onClose, onDone }: {
+  planId: string; channel: string; target: number | null; link: string | null; onClose: () => void; onDone: () => void;
+}) {
+  const [t, setT] = useState(target ? String(target) : '');
+  const [url, setUrl] = useState(link ?? '');
+  const [saving, setSaving] = useState(false);
+  const newTarget = wholeTarget(t);
+  const targetChanged = newTarget !== null && newTarget !== target;
+  const linkChanged = url.trim() !== (link ?? '') && isUrl(url);
+  const problem = t.trim() !== '' && newTarget === null ? 'The weekly sourcing target is a whole number (1 or more).'
+    : url.trim() !== '' && !isUrl(url) ? 'The link must start with http:// or https://.' : '';
+  const ok = !problem && (targetChanged || linkChanged);
+  const submit = async () => {
+    if (!ok) return;
+    setSaving(true);
+    try {
+      await sourcingApi.updateChannel(planId, { channel, ...(targetChanged ? { weekly_target: newTarget } : {}), ...(linkChanged ? { posting_url: url.trim() } : {}) });
+      toast.success('Saved — the change is in the plan history');
+      onDone();
+    } catch (err) {
+      toast.error(apiError(err, 'Could not save the change'));
+      if ((err as { response?: { status?: number } })?.response?.status === 409) onDone();
+    }
+    setSaving(false);
+  };
+  return (
+    <ModalShell title={`${channel}: target and link`} subtitle={target ? undefined : 'No weekly target is set yet, so this channel is not being tracked.'} onClose={onClose}
+      footer={<>
+        <button type="button" onClick={onClose} className="btn-secondary text-sm">Cancel</button>
+        <button type="button" onClick={submit} disabled={saving || !ok} title={problem || undefined} className="btn-primary text-sm">{saving ? <Spinner size="sm" /> : 'Save'}</button>
+      </>}>
+      <Field label="Weekly sourcing target" hint="Applicants per week — qualified and unqualified together. Weeks that already finished keep the target they were measured against; a new target counts from now.">
+        <input type="number" min={1} max={MAX_WEEKLY_TARGET} step={1} className="input text-sm w-40" value={t} onChange={e => setT(e.target.value)} />
+      </Field>
+      <Field label={channel === 'Direct Outreach' ? 'Link to the outreach campaign or list' : 'Link to the job post'} optional>
+        <input type="url" className="input text-sm" placeholder="https://…" value={url} onChange={e => setUrl(e.target.value)} />
+      </Field>
+      {problem && <p role="status" className="text-xs text-amber-700">{problem}</p>}
     </ModalShell>
   );
 }
@@ -398,7 +489,7 @@ export function AddChannelModal({ planId, planStatus, channels, preset, onClose,
 }) {
   const options = preset
     ? [preset]
-    : SOURCING_CHANNELS.filter(c => { const have = channels.find(x => x.channel === c); return !have || have.state === 'excluded'; });
+    : SOURCING_CHANNELS.filter(c => { const have = channels.find(x => x.channel === c); return !have || have.state === 'excluded'; });   // a CLOSED channel is reopened, not added
   const [choice, setChoice] = useState<string>(preset ?? '');
   const [saving, setSaving] = useState(false);
   const earlier = (ch: string) => channels.find(x => x.channel === ch && x.state === 'excluded')?.excluded_reason ?? null;
@@ -441,31 +532,44 @@ export function AddChannelModal({ planId, planStatus, channels, preset, onClose,
   );
 }
 
-// ═══ Edit the strategy note of a plan ══════════════════════════════════════════════════════════════
-// A plan has no individual owner — sourcing belongs to the HR/Admin persona as a whole — so the note is all there is to edit.
-export function EditPlanModal({ plan, onClose, onDone }: { plan: SourcingPlan; onClose: () => void; onDone: () => void }) {
+// ═══ Edit a plan: the strategy note and this role's weekly qualified target ═════════════════════════
+// A plan has no individual owner — sourcing belongs to the HR/Admin persona as a whole — so these two are all there is to edit.
+export function EditPlanModal({ plan, defaultTarget, onClose, onDone }: { plan: SourcingPlan; defaultTarget?: number | null; onClose: () => void; onDone: () => void }) {
   const [note, setNote] = useState(plan.strategy_note ?? '');
+  const [target, setTarget] = useState(plan.weekly_qualified_target ? String(plan.weekly_qualified_target) : '');
   const [saving, setSaving] = useState(false);
-  const changed = note.trim() !== (plan.strategy_note ?? '').trim();
+  const noteChanged = note.trim() !== (plan.strategy_note ?? '').trim();
+  const targetBad = target.trim() !== '' && (!Number.isInteger(Number(target)) || Number(target) < 1 || Number(target) > 500);
+  const newTarget = target.trim() === '' ? null : Number(target);
+  const targetChanged = !targetBad && newTarget !== (plan.weekly_qualified_target ?? null);
+  const ok = !targetBad && (noteChanged || targetChanged);
 
   const submit = async () => {
-    if (!changed) return;
+    if (!ok) return;
     setSaving(true);
     try {
-      await sourcingApi.updatePlan(plan.id, { strategy_note: note.trim() || null });
-      toast.success('Strategy note updated');
+      await sourcingApi.updatePlan(plan.id, {
+        ...(noteChanged ? { strategy_note: note.trim() || null } : {}),
+        ...(targetChanged ? { weekly_qualified_target: newTarget } : {}),
+      });
+      toast.success('Plan updated');
       onDone();
-    } catch (err) { toast.error(apiError(err, 'Could not update the strategy note')); }
+    } catch (err) { toast.error(apiError(err, 'Could not update the plan')); }
     setSaving(false);
   };
 
   return (
-    <ModalShell title="Edit strategy note" subtitle="The change is written to the plan's history."
+    <ModalShell title="Edit plan" subtitle="Changes are written to the plan's history."
       onClose={onClose}
       footer={<>
         <button type="button" onClick={onClose} className="btn-secondary text-sm">Cancel</button>
-        <button type="button" onClick={submit} disabled={saving || !changed} className="btn-primary text-sm">{saving ? <Spinner size="sm" /> : 'Save'}</button>
+        <button type="button" onClick={submit} disabled={saving || !ok} className="btn-primary text-sm">{saving ? <Spinner size="sm" /> : 'Save'}</button>
       </>}>
+      <Field label="Weekly qualified target" optional
+        hint={defaultTarget ? `Qualified candidates wanted in any 7 days for this role. Blank = the default of ${defaultTarget}.` : 'Qualified candidates wanted in any 7 days for this role. Blank = no target, so nothing is flagged.'}>
+        <input type="number" min={1} max={500} step={1} className="input text-sm w-32" value={target} onChange={e => setTarget(e.target.value)} />
+      </Field>
+      {targetBad && <p role="status" className="text-xs text-amber-700">The target is a whole number from 1 to 500.</p>}
       <Field label="Strategy note" optional hint="Anything leadership should know about how you'll source this role. The Hiring Manager does not see it.">
         <textarea className="input text-sm h-28 resize-none" maxLength={2000} value={note} onChange={e => setNote(e.target.value)} />
       </Field>

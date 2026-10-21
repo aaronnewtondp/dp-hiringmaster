@@ -125,6 +125,12 @@ export const sourcingApi = {
   skipCommitment:    (id: string, reason: string)                    => api.post(`/sourcing/commitments/${id}/skip`, { reason }),
   reopenCommitment:  (id: string)                                    => api.post(`/sourcing/commitments/${id}/reopen`, {}),
   resolveException:  (id: string, data: Record<string, unknown>)     => api.post(`/sourcing/exceptions/${id}/resolve`, data),
+  workspace:         ()                                              => api.get('/sourcing/workspace'),
+  // AI next steps (cached on the server). `refresh` asks for a new one — the server allows that at most once a minute.
+  advice:            (roleId: string, refresh = false)               => api.get(`/sourcing/plans/${roleId}/advice`, { params: refresh ? { refresh: '1' } : undefined }),
+  closeChannel:      (planId: string, channel: string, reason: string) => api.post(`/sourcing/plans/${planId}/channel/close`, { channel, reason }),
+  reopenChannel:     (planId: string, channel: string)               => api.post(`/sourcing/plans/${planId}/channel/reopen`, { channel }),
+  updateChannel:     (planId: string, data: Record<string, unknown>) => api.patch(`/sourcing/plans/${planId}/channel-settings`, data),
   queue:             ()                                              => api.get('/sourcing/queue'),
   dashboard:         (params?: Record<string, string | string[]>)    => api.get('/dashboard/sourcing', { params }),
 };

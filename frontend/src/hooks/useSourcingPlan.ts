@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { sourcingApi } from '../services/api.ts';
-import { SourcingPlanResponse } from '../types/sourcing.ts';
+import { SourcingAdvice, SourcingPlanResponse, SourcingWorkspaceResponse } from '../types/sourcing.ts';
 
 /**
  * A role's sourcing plan, or `{ enabled:false }` while the module is off. A 403 (a Hiring Manager who is not named on the
@@ -32,4 +32,35 @@ export function sourcingChip(view: SourcingPlanResponse | undefined): { text: st
       return { text: 'Sourcing on track', tone: 'green' };
     }
   }
+}
+
+/** The Dashboard workspace's role switcher: roles with an active/paused plan (+ drafts for HR-tier), or `{ enabled:false }` while the module is off. */
+export function useSourcingWorkspace() {
+  return useQuery<SourcingWorkspaceResponse>({
+    queryKey: ['sourcing-workspace'],
+    queryFn:  async () => (await sourcingApi.workspace()).data as SourcingWorkspaceResponse,
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * AI-written next steps for a role's plan (HR-tier only). The server caches them (24 h while the facts are unchanged), so this is cheap to
+ * mount; `refresh` asks for a new one (the server allows that at most once a minute). A failure just means "no advice yet" — the panel falls
+ * back to the plain next action on each problem.
+ */
+export function useSourcingAdvice(roleId: string | undefined, enabled: boolean) {
+  const qc = useQueryClient();
+  const query = useQuery<{ enabled: boolean; advice: SourcingAdvice | null }>({
+    queryKey: ['sourcing-advice', roleId],
+    queryFn:  async () => (await sourcingApi.advice(roleId!)).data,
+    enabled:  !!roleId && enabled,
+    retry:    false,
+    staleTime: 5 * 60_000,
+  });
+  const refresh = useMutation({
+    mutationFn: async () => (await sourcingApi.advice(roleId!, true)).data as { enabled: boolean; advice: SourcingAdvice | null },
+    onSuccess:  data => qc.setQueryData(['sourcing-advice', roleId], data),
+  });
+  return { ...query, refresh };
 }

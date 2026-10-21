@@ -23,8 +23,35 @@ describe('buildHrDigest', () => {
     expect(m.text).toContain('Hi team,');
     expect(m.text).toContain('QA Engineer (P1) — Agency');
     expect(m.text).toContain('Not done — 2 days overdue. Next: Choose the agencies.');
-    expect(m.text).toContain('https://hms.example.com/roles/R5#sourcing');            // trailing slash trimmed, no double slash
+    expect(m.text).toContain('https://hms.example.com/dashboard?sourcing_role=R5#sourcing-workspace');            // trailing slash trimmed, no double slash
     expect(m.text).toContain('Backend — LinkedIn: Renew the posting');
+  });
+
+  it('every role link goes to that role\'s plan in the Dashboard\'s Sourcing workspace — never the old role-page anchor', () => {
+    const m = buildHrDigest({ today: '2026-10-14', baseUrl: 'https://hms.example.com', dueToday: [], exceptions: [ex({ role_id: 'R5' }), ex({ role_id: 'R19', role_title: 'Head of Marketing' })] })!;
+    const links = m.text.match(/https?:\/\/\S+/g) ?? [];
+    expect(links).toEqual([
+      'https://hms.example.com/dashboard?sourcing_role=R5#sourcing-workspace',
+      'https://hms.example.com/dashboard?sourcing_role=R19#sourcing-workspace',
+    ]);
+    expect(m.text).not.toMatch(/\/roles\/|#sourcing(?!-)/);
+  });
+
+  it('the closing line points to the Dashboard\'s Sourcing plans section and My Tasks, not to a role\'s Sourcing card', () => {
+    const m = buildHrDigest({ today: '2026-10-14', dueToday: [], exceptions: [ex()] })!;
+    expect(m.text).toContain('from the Sourcing plans section on the Dashboard in HMS (or My Tasks → Sourcing).');
+    expect(m.text).not.toMatch(/Sourcing card/);
+  });
+
+  it('a role id with characters that are special in a URL is encoded, so the link cannot be cut short or injected into', () => {
+    const m = buildHrDigest({ today: '2026-10-14', baseUrl: 'https://hms.example.com', dueToday: [], exceptions: [ex({ role_id: 'R5&x=1#frag' })] })!;
+    expect(m.text).toContain('https://hms.example.com/dashboard?sourcing_role=R5%26x%3D1%23frag#sourcing-workspace');
+  });
+
+  it('several trailing slashes on the base URL are trimmed', () => {
+    const m = buildHrDigest({ today: '2026-10-14', baseUrl: 'https://hms.example.com///', dueToday: [], exceptions: [ex()] })!;
+    expect(m.text).toContain('https://hms.example.com/dashboard?sourcing_role=R5#sourcing-workspace');
+    expect(m.text).not.toContain('.com//');
   });
 
   it('pluralises the subject', () => {
@@ -61,6 +88,16 @@ describe('buildWeeklySummary', () => {
     const m = buildWeeklySummary({ ...base, exceptions: many });
     expect(m.text).toContain('…and 3 more on the dashboard.');
     expect((m.text.match(/Committed:/g) ?? []).length).toBe(15);
+  });
+
+  it('every exception links to the role\'s plan in the Dashboard\'s Sourcing workspace, and a base URL is needed for any link', () => {
+    const m = buildWeeklySummary({ ...base, baseUrl: 'https://hms.example.com/', exceptions: [ex({ role_id: 'R5' }), ex({ role_id: 'R19' })] });
+    expect(m.text.match(/https?:\/\/\S+/g)).toEqual([
+      'https://hms.example.com/dashboard?sourcing_role=R5#sourcing-workspace',
+      'https://hms.example.com/dashboard?sourcing_role=R19#sourcing-workspace',
+    ]);
+    expect(m.text).not.toMatch(/\/roles\/|#sourcing(?!-)/);
+    expect(buildWeeklySummary({ ...base, exceptions: [ex()] }).text).not.toContain('http');
   });
 
   it('says nothing was due rather than "0%" when no commitment came due', () => {

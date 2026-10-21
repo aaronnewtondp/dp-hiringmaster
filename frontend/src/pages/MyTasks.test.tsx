@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -215,13 +215,135 @@ describe('My Tasks — the Sourcing box', () => {
     mount();
     fireEvent.click(await screen.findByRole('button', { name: /^Sourcing/ }));
     expect(await screen.findByText('Plans to activate')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Quality Assurance Engineer' })).toHaveAttribute('href', '/roles/R005#sourcing');
+    expect(screen.getByRole('link', { name: 'Quality Assurance Engineer' })).toHaveAttribute('href', '/dashboard?sourcing_role=R005#sourcing-workspace');
     expect(screen.getByText('Renew the LinkedIn posting')).toBeInTheDocument();
     expect(screen.getByText('Not done — 2 days overdue')).toBeInTheDocument();
-    expect(screen.getByTestId('sourcing-targets')).toHaveTextContent('1 of 2 priority roles');
+    expect(screen.getByTestId('sourcing-targets')).toHaveTextContent('1 of 2 roles');
     expect(screen.getByTestId('sourcing-targets')).toHaveTextContent('Below target');
     expect(screen.getByText(/1 catching up/)).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Whose queue' })).not.toBeInTheDocument();          // a recruiter only ever sees their own
+  });
+
+  // ── the header line: "X of N roles at their own weekly qualified target" ──
+  describe('the weekly-target header line', () => {
+    const openBox = async (queue: unknown = QUEUE) => {
+      sourcingQueue.mockResolvedValue({ data: queue });
+      mount();
+      fireEvent.click(await screen.findByRole('button', { name: /^Sourcing/ }));
+      return screen.findByTestId('sourcing-targets');
+    };
+    const norm = (el: HTMLElement) => (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+    const role = (i: number, qualified: number, min = 5) => ({ role_id: `R2${i}`, title: `Role ${i}`, priority: 'P1', min, qualified });
+
+    it('reads "This week: X of N roles at their own weekly qualified target." with the roles below target named and linked to their plan', async () => {
+      const el = await openBox();
+      expect(norm(el)).toBe('This week: 1 of 2 roles at their own weekly qualified target. Below target: Sr. E&I Engineer (Hyderabad) (2).');
+      expect(screen.getAllByRole('link', { name: 'Sr. E&I Engineer (Hyderabad)' }).map(a => a.getAttribute('href')))
+        .toContain('/dashboard?sourcing_role=R003#sourcing-workspace');
+      expect(el.textContent).not.toMatch(/at or above|minimum|a minimum of/i);
+    });
+
+    it('counts the roles the queue reports, with the singular "1 role"', async () => {
+      const el = await openBox({ ...QUEUE, volume: [role(1, 9)], volume_ok: 1 });
+      expect(norm(el)).toBe('This week: 1 of 1 role at their own weekly qualified target.');
+      expect(el.textContent).not.toMatch(/Below target/);
+    });
+
+    it('when every role is on target there is no "Below target" list; when none is, every one is named', async () => {
+      const ok = await openBox({ ...QUEUE, volume: [role(1, 5), role(2, 8)], volume_ok: 2 });
+      expect(norm(ok)).toBe('This week: 2 of 2 roles at their own weekly qualified target.');   // exactly the target counts as met
+      cleanup();
+      const none = await openBox({ ...QUEUE, volume: [role(1, 0), role(2, 4)], volume_ok: 0 });
+      expect(norm(none)).toBe('This week: 0 of 2 roles at their own weekly qualified target. Below target: Role 1 (0), Role 2 (4).');
+    });
+
+    it('names at most three roles below target and counts the rest ("+N more")', async () => {
+      const volume = [role(1, 0), role(2, 1), role(3, 2), role(4, 3), role(5, 4), role(6, 9)];
+      const el = await openBox({ ...QUEUE, volume, volume_ok: 1 });
+      expect(norm(el)).toBe('This week: 1 of 6 roles at their own weekly qualified target. Below target: Role 1 (0), Role 2 (1), Role 3 (2) +2 more.');
+      expect(screen.queryByRole('link', { name: 'Role 4' })).not.toBeInTheDocument();
+    });
+
+    it('a role\'s own target decides "below": 6 qualified against its own target of 8 is below, 3 against a target of 2 is not', async () => {
+      const el = await openBox({ ...QUEUE, volume: [role(1, 6, 8), role(2, 3, 2)], volume_ok: 1 });
+      expect(norm(el)).toBe('This week: 1 of 2 roles at their own weekly qualified target. Below target: Role 1 (6).');
+    });
+
+    it('with no role carrying a target yet it says how many plans are active and how a target comes about, and never "0 of 0 roles"', async () => {
+      const el = await openBox({ ...QUEUE, volume: [], volume_ok: 0, active_plans: 3 });
+      expect(norm(el)).toBe('3 active plans. A role\'s weekly qualified target applies once it has one (5 by default for P0 and P1 roles).');
+      expect(el.textContent).not.toMatch(/0 of 0/);
+      cleanup();
+      const one = await openBox({ ...QUEUE, volume: [], volume_ok: 0, active_plans: 1 });
+      expect(norm(one)).toMatch(/^1 active plan\. /);
+    });
+  });
+
+  // ── the empty state ──
+  describe('when nothing needs attention', () => {
+    const EMPTY = { ...QUEUE, plans_to_activate: [], due: [], exceptions: [], exception_count: 0, snoozed_count: 0, blocked_count: 0 };
+
+    it('says "Nothing needs your attention" with the three things that are clear, and lists no groups', async () => {
+      sourcingQueue.mockResolvedValue({ data: EMPTY });
+      mount();
+      const box = await screen.findByRole('button', { name: /^Sourcing/ });
+      fireEvent.click(box);
+      expect(await screen.findByText('Nothing needs your attention ✓')).toBeInTheDocument();
+      expect(screen.getByText('No plans waiting, nothing due today, no open exceptions.')).toBeInTheDocument();
+      expect(screen.queryByText('Plans to activate')).not.toBeInTheDocument();
+      expect(screen.queryByText('Due today')).not.toBeInTheDocument();
+      expect(screen.queryByText('Needs attention')).not.toBeInTheDocument();
+      // the weekly-target line still shows above it
+      expect(screen.getByTestId('sourcing-targets')).toHaveTextContent('1 of 2 roles at their own weekly qualified target');
+    });
+
+    it('is not shown while anything at all is waiting — a plan to activate, a task due today or an open exception each suppress it', async () => {
+      const cases: Array<[string, Record<string, unknown>]> = [
+        ['a plan to activate', { plans_to_activate: QUEUE.plans_to_activate }],
+        ['a task due today', { due: QUEUE.due }],
+        ['an open exception', { exceptions: QUEUE.exceptions, exception_count: 1 }],
+      ];
+      for (const [label, over] of cases) {
+        sourcingQueue.mockResolvedValue({ data: { ...EMPTY, ...over } });
+        const { unmount } = mount();
+        fireEvent.click(await screen.findByRole('button', { name: /^Sourcing/ }));
+        await screen.findByTestId('sourcing-targets');
+        expect(screen.queryByText('Nothing needs your attention ✓'), label).not.toBeInTheDocument();
+        unmount();
+      }
+    });
+
+    it('an overdue task is not "due today": it does not count toward the list, so a queue with only overdue tasks reads as clear (its exception carries it)', async () => {
+      sourcingQueue.mockResolvedValue({ data: { ...EMPTY, due: [{ ...QUEUE.due[0], overdue: true }] } });
+      mount();
+      fireEvent.click(await screen.findByRole('button', { name: /^Sourcing/ }));
+      expect(await screen.findByText('Nothing needs your attention ✓')).toBeInTheDocument();
+      expect(screen.queryByText('Due today')).not.toBeInTheDocument();
+    });
+  });
+
+  it('an exception about a channel set-up shows the label "Channel set-up overdue" with the channel, never "Channel not live"', async () => {
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: /^Sourcing/ }));
+    await screen.findByText('Needs attention');
+    expect(screen.getByText('Channel set-up overdue')).toBeInTheDocument();
+    expect(screen.getByText('Channel set-up overdue').parentElement).toHaveTextContent('Channel set-up overdue · Agency');
+    expect(screen.queryByText(/Channel not live/)).not.toBeInTheDocument();
+  });
+
+  it('every role link in the box opens that role\'s plan in the Dashboard\'s Sourcing workspace, and none goes to the role page', async () => {
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: /^Sourcing/ }));
+    await screen.findByText('Plans to activate');
+    const href = (name: string) => screen.getAllByRole('link', { name }).map(a => a.getAttribute('href'));
+    // plan to activate: the title AND the Activate button
+    expect(href('Quality Assurance Engineer')).toEqual(['/dashboard?sourcing_role=R005#sourcing-workspace']);
+    expect(href('Activate')).toEqual(['/dashboard?sourcing_role=R005#sourcing-workspace']);
+    // due today
+    expect(href('Sr. Backend Developer')).toEqual(['/dashboard?sourcing_role=R001#sourcing-workspace']);
+    // the exception group heading and the "Below target" line both name R003
+    expect(href('Sr. E&I Engineer (Hyderabad)')).toEqual(Array(2).fill('/dashboard?sourcing_role=R003#sourcing-workspace'));
+    expect(screen.getAllByRole('link').some(a => (a.getAttribute('href') ?? '').startsWith('/roles/'))).toBe(false);
   });
 
   it('is absent while the module is off — and the queue is never fetched', async () => {
