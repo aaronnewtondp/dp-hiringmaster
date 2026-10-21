@@ -1186,6 +1186,7 @@ ALTER TABLE sourcing_advice        ENABLE ROW LEVEL SECURITY;
 --   2. every LIVE LinkedIn / Naukri/IIMjobs / Direct Outreach channel that has no weekly sourcing target gets its first task back —
 --      "Log the … post (link and weekly sourcing target)", due in two days — so HR is asked once for the link and the target; completing it
 --      (or adding both through "Edit target and link") starts the tracker. Without this such a channel would be live but never measured.
+--      Each task handed back is written to the plan's history (type task_handed_back), so the timeline explains why a finished task is open again.
 -- Idempotent: once the target exists (or the task was skipped by HR) neither statement matches again.
 UPDATE sourcing_commitments SET status = 'skipped' WHERE kind = 'weekly_outbound' AND status = 'open';
 UPDATE sourcing_commitments c
@@ -1194,12 +1195,19 @@ UPDATE sourcing_commitments c
   FROM sourcing_plan_channels ch
  WHERE c.plan_channel_id = ch.id AND c.kind = 'activate_channel' AND c.status = 'open'
    AND ch.channel IN ('LinkedIn','Naukri/IIMjobs','Direct Outreach') AND c.title NOT LIKE 'Log the %';
-UPDATE sourcing_commitments c
-   SET status = 'open',
-       title  = CASE WHEN ch.channel = 'Direct Outreach' THEN 'Log the Direct Outreach campaign (link and weekly sourcing target)'
-                     ELSE 'Log the ' || ch.channel || ' post (link and weekly sourcing target)' END,
-       due_at = (((NOW() AT TIME ZONE 'Asia/Kolkata')::date + 3)::timestamp AT TIME ZONE 'Asia/Kolkata') - INTERVAL '1 millisecond'
-  FROM sourcing_plan_channels ch JOIN sourcing_plans p ON p.id = ch.plan_id
- WHERE c.plan_channel_id = ch.id AND c.kind = 'activate_channel' AND c.status = 'done'
-   AND ch.channel IN ('LinkedIn','Naukri/IIMjobs','Direct Outreach') AND ch.state = 'active'
-   AND ch.tracker_anchor IS NULL AND NOT (ch.targets ? 'weekly_target') AND p.status IN ('active','paused');
+WITH handed_back AS (
+  UPDATE sourcing_commitments c
+     SET status = 'open',
+         title  = CASE WHEN ch.channel = 'Direct Outreach' THEN 'Log the Direct Outreach campaign (link and weekly sourcing target)'
+                       ELSE 'Log the ' || ch.channel || ' post (link and weekly sourcing target)' END,
+         due_at = (((NOW() AT TIME ZONE 'Asia/Kolkata')::date + 3)::timestamp AT TIME ZONE 'Asia/Kolkata') - INTERVAL '1 millisecond'
+    FROM sourcing_plan_channels ch JOIN sourcing_plans p ON p.id = ch.plan_id
+   WHERE c.plan_channel_id = ch.id AND c.kind = 'activate_channel' AND c.status = 'done'
+     AND ch.channel IN ('LinkedIn','Naukri/IIMjobs','Direct Outreach') AND ch.state = 'active'
+     AND ch.tracker_anchor IS NULL AND NOT (ch.targets ? 'weekly_target') AND p.status IN ('active','paused')
+  RETURNING ch.plan_id AS plan_id, ch.channel AS channel, c.title AS title
+)
+INSERT INTO sourcing_plan_changes (plan_id, "by", change, reason, at)
+SELECT plan_id, NULL, jsonb_build_object('type', 'task_handed_back', 'channel', channel, 'commitment', title),
+       'Handed back by the weekly-tracker release: the tracker needs a post link and a weekly sourcing target for this live channel', NOW()
+  FROM handed_back;

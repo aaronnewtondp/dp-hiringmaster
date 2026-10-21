@@ -45,11 +45,14 @@ export interface AdviceFacts {
     qualified_last_7d: number; shortlisted_last_7d: number; scored_above_60_last_7d: number; qualified_rule: string; gap: number | null;
   };
   pipeline: PipelineFacts;
+  /** All applications to the role, and how many came with no "How did you hear about this opening?" answer (everyone before that question existed). */
+  applications: { total: number; untagged: number };
   channels: Array<{
     channel: string; state: string; tracked: boolean; post_logged: boolean; weekly_target: number | null;
     this_week: { actual: number; target: number; days_left: number } | null;
     last_weeks: Array<{ actual: number; target: number; met: boolean }>;
-    applicants_total: number; qualified_total: number;
+    measured: boolean;                                       // a weekly sourcing target is set, so the tracker is counting this channel
+    applicants_tagged_total: number; qualified_tagged_total: number;   // ONLY applicants who named this channel on the application form
     open_tasks: Array<{ title: string; due: string; overdue: boolean }>;
   }>;
   exceptions: Array<{ id: string; type: string; what: string; channel: string; severity: number; committed: string; happened: string; age_days: number }>;
@@ -77,13 +80,18 @@ export function buildAdviceFacts(view: PlanView, pipeline: PipelineFacts, today:
       gap: target === null ? null : Math.max(0, target - v.weekly_qualified),
     },
     pipeline,
+    applications: {
+      total: (view.output ?? []).reduce((n, o) => n + o.applications, 0),
+      untagged: (view.output ?? []).filter(o => o.tag === '(untagged)' || o.tag === 'untagged_default').reduce((n, o) => n + o.applications, 0),
+    },
     channels: view.channels.filter(c => c.state !== 'excluded' && c.state !== 'closed').map(c => ({
       channel: c.channel, state: c.state, tracked: c.tracker.applicable,
       post_logged: c.tracker.link !== null || c.state === 'active',
       weekly_target: c.tracker.target,
       this_week: c.tracker.running ? { actual: c.tracker.running.actual, target: c.tracker.running.target, days_left: Math.max(0, daysBetween(today, c.tracker.running.end)) } : null,
       last_weeks: c.tracker.weeks.filter(w => !w.partial).slice(0, 4).map(w => ({ actual: w.actual, target: w.target, met: w.met })),   // a week cut short is neither met nor missed
-      applicants_total: c.tracker.sourced.applications, qualified_total: c.tracker.sourced.qualified,
+      measured: c.tracker.target !== null,
+      applicants_tagged_total: c.tracker.sourced.applications, qualified_tagged_total: c.tracker.sourced.qualified,
       open_tasks: c.commitments.filter(m => m.status === 'open').map(m => ({ title: m.title, due: m.due_date, overdue: m.overdue })),
     })),
     exceptions: view.exceptions.filter(e => e.status === 'open' && !e.is_shadow).map(e => ({
@@ -159,6 +167,7 @@ Write concrete next steps. Rules:
 - Use only the facts given. Never invent candidates, companies, numbers, tools or results. If something is unknown, say what to check.
 - Every step says WHAT to do, on WHICH channel (when it concerns one) and a number or deadline where the facts allow ("today", "within 48 hours", "5 messages a day for this week").
 - Aim at the single goal: close the gap between qualified candidates in the last 7 days and the target. Levers: clear candidates waiting for a shortlist decision (My Tasks > Ready for review); reactivate suitable people from the talent pool (Archived Pipeline > Hold for Future > Reactivate); refresh or boost a LinkedIn/Naukri/IIMjobs post that is under its weekly target; brief or chase agencies; push the role to employees for referrals; run direct outreach; ask the Hiring Manager for a quick decision or a sharper job description.
+- Channel counts ("applicants_tagged_total", "qualified_tagged_total") include ONLY applicants who named that channel on the application form; "applications.untagged" of "applications.total" gave no answer (everyone who applied before the question existed). So a count of 0 never means nobody applied: say "none tagged to this channel yet", or — when "measured" is false (no weekly target set, so the tracker is not counting it) — "not being measured yet". Never write "no applicants".
 - Diagnose before prescribing. If a channel meets its weekly applicant target but qualified candidates are still short, the problem is quality, not volume: say so and change the targeting, not the volume. If channels miss their target, the problem is reach.
 - If a step answers one of the flagged exceptions, set "exception_id" to that exception's id. Plan-level steps use null. Give at most 4 plan-level steps plus at most 2 steps per exception.
 - "owner" is "HR" unless the step needs the Hiring Manager.

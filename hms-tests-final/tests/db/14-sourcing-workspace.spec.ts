@@ -2904,6 +2904,7 @@ test.describe('Sourcing workspace', () => {
     let before: Json[] = [], after: Json[] = [], twice: Json[] = [];
     let outbound = '', logRows = { before: 0, after: 0 };
     let planOf: Record<string, string> = {};
+    let handed: { once: Json[]; twice: Json[] } = { once: [], twice: [] };
     await client.query('BEGIN');
     try {
       const fx = await buildLegacyPlans(client, ['A', 'B', 'C', 'D', 'E']);
@@ -2913,10 +2914,15 @@ test.describe('Sourcing workspace', () => {
       const plans = Object.values(planOf);
       before = await legacySnapshot(client, plans);
       logRows.before = Number((await client.query(`SELECT count(*) AS n FROM sourcing_commitment_log WHERE commitment_id=$1::bigint`, [outbound])).rows[0].n);
+      const handedBack = async () => (await client.query(
+        `SELECT plan_id::text AS plan_id, "by" AS by, change, reason FROM sourcing_plan_changes WHERE plan_id = ANY($1::bigint[]) AND change->>'type' = 'task_handed_back'`, [plans])).rows as Json[];
+      expect(await handedBack(), 'nothing is in the history before the migration runs').toEqual([]);
       await client.query(migration);
+      handed.once = await handedBack();
       after = await legacySnapshot(client, plans);
       logRows.after = Number((await client.query(`SELECT count(*) AS n FROM sourcing_commitment_log WHERE commitment_id=$1::bigint`, [outbound])).rows[0].n);
       await client.query(migration);
+      handed.twice = await handedBack();
       twice = await legacySnapshot(client, plans);
     } finally {
       await client.query('ROLLBACK');
@@ -2967,6 +2973,18 @@ test.describe('Sourcing workspace', () => {
     expect(logRows).toEqual({ before: 1, after: 1 });
     // idempotent: the matched rows are no longer 'done' / 'open', so a second run finds nothing
     expect(twice).toEqual(after);
+
+    // the plan history says why a finished task is open again: exactly one "task handed back" entry per re-opened task — written by the system, in
+    // the same statement — and none for the retitled open tasks, the skipped weekly task or anything left alone; a second run adds none
+    const handedKeys = (rows: Json[]) => rows.map(h => `${h.plan_id}|${h.change.channel}`).sort();
+    expect(handedKeys(handed.once)).toEqual([`${planOf.A}|Direct Outreach`, `${planOf.A}|Naukri/IIMjobs`, `${planOf.B}|Direct Outreach`].sort());
+    for (const h of handed.once) {
+      expect(h.by, 'a system entry has no author').toBeNull();
+      expect(h.change.type).toBe('task_handed_back');
+      expect(h.change.commitment).toBe(h.change.channel === 'Direct Outreach' ? 'Log the Direct Outreach campaign (link and weekly sourcing target)' : `Log the ${h.change.channel} post (link and weekly sourcing target)`);
+      expect(h.reason).toMatch(/weekly-tracker release/);
+    }
+    expect(handedKeys(handed.twice)).toEqual(handedKeys(handed.once));
 
     migratedA = after.filter(r => r.plan_id === planOf.A && (changed[rowKey(r)])).map(r => ({ channel: r.channel, kind: r.kind, subject_key: r.subject_key, status: r.status, title: r.title, due_at: r.due_at }));
     expect(migratedA).toHaveLength(3);

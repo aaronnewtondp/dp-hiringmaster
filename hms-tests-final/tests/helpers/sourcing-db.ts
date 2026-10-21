@@ -23,8 +23,10 @@ export function trackerMigrationSql(): string {
   const at = all.indexOf(TRACKER_MIGRATION_MARKER);
   if (at < 0) throw new Error(`the marker "${TRACKER_MIGRATION_MARKER}" is not in ${file} any more — update helpers/sourcing-db.ts and the migration specs`);
   const block = all.slice(at);
-  const updates = block.match(/^UPDATE /gm) ?? [];
-  if (updates.length !== 3) throw new Error(`the tracker migration block holds ${updates.length} UPDATE statements, the specs expect 3 — update them with the migration`);
+  // statements start at the beginning of a line: two plain UPDATEs (skip the retired task, retitle the open first tasks) and one WITH … UPDATE … INSERT
+  // (the re-opening, which also writes the plan history)
+  const statements = block.match(/^(UPDATE|WITH) /gm) ?? [];
+  if (statements.length !== 3) throw new Error(`the tracker migration block holds ${statements.length} statements, the specs expect 3 (2 UPDATE + 1 WITH) — update them with the migration`);
   return block;
 }
 

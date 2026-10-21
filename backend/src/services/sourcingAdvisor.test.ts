@@ -55,6 +55,23 @@ describe('buildAdviceFacts — what the model is allowed to see', () => {
     expect(out.channels.map(c => c.channel)).toEqual(['LinkedIn']);
     expect(out.exceptions.map(e => e.id)).toEqual(['41']);
   });
+  it('applicant counts are labelled as TAGGED, a channel with no weekly target is "not measured", and the untagged pool is stated — a 0 must not read as "nobody applied"', () => {
+    const v = baseView({ output: [{ tag: '(untagged)', applications: 19, qualified: 12 }, { tag: 'untagged_default', applications: 1, qualified: 0 }, { tag: 'LinkedIn', applications: 3, qualified: 1 }] });
+    v.channels.push({
+      ...v.channels[0], id: '3', channel: 'Naukri/IIMjobs',
+      tracker: { ...v.channels[0].tracker, target: null, running: null, weeks: [], link: null, sourced: { applications: 0, qualified: 0 } },
+    });
+    const out = buildAdviceFacts(v, pipeline(), '2026-10-28');
+    expect(out.applications).toEqual({ total: 23, untagged: 20 });
+    expect(out.channels[0]).toMatchObject({ channel: 'LinkedIn', measured: true });
+    expect(out.channels[1]).toMatchObject({ channel: 'Naukri/IIMjobs', measured: false, weekly_target: null, applicants_tagged_total: 0, qualified_tagged_total: 0 });
+    for (const c of out.channels) { expect(Object.keys(c)).not.toContain('applicants_total'); expect(Object.keys(c)).not.toContain('qualified_total'); }
+  });
+  it('a role with no application data at all gives zero totals, not a crash', () => {
+    const v = baseView();
+    (v as unknown as { output?: unknown }).output = undefined;
+    expect(buildAdviceFacts(v, pipeline(), '2026-10-28').applications).toEqual({ total: 0, untagged: 0 });
+  });
   it('no target (a P2 role without one) means no gap', () => {
     const v = baseView({ volume: { weekly_qualified: 2, shortlisted: 0, scored: 2, min: 0, rule: 'either', applicable: false, target_source: 'none', role_target: null, default_target: null } });
     expect(buildAdviceFacts(v, pipeline(), '2026-10-28').plan).toMatchObject({ target: null, gap: null });

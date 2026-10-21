@@ -1230,7 +1230,8 @@ its active plan as it was (it is reconciled on that role's next real save — se
   "log the post" task, due two days after the migration, so HR is asked once for the link and the target (completing it, or giving both through **Edit
   target and link** — `PATCH /sourcing/plans/:id/channel-settings`, which then completes the open task itself — starts the tracker); the old Direct
   Outreach `weekly_contacts` counted outbound CONTACTS, not applicants, so it is deliberately NOT carried over as a target, and the retired
-  `weekly_outbound` task is skipped (and hidden from the plan view). Until the task is done the channel shows a "no weekly target" prompt. The week's
+  `weekly_outbound` task is skipped (and hidden from the plan view). Each task handed back is written to the plan's history (`task_handed_back`, a system entry), so the timeline explains why a finished task is open
+  again, and an open one-off task never shows the evidence of an earlier completion. Until the task is done the channel shows a "no weekly target" prompt. The week's
   numbers are only as good as the form tagging: an application with no "How did you hear about this opening?" answer counts toward no channel.
 - **Close / reopen a channel (2026-10-21, replaces "Stop using").** `POST /plans/:id/channel/close {channel, reason}` and `/channel/reopen`. A CLOSED
   channel is stored as `state='excluded'` with `closed_at` set (so every existing `excluded` guard — engine, queue, completion refusal, role-mode
@@ -1251,7 +1252,7 @@ its active plan as it was (it is reconciled on that role's next real save — se
 - **AI next steps (2026-10-21).** `services/sourcingAdvisor.ts`, `GET /sourcing/plans/:roleId/advice[?refresh=1]` (HR-tier only). It builds a facts pack —
   the role, effective target and gap, the pipeline as COUNTS (waiting for a shortlist decision, scored above 60, over 48 h, interviewing, new this week,
   the Hold-for-Future pool on other roles), each live channel's target / this week / last four weeks / open tasks, and the open non-provisional exceptions
-  (ids, labels, plain text) — with no names, e-mails, phone numbers or links, and asks `claude-sonnet-4-5` (`SOURCING_ADVICE_MODEL`) for JSON: a headline
+  (ids, labels, plain text) — with no names, e-mails, phone numbers or links, — a channel's counts are named `applicants_tagged_total` / `qualified_tagged_total` (ONLY applicants who named the channel on the form), with `measured` (a weekly target is set) and the role's `applications: {total, untagged}`, and the prompt says a tagged count of 0 never means "nobody applied" (the first live advice wrote "no applicants yet" for channels that simply had no tagged ones) — and asks `claude-sonnet-4-5` (`SOURCING_ADVICE_MODEL`) for JSON: a headline
   and steps (title, detail, channel, `exception_id`, impact, owner). `validateAdvice` never trusts the answer: an unknown channel or an exception id it was
   not given becomes null; empty/over-long fields are dropped. Cached in `sourcing_advice` (PK plan) against a hash of the facts that leaves out day counters
   (`decideAdviceAction`): reused 24 h while unchanged; rewritten when the facts change but not within 15 min; **at once when an open problem appears that the
@@ -1270,12 +1271,12 @@ its active plan as it was (it is reconciled on that role's next real save — se
   sync, the form's source tags, and the data migration run against production-shaped rows inside a rolled-back transaction), `tests/e2e/08-sourcing.spec.ts`
   (11 browser tests) and the sourcing block (4 tests) in `tests/db/00-schema-integrity.spec.ts`; all of them skip themselves when the flag is off. Helper:
   `tests/helpers/sourcing-db.ts` (`purgeRolesFast` — the local `pending_actions` table is millions of rows with unindexed foreign keys, so deleting
-  an application or role one by one costs ~0.5 s each). Vitest — backend 641 tests / 36 files, of which the sourcing ones are `sourcingChecker` (28),
-  `sourcingAdvisor` (58 + 14 for the model call), `sourcingConfig` (32), `sourcingTimeline` (35), `sourcingWeeks` (42), `sourcingPlanTransitions` (42),
+  an application or role one by one costs ~0.5 s each). Vitest — backend 645 tests / 36 files, of which the sourcing ones are `sourcingChecker` (28),
+  `sourcingAdvisor` (60 + 15 for the model call), `sourcingConfig` (32), `sourcingTimeline` (36), `sourcingWeeks` (42), `sourcingPlanTransitions` (42),
   `sourcingTemplates` (19), `sourcingDigest` util + service (16 + 16), `sourcingDescribe` (9) and `workingDays`; the read-only guard for the smoke accounts is in
   `middleware/auth.test.ts`. `services/sourcingPlans.ts` (lifecycle, activation, resolution, hook), `services/sourcingSettings.ts`, `services/sourcingWorkspace.ts`
-  and `routes/sourcing.ts` have NO Vitest and are covered only by the Playwright db specs. Frontend 581 tests / 24 files, of which the sourcing ones are
-  `SourcingPlanPanel` (100), `SourcingModals` (103), `SourcingChannelBlock` (74), `SourcingWorkspace` (36), `SourcingTimeline` (18), `SourcingExecution` (10),
+  and `routes/sourcing.ts` have NO Vitest and are covered only by the Playwright db specs. Frontend 585 tests / 24 files, of which the sourcing ones are
+  `SourcingPlanPanel` (100), `SourcingModals` (103), `SourcingChannelBlock` (78), `SourcingWorkspace` (36), `SourcingTimeline` (18), `SourcingExecution` (10),
   `useSourcingPlan` (24), `sourcingFormat` (7), `RoleDetail.sourcing` (17), and the Sourcing / Help parts of `MyTasks` (31) and `Help` (26).
   **Regression run of the finished branch (2026-10-21/22):** the whole local suite (api + db + e2e, `npm run test:local`, `SOURCING_ENABLED=true`) — 646
   tests, 645 passed. The one failure is `tests/e2e/05-unlinked-candidates.spec.ts` ("candidate with zero applications appears in the Unmatched Candidates

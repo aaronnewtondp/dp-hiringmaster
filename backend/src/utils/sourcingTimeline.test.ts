@@ -35,6 +35,13 @@ describe('describeChange — every kind of action reads as one plain sentence', 
     expect(describeChange({ type: 'exception_snoozed', exception_type: 'VOLUME_GAP', channel: '*', until: '2026-11-03' }).text).toBe('Catching up by 3 Nov — Too few qualified candidates');
     expect(describeChange({ type: 'exception_blocked', exception_type: 'COMMITMENT_OVERDUE', channel: 'Agency', owner: 'Ria', due: '2026-11-03' }).text).toBe('Agency: Marked blocked (Ria to unblock, by 3 Nov) — Task overdue');
   });
+  it('a task handed back by the tracker release says why a finished task is open again', () => {
+    expect(describeChange({ type: 'task_handed_back', channel: 'Naukri/IIMjobs', commitment: 'Log the Naukri/IIMjobs post (link and weekly sourcing target)' })).toEqual({
+      category: 'task',
+      text: 'Naukri/IIMjobs: Task handed back: Log the Naukri/IIMjobs post (link and weekly sourcing target) — the weekly tracker needs the link and a weekly target',
+    });
+    expect(describeChange({ type: 'task_handed_back', channel: 'Direct Outreach' }).text).toBe('Direct Outreach: Task handed back: log the post — the weekly tracker needs the link and a weekly target');
+  });
   it('a finished tracker week: met or missed, and cut short', () => {
     const base = { type: 'weekly_result', channel: 'Naukri/IIMjobs', week_start: '2026-10-21', week_end: '2026-10-27', target: 10 };
     expect(describeChange({ ...base, actual: 12, met: true })).toEqual({ category: 'weekly', text: 'Naukri/IIMjobs: Week 21 Oct–27 Oct: 12 of 10 applicants — target met' });

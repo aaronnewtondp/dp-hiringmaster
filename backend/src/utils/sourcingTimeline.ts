@@ -53,6 +53,8 @@ export function describeChange(c: ChangeLike | null | undefined): { text: string
     }
     case 'commitment_skipped': return { category: 'task', text: withChannel(channel, `Skipped — ${str(ch.commitment) ?? 'task'}`) };
     case 'commitment_reopened': return { category: 'task', text: withChannel(channel, 'Skipped task brought back') };
+    // A finished first task opened again by the weekly-tracker release: the live channel needs a link and a weekly target before it can be measured.
+    case 'task_handed_back': return { category: 'task', text: withChannel(channel, `Task handed back: ${str(ch.commitment) ?? 'log the post'} — the weekly tracker needs the link and a weekly target`) };
 
     case 'channel_added': return { category: 'channel', text: `Channel added: ${channel ?? ''}`.trim() };
     case 'channel_excluded': return { category: 'channel', text: `Channel left out: ${channel ?? ''}`.trim() };
