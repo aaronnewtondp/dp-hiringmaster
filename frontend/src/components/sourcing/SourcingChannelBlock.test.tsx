@@ -657,3 +657,29 @@ describe('SourcingChannelBlock — a closed channel\'s totals come from the API,
     expect(screen.queryByText('Weeks tracked')).toBeNull();
   });
 });
+
+describe('SourcingChannelBlock — evidence is shown only against a finished (or repeating) task, never an open one-off', () => {
+  const evidenceText = () => screen.queryByText(/Evidence:/);
+  it('a finished one-off task shows the evidence it was completed with', () => {
+    mount(channel({ commitments: [commitment({ status: 'done', last_done_at: '2026-10-08T07:00:00Z', evidence: { auto: 0, self: 1 } })] }));
+    expect(evidenceText()).toHaveTextContent('Evidence: 1 self-reported');
+  });
+  it('a one-off task handed back (open again, after an earlier completion) does NOT show the old evidence — it is not complete', () => {
+    mount(channel({ commitments: [commitment({ status: 'open', due_date: '2026-10-24', last_done_at: '2026-10-08T07:00:00Z', evidence: { auto: 0, self: 1 } })] }));
+    expect(screen.getByText('Log the LinkedIn post')).toBeInTheDocument();
+    expect(evidenceText()).toBeNull();
+    expect(btn('Mark done')).toBeInTheDocument();                           // still actionable
+  });
+  it('a repeating task keeps showing its last completion\'s evidence next to "Last done"', () => {
+    mount(channel({ commitments: [commitment({
+      id: '12', kind: 'renew_posting', title: 'Renew the LinkedIn posting', status: 'open', cadence_days: 30, due_date: '2026-11-17', evidence: { auto: 0, self: 2 },
+      recent: [{ done_at: '2026-10-08T07:00:00Z', was_due_at: '2026-10-09T18:29:59Z', on_time: true, note: null, evidence: [] }],
+    })] }));
+    expect(evidenceText()).toHaveTextContent('Evidence: 2 self-reported');
+    expect(screen.getByText(/Last done/)).toBeInTheDocument();
+  });
+  it('an open one-off task with no evidence shows none (the normal case)', () => {
+    mount(channel({ commitments: [commitment()] }));
+    expect(evidenceText()).toBeNull();
+  });
+});

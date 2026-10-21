@@ -42,7 +42,9 @@ export function CommitmentRow({ c, today, canEdit, canUndo, busy, onDone, onSkip
           {skipped ? <span>Skipped</span>
             : isDone ? <span>Done{c.last_done_at ? ` ${day(c.last_done_at)}` : ''}</span>
             : <span className={c.overdue ? 'text-red-600 font-medium' : ''}>{dueLabel(c.due_date, today)}{rolling ? ` · repeats every ${plural(c.cadence_days!, 'day')}` : ''}</span>}
-          {(c.evidence.auto > 0 || c.evidence.self > 0) && (
+          {/* Evidence belongs to a finished task (or a repeating one's last completion). A one-off task that is open again — handed back because it
+              needs a link and a weekly target — is not complete, so a past completion's evidence is not shown against it. */}
+          {(isDone || rolling) && (c.evidence.auto > 0 || c.evidence.self > 0) && (
             <span title="Auto = captured by HMS itself; self = confirmed by a person">
               Evidence: {c.evidence.auto > 0 ? `${c.evidence.auto} auto` : ''}{c.evidence.auto > 0 && c.evidence.self > 0 ? ' · ' : ''}{c.evidence.self > 0 ? `${c.evidence.self} self-reported` : ''}
             </span>

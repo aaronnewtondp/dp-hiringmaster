@@ -103,6 +103,22 @@ describe('getAdvice — how the model is called', () => {
     expect(body).not.toMatch(/@|https?:\/\//);                         // no e-mail addresses or links reach the model
   });
 
+  it('tells the model that a tagged count of 0 is not "no applicants", and sends the facts it needs to say so truthfully', async () => {
+    h.getPlanView.mockResolvedValue(view({ output: [{ tag: '(untagged)', applications: 19, qualified: 12 }] }));
+    h.create.mockResolvedValue(modelAnswer());
+    await getAdvice('R003', {}, NOW);
+    const req = h.create.mock.calls[0][0] as { messages: Array<{ content: string }>; system: string };
+    expect(req.system).toMatch(/include ONLY applicants who named that channel on the application form/);
+    expect(req.system).toMatch(/a count of 0 never means nobody applied/);
+    expect(req.system).toMatch(/not being measured yet/);
+    expect(req.system).toMatch(/Never write "no applicants"/);
+    const facts = JSON.parse(req.messages[0].content.slice('<facts>\n'.length, -'\n</facts>'.length));
+    expect(facts.applications).toEqual({ total: 19, untagged: 19 });
+    expect(facts.channels[0]).toMatchObject({ measured: true });
+    expect(facts.channels[0]).toHaveProperty('applicants_tagged_total');
+    expect(facts.channels[0]).not.toHaveProperty('applicants_total');
+  });
+
   it('the answer is validated: an unknown channel or an exception id it was not given is dropped, a good step is kept', async () => {
     h.create.mockResolvedValue(modelAnswer({ steps: [
       { title: 'Try TikTok', detail: 'Post a short video on TikTok.', channel: 'TikTok', exception_id: '999', impact: 'low', owner: 'HR' },
