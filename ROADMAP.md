@@ -66,11 +66,11 @@ live.
       manual button) on the Draft/Under Review → Approved transition, guarded
       by `!jd_drive_link` so it only runs once per role. Claude condenses raw
       role fields into structured content (`jdContent.ts`), then two Node/TS
-      renderers ported from the `digitalpaani-long-jd`/`digitalpaani-social-jd`
-      skills' ReportLab source produce the PDFs (`pdf/longFormJd.ts` via
-      pdfmake, `pdf/socialJd.ts` via pdfkit — colors/fonts/layout ported 1:1,
-      verified by rendering and visually inspecting output against the
-      skills' reference PDFs). Uploaded to Drive via domain-wide delegation
+      renderers produce the PDFs (`pdf/longFormJd.ts` via pdfmake, ported from
+      the `digitalpaani-long-jd` skill's ReportLab source and verified by
+      visually inspecting output against its reference PDF; `pdf/socialJd.ts`
+      via pdfkit — redesigned 2026-10-22 as the standard social-JD template,
+      no longer a port of the skill: see CLAUDE.md "Social JD template"). Uploaded to Drive via domain-wide delegation
       (`GOOGLE_DRIVE_IMPERSONATE_EMAIL` — a bare service account has no Drive
       storage quota of its own, confirmed against the real API). Links shown
       on the role detail page's Links & Assets card; a "Change status"

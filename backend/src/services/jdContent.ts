@@ -46,7 +46,20 @@ const MAX_KEY_RESPONSIBILITIES = 7;
 // actually has to say.
 const MAX_REQUIREMENT_BULLETS = 8;
 const MAX_SOCIAL_BULLETS = 5;
-const MAX_SOCIAL_BULLET_CHARS = 90; // hard cap on the description portion, generous over the "~60 chars" style guide
+// Hard cap on a WHOLE bullet string (markup included) — a backstop only; the prompt below asks for far less.
+const MAX_SOCIAL_BULLET_CHARS = 90;
+
+// What the social JD template (services/pdf/socialJd.ts) can set on ONE line at full size: the bold lead in
+// a ~390pt column at 28pt, the detail line under it at 22.5pt. Beyond this the layout still copes (shrinks,
+// wraps, ellipsizes) but the graphic gets visibly cramped — so the prompt asks for these and
+// socialJd.test.ts measures real strings at exactly these limits in the real font, so the two can't drift.
+export const SOCIAL_LEAD_MAX_CHARS = 24;
+export const SOCIAL_DETAIL_MAX_CHARS = 36;
+export const SOCIAL_TAG_MAX_CHARS = 24;
+
+// Shared by the generation prompt and the extraction prompt (hand-written JDs) so they cannot diverge.
+const TAGS_RULE = `- tags: 4-8 short chips (1-3 words, at most ${SOCIAL_TAG_MAX_CHARS} characters each, e.g. "Node.js", "PLC / HMI / SCADA"). isGreen=true for nice-to-have-derived tags, false for must-have-derived tags. The social graphic shows them as two colour groups on two rows, so lead with the core craft/skills.`;
+const SOCIAL_BULLETS_RULE = `- socialAboutRole / socialAboutYou: ${MAX_SOCIAL_BULLETS} bullets each (fewer only if the role genuinely lacks material), printed as two short columns on a social graphic: "The Job" (socialAboutRole — what this person will DO) and "Who You Are" (socialAboutYou — what they have DONE or who they are). Format exactly "<b>Lead:</b> Detail". Lead = a punchy 2-4 word active phrase, at most ${SOCIAL_LEAD_MAX_CHARS} characters — never an abstract label like "Mission", "Scope" or "Impact" (good for the job: "Own the roadmap", "Ship every week", "Build the team"; good for you: "Shipped at scale", "Led a team", "Scrappy operator" — adapt the wording to THIS role, do not copy these). Detail = at most ${SOCIAL_DETAIL_MAX_CHARS} characters, plain words, one phrase, no trailing period. Direct and confident, never hype, no exclamation marks.`;
 
 /**
  * Condenses a role's raw free-text fields into the structured content both JD
@@ -90,14 +103,14 @@ Return ONLY valid JSON, no markdown, no code fences, matching exactly this shape
 }
 
 Rules:
-- tags: 4-8 short chips (1-3 words each, e.g. "Node.js", "PLC / HMI / SCADA"). isGreen=true for nice-to-have-derived tags, false for must-have-derived tags.
+${TAGS_RULE}
 - aboutRoleParagraph: 2-3 sentences introducing the role, written in second person ("You'll...").
 - highlightQuote: an optional one-sentence pull-quote emphasizing impact/mission; use null if nothing genuinely stands out — do not force one.
 - keyResponsibilities: ${MAX_KEY_RESPONSIBILITIES} bullets max, one sentence each, no trailing period style consistency required.
 - mustHaves / goodToHaves: ${MAX_REQUIREMENT_BULLETS} bullets max each, condensed from the raw skills fields.
 - goodToHaveLabel: use "Who You Are" for field/site-execution-heavy roles (personality/soft-skill framing), "Good to Have" for skill-heavy roles (technical/nice-to-have framing) — pick whichever fits this role.
 - whyJoinUs: EXACTLY 4 items. iconKey must be one of: ${WHY_ICON_KEYS.join(', ')}. title is 2-4 words, description is one short sentence. Pick 4 distinct icon keys that fit this specific role (don't always default to the same 4).
-- socialAboutRole / socialAboutYou: ${MAX_SOCIAL_BULLETS} bullets max each, format exactly "<b>Label:</b> Description" with description under 60 characters — these are for a space-constrained social graphic, keep them terse.`;
+${SOCIAL_BULLETS_RULE}`;
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',
@@ -109,14 +122,14 @@ Rules:
 }
 
 const EXTRACTION_RULES = `Rules:
-- tags: 4-8 short chips (1-3 words each, e.g. "Node.js", "PLC / HMI / SCADA"). isGreen=true for nice-to-have-derived tags, false for must-have-derived tags.
+${TAGS_RULE}
 - aboutRoleParagraph: 2-3 sentences introducing the role, written in second person ("You'll...").
 - highlightQuote: an optional one-sentence pull-quote emphasizing impact/mission; use null if nothing genuinely stands out — do not force one.
 - keyResponsibilities: ${MAX_KEY_RESPONSIBILITIES} bullets max, one sentence each, no trailing period style consistency required.
 - mustHaves / goodToHaves: ${MAX_REQUIREMENT_BULLETS} bullets max each, condensed from the source's requirements.
 - goodToHaveLabel: use "Who You Are" for field/site-execution-heavy roles (personality/soft-skill framing), "Good to Have" for skill-heavy roles (technical/nice-to-have framing) — pick whichever fits this role.
 - whyJoinUs: EXACTLY 4 items. iconKey must be one of: ${WHY_ICON_KEYS.join(', ')}. title is 2-4 words, description is one short sentence. Pick 4 distinct icon keys that fit this specific role (don't always default to the same 4).
-- socialAboutRole / socialAboutYou: ${MAX_SOCIAL_BULLETS} bullets max each, format exactly "<b>Label:</b> Description" with description under 60 characters — these are for a space-constrained social graphic, keep them terse.`;
+${SOCIAL_BULLETS_RULE}`;
 
 /**
  * Same target JSON shape as generateJdContent(), but for a role whose
