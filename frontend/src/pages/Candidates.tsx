@@ -24,7 +24,7 @@ const UNMATCHED_PAGE_SIZE = 50;
 const COLUMN_INFO: Record<string, string> = {
   'Gender': GENDER_COLUMN_INFO,
   'Fit': "ResumeIQ's score (0-100): the average of its 8 dimensions (Technical, Experience, Industry Fit, Culture Fit, Role Alignment, Trajectory, Leadership, Communication) × 10. The Senior UX/Product Designer role adds a ninth, Portfolio, once that review finishes. Scored automatically when the candidate applies; 75+ also tightens SLA windows to 24h.",
-  'CTC → ECTC': "Current fixed CTC → expected CTC, both from the candidate's own profile (one figure per candidate, not per role), in ₹ lakhs. 'Over Budget' = expected CTC above the top of the role's CTC band.",
+  'Current CTC → Expected CTC': "Current fixed CTC → expected CTC, both from the candidate's own profile (one figure per candidate, not per role), in ₹ lakhs. 'Over Budget' = expected CTC above the top of the role's CTC band.",
   'Application Date': 'Days since the candidate applied — not the same as Last Updated.',
   'Company / Industry': "Current company and industry from the candidate's own profile, shown as one field.",
 };
@@ -494,27 +494,32 @@ export default function Candidates() {
                     />
                   </th>
                 )}
+                {/* Header labels are written out in full and WRAP (never truncate), so every
+                    name is readable. A column's width is its longest unbreakable word at this
+                    size (12px uppercase) + the 16px of padding (+ ~18px for each sort chevron or
+                    info marker it carries) — a label only wraps at its spaces. Same rule as the
+                    Ready for Review and Archived Pipeline tables. */}
                 {[
                   { label: 'Candidate', width: 'w-[140px]' },
                   { label: 'Gender', width: 'w-[88px]' },
                   { label: 'Role', width: 'w-[100px]' },
                   { label: 'Stage', width: 'w-[90px]' },
                   { label: 'Fit', width: 'w-[84px]', sortKey: 'fit' as const },
-                  { label: 'CTC → ECTC', width: 'w-[110px]' },
-                  { label: 'Notice', width: 'w-[58px]' },
+                  { label: 'Current CTC → Expected CTC', width: 'w-[132px]' },
+                  { label: 'Notice Period', width: 'w-[68px]' },
                   { label: 'Preferred Location', width: 'w-[110px]' },
                   { label: 'Company / Industry', width: 'w-[155px]' },
                   { label: 'Resume Link', width: 'w-[68px]' },
-                  { label: 'Application Date', width: 'w-[122px]', sortKey: 'application_date' as const },
+                  { label: 'Application Date', width: 'w-[134px]', sortKey: 'application_date' as const },
                   { label: 'Last Updated', width: 'w-[108px]', sortKey: 'last_updated' as const },
                   { label: '', width: 'w-[34px]' },
                 ].map(col => (
-                  // overflow-hidden is unconditional here — content that's too
-                  // wide for its fixed column now clips/ellipses inside its
-                  // own cell instead of visually bleeding into the next
-                  // column's header (a real bug hit once a couple of these
-                  // labels grew long enough to overflow a tight width).
-                  <th key={col.label} title={col.label} className={`table-th px-2 tracking-normal overflow-hidden ${col.width}`}>
+                  // overflow-hidden stays as a safety net — content that's too wide for its fixed
+                  // column clips inside its own cell instead of bleeding into the next column's
+                  // header — except on a header that carries an info marker, whose popover hangs
+                  // below the cell and was being clipped to a sliver by it. whitespace-normal
+                  // overrides .table-th's nowrap so the label wraps instead of truncating.
+                  <th key={col.label} title={col.label} className={`table-th px-2 tracking-normal whitespace-normal align-bottom leading-tight ${COLUMN_INFO[col.label] ? '' : 'overflow-hidden'} ${col.width}`}>
                     <div className="flex items-center gap-1 min-w-0">
                       {col.sortKey ? (
                         // InfoTooltip renders its own <button> internally, so it
@@ -524,9 +529,9 @@ export default function Candidates() {
                         <button
                           type="button"
                           onClick={() => toggleSort(col.sortKey)}
-                          className="flex items-center gap-1 min-w-0 hover:text-dp-600 transition-colors group"
+                          className="flex items-center gap-1 min-w-0 text-left uppercase hover:text-dp-600 transition-colors group"
                         >
-                          <span className="truncate">{col.label}</span>
+                          <span>{col.label}</span>
                           {sortKey === col.sortKey ? (
                             sortDir === 'asc'
                               ? <ChevronUp className="w-3.5 h-3.5 shrink-0 text-dp-600" strokeWidth={3} />
@@ -536,7 +541,7 @@ export default function Candidates() {
                           )}
                         </button>
                       ) : (
-                        <span className="truncate">{col.label}</span>
+                        <span>{col.label}</span>
                       )}
                       {COLUMN_INFO[col.label] && <InfoTooltip text={COLUMN_INFO[col.label]} width="w-60" />}
                     </div>

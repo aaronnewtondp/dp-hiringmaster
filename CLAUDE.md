@@ -621,6 +621,19 @@ lists candidates: Active Candidates (`Candidates.tsx`), Archived Pipeline
 constant had to bump from 10 to 11 to account for the new column). These are
 three fully independent hand-written JSX tables, not a shared component —
 a future column/filter addition needs the same edit made three times.
+**Column headers on all three follow one rule (2026-10-22): written out in full (no
+abbreviations — "Notice Period", "Current CTC → Expected CTC", "Average Score", the 8 ResumeIQ
+dimension names, "Portfolio"), and they WRAP at their spaces, never `truncate`.** Each column's
+`w-[…px]` is its longest unbreakable word at 12px uppercase (Figtree) + the cell's horizontal padding
+(`px-2` = 16px, `px-1.5` = 12px) + ~18px for each sort chevron or info marker it carries — a label
+added or renamed means re-measuring that width (a header wider than its column is clipped by the cell's
+`overflow-hidden` safety net). Two traps in the same cells: a header with an info marker must NOT be
+`overflow-hidden` (its popover hangs below the cell and was clipped to a sliver; Archived Pipeline's
+last column, Actions, also passes `align="right"` so its popover opens leftward instead of past the
+table's edge), and sort `<button>`s need `uppercase` (browsers
+reset `text-transform` on buttons, so they rendered mixed-case). Pinned by `ScorecardSummary.headers.test.tsx`,
+`Candidates.headers.test.tsx` and `TalentPool.headers.test.tsx`. `COLUMN_INFO` is keyed by the exact label,
+so renaming a header means renaming its key.
 
 One-time backfill for existing candidates missing the tag:
 `npx tsx src/scripts/backfillGender.ts [--dry-run]` — fill-null-only (never
