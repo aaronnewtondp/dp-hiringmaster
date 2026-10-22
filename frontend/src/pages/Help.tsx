@@ -363,7 +363,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
             — full ownership of a product, storytelling and process, field research, design
             system work, whether the site itself works, and so on. This takes a few minutes, so
             the overall score shown at first is <strong>provisional</strong> (marked "…" in the
-            Port column) and updates when the review finishes.</p>
+            Portfolio column) and updates when the review finishes.</p>
             <p className="mt-2">The result appears under <strong>View Highlights and Summary</strong>{' '}
             and on the candidate's page: a 0-10 portfolio score (included in the overall score),
             what was reviewed, strengths and concerns, and each criterion marked Evidenced /

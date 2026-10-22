@@ -33,7 +33,7 @@ const PORTFOLIO_SCORE_FILTER_MIN = 7.5;
 
 const COLUMN_INFO: Record<string, string> = {
   'Gender': GENDER_COLUMN_INFO,
-  'CTC → ECTC': "Current fixed CTC → expected CTC, both from the candidate's own profile (one figure per candidate, not per role), in ₹ lakhs. 'Over Budget' = expected CTC above the top of the role's CTC band.",
+  'Current CTC → Expected CTC': "Current fixed CTC → expected CTC, both from the candidate's own profile (one figure per candidate, not per role), in ₹ lakhs. 'Over Budget' = expected CTC above the top of the role's CTC band.",
 };
 
 // Compact 0-10 dimension cell — mirrors ResumeIQPanel.tsx's private
@@ -60,15 +60,18 @@ function VerdictBadge({ recommendation }: { recommendation?: string }) {
   return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${color}`}>{recommendation}</span>;
 }
 
-const DIMENSIONS: Array<{ key: keyof Application; label: string }> = [
-  { key: 'score_technical',      label: 'Tech' },
-  { key: 'score_experience',     label: 'Exp' },
-  { key: 'score_industry_fit',   label: 'Ind' },
-  { key: 'score_culture_fit',    label: 'Cult' },
-  { key: 'score_role_alignment', label: 'Role' },
-  { key: 'score_trajectory',     label: 'Traj' },
-  { key: 'score_leadership',     label: 'Lead' },
-  { key: 'score_communication',  label: 'Comm' },
+// Full ResumeIQ dimension names — spelled out in the column headers (they used
+// to be 4-letter abbreviations that clipped, and "Role" collided with the Role
+// column). Each header's width in the table below is sized to the longest word.
+const DIMENSIONS: Array<{ key: keyof Application; label: string; width: string }> = [
+  { key: 'score_technical',      label: 'Technical',      width: 'w-[84px]'  },
+  { key: 'score_experience',     label: 'Experience',     width: 'w-[88px]'  },
+  { key: 'score_industry_fit',   label: 'Industry Fit',   width: 'w-[76px]'  },
+  { key: 'score_culture_fit',    label: 'Culture Fit',    width: 'w-[70px]'  },
+  { key: 'score_role_alignment', label: 'Role Alignment', width: 'w-[88px]'  },
+  { key: 'score_trajectory',     label: 'Trajectory',     width: 'w-[92px]'  },
+  { key: 'score_leadership',     label: 'Leadership',     width: 'w-[88px]'  },
+  { key: 'score_communication',  label: 'Communication',  width: 'w-[122px]' },
 ];
 
 // Column counts flanking the DIMENSIONS block, for the toggle/detail rows'
@@ -229,7 +232,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   const apps = filterInBudget
     ? allApps.filter(a => isWithinBudgetOrNear(a.candidate_expected_ctc, a.role_ctc_band))
     : allApps;
-  // A 'Port' column only appears when at least one row in view belongs to a
+  // A 'Portfolio' column only appears when at least one row in view belongs to a
   // role with portfolio review (Senior UX/Product Designer) — every other
   // role's view is unchanged.
   const showPortfolioCol = apps.some(a => a.portfolio_analysis_status);
@@ -526,36 +529,42 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                     />
                   )}
                 </th>
+                {/* Header labels are written out in full and WRAP (never truncate), so every
+                    name is readable. A column's width is its longest unbreakable word at this
+                    size (12px uppercase) + the 12px of padding (+ ~18px when the header carries
+                    a sort chevron or an info marker) — a label only wraps at its spaces. */}
                 {[
                   { label: '#', width: 'w-[32px]' },
                   { label: 'Candidate', width: 'w-[150px]' },
                   { label: 'Gender', width: 'w-[88px]' },
                   { label: 'Role', width: 'w-[120px]' },
                   { label: 'Stage', width: 'w-[100px]' },
-                  { label: 'CTC → ECTC', width: 'w-[105px]' },
-                  { label: 'Notice', width: 'w-[55px]' },
+                  { label: 'Current CTC → Expected CTC', width: 'w-[128px]' },
+                  { label: 'Notice Period', width: 'w-[68px]' },
                   { label: 'Preferred Location', width: 'w-[110px]' },
-                  { label: 'Company / Industry', width: 'w-[140px]' },
-                  { label: 'Resume', width: 'w-[55px]' },
-                  ...DIMENSIONS.map(d => ({ label: d.label, width: 'w-[42px]' })),
-                  ...(showPortfolioCol ? [{ label: 'Port', width: 'w-[42px]' }] : []),
-                  { label: 'Avg', width: 'w-[58px]', sortKey: 'avg' as const },
+                  { label: 'Company / Industry', width: 'w-[148px]' },
+                  { label: 'Resume', width: 'w-[68px]' },
+                  ...DIMENSIONS.map(d => ({ label: d.label, width: d.width })),
+                  ...(showPortfolioCol ? [{ label: 'Portfolio', width: 'w-[84px]' }] : []),
+                  { label: 'Average Score', width: 'w-[92px]', sortKey: 'avg' as const },
                   { label: 'Verdict', width: 'w-[80px]' },
-                  { label: 'App. Age', width: 'w-[80px]', sortKey: 'app_age' as const },
+                  { label: 'Application Age', width: 'w-[112px]', sortKey: 'app_age' as const },
                   { label: 'Actions', width: 'w-[150px]' },
                 ].map((col, i) => (
-                  // overflow-hidden unconditional — see Candidates.tsx's own
-                  // header cells for why (a too-wide label used to visually
-                  // bleed into the next column's header).
-                  <th key={`${col.label}-${i}`} title={col.label} className={`table-th px-1.5 tracking-normal overflow-hidden ${col.width}`}>
+                  // overflow-hidden stays as a safety net (see Candidates.tsx's own header
+                  // cells: a too-wide label used to bleed into the next column's header) —
+                  // except on a header that carries an info marker, whose popover hangs below
+                  // the cell and was being clipped to a sliver by it. whitespace-normal
+                  // overrides .table-th's nowrap so the label wraps instead of truncating.
+                  <th key={`${col.label}-${i}`} title={col.label} className={`table-th px-1.5 tracking-normal whitespace-normal align-bottom leading-tight ${COLUMN_INFO[col.label] ? '' : 'overflow-hidden'} ${col.width}`}>
                     <div className="flex items-center gap-1 min-w-0">
                       {col.sortKey ? (
                         <button
                           type="button"
                           onClick={() => toggleSort(col.sortKey)}
-                          className="flex items-center gap-1 min-w-0 hover:text-dp-600 transition-colors group"
+                          className="flex items-center gap-1 min-w-0 text-left uppercase hover:text-dp-600 transition-colors group"
                         >
-                          <span className="truncate">{col.label}</span>
+                          <span>{col.label}</span>
                           {sortKey === col.sortKey ? (
                             sortDir === 'asc'
                               ? <ChevronUp className="w-3.5 h-3.5 shrink-0 text-dp-600" strokeWidth={3} />
@@ -565,7 +574,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                           )}
                         </button>
                       ) : (
-                        <span className="truncate">{col.label}</span>
+                        <span>{col.label}</span>
                       )}
                       {COLUMN_INFO[col.label] && <InfoTooltip text={COLUMN_INFO[col.label]} width="w-60" />}
                     </div>
