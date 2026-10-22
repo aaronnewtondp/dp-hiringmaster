@@ -440,6 +440,53 @@ and `POST /:id/regenerate-jd` refuses with a 400. RoleDetail.tsx hides the
 "Regenerate JD" button and shows an explanatory note instead, for the same
 reason.
 
+### Social JD template (2026-10-22) — one layout for every role
+The 1080×1350pt (4:5) social JD was redesigned for R019 and then made the **standard template for every role**. It is no longer a port
+of the `digitalpaani-social-jd` skill's `social_generator.py` (that skill is now historical for the social JD; the long-form JD is unchanged).
+Follows Brand Book v7: navy `#002454`, teal-lt `#95CFD3`, rust-lt `#E8845A` (the one warm emphasis), Figtree + IBM Plex Mono (numerics), no
+exclamation marks; the blue/green skill chips are the long-standing colours, deliberately unchanged.
+- **Fixed vs adaptive (the rule Aaron set):** everything *before* the role block — logo, "NOW HIRING", the three-line hook, the two-sentence
+  intro, the ripple/crosshair artwork — is **identical on every role** and has its copy as constants in `services/pdf/theme.ts` (`SOCIAL_HOOK_MUTED`,
+  `SOCIAL_HOOK_PUNCH`, `SOCIAL_INTRO_FACT`, `SOCIAL_INTRO_ASK`, …) — edit them there and every future social JD follows (the ripple artwork's position, `RIPPLE`, lives in `socialJdLayout.ts`, its rings in `socialJd.ts`). Everything *after* it adapts
+  to the role: the role block (title fitted onto 1–3 lines, Location / Experience / Team), the skill chips, and the "The Job" / "Who You Are" columns.
+  **The copy is Mansi's "topliner" (22 Oct 2026):** "We're running out of water. / Our rivers are polluted. / We have the technology to solve it." are the three hook
+  lines (the last in white with "solve it." in rust) and "Help us scale this story up." is the bold ask — set in rust like "solve it." so it stands out — under the unchanged "We run AI-powered water infrastructure
+  across 100+ sites in India." — her fourth sentence could not be a fourth hook line (the hero must stay in 40% of the page), and as the intro's ask it also replaced
+  the earlier brand-specific "You'll build the brand around it — from zero.", so the fixed top now reads correctly on any role. **Hook size is set by the longest line:**
+  Mansi's third line is 15% wider than the old widest line ("Water is running dry and dirty."), so the hook is 49pt (`GEO.h1Size`; 54.5 before) and every hook line must end
+  left of `HOOK_MAX_RIGHT` (820pt = `RIPPLE.cx` − the 106pt ring − a 24pt gap, so it follows the artwork; the fainter outer rings run behind the text by design). The renderer
+  warns, and the tests in `the fixed hook fits the artwork` (real-font measurement, a positive control for the warning, a typographic-quotes check) fail, if a longer line is ever put in `theme.ts`.
+  The 16pt the smaller hook freed went back into the hero as whitespace (`heroTop` / `subMarginTop` / `cardMarginTop`): the role block sits 0.3pt higher than before and everything
+  below it (chips, columns, CTA) is exactly where it was. The hero (logo → role
+  block) must end at or above 40% of the page (`HERO_MAX_BOTTOM` = 540pt); a warning is logged and a test fails if it does not.
+- **Where it lives:** `services/pdf/socialJd.ts` (the `pdfkit` renderer, `renderSocialJd(role, content): Promise<Buffer>` — same signature the
+  callers always used: `roles.ts` `generateAndSaveJd` on Approve and `POST /:id/regenerate-jd`, `scripts/importManualJd.ts`) and
+  `services/pdf/socialJdLayout.ts` (pure layout — title fitting, `planMeta`, `packChips`, `layoutColumns`; takes a `measure` callback so it is unit-testable
+  without fonts). Drawn natively in `pdfkit` (vector, in the main API function) — **no Chromium**; the design was prototyped in HTML and ported 1 CSS px = 1pt.
+- **Adaptive rules (all pinned by `socialJdLayout.test.ts`, 59+ tests):** title fits by shrinking then wrapping (never more than 3 lines);
+  `planMeta` sizes the two meta columns by content, never left of the half-way line, so a long Location ("Hyderabad, Bangalore") keeps the full
+  23pt size instead of shrinking next to a short Experience, and falls back to Location-spans-row-0 / Experience | Team below before ever shrinking past 13%;
+  experience is formatted as `5–10 yrs` in mono (`formatExperience`, never mislabels months/weeks as years); chips pack into **at most 2 centred rows**
+  (extra tags are dropped with a logged warning); each column fits by scale 1 → 0.85, two-line then one-line details, then ellipsis, with rows shared across both columns.
+- **Prompt ↔ layout coupling:** `services/jdContent.ts` exports `SOCIAL_LEAD_MAX_CHARS` (24), `SOCIAL_DETAIL_MAX_CHARS` (36), `SOCIAL_TAG_MAX_CHARS` (24), shared by both
+  Claude prompts via `TAGS_RULE` / `SOCIAL_BULLETS_RULE`, so the model writes copy that fits (5 + 5 bullets, lead + one short detail). The numbers were calibrated by
+  measuring thousands of phrases with the real fonts; a seeded distribution test in `socialJd.test.ts` fails if the limits, the fonts or the column width change without
+  the others. A real-model run over 12 production roles gave 12/12 with 5 + 5 bullets and 116/120 details inside the limit; legacy long bullets degrade to a single-line ellipsis.
+- **Fonts:** `backend/src/assets/fonts/` — static Figtree (Regular/Bold/ExtraBold) and IBM Plex Mono (Medium/SemiBold) TTFs, both SIL OFL (licence texts alongside). `pdfkit`
+  cannot use variable fonts, hence static files. They are read with **literal** `path.join(__dirname, …)` inside `fs.readFileSync` so `@vercel/nft` bundles them
+  (checked with a real nft run) — the same trap as the old `pdf.worker.mjs`. Do not load them through a variable path.
+- **Apply link:** the whole footer bar is a PDF hyperlink to `SOCIAL_APPLY_URL` (`https://forms.gle/boTsnrtPUt5WZ7Y49`) — a second short link to the **same** Google
+  Form as `APPLICATION_FORM_URL` (the long JD still prints the older short link; both resolve to one form).
+- **Existing roles keep their old-style social JD until regenerated, and R019's Drive file is still on the previous hook** (it carries "Water is running dry and dirty…" and the "You'll build the brand around it" intro until it is re-uploaded in place — same file id, old revision pinned, as on 2026-10-22). `POST /api/roles/:id/regenerate-jd` (or "Regenerate JD" in RoleDetail) re-renders both
+  PDFs with the template; **manual roles (`jd_source='manual'`, e.g. R019) cannot be regenerated** — R019's Drive file was replaced in place with the new design
+  on 2026-10-22 (same file id, previous revision pinned). Never re-run `importManualJd.ts` for R019 expecting it to keep that file.
+  **R007 (Senior UX/Product Designer) was done by hand on 2026-10-22 too:** its Drive file (`1okA25t7…`, the one `roles.social_jd_drive_link` already pointed at) was replaced in place with the template
+  render — old revision pinned, link unchanged. Its bullets were written from the role's own must-haves / nice-to-haves / 45-day target (the model's draft had added claims the role never makes), so they are
+  NOT what `generated_jd_content` holds (old-style bullets that just repeat location and experience); do not press "Regenerate JD" on R007 expecting that file or content to survive.
+- **Preview after ANY change** to `socialJd.ts` / `socialJdLayout.ts` / `theme.ts`: `cd backend && npx tsx src/scripts/previewSocialJd.ts [out-dir]` renders every fixture in
+  `services/pdf/socialJd.fixtures.ts` (the R019 reference, a long title, a short title, legacy long bullets, too many tags, a sparse role) to PDF (+ PNG when `pdftoppm`
+  is installed). Look at all of them, not just R019 — the point of the template is that the bottom half adapts.
+
 ### Assignment emails (Gmail API)
 "Send Assignment" (on a candidate's `Assignment Round` stage) composes and
 sends a real email to the candidate from `hr@digitalpaani.com` — mail body,

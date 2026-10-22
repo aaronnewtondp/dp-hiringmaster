@@ -41,19 +41,21 @@ export const LONG_JD_COLORS = {
   highlightText: '#0d3b6e',
 };
 
-// ── Social JD colors (social_generator.py) ──────────────────────────────────
-export const SOCIAL_JD_COLORS = {
-  navy: '#0a1f3d',
-  navyLight: '#0d2847',
-  teal: '#00c2cb',
-  lightGreen: '#e2f5ec',
-  tagBlue: '#d9eefc',
-  tagBlueTxt: '#0077a8',
-  tagGreen: '#d8f5e8',
-  tagGreenTxt: '#00694a',
-  taglineText: '#e8f4f9',
-  metaDivider: '#88a0b9',
-  footerLine1: '#b8d4e0',
+// ── Social JD colors ────────────────────────────────────────────────────────
+// The social JD was redesigned on 2026-10-22 (first shipped for R019) and is no
+// longer a port of the digitalpaani-social-jd skill's social_generator.py — it
+// follows DigitalPaani Brand Book v7. Chip colours are the long-standing blue/
+// green skill blocks, deliberately unchanged.
+export const SOCIAL_COLORS = {
+  navy: '#002454',
+  navyMid: '#193650',
+  tealLt: '#95CFD3',      // brand "Teal · decorative" — large fills, linework, labels
+  rustLt: '#E8845A',      // brand "Rust · light" — the single warm emphasis
+  white: '#FFFFFF',
+  chipBlueBg: '#d9eefc',
+  chipBlueTx: '#0077a8',
+  chipGreenBg: '#d8f5e8',
+  chipGreenTx: '#00694a',
 };
 
 // Icon fill colors, fixed regardless of variant (both scripts)
@@ -88,14 +90,29 @@ export const ABOUT_DP_BULLETS: string[] = [
   'Trusted by <b>85+ facilities</b> including Amazon, Silicon Valley Clean Water, Tata Power, Taj Hotels, and Delhi Jal Board',
 ];
 
-// Fixed social-card tagline and CTA — identical across the source's examples,
-// not per-role content. Per the plan, the CTA intentionally uses the one
-// general application form (not the JD6/JD7-specific one) until Phase 4
-// candidate ingestion replaces Google Forms entirely.
-export const SOCIAL_TAGLINE = 'Join us to solve water scarcity and climate problems at scale';
+// Fixed social-card copy. Per the 2026-10-22 template decision, EVERYTHING above
+// the role block (the three-line hook and the two-sentence intro) is identical on
+// every role's social JD; only what comes after the role block adapts to the role.
+// Edit the hook here and every future social JD follows. The hook is Mansi's
+// "topliner" (22 Oct): her first three sentences are the three hook lines, her
+// fourth ("Help us scale this story up.") is the bold ask under the intro's fact line. A hook line
+// must end left of HOOK_MAX_RIGHT (socialJdLayout.ts) — the renderer warns and a
+// test fails if a longer line is ever put here.
+export const SOCIAL_HOOK_MUTED = ['We\u2019re running out of water.', 'Our rivers are polluted.'];
+export const SOCIAL_HOOK_PUNCH = { lead: 'We have the technology to ', accent: 'solve it.' };
+export const SOCIAL_INTRO_FACT = 'We run AI-powered water infrastructure across 100+ sites in India.';
+export const SOCIAL_INTRO_ASK = 'Help us scale this story up.';
+export const SOCIAL_NOW_HIRING = 'NOW HIRING';
+export const SOCIAL_ROLE_EYEBROW = 'THE ROLE';
+export const SOCIAL_COL_HEADINGS = { job: 'The Job', you: 'Who You Are' };
+export const SOCIAL_CTA_TEXT = 'Think it\u2019s you? Apply.';
+export const SOCIAL_YOU_ARE_HERE = 'YOU ARE HERE';
 export const APPLICATION_FORM_URL = 'https://forms.gle/nxMot1ixC6oF5MEa9';
 export const LONG_JD_FOOTER_NOTE = `Interested? Fill the Google form link to apply — <b>${APPLICATION_FORM_URL}</b>`;
-export const SOCIAL_FOOTER_LINE1 = 'Interested? Fill the Google form to apply';
+// Social JD apply link. A second short link to the SAME Google Form as
+// APPLICATION_FORM_URL (both resolve to one form id — verified 2026-10-22);
+// the social JD uses this one because it is the link chosen for the R019 relaunch.
+export const SOCIAL_APPLY_URL = 'https://forms.gle/boTsnrtPUt5WZ7Y49';
 
 export const HEADER_TAGLINE = 'CAREERS · 2026';
 export const FOOTER_CONTACT = 'hr@digitalpaani.com  ·  www.digitalpaani.com';

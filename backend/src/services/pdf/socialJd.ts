@@ -1,620 +1,318 @@
 /**
- * Social-sharable JD PDF (1080×1350 portrait) — pdfkit port of the
- * digitalpaani-social-jd skill's social_generator.py (ReportLab, 303 lines).
- * Ground truth is that Python script, not the skill's SKILL.md prose.
+ * Social-sharable JD PDF (1080×1350, 4:5 portrait) — the standard template for
+ * every role, redesigned 2026-10-22 (first shipped for R019) to Brand Book v7.
  *
- * ── Coordinate system note ──────────────────────────────────────────────────
- * ReportLab's canvas is Y-UP (origin bottom-left); pdfkit is Y-DOWN (origin
- * top-left). Rather than rewriting the layout math from scratch, this file
- * mirrors the Python source's own running `y` variable exactly (same starting
- * value, same `y -= N` decrements, in the same order), and only converts to
- * pdfkit's coordinate space at the moment of each draw call, via `flipY()`
- * plus one of two rules depending on what ReportLab primitive is being
- * reproduced:
- *   - box/rect (corner + extends UPWARD by h):      pdfkit top = flipY(cornerY) - h
- *   - baseline text (drawString/drawCentredString): pdfkit top = flipY(baselineY) - fontSize*ASCENT_RATIO
- *   - point (line endpoint / circle center):        pdfkit y  = flipY(Y)
- * This keeps every numeric constant from the Python source directly traceable
- * here, rather than hand-waving a global re-derivation.
+ * Structure (identical on every role):
+ *   TOP 40%  — logo · "Now hiring" · the three-line hook · the intro · the role
+ *              block (title + location / experience / team). The hook and intro
+ *              are fixed constants in theme.ts — they never change per role.
+ *   BOTTOM 60% — skill chips · "The Job" / "Who You Are" columns · apply bar. These adapt
+ *              to the role: its tags, its five+five bullets, its title length.
  *
- * Icons additionally need their own internal Y-flip (24-gy per the design
- * grid) independent of the page-level flip above — see drawIcon().
+ * Rendering is pdfkit (vector, no browser) so it runs inside the main API
+ * function — Chromium is worker-only (see CLAUDE.md, portfolio review). The
+ * design was prototyped in HTML/CSS; coordinates here are the prototype's CSS
+ * pixels 1:1 (1px = 1pt), and baselines are placed with the same
+ * half-leading + ascent arithmetic a browser uses, so the two match.
+ *
+ * All "where does it go / does it fit" decisions live in socialJdLayout.ts
+ * (pure, unit-tested). This file only draws what that module decides.
  */
 
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
+import path from 'path';
 import { Role } from '../../types/index.js';
 import { JdContent } from '../jdContent.js';
 import {
-  SOCIAL_JD_COLORS,
-  SOCIAL_TAGLINE,
-  SOCIAL_FOOTER_LINE1,
-  APPLICATION_FORM_URL,
-  LOGO_PATH,
-  ICON_COLORS,
+  SOCIAL_COLORS as C,
+  SOCIAL_HOOK_MUTED, SOCIAL_HOOK_PUNCH, SOCIAL_INTRO_FACT, SOCIAL_INTRO_ASK,
+  SOCIAL_NOW_HIRING, SOCIAL_ROLE_EYEBROW, SOCIAL_COL_HEADINGS, SOCIAL_CTA_TEXT,
+  SOCIAL_YOU_ARE_HERE, SOCIAL_APPLY_URL,
 } from './theme.js';
+import {
+  FontKey, FONT_METRICS, Measure, baselineInLine,
+  PAGE_W, PAGE_H, MARGIN, CONTENT_W, CTA_TOP, CTA_H, HERO_MAX_BOTTOM, GEO, COL_X, COLS,
+  fitSingleLine, fitTitle, formatExperience, planMeta, packChips, chipsBlockHeight,
+  HOOK_MAX_RIGHT, HOOK_CLEARANCE, RIPPLE,
+  parseBullet, layoutColumns, stripTags, cleanText,
+  MetaItem, ExperienceParts, RowLayout,
+} from './socialJdLayout.js';
 
-const PAGE_WIDTH = 1080;
-const PAGE_HEIGHT = 1350;
+// ─── Ripple graphic (the brand's "See" layer: blueprint linework) ───────────
+// [radius, stroke width, opacity, dash?]. Radii avoid the radial band occupied by
+// the "NOW HIRING" label so no ring strikes through it.
+const RINGS: [number, number, number, [number, number]?][] = [
+  [52, 1.5, 0.6], [HOOK_CLEARANCE.ring, 1.3, 0.45], [190, 1.3, 0.34, [3, 9]],
+  [268, 9, 0.18, [1.5, 14]],            // tick ring — thick short dashes read as measurement ticks
+  [268, 1.1, 0.22], [356, 1.1, 0.16], [456, 1.1, 0.12, [3, 9]],
+  [576, 1.1, 0.09], [706, 1.1, 0.07], [856, 1.1, 0.05],
+];
 
-// Helvetica ascender, per the standard AFM metric (718/1000 em). Used to
-// approximate ReportLab's baseline-referenced y positions as pdfkit's
-// top-of-box-referenced text() calls.
-const ASCENT_RATIO = 0.718;
-
-function flipY(y: number): number {
-  return PAGE_HEIGHT - y;
+// Assets are read with LITERAL path.join(__dirname, …) expressions on purpose: that is the form
+// Vercel's file tracer (@vercel/nft) can follow, so the fonts and logo are bundled into the serverless
+// function. Passing path strings through a variable into pdfkit hides them from the tracer — the same
+// failure that once dropped pdf.worker.mjs from the bundle (see backend/vercel.json, driveService.ts).
+// Read once, then cached for the life of the process.
+let assets: { fonts: Record<FontKey, Buffer>; logo: Buffer } | null = null;
+function loadAssets() {
+  assets ??= {
+    fonts: {
+      fig:      fs.readFileSync(path.join(__dirname, '../../assets/fonts/Figtree-Regular.ttf')),
+      figBold:  fs.readFileSync(path.join(__dirname, '../../assets/fonts/Figtree-Bold.ttf')),
+      figXBold: fs.readFileSync(path.join(__dirname, '../../assets/fonts/Figtree-ExtraBold.ttf')),
+      monoMed:  fs.readFileSync(path.join(__dirname, '../../assets/fonts/IBMPlexMono-Medium.ttf')),
+      monoSemi: fs.readFileSync(path.join(__dirname, '../../assets/fonts/IBMPlexMono-SemiBold.ttf')),
+    },
+    logo: fs.readFileSync(path.join(__dirname, '../../assets/dp_logo_white.png')),
+  };
+  return assets;
 }
 
-// ─── Color helpers ──────────────────────────────────────────────────────────
-function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace('#', '');
-  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
-}
-
-function lerpColor(c1: [number, number, number], c2: [number, number, number], t: number): string {
-  const mix = (a: number, b: number) => Math.round(a * (1 - t) + b * t);
-  const [r, g, b] = [mix(c1[0], c2[0]), mix(c1[1], c2[1]), mix(c1[2], c2[2])];
-  return `#${[r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')}`;
-}
-
-// ─── Gradient background (grad_rect in the Python) ─────────────────────────
-function drawGradientBackground(doc: PDFKit.PDFDocument): void {
-  const steps = 30;
-  const stepH = PAGE_HEIGHT / steps;
-  const navy = hexToRgb(SOCIAL_JD_COLORS.navy);
-  const navyLight = hexToRgb(SOCIAL_JD_COLORS.navyLight);
-  for (let i = 0; i < steps; i++) {
-    const t = i / (steps - 1);
-    const color = lerpColor(navy, navyLight, t);
-    doc.rect(0, i * stepH, PAGE_WIDTH, stepH + 0.5).fill(color);
-  }
-}
-
-// ─── Icons (social's own 4 meta icons — 24-unit design grid, Y-up as
-// authored). "Corrected orientation" per the Python's own comments — do not
-// reuse the long-form JD's icon shapes, these have different path data. ────
-type IconOp =
-  | { op: 'move'; x: number; y: number }
-  | { op: 'line'; x: number; y: number }
-  | { op: 'curve'; cp1x: number; cp1y: number; cp2x: number; cp2y: number; x: number; y: number }
-  | { op: 'close' };
-
-interface IconCircle {
-  cx: number;
-  cy: number;
-  r: number;
-  color: string;
-}
-
-interface IconSpec {
-  fill: string;
-  path: IconOp[];
-  circles?: IconCircle[];
-}
-
-type IconKind = 'pin' | 'building' | 'grad' | 'tag';
-
-const ICONS: Record<IconKind, IconSpec> = {
-  // Pin pointing down — moveTo/curveTo verbatim from icon_pin()
-  pin: {
-    fill: ICON_COLORS.pin,
-    path: [
-      { op: 'move', x: 12, y: 2 },
-      { op: 'curve', cp1x: 12, cp1y: 2, cp2x: 5, cp2y: 9.75, x: 5, y: 15 },
-      { op: 'curve', cp1x: 5, cp1y: 18.87, cp2x: 8.13, cp2y: 22, x: 12, y: 22 },
-      { op: 'curve', cp1x: 15.87, cp1y: 22, cp2x: 19, cp2y: 18.87, x: 19, y: 15 },
-      { op: 'curve', cp1x: 19, cp1y: 9.75, cp2x: 12, cp2y: 2, x: 12, y: 2 },
-      { op: 'close' },
-    ],
-    circles: [{ cx: 12, cy: 15, r: 2.5, color: '#ffffff' }],
-  },
-  // Building facing up — verbatim from icon_building()
-  building: {
-    fill: ICON_COLORS.building,
-    path: [
-      { op: 'move', x: 4, y: 3 },
-      { op: 'line', x: 4, y: 17 },
-      { op: 'line', x: 12, y: 21 },
-      { op: 'line', x: 20, y: 17 },
-      { op: 'line', x: 20, y: 3 },
-      { op: 'close' },
-    ],
-    circles: ([[6, 9], [10, 9], [14, 9], [6, 13], [10, 13], [14, 13]] as [number, number][]).map(
-      ([x, y]) => ({ cx: x + 1.25, cy: y + 1.25, r: 1.2, color: '#ffffff' })
-    ),
-  },
-  // Graduation cap facing up — verbatim from icon_grad() (single flat quad, no band)
-  grad: {
-    fill: ICON_COLORS.grad,
-    path: [
-      { op: 'move', x: 12, y: 21 },
-      { op: 'line', x: 1, y: 15 },
-      { op: 'line', x: 12, y: 9 },
-      { op: 'line', x: 23, y: 15 },
-      { op: 'close' },
-    ],
-  },
-  // Tag oriented correctly — verbatim from icon_tag()
-  tag: {
-    fill: ICON_COLORS.tag,
-    path: [
-      { op: 'move', x: 3, y: 12.5 },
-      { op: 'line', x: 11.5, y: 21 },
-      { op: 'line', x: 20, y: 21 },
-      { op: 'line', x: 20, y: 12.5 },
-      { op: 'line', x: 11.5, y: 4 },
-      { op: 'close' },
-    ],
-    circles: [{ cx: 17, cy: 17, r: 1.3, color: '#ffffff' }],
-  },
-};
-
-/**
- * Draws one meta-row icon. `x` and `originYUp` match the Python call site's
- * `renderPDF.draw(icon_fn(sz), c, x, originYUp)` — i.e. originYUp is the
- * canvas Y-UP position of the icon's own bottom-left corner, on the SAME
- * page-level y-up frame the rest of this file mirrors.
- *
- * Within the icon's own 24-unit design grid, the path was authored Y-up
- * (matching ReportLab's native Drawing coordinate space); pdfkit needs each
- * grid point flipped as (24 - gy) before scaling — this is a SEPARATE flip
- * from the page-level one above, needed because these are actual curved
- * vector paths where getting the orientation wrong is visually obvious
- * (upside-down pin, etc.), not just a coarse block position.
- */
-function drawIcon(doc: PDFKit.PDFDocument, kind: IconKind, x: number, originYUp: number, sz: number): void {
-  const spec = ICONS[kind];
-  const s = sz / 24;
-  const px = (gx: number) => x + gx * s;
-  const py = (gy: number) => flipY(originYUp) - gy * s;
-
-  spec.path.forEach(op => {
-    if (op.op === 'move') doc.moveTo(px(op.x), py(op.y));
-    else if (op.op === 'line') doc.lineTo(px(op.x), py(op.y));
-    else if (op.op === 'curve') {
-      doc.bezierCurveTo(px(op.cp1x), py(op.cp1y), px(op.cp2x), py(op.cp2y), px(op.x), py(op.y));
-    } else doc.closePath();
-  });
-  doc.fill(spec.fill);
-
-  (spec.circles || []).forEach(c => {
-    doc.circle(px(c.cx), py(c.cy), c.r * s).fill(c.color);
-  });
-}
-
-// ─── Rich-text bullet parsing ("<b>Label:</b> Description") ────────────────
-interface RichSegment {
-  text: string;
-  bold: boolean;
-}
-
-function parseRichText(s: string): RichSegment[] {
-  const parts: RichSegment[] = [];
-  const regex = /<b>(.*?)<\/b>/gi;
-  let lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = regex.exec(s)) !== null) {
-    if (m.index > lastIndex) parts.push({ text: s.slice(lastIndex, m.index), bold: false });
-    parts.push({ text: m[1], bold: true });
-    lastIndex = m.index + m[0].length;
-  }
-  if (lastIndex < s.length) parts.push({ text: s.slice(lastIndex), bold: false });
-  return parts;
-}
-
-function stripTags(s: string): string {
-  return s.replace(/<\/?b>/gi, '');
-}
-
-// ─── Title line-splitting heuristic (replaces the Python's hand-authored
-// 'Senior Backend\nDeveloper' literal — there's no manual authoring here) ──
-function splitTitleLines(title: string): string[] {
-  const trimmed = title.trim();
-  const words = trimmed.split(/\s+/);
-  if (words.length < 2 || trimmed.length <= 18) return [trimmed];
-
-  const mid = trimmed.length / 2;
-  let bestIdx = 0;
-  let bestDist = Infinity;
-  let pos = 0;
-  for (let i = 0; i < words.length - 1; i++) {
-    pos += words[i].length + 1; // position just after the space following this word
-    const dist = Math.abs(pos - mid);
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestIdx = i;
-    }
-  }
-  const line1 = words.slice(0, bestIdx + 1).join(' ');
-  const line2 = words.slice(bestIdx + 1).join(' ');
-  return [line1, line2];
-}
-
-// ─── PNG dimension read (for logo aspect ratio — avoids depending on
-// pdfkit's undocumented/untyped internal image-loading APIs) ───────────────
-function getPngDimensions(filePath: string): { width: number; height: number } {
-  const buf = fs.readFileSync(filePath);
-  // PNG: width/height are big-endian uint32s at byte offsets 16 and 20.
-  const width = buf.readUInt32BE(16);
-  const height = buf.readUInt32BE(20);
-  return { width, height };
-}
+const HERO_LEFT = MARGIN;
+const LOGO = { x: MARGIN - 12, y: 28, w: 122 }; // -12: the PNG has built-in left padding; this aligns the "D" with the headline edge
 
 export async function renderSocialJd(role: Role, content: JdContent): Promise<Buffer> {
   const doc = new PDFDocument({
-    size: [PAGE_WIDTH, PAGE_HEIGHT],
+    size: [PAGE_W, PAGE_H],
     margins: { top: 0, bottom: 0, left: 0, right: 0 },
+    info: {
+      Title: `${stripTags(role.title)} — DigitalPaani`,
+      Author: 'DigitalPaani',
+      Subject: 'Social job description',
+    },
   });
-
   const chunks: Buffer[] = [];
-  doc.on('data', chunk => chunks.push(chunk));
-  const donePromise = new Promise<Buffer>((resolve, reject) => {
+  doc.on('data', (c: Buffer) => chunks.push(c));
+  const done = new Promise<Buffer>((resolve, reject) => {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
   });
 
-  // ── Background ────────────────────────────────────────────────────────
-  drawGradientBackground(doc);
+  const { fonts, logo } = loadAssets();
+  (Object.keys(fonts) as FontKey[]).forEach(k => doc.registerFont(k, fonts[k]));
 
-  // y mirrors the Python's own running y-up variable exactly (starts at
-  // PAGE_HEIGHT, decremented by the same amounts, in the same order).
-  let y = PAGE_HEIGHT;
+  // CSS letter-spacing semantics: `spacing` pt after every character, last included.
+  const measure: Measure = (text, font, size, spacing = 0) => {
+    doc.font(font).fontSize(size);
+    return doc.widthOfString(text) + spacing * Array.from(text).length;
+  };
 
-  // ── WE'RE HIRING! badge ─────────────────────────────────────────────────
-  y -= 90;
-  {
-    const badgeW = 350;
-    const badgeH = 60;
-    const badgeX = (PAGE_WIDTH - badgeW) / 2;
-    const cornerYUp = y; // roundRect(x, y, w, h) — corner, extends UP by h
-    doc.roundedRect(badgeX, flipY(cornerYUp) - badgeH, badgeW, badgeH, 30).fill(SOCIAL_JD_COLORS.teal);
-
-    const fontSize = 26;
-    const baselineYUp = y + 21;
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(fontSize)
-      .fillColor('#ffffff')
-      .text("WE'RE HIRING!", badgeX, flipY(baselineYUp) - fontSize * ASCENT_RATIO, {
-        width: badgeW,
-        align: 'center',
-        lineBreak: false,
-      });
+  /** Draw `str` with its BASELINE at `baseline`. */
+  function text(
+    str: string, x: number, baseline: number, font: FontKey, size: number, color: string,
+    o: { opacity?: number; spacing?: number; align?: 'left' | 'right' | 'center' } = {},
+  ): number {
+    const spacing = o.spacing ?? 0;
+    const w = measure(str, font, size, spacing);
+    const left = o.align === 'right' ? x - w : o.align === 'center' ? x - w / 2 : x;
+    doc.font(font).fontSize(size).fillColor(color, o.opacity ?? 1)
+      .text(str, left, baseline - FONT_METRICS[font].asc * size, { lineBreak: false, characterSpacing: spacing });
+    return w;
   }
 
-  // ── Job title ────────────────────────────────────────────────────────────
-  y -= 110;
+  const rect = (x: number, y: number, w: number, h: number, color: string, opacity = 1) =>
+    doc.fillColor(color, opacity).rect(x, y, w, h).fill();
+
+  // ── Background: navy, a soft elliptical lift behind the ripples, the grid ──
+  rect(0, 0, PAGE_W, PAGE_H, C.navy);
+  doc.save();
+  doc.translate(RIPPLE.cx, RIPPLE.cy).scale(1, 518 / 636);          // CSS: radial-gradient(860px 700px, navyMid 0 → navy 74%)
+  const glow = doc.radialGradient(0, 0, 0, 0, 0, 636).stop(0, C.navyMid).stop(1, C.navy);
+  doc.rect(-3000, -3000, 6000, 6000).fill(glow);
+  doc.restore();
+  for (let x = 0; x < PAGE_W; x += 40) rect(x, 0, 1, PAGE_H, C.tealLt, 0.065);   // "instrumented, not decorative"
+  for (let y = 0; y < PAGE_H; y += 40) rect(0, y, PAGE_W, 1, C.tealLt, 0.065);
+
+  // ── Ripples + crosshair + "you are here" callout ───────────────────────────
+  for (const [r, sw, op, dash] of RINGS) {
+    if (dash) doc.dash(dash[0], { space: dash[1] });
+    doc.lineWidth(sw).strokeColor(C.tealLt, op).circle(RIPPLE.cx, RIPPLE.cy, r).stroke();
+    if (dash) doc.undash();
+  }
+  doc.lineWidth(1.4).strokeColor(C.tealLt, 0.75)
+    .moveTo(RIPPLE.cx - 20, RIPPLE.cy).lineTo(RIPPLE.cx + 20, RIPPLE.cy).stroke()
+    .moveTo(RIPPLE.cx, RIPPLE.cy - 20).lineTo(RIPPLE.cx, RIPPLE.cy + 20).stroke();
+  doc.fillColor(C.tealLt, 0.95).circle(RIPPLE.cx, RIPPLE.cy, 4.5).fill();
+  doc.lineWidth(1.1).strokeColor(C.tealLt, 0.55).moveTo(RIPPLE.cx, RIPPLE.cy + 52).lineTo(RIPPLE.cx, RIPPLE.cy + 64).stroke();
+  text(SOCIAL_YOU_ARE_HERE, RIPPLE.cx, RIPPLE.cy + 82, 'monoMed', 11, C.tealLt, { opacity: 0.85, spacing: 11 * 0.18, align: 'center' });
+
+  // corner registration marks
+  doc.lineWidth(1.5).strokeColor(C.tealLt, 0.5);
+  for (const x0 of [26, PAGE_W - 26 - 20]) {
+    doc.moveTo(x0 + 9.75, 18).lineTo(x0 + 9.75, 38).stroke().moveTo(x0, 27.75).lineTo(x0 + 20, 27.75).stroke();
+  }
+
+  // ── Top bar: logo + NOW HIRING ─────────────────────────────────────────────
+  const logoH = LOGO.w * (362 / 701);
+  doc.image(logo, LOGO.x, LOGO.y, { width: LOGO.w });
   {
-    const fontSize = 72;
-    doc.font('Helvetica-Bold').fontSize(fontSize).fillColor('#ffffff');
-    const lines = splitTitleLines(role.title);
-    for (const line of lines) {
-      const baselineYUp = y;
-      doc.text(line, 0, flipY(baselineYUp) - fontSize * ASCENT_RATIO, {
-        width: PAGE_WIDTH,
-        align: 'center',
-        lineBreak: false,
-      });
-      y -= 80;
+    const cy = LOGO.y + logoH / 2;
+    const size = 14, sp = size * 0.14;
+    const w = measure(SOCIAL_NOW_HIRING, 'monoMed', size, sp);
+    const left = MARGIN + CONTENT_W - w;
+    const baseline = cy - (1.3 * size) / 2 + FONT_METRICS.monoMed.asc * size;
+    text(SOCIAL_NOW_HIRING, left, baseline, 'monoMed', size, C.tealLt, { spacing: sp });
+    doc.fillColor(C.tealLt, 0.18).circle(left - 10 - 4.5, cy, 9.5).fill();
+    doc.fillColor(C.tealLt, 1).circle(left - 10 - 4.5, cy, 4.5).fill();
+  }
+
+  // ── Hook (fixed copy) ──────────────────────────────────────────────────────
+  const h1Size = GEO.h1Size, h1LH = h1Size * GEO.h1LineH, h1Sp = GEO.h1Spacing * h1Size;
+  const h1Base = (i: number) => GEO.heroTop + i * h1LH + baselineInLine('figXBold', h1Size, h1LH);
+  SOCIAL_HOOK_MUTED.forEach((line, i) => text(line, HERO_LEFT, h1Base(i), 'figXBold', h1Size, C.white, { opacity: 0.7, spacing: h1Sp }));
+  {
+    const w = text(SOCIAL_HOOK_PUNCH.lead, HERO_LEFT, h1Base(2), 'figXBold', h1Size, C.white, { spacing: h1Sp });
+    text(SOCIAL_HOOK_PUNCH.accent, HERO_LEFT + w, h1Base(2), 'figXBold', h1Size, C.rustLt, { spacing: h1Sp });
+  }
+  const h1Bottom = GEO.heroTop + 3 * h1LH;
+  for (const line of [...SOCIAL_HOOK_MUTED, SOCIAL_HOOK_PUNCH.lead + SOCIAL_HOOK_PUNCH.accent]) {
+    // visible end of the last glyph: the measure includes one trailing letter-space (negative here), which is not drawn
+    const end = HERO_LEFT + measure(line, 'figXBold', h1Size, h1Sp) - h1Sp;
+    if (end > HOOK_MAX_RIGHT) console.warn(`[SocialJD] hook line "${line}" ends at ${end.toFixed(0)}pt, past ${HOOK_MAX_RIGHT}pt (it would run into the ripple artwork)`);
+  }
+
+  // ── Intro (fixed copy) ─────────────────────────────────────────────────────
+  const subLH = GEO.subSize * GEO.subLineH;
+  const subTop = h1Bottom + GEO.subMarginTop;
+  const subBase = (i: number) => subTop + i * subLH + baselineInLine('fig', GEO.subSize, subLH);
+  text(SOCIAL_INTRO_FACT, HERO_LEFT, subBase(0), 'fig', GEO.subSize, C.white, { opacity: 0.82, spacing: -0.005 * GEO.subSize });
+  // the ask is set in the brand's warm emphasis (rust) so it stands out from the intro above it
+  text(SOCIAL_INTRO_ASK, HERO_LEFT, subBase(1), 'figBold', GEO.subSize, C.rustLt, { spacing: -0.005 * GEO.subSize });
+  const subBottom = subTop + 2 * subLH;
+
+  // ── Role block — translucent teal "glass" ──────────────────────────────────
+  const cardX = MARGIN, cardY = subBottom + GEO.cardMarginTop, cardW = CONTENT_W, cardH = GEO.cardH;
+  const innerTop = cardY + 1, innerH = cardH - 2;
+  {
+    const g = doc.linearGradient(cardX, cardY, cardX + cardW, cardY + cardH)
+      .stop(0, C.tealLt, 0.17).stop(1, C.tealLt, 0.07);
+    doc.roundedRect(cardX, cardY, cardW, cardH, 6).fill(g);
+    doc.lineWidth(1).strokeColor(C.tealLt, 0.34).roundedRect(cardX + 0.5, cardY + 0.5, cardW - 1, cardH - 1, 5.5).stroke();
+    // right-hand meta: location / experience / team (any of them may be missing)
+    const items: MetaItem[] = [];
+    const loc = cleanText(role.location ?? '');
+    if (loc) items.push({ key: 'LOCATION', value: { text: loc } });
+    const exp = formatExperience(role.yoe_required);
+    if (exp) items.push({ key: 'EXPERIENCE', value: exp });
+    const team = cleanText(role.department ?? '');
+    if (team) items.push({ key: 'TEAM', value: { text: team } });
+    const metaX = GEO.col2X, metaW = cardX + cardW - 1 - 28 - metaX;
+    const naturalW = (it: MetaItem) => it.value.num
+      ? measure(it.value.num, 'monoSemi', 22, -0.02 * 22) + measure(' ' + (it.value.unit ?? ''), 'figBold', 23, -0.01 * 23)
+      : measure(it.value.text ?? '', 'figBold', 23, -0.01 * 23);
+    const { placements: placed, col1X } = planMeta(items, naturalW, metaW);
+
+    // The divider sits at x=541.5 so the meta text lands exactly on the second column's gridline (x=570).
+    // With no meta at all there is nothing to divide: drop the rule and give the title the whole block.
+    const dividerX = GEO.col2X - 28.5;
+    if (placed.length) doc.lineWidth(1).strokeColor(C.tealLt, 0.28).moveTo(dividerX, innerTop).lineTo(dividerX, innerTop + innerH).stroke();
+
+    // left: eyebrow + fitted title, centred as a group in the block
+    const titleX = cardX + 1 + 36;
+    const titleMaxW = (placed.length ? dividerX - 12 : cardX + cardW - 1 - 36) - titleX;
+    const t = fitTitle(role.title, titleMaxW, measure);
+    const tLH = t.size * 1.02;
+    const eyebrowH = 1.3 * 12.5;
+    const groupH = eyebrowH + 10 + t.lines.length * tLH;
+    const top = innerTop + (innerH - groupH) / 2;
+    doc.fillColor(C.tealLt, 1).rect(titleX, top + (eyebrowH - 8) / 2, 8, 8).fill();
+    text(SOCIAL_ROLE_EYEBROW, titleX + 17, top + FONT_METRICS.monoMed.asc * 12.5, 'monoMed', 12.5, C.tealLt, { spacing: 12.5 * 0.14 });
+    const t0 = top + eyebrowH + 10;
+    t.lines.forEach((line, i) =>
+      text(line, titleX, t0 + i * tLH + baselineInLine('figXBold', t.size, tLH), 'figXBold', t.size, C.white, { spacing: -0.03 * t.size }));
+
+    // right: the meta items on a two-column grid
+    const itemH = 11.5 + 5 + 1.1 * 23;
+    const rowsN = placed.length ? Math.max(...placed.map(p => p.row)) + 1 : 0;
+    const gridH = rowsN * itemH + Math.max(0, rowsN - 1) * 16;
+    const gridTop = innerTop + (innerH - gridH) / 2;
+    for (const p of placed) {
+      const x = metaX + (p.col === 1 ? col1X : 0);
+      const w = p.span2 ? metaW : p.col === 0 ? col1X - 28 : metaW - col1X;
+      const y = gridTop + p.row * (itemH + 16);
+      text(p.key, x, y + baselineInLine('monoMed', 11.5, 11.5), 'monoMed', 11.5, C.tealLt, { opacity: 0.9, spacing: 11.5 * 0.14 });
+      drawMetaValue(p.value, x, y + 16.5 + baselineInLine('figBold', 23, 1.1 * 23), w);
     }
   }
+  const heroBottom = cardY + cardH;
+  // The template's contract: everything from the logo to the role block fits in the top 40%.
+  if (heroBottom > HERO_MAX_BOTTOM) console.warn(`[SocialJD] hero ends at ${heroBottom.toFixed(1)}pt, past the 40% line (${HERO_MAX_BOTTOM}pt)`);
 
-  // ── Tagline ──────────────────────────────────────────────────────────────
-  y -= 20;
-  {
-    const fontSize = 26;
-    const baselineYUp = y;
-    doc
-      .font('Helvetica')
-      .fontSize(fontSize)
-      .fillColor(SOCIAL_JD_COLORS.taglineText)
-      .text(SOCIAL_TAGLINE, 0, flipY(baselineYUp) - fontSize * ASCENT_RATIO, {
-        width: PAGE_WIDTH,
-        align: 'center',
-        lineBreak: false,
-      });
+  function drawMetaValue(v: ExperienceParts, x: number, baseline: number, maxW: number) {
+    if (v.num) {
+      // digits in mono (brand rule: numerics are IBM Plex Mono), unit in Figtree
+      const w = (s: number) => measure(v.num!, 'monoSemi', s * (22 / 23), -0.02 * s * (22 / 23)) + measure(' ' + (v.unit ?? ''), 'figBold', s, -0.01 * s);
+      let s = 23;
+      while (s > 16 && w(s) > maxW) s -= 0.5;
+      const nw = text(v.num, x, baseline, 'monoSemi', s * (22 / 23), C.white, { spacing: -0.02 * s * (22 / 23) });
+      text(' ' + (v.unit ?? ''), x + nw, baseline, 'figBold', s, C.white, { spacing: -0.01 * s });
+      return;
+    }
+    const f = fitSingleLine(v.text ?? '', 'figBold', maxW, 23, 16, -0.01, measure);
+    text(f.text, x, baseline, 'figBold', f.size, C.white, { spacing: -0.01 * f.size });
   }
 
-  // ── Meta info row ────────────────────────────────────────────────────────
-  y -= 80;
-  {
-    const metaItems: Array<{ icon: IconKind; label: string }> = [];
-    if (role.location) metaItems.push({ icon: 'pin', label: role.location });
-    if (role.employment_type) metaItems.push({ icon: 'building', label: role.employment_type });
-    if (role.yoe_required) metaItems.push({ icon: 'grad', label: role.yoe_required });
-    if (role.department) metaItems.push({ icon: 'tag', label: role.department });
+  // ── Skill chips (centred rows; blue = craft, green = sector) ───────────────
+  const chips = packChips(content.tags, measure);
+  chips.rows.forEach((row, ri) => {
+    const y = GEO.chipsTop + ri * (GEO.chipH + GEO.chipGap);
+    for (const c of row) {
+      doc.fillColor(c.green ? C.chipGreenBg : C.chipBlueBg, 1).roundedRect(c.x, y, c.w, GEO.chipH, 6).fill();
+      text(c.text, c.x + GEO.chipPadX, y + 10 + baselineInLine('figBold', GEO.chipFont, GEO.chipFont), 'figBold', GEO.chipFont,
+        c.green ? C.chipGreenTx : C.chipBlueTx, { spacing: GEO.chipSpacing * GEO.chipFont });
+    }
+  });
+  if (chips.dropped) console.warn(`[SocialJD] ${role.id}: dropped ${chips.dropped} tag(s) that did not fit two chip rows`);
 
-    const fontSize = 20;
-    doc.font('Helvetica-Bold').fontSize(fontSize);
+  // ── The Job / Who You Are ──────────────────────────────────────────────────────────
+  const colsTop = chips.rows.length ? GEO.chipsTop + chipsBlockHeight(chips.rows.length) + GEO.colsGapAfterChips : GEO.chipsTop;
+  const availH = CTA_TOP - GEO.colsBottomGap - colsTop;
+  const layout = layoutColumns(
+    (content.socialAboutRole ?? []).map(parseBullet).filter(b => b.lead),
+    (content.socialAboutYou ?? []).map(parseBullet).filter(b => b.lead),
+    availH, measure,
+  );
+  if (layout.overflow) console.warn(`[SocialJD] ${role.id}: columns exceed the available height even at minimum scale`);
 
-    const ICON_ADVANCE = 22; // x-advance after each icon, before the label
-    const LABEL_GAP = 10; // gap after label, before separator/next icon
-    const SEP_GAP = 12; // gap after the separator line
-
-    // Bug fix: the original Python computed the centering width using
-    // (18 + labelWidth + 15) per item while the draw loop actually advanced
-    // x by 22 (+ labelWidth + 10 [+ 12 for the separator]) — a mismatch that
-    // left the row visibly off-center. Here the width sum uses the EXACT
-    // same per-item advance the draw loop uses below, so centering is exact.
-    const perItemAdvance = (label: string, isLast: boolean) =>
-      ICON_ADVANCE + doc.widthOfString(label) + LABEL_GAP + (isLast ? 0 : SEP_GAP);
-
-    const totalW = metaItems.reduce(
-      (sum, item, i) => sum + perItemAdvance(item.label, i === metaItems.length - 1),
-      0
-    );
-
-    let x = (PAGE_WIDTH - totalW) / 2;
-    const rowYUp = y;
-
-    metaItems.forEach((item, i) => {
-      drawIcon(doc, item.icon, x, rowYUp - 2, 16);
-      x += ICON_ADVANCE;
-
-      // drawIcon's .fill(color) calls leave the doc's fill color set to the
-      // icon's color — reset to white before drawing the label text.
-      doc.font('Helvetica-Bold').fontSize(fontSize).fillColor('#ffffff');
-      const baselineYUp = rowYUp;
-      doc.text(item.label, x, flipY(baselineYUp) - fontSize * ASCENT_RATIO, { lineBreak: false });
-      const labelWidth = doc.widthOfString(item.label);
-      x += labelWidth + LABEL_GAP;
-
-      if (i < metaItems.length - 1) {
-        doc
-          .moveTo(x, flipY(rowYUp - 3))
-          .lineTo(x, flipY(rowYUp + 16))
-          .lineWidth(1)
-          .strokeColor(SOCIAL_JD_COLORS.metaDivider)
-          .stroke();
-        x += SEP_GAP;
+  [SOCIAL_COL_HEADINGS.job, SOCIAL_COL_HEADINGS.you].forEach((heading, ci) => {
+    const x = COL_X[ci];
+    rect(x, colsTop, 56, 3, C.tealLt);
+    text(heading, x, colsTop + 20 + baselineInLine('figXBold', 36, 36), 'figXBold', 36, C.white, { spacing: -0.02 * 36 });
+    let y = colsTop + COLS.headerH;
+    layout.rows.forEach((row, ri) => {
+      const r: RowLayout | undefined = ci === 0 ? row.left : row.right;
+      const s = layout.scale;
+      if (r) {
+        text(String(ri + 1).padStart(2, '0'), x, y + row.pad + 7 * s + FONT_METRICS.monoMed.asc * 16 * s, 'monoMed', 16 * s, C.tealLt, { spacing: 0.04 * 16 * s });
+        const tx = x + COLS.textX;
+        const leadLH = r.leadSize * COLS.leadLH;
+        text(r.lead, tx, y + row.pad + baselineInLine('figBold', r.leadSize, leadLH), 'figBold', r.leadSize, C.white, { spacing: -0.015 * r.leadSize });
+        const dTop = y + row.pad + leadLH + COLS.leadDescGap * s;
+        const dLH = r.descSize * COLS.descLH;
+        r.descLines.forEach((ln, li) =>
+          text(ln, tx, dTop + li * dLH + baselineInLine('fig', r.descSize, dLH), 'fig', r.descSize, C.white, { opacity: 0.68 }));
       }
+      if (ri < layout.rows.length - 1) rect(x, y + row.h - 1, GEO.colW, 1, C.white, 0.1);
+      y += row.h;
     });
-  }
+  });
 
-  // ── Tech tags — greedy row-wrap, each row independently centered ────────
-  y -= 50;
+  // ── Apply bar (the whole bar is the link) ──────────────────────────────────
+  rect(0, CTA_TOP, PAGE_W, CTA_H, C.tealLt);
+  const ctaMid = CTA_TOP + CTA_H / 2;
+  text(SOCIAL_CTA_TEXT, MARGIN, ctaMid - (1.2 * 32) / 2 + FONT_METRICS.figXBold.asc * 32, 'figXBold', 32, C.navy, { spacing: -0.025 * 32 });
   {
-    const fontSize = 13;
-    doc.font('Helvetica-Bold').fontSize(fontSize);
-    const maxRowWidth = 800;
-
-    const tagWidths: number[] = [];
-    const rowWidths: number[] = [0];
-    let currentRow = 0;
-    for (const tag of content.tags) {
-      const tw = doc.widthOfString(tag.text.toUpperCase()) + 22;
-      if (rowWidths[currentRow] + tw > maxRowWidth) {
-        currentRow += 1;
-        rowWidths.push(0);
-      }
-      rowWidths[currentRow] += tw + 10;
-      tagWidths.push(tw);
-    }
-
-    let tagYUp = y;
-    let tagIdx = 0;
-    for (const rowWidth of rowWidths) {
-      let tagX = (PAGE_WIDTH - rowWidth + 10) / 2;
-      while (tagIdx < content.tags.length) {
-        const tag = content.tags[tagIdx];
-        const tw = tagWidths[tagIdx];
-        if (tagX + tw > (PAGE_WIDTH + rowWidth) / 2) break;
-
-        const bg = tag.isGreen ? SOCIAL_JD_COLORS.tagGreen : SOCIAL_JD_COLORS.tagBlue;
-        const fg = tag.isGreen ? SOCIAL_JD_COLORS.tagGreenTxt : SOCIAL_JD_COLORS.tagBlueTxt;
-
-        const cornerYUp = tagYUp - 4;
-        doc.roundedRect(tagX, flipY(cornerYUp) - 20, tw, 20, 5).fill(bg);
-
-        const baselineYUp = tagYUp + 2;
-        doc
-          .fillColor(fg)
-          .text(tag.text.toUpperCase(), tagX + 11, flipY(baselineYUp) - fontSize * ASCENT_RATIO, {
-            lineBreak: false,
-          });
-
-        tagX += tw + 10;
-        tagIdx += 1;
-      }
-      tagYUp -= 26;
-    }
-
-    y = tagYUp - 60;
+    const R = 19, cx = MARGIN + CONTENT_W - R;
+    const urlText = SOCIAL_APPLY_URL.replace(/^https?:\/\//, '');
+    text(urlText, cx - R - 13, ctaMid - (1.3 * 20.8) / 2 + FONT_METRICS.monoSemi.asc * 20.8, 'monoSemi', 20.8, C.navy, { align: 'right', spacing: -0.02 * 20.8 });
+    doc.fillColor(C.navy, 1).circle(cx, ctaMid, R).fill();
+    doc.lineWidth(2.2).lineCap('round').lineJoin('round').strokeColor(C.tealLt, 1)
+      .moveTo(cx - 7, ctaMid).lineTo(cx + 7, ctaMid).stroke()
+      .moveTo(cx + 2.5, ctaMid - 4.7).lineTo(cx + 7, ctaMid).lineTo(cx + 2.5, ctaMid + 4.7).stroke();
   }
-
-  // ── Role continuity note (optional) ─────────────────────────────────────
-  // Hand-authored context paragraph(s), shown above the two columns only
-  // when content.roleContinuityNote is set — every other role's render is
-  // completely unaffected (this whole block is a no-op for them).
-  const hasContinuityNote = !!content.roleContinuityNote;
-  if (content.roleContinuityNote) {
-    const fontSize = 17;
-    const lineGap = 6;
-    const noteWidth = PAGE_WIDTH - 2 * 70;
-    doc.font('Helvetica').fontSize(fontSize).fillColor(SOCIAL_JD_COLORS.footerLine1);
-
-    const paragraphs = content.roleContinuityNote.split('\n\n').filter(Boolean);
-    y -= 4;
-    for (const para of paragraphs) {
-      const h = doc.heightOfString(para, { width: noteWidth, lineGap, align: 'left' });
-      const topYUp = y;
-      doc.text(para, 70, flipY(topYUp) - fontSize * ASCENT_RATIO, {
-        width: noteWidth,
-        lineGap,
-        align: 'left',
-      });
-      y -= h + 18;
-    }
-    y -= 10;
-  }
-
-  // ── Two columns: "About the role:" / "About you:" ──────────────────────
-  const colMargin = 70;
-  const colGap = 60;
-  const colW = (PAGE_WIDTH - 2 * colMargin - colGap) / 2;
-  const rightX = colMargin + colW + colGap;
-
-  {
-    const headerFontSize = 28;
-    doc.font('Helvetica-Bold').fontSize(headerFontSize).fillColor(SOCIAL_JD_COLORS.lightGreen);
-
-    const headerBaselineYUp = y;
-    const headerTopPdf = flipY(headerBaselineYUp) - headerFontSize * ASCENT_RATIO;
-    doc.text('About the role:', colMargin, headerTopPdf, { lineBreak: false });
-    doc.text('About you:', rightX, headerTopPdf, { lineBreak: false });
-
-    const underlineYUp = y - 6;
-    const underlinePdfY = flipY(underlineYUp);
-    doc
-      .moveTo(colMargin, underlinePdfY)
-      .lineTo(colMargin + 280, underlinePdfY)
-      .lineWidth(3)
-      .strokeColor(SOCIAL_JD_COLORS.teal)
-      .stroke();
-    doc
-      .moveTo(rightX, underlinePdfY)
-      .lineTo(rightX + 220, underlinePdfY)
-      .lineWidth(3)
-      .strokeColor(SOCIAL_JD_COLORS.teal)
-      .stroke();
-  }
-
-  // ── Bullets ──────────────────────────────────────────────────────────────
-  // Slightly tighter when a continuity note pushed the columns down —
-  // keeps the (already space-tight) bullet flow clear of the fixed-position
-  // footer without changing anything for a role with no note at all.
-  const bulletFontSize = hasContinuityNote ? 15 : 18;
-  const bulletLeading = hasContinuityNote ? 20 : 25;
-  const bulletGap = hasContinuityNote ? 10 : 20;
-  doc.font('Helvetica').fontSize(bulletFontSize);
-  const naturalLineHeight = doc.currentLineHeight();
-  const bulletLineGap = bulletLeading - naturalLineHeight;
-  const bulletWidth = colW - 25;
-
-  function renderBulletColumn(items: string[], x: number): number {
-    let bulletYUp = y - (hasContinuityNote ? 40 : 50);
-    for (const raw of items) {
-      // Conservative height measurement: uses the wider (Bold) font for the
-      // whole plain string so wrapping never comes out narrower than the
-      // real mixed-font render — avoids under-measuring and clipping into
-      // the next bullet or the footer.
-      doc.font('Helvetica-Bold').fontSize(bulletFontSize);
-      const plain = stripTags(raw);
-      const h = doc.heightOfString(plain, { width: bulletWidth, lineGap: bulletLineGap });
-
-      const paragraphTopYUp = bulletYUp + 10;
-      const topPdfY = flipY(paragraphTopYUp);
-
-      const segments = parseRichText(raw);
-      doc.x = x;
-      doc.y = topPdfY;
-      segments.forEach((seg, i) => {
-        doc
-          .font(seg.bold ? 'Helvetica-Bold' : 'Helvetica')
-          .fontSize(bulletFontSize)
-          .fillColor('#ffffff')
-          .text(seg.text, {
-            continued: i < segments.length - 1,
-            width: bulletWidth,
-            lineGap: bulletLineGap,
-          });
-      });
-
-      // Bullet dot aligned to the first line of this item.
-      const dotYUp = bulletYUp + 6;
-      doc.circle(x - 14, flipY(dotYUp), 5).fill(SOCIAL_JD_COLORS.teal);
-
-      bulletYUp -= h + bulletGap;
-    }
-    return bulletYUp;
-  }
-
-  const leftFinalYUp = renderBulletColumn(content.socialAboutRole, colMargin + 22);
-  const rightFinalYUp = renderBulletColumn(content.socialAboutYou, rightX + 22);
-
-  // ── Overflow guard ───────────────────────────────────────────────────────
-  // The original has no guard at all — footer sits at a fixed position
-  // regardless of content height. MAX_SOCIAL_BULLETS=5 (jdContent.ts) should
-  // already keep this from happening; this is a defensive check, not a
-  // dynamic-shrink algorithm.
-  const footerSeparatorYUp = 180 + 70; // footer_y + 70, matches the footer section below
-  if (leftFinalYUp < footerSeparatorYUp || rightFinalYUp < footerSeparatorYUp) {
-    console.warn(
-      `[socialJd] Bullet content for role ${role.id} may overlap the footer ` +
-        `(leftEndYUp=${leftFinalYUp.toFixed(1)}, rightEndYUp=${rightFinalYUp.toFixed(1)}, ` +
-        `footerSeparatorYUp=${footerSeparatorYUp}). Consider trimming socialAboutRole/socialAboutYou.`
-    );
-  }
-
-  // ── Footer CTA (fixed position, independent of the flowing content above) ─
-  const footerYUp = 180;
-
-  {
-    const separatorYUp = footerYUp + 70;
-    doc
-      .moveTo(colMargin, flipY(separatorYUp))
-      .lineTo(PAGE_WIDTH - colMargin, flipY(separatorYUp))
-      .lineWidth(1)
-      .strokeColor('#ffffff')
-      .strokeOpacity(0.2)
-      .stroke();
-    doc.strokeOpacity(1);
-
-    const line1FontSize = 18;
-    const line1BaselineYUp = footerYUp + 42;
-    doc
-      .font('Helvetica')
-      .fontSize(line1FontSize)
-      .fillColor(SOCIAL_JD_COLORS.footerLine1)
-      .text(SOCIAL_FOOTER_LINE1, 0, flipY(line1BaselineYUp) - line1FontSize * ASCENT_RATIO, {
-        width: PAGE_WIDTH,
-        align: 'center',
-        lineBreak: false,
-      });
-
-    const line2FontSize = 24;
-    const line2BaselineYUp = footerYUp + 10;
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(line2FontSize)
-      .fillColor(SOCIAL_JD_COLORS.teal)
-      .text(APPLICATION_FORM_URL, 0, flipY(line2BaselineYUp) - line2FontSize * ASCENT_RATIO, {
-        width: PAGE_WIDTH,
-        align: 'center',
-        lineBreak: false,
-      });
-  }
-
-  // ── Logo (with fallback) ─────────────────────────────────────────────────
-  {
-    const logoYUp = 60;
-    const logoH = 85;
-    try {
-      const { width: imgW, height: imgH } = getPngDimensions(LOGO_PATH);
-      const aspect = imgW / imgH;
-      const logoW = logoH * aspect;
-      const topEdgeYUp = logoYUp + logoH;
-      doc.image(LOGO_PATH, (PAGE_WIDTH - logoW) / 2, flipY(topEdgeYUp), {
-        width: logoW,
-        height: logoH,
-      });
-    } catch (err) {
-      console.error('[socialJd] Logo load failed, falling back to text:', err);
-      const fontSize = 32;
-      const baselineYUp = logoYUp + 25;
-      doc
-        .font('Helvetica-Bold')
-        .fontSize(fontSize)
-        .fillColor('#ffffff')
-        .text('DigitalPaani', 0, flipY(baselineYUp) - fontSize * ASCENT_RATIO, {
-          width: PAGE_WIDTH,
-          align: 'center',
-          lineBreak: false,
-        });
-    }
-  }
+  doc.link(0, CTA_TOP, PAGE_W, CTA_H, SOCIAL_APPLY_URL);
 
   doc.end();
-  return donePromise;
+  return done;
 }
