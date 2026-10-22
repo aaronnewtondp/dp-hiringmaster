@@ -1,4 +1,4 @@
-// The Dashboard's Sourcing workspace: which roles have a plan to show, and how each one is doing at a glance.
+// The Sourcing page's workspace: which roles have a plan to show, and how each one is doing at a glance.
 // Active and paused plans are the roles you can switch between; draft plans (waiting to be activated) are listed separately so they can be
 // opened and activated. A Hiring Manager sees only the roles they are named on, and never a draft.
 import { query, queryOne } from '../db/index.js';

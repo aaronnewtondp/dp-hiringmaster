@@ -215,7 +215,7 @@ describe('My Tasks — the Sourcing box', () => {
     mount();
     fireEvent.click(await screen.findByRole('button', { name: /^Sourcing/ }));
     expect(await screen.findByText('Plans to activate')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Quality Assurance Engineer' })).toHaveAttribute('href', '/dashboard?sourcing_role=R005#sourcing-workspace');
+    expect(screen.getByRole('link', { name: 'Quality Assurance Engineer' })).toHaveAttribute('href', '/sourcing?sourcing_role=R005');
     expect(screen.getByText('Renew the LinkedIn posting')).toBeInTheDocument();
     expect(screen.getByText('Not done — 2 days overdue')).toBeInTheDocument();
     expect(screen.getByTestId('sourcing-targets')).toHaveTextContent('1 of 2 roles');
@@ -239,7 +239,7 @@ describe('My Tasks — the Sourcing box', () => {
       const el = await openBox();
       expect(norm(el)).toBe('This week: 1 of 2 roles at their own weekly qualified target. Below target: Sr. E&I Engineer (Hyderabad) (2).');
       expect(screen.getAllByRole('link', { name: 'Sr. E&I Engineer (Hyderabad)' }).map(a => a.getAttribute('href')))
-        .toContain('/dashboard?sourcing_role=R003#sourcing-workspace');
+        .toContain('/sourcing?sourcing_role=R003');
       expect(el.textContent).not.toMatch(/at or above|minimum|a minimum of/i);
     });
 
@@ -331,18 +331,18 @@ describe('My Tasks — the Sourcing box', () => {
     expect(screen.queryByText(/Channel not live/)).not.toBeInTheDocument();
   });
 
-  it('every role link in the box opens that role\'s plan in the Dashboard\'s Sourcing workspace, and none goes to the role page', async () => {
+  it('every role link in the box opens that role\'s plan on the Sourcing page, and none goes to the role page', async () => {
     mount();
     fireEvent.click(await screen.findByRole('button', { name: /^Sourcing/ }));
     await screen.findByText('Plans to activate');
     const href = (name: string) => screen.getAllByRole('link', { name }).map(a => a.getAttribute('href'));
     // plan to activate: the title AND the Activate button
-    expect(href('Quality Assurance Engineer')).toEqual(['/dashboard?sourcing_role=R005#sourcing-workspace']);
-    expect(href('Activate')).toEqual(['/dashboard?sourcing_role=R005#sourcing-workspace']);
+    expect(href('Quality Assurance Engineer')).toEqual(['/sourcing?sourcing_role=R005']);
+    expect(href('Activate')).toEqual(['/sourcing?sourcing_role=R005']);
     // due today
-    expect(href('Sr. Backend Developer')).toEqual(['/dashboard?sourcing_role=R001#sourcing-workspace']);
+    expect(href('Sr. Backend Developer')).toEqual(['/sourcing?sourcing_role=R001']);
     // the exception group heading and the "Below target" line both name R003
-    expect(href('Sr. E&I Engineer (Hyderabad)')).toEqual(Array(2).fill('/dashboard?sourcing_role=R003#sourcing-workspace'));
+    expect(href('Sr. E&I Engineer (Hyderabad)')).toEqual(Array(2).fill('/sourcing?sourcing_role=R003'));
     expect(screen.getAllByRole('link').some(a => (a.getAttribute('href') ?? '').startsWith('/roles/'))).toBe(false);
   });
 

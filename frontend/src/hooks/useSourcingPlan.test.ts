@@ -11,15 +11,18 @@ let adviceImpl: (id: string, refresh?: boolean) => Promise<unknown> = async () =
 const planCalls: string[] = [];
 const workspaceCalls: number[] = [];
 const adviceCalls: Array<[string, boolean | undefined]> = [];
+let statusImpl: () => Promise<unknown> = async () => ({ data: { enabled: false } });
+const statusCalls: number[] = [];
 vi.mock('../services/api.ts', () => ({
   sourcingApi: {
+    status: () => { statusCalls.push(1); return statusImpl(); },
     plan: (id: string) => { planCalls.push(id); return planImpl(id); },
     workspace: () => { workspaceCalls.push(1); return workspaceImpl(); },
     advice: (id: string, refresh?: boolean) => { adviceCalls.push([id, refresh]); return adviceImpl(id, refresh); },
   },
 }));
 
-import { sourcingChip, useSourcingAdvice, useSourcingPlan, useSourcingWorkspace } from './useSourcingPlan.ts';
+import { sourcingChip, useSourcingAdvice, useSourcingEnabled, useSourcingPlan, useSourcingWorkspace } from './useSourcingPlan.ts';
 
 const ex = (over: Partial<SourcingException> = {}): SourcingException => ({
   id: '1', channel: 'LinkedIn', type: 'CHANNEL_NOT_ACTIVATED', status: 'open', severity: 30, is_shadow: false, detected_at: '2026-10-14T00:00:00Z',
@@ -30,6 +33,58 @@ const view = (status: string, exceptions: SourcingException[] = []): SourcingPla
   enabled: true, exceptions,
   plan: { id: '1', role_id: 'R1', status: status as never, strategy_note: null, baseline: null, baseline_at: null,
           activated_at: null, paused_at: null, pause_total_days: 0, closed_at: null, weekly_qualified_target: null },
+});
+
+describe('useSourcingEnabled', () => {
+  const wrapper = () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: qc }, children);
+  };
+  beforeEach(() => { statusCalls.length = 0; statusImpl = async () => ({ data: { enabled: false } }); });
+
+  it('is loading first, then reflects the answer: on', async () => {
+    statusImpl = async () => ({ data: { enabled: true } });
+    const { result } = renderHook(() => useSourcingEnabled(), { wrapper: wrapper() });
+    expect(result.current).toMatchObject({ enabled: false, loading: true, failed: false });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current).toMatchObject({ enabled: true, failed: false });
+  });
+
+  it('off is an answer, not a failure', async () => {
+    const { result } = renderHook(() => useSourcingEnabled(), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current).toMatchObject({ enabled: false, failed: false });
+  });
+
+  it.each([['"true"', 'true'], ['1', 1], ['null', null], ['missing', undefined]])('only a real boolean true counts as on (%s is off)', async (_n, v) => {
+    statusImpl = async () => ({ data: { enabled: v } });
+    const { result } = renderHook(() => useSourcingEnabled(), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.enabled).toBe(false);
+  });
+
+  it('a failed call is reported as failed (never as "off"), is not retried on its own, and retry() asks again', async () => {
+    statusImpl = async () => { throw new Error('boom'); };
+    const { result } = renderHook(() => useSourcingEnabled(), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.failed).toBe(true));
+    expect(result.current).toMatchObject({ enabled: false, loading: false });
+    expect(statusCalls).toHaveLength(1);
+    statusImpl = async () => ({ data: { enabled: true } });
+    act(() => result.current.retry());
+    await waitFor(() => expect(result.current.enabled).toBe(true));
+    expect(result.current.failed).toBe(false);
+    expect(statusCalls).toHaveLength(2);
+  });
+
+  it('a failed REFRESH after a good answer keeps the answer (no flicker to "failed")', async () => {
+    statusImpl = async () => ({ data: { enabled: true } });
+    const { result } = renderHook(() => useSourcingEnabled(), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.enabled).toBe(true));
+    statusImpl = async () => { throw new Error('blip'); };
+    act(() => result.current.retry());
+    await waitFor(() => expect(statusCalls).toHaveLength(2));
+    expect(result.current).toMatchObject({ enabled: true, failed: false });
+  });
 });
 
 describe('sourcingChip', () => {

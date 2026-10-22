@@ -93,7 +93,7 @@ describe('RoleDetail — the sourcing plan follows role edits', () => {
     await waitFor(() => expect(plan.mock.calls.length).toBeGreaterThan(readsBefore));
     await waitFor(() => expect(chip()).toHaveTextContent('Sourcing paused'));
     expect(chip().className).toMatch(/bg-gray-100/);
-    expect(chip()).toHaveAttribute('href', '/dashboard?sourcing_role=R5#sourcing-workspace');
+    expect(chip()).toHaveAttribute('href', '/sourcing?sourcing_role=R5');
   });
 
   it('approving a role re-reads the plan: the draft plan the server just seeded shows in the header chip', async () => {
@@ -133,7 +133,7 @@ describe('RoleDetail — the sourcing plan follows role edits', () => {
   });
 });
 
-describe('RoleDetail — the sourcing plan has moved to the Dashboard', () => {
+describe('RoleDetail — the sourcing plan has moved to the Sourcing page', () => {
   it('no longer renders the plan on the page: none of the card\'s sections, buttons or its own requests', async () => {
     server = { role: role(), plan: view('active', [exception()]) };
     mount();
@@ -155,8 +155,8 @@ describe('RoleDetail — the sourcing plan has moved to the Dashboard', () => {
   });
 });
 
-describe('RoleDetail — the header chip opens the plan on the Dashboard', () => {
-  const HREF = '/dashboard?sourcing_role=R5#sourcing-workspace';
+describe('RoleDetail — the header chip opens the plan on the Sourcing page', () => {
+  const HREF = '/sourcing?sourcing_role=R5';
   const cases: Array<[string, SourcingPlanView, string, RegExp]> = [
     ['draft plan',                         view('draft'),                                                        'Sourcing plan not activated', /bg-amber-50/],
     ['active plan with nothing wrong',     view('active'),                                                       'Sourcing on track',           /bg-green-50/],
@@ -174,7 +174,7 @@ describe('RoleDetail — the header chip opens the plan on the Dashboard', () =>
       expect(chip().tagName).toBe('A');
       expect(chip()).toHaveAttribute('href', HREF);
       expect(chip().className).toMatch(tone);
-      expect(chip()).toHaveAttribute('title', "Open this role's sourcing plan on the Dashboard");
+      expect(chip()).toHaveAttribute('title', "Open this role's sourcing plan on the Sourcing page");
     });
   }
 

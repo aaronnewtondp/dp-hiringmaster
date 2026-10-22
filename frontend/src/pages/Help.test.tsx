@@ -83,7 +83,7 @@ describe('Help — answers that were wrong or stale', () => {
   });
 });
 
-// ─── The Sourcing group after the move to the Dashboard workspace ────────────────────────────────────────
+// ─── The Sourcing group after the move to the Sourcing page ────────────────────────────────────────
 const SOURCING_QUESTIONS: Array<string | RegExp> = [
   'What is Sourcing execution, and where do I find it?',
   'Who owns a sourcing plan?',
@@ -132,10 +132,10 @@ describe('Help — the Sourcing questions exist only while the module is on', ()
     for (const q of SOURCING_QUESTIONS) expect(screen.queryByRole('button', { name: q })).toBeNull();
   });
 
-  it('the Dashboard answer points to the Sourcing plans section only as something that appears with the module', async () => {
+  it('the Dashboard answer points to Sourcing execution and the Sourcing page only as something that appears with the module', async () => {
     mount();
     const text = answerTo('What am I looking at on the Dashboard?');
-    expect(text).toMatch(/When the Sourcing module is switched on, the last two sections are Sourcing execution .* and Sourcing plans \(one role's whole plan at a time\)/);
+    expect(text).toMatch(/When the Sourcing module is switched on, the last section is Sourcing execution .*one role's whole plan is on the Sourcing page in the left menu/);
   });
 });
 
@@ -143,18 +143,18 @@ describe('Help — what the Sourcing answers say about the new design', () => {
   beforeEach(() => answers({ data: { enabled: true } }));
   const mountReady = async () => { mount(); await screen.findByText(SOURCING_TITLE); };
 
-  it('says where it lives: Dashboard "Sourcing plans", pick a role at the top, and the role page only has a chip', async () => {
+  it('says where it lives: Sourcing in the left menu, pick a role at the top, and the role page only has a chip', async () => {
     await mountReady();
     const t = answerTo('What is Sourcing execution, and where do I find it?');
-    expect(t).toMatch(/Sourcing plans \(pick a role at the top to see its whole plan\)/);
+    expect(t).toMatch(/Open Sourcing in the left menu and pick a role at the top to see its whole plan/);
     expect(t).toMatch(/role's own page shows only a chip that opens its plan/);
     expect(t).toMatch(/Sourcing box in My Tasks/);
   });
 
-  it('activation: the Dashboard flow, the weekly target and the link needed for an already-running tracked channel', async () => {
+  it('activation: the Sourcing page flow, the weekly target and the link needed for an already-running tracked channel', async () => {
     await mountReady();
     const t = answerTo(/How do I activate and work a plan/);
-    expect(t).toMatch(/On the Dashboard, open Sourcing plans, pick the role/);
+    expect(t).toMatch(/Open Sourcing in the left menu, pick the role/);
     expect(t).toMatch(/Activate plan/);
     expect(t).toMatch(/Already running before today and give the post link and the weekly sourcing target/);
     expect(t).toMatch(/Add channel.*Close channel.*Edit target and link.*Edit plan/);
@@ -272,10 +272,10 @@ describe('Help — what the Sourcing answers say about the new design', () => {
     expect(t).toMatch(/applicant's own answer/);
   });
 
-  it('what a Hiring Manager sees: a read-only plan on the Dashboard without links, reasons, history or recommended steps', async () => {
+  it('what a Hiring Manager sees: a read-only plan on the Sourcing page without links, reasons, history or recommended steps', async () => {
     await mountReady();
     const t = answerTo('What does a Hiring Manager see?');
-    expect(t).toMatch(/read-only "View only" plan for their own roles on the Dashboard/);
+    expect(t).toMatch(/read-only "View only" plan for their own roles on the Sourcing page/);
     expect(t).toMatch(/no strategy note, post links, notes, closing reasons, plan history, recommended steps or provisional signals/);
     expect(t).not.toMatch(/role's page/);
   });

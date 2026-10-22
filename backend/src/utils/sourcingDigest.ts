@@ -9,7 +9,7 @@ export interface DigestException {
 export interface DigestDue { role_id: string; role_title: string; channel: string; title: string; overdue: boolean }
 export interface Email { subject: string; text: string }
 
-const link = (baseUrl: string | undefined, roleId: string) => (baseUrl ? `${baseUrl.replace(/\/+$/, '')}/dashboard?sourcing_role=${encodeURIComponent(roleId)}#sourcing-workspace` : '');
+const link = (baseUrl: string | undefined, roleId: string) => (baseUrl ? `${baseUrl.replace(/\/+$/, '')}/sourcing?sourcing_role=${encodeURIComponent(roleId)}` : '');
 
 /**
  * Daily note to the HR team (sourcing belongs to the HR/Admin persona as a whole, so one message goes to everyone in it). Returns null
@@ -35,7 +35,7 @@ export function buildHrDigest(i: { today: string; baseUrl?: string; dueToday: Di
     for (const d of due) lines.push(`• ${d.role_title} — ${d.channel}: ${d.title}`);
     lines.push('');
   }
-  lines.push('Mark things done, or choose how to resolve them, from the Sourcing plans section on the Dashboard in HMS (or My Tasks → Sourcing).');
+  lines.push('Mark things done, or choose how to resolve them, from Sourcing in the left menu of HMS (or My Tasks → Sourcing).');
 
   const n = i.exceptions.length;
   const bits = [n ? `${plural(n, 'item')} ${n === 1 ? 'needs' : 'need'} attention` : '', due.length ? `${due.length} due today` : ''].filter(Boolean);
@@ -68,7 +68,7 @@ export function buildWeeklySummary(i: {
     if (i.exceptions.length > 15) lines.push(`…and ${i.exceptions.length - 15} more on the dashboard.`);
   }
   if (i.provisionalSignals > 0) {
-    lines.push('', `${plural(i.provisionalSignals, 'provisional signal')} (new, still being calibrated) ${i.provisionalSignals === 1 ? 'is' : 'are'} visible on the dashboard only and not listed here.`);
+    lines.push('', `${plural(i.provisionalSignals, 'provisional signal')} (new, still being calibrated) ${i.provisionalSignals === 1 ? 'is' : 'are'} visible to HR/Admin and Leadership in HMS only and not listed here.`);
   }
   return { subject: `Sourcing execution — week of ${i.today}: ${i.exceptions.length === 0 ? 'on track' : plural(i.exceptions.length, 'exception')}`, text: lines.join('\n') };
 }

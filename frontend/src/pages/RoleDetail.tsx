@@ -213,8 +213,8 @@ export default function RoleDetail() {
               <AgingBadge alert={role.aging_alert} daysOpen={role.days_open} daysOverdue={role.days_overdue} />
               {sourcingChipInfo && (
                 <Link
-                  to={`/dashboard?sourcing_role=${role.id}#sourcing-workspace`}
-                  title="Open this role's sourcing plan on the Dashboard"
+                  to={`/sourcing?sourcing_role=${role.id}`}
+                  title="Open this role's sourcing plan on the Sourcing page"
                   data-testid="sourcing-chip"
                   className={`px-2 py-0.5 rounded-full border text-[11px] font-medium ${
                     sourcingChipInfo.tone === 'red' ? 'bg-red-50 text-red-700 border-red-200'

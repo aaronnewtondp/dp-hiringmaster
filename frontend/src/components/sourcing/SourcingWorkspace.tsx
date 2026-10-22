@@ -6,6 +6,7 @@ import { usePersistedState } from '../../hooks/usePersistedState.ts';
 import { useSourcingWorkspace } from '../../hooks/useSourcingPlan.ts';
 import { WorkspaceRole } from '../../types/sourcing.ts';
 import SourcingPlanPanel from './SourcingPlanPanel.tsx';
+import SourcingSwitchedOff from './SourcingSwitchedOff.tsx';
 
 const ROLE_PARAM = 'sourcing_role';
 
@@ -30,12 +31,12 @@ function RolePill({ r, selected, onSelect }: { r: WorkspaceRole; selected: boole
 }
 
 /**
- * Dashboard → Sourcing plans. Every role whose plan is active (or paused) is a button across the top; picking one shows its whole plan below —
+ * Sidebar → Sourcing. Every role whose plan is active (or paused) is a button across the top; picking one shows its whole plan below —
  * target, what needs attention with recommended next steps, channels with their weekly trackers, and the plan's activity timeline. It replaces the
  * Sourcing card that used to sit on each role's page. Plans still waiting to be activated are listed underneath so they can be opened and activated.
- * Renders nothing while the module is off.
+ * Renders nothing while the module is off (on the Sourcing page, which has its own title, it says so instead: `heading={false}`).
  */
-export default function SourcingWorkspace() {
+export default function SourcingWorkspace({ heading: showHeading = true }: { heading?: boolean } = {}) {
   const { data, isLoading, isError } = useSourcingWorkspace();
   const [params, setParams] = useSearchParams();
   const location = useLocation();
@@ -55,15 +56,23 @@ export default function SourcingWorkspace() {
     setParams(p => { const n = new URLSearchParams(p); n.set(ROLE_PARAM, id); return n; }, { replace: true });
   };
 
-  // Arriving from a role page chip, My Tasks or the exceptions table (…#sourcing-workspace): bring the workspace into view once it has loaded.
-  const arrivedByLink = location.hash === '#sourcing-workspace' || !!wanted;
+  // A role arrived at by link (My Tasks, the role page chip, the exceptions table, an e-mail) becomes the remembered one, so going back to the page
+  // from the sidebar shows the same role instead of the first one.
+  useEffect(() => {
+    if (ws && wanted && known(wanted) && wanted !== remembered) setRemembered(wanted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!ws, wanted]);
+
+  // Legacy embedded use (a heading, no page title): arriving by a link brings the workspace into view once it has loaded. On the Sourcing page the plan
+  // is already at the top.
+  const arrivedByLink = showHeading && (location.hash === '#sourcing-workspace' || !!wanted);
   useEffect(() => {
     if (ws && arrivedByLink) ref.current?.scrollIntoView?.({ block: 'start' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!ws]);
 
-  if (data && !data.enabled) return null;                              // module off: the page is exactly what it was
-  const heading = (
+  if (data && !data.enabled) return showHeading ? null : <SourcingSwitchedOff />;   // module off
+  const heading = !showHeading ? null : (
     <div className="flex items-center gap-2 mb-3">
       <Compass className="w-4 h-4 text-gray-400" aria-hidden="true" />
       <h2 className="text-base font-semibold text-gray-900">Sourcing plans</h2>
@@ -76,7 +85,7 @@ export default function SourcingWorkspace() {
   const selectedDraft = drafts.find(r => r.role_id === selected);
   return (
     <section id="sourcing-workspace" ref={ref} aria-label="Sourcing plans" className="scroll-mt-4 space-y-3" data-testid="sourcing-workspace">
-      <div>{heading}</div>
+      {heading ? <div>{heading}</div> : <h2 className="sr-only">Plans by role</h2>}
 
       {roles.length === 0 && drafts.length === 0 ? (
         <div className="card p-8"><EmptyState title="No sourcing plans yet" message={ws.read_only ? 'A plan appears here once HR activates one for a role you are hiring for.' : 'A plan is created for every open role. Approve a role and it will appear here.'} /></div>
@@ -100,6 +109,12 @@ export default function SourcingWorkspace() {
               </div>
               {draftsTotal > drafts.length && <p className="mt-1.5 text-[11px] text-gray-400">Showing the {drafts.length} most urgent of {draftsTotal}.</p>}
             </details>
+          )}
+
+          {wanted && !known(wanted) && (
+            <p role="status" data-testid="wanted-role-missing" className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              That role isn't in the list — its plan may be closed, not set up yet, or not one you can see here. Showing another role instead.
+            </p>
           )}
 
           {selected && <SourcingPlanPanel key={selected} roleId={selected} />}

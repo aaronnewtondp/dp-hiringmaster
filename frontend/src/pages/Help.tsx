@@ -58,7 +58,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
             and Operational
             Velocity (turnaround time per stage,
             Interview→Offer ratio, and the biggest drop-off stage shown both by raw count and by
-            rejection rate, since those two can point at different stages). When the Sourcing module is switched on, the last two sections are <strong>Sourcing execution</strong> (the sourcing exceptions across roles) and <strong>Sourcing plans</strong> (one role's whole plan at a time) — see the Sourcing group below.</p>
+            rejection rate, since those two can point at different stages). When the Sourcing module is switched on, the last section is <strong>Sourcing execution</strong> (the sourcing exceptions across roles); one role's whole plan is on the <strong>Sourcing</strong> page in the left menu — see the Sourcing group below.</p>
             <p className="mt-2">Filters at the top (Department, Location, Recruitment Mode,
             Priority, Role) scope every section together. <strong>A Hiring Manager's dashboard is
             locked to their own role(s)</strong> — the Role filter is replaced with a fixed
@@ -429,11 +429,10 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
           <p>Every open role gets a <strong>sourcing plan</strong>: the channels HR will use
           (LinkedIn, Naukri/IIMjobs, Agency, Internal Referral, Direct Outreach), dated tasks for
           each, and a weekly target. When something that was promised isn't done, HMS raises an{' '}
-          <em>exception</em>. It all lives on the <strong>Dashboard</strong>: the last two sections are{' '}
-          <strong>Sourcing execution</strong> (what is slipping, across roles) and{' '}
-          <strong>Sourcing plans</strong> (pick a role at the top to see its whole plan). The{' '}
-          <strong>Sourcing</strong> box in My Tasks (HR/Admin and Super Admin) is the to-do list. A
-          role's own page shows only a chip that opens its plan.</p>
+          <em>exception</em>. Open <strong>Sourcing</strong> in the left menu and pick a role at the top
+          to see its whole plan. The Dashboard's last section, <strong>Sourcing execution</strong>, shows
+          what is slipping across roles. The <strong>Sourcing</strong> box in My Tasks (HR/Admin and
+          Super Admin) is the to-do list. A role's own page shows only a chip that opens its plan.</p>
         ),
       },
       {
@@ -451,7 +450,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         answer: (
           <>
             <ol className="list-decimal pl-5 space-y-1">
-              <li>On the Dashboard, open <strong>Sourcing plans</strong>, pick the role (a role waiting for
+              <li>Open <strong>Sourcing</strong> in the left menu, pick the role (a role waiting for
               a plan is listed under "plans waiting to be activated") and click <strong>Activate plan</strong>.
               Tick the channels you'll use and optionally set this role's weekly qualified target. For a
               LinkedIn, Naukri/IIMjobs or Direct Outreach channel that is already live, tick{' '}
@@ -565,7 +564,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         question: 'What does "Provisional" mean on a sourcing signal?',
         answer: (
           <p>A new threshold signal, such as "not enough qualified candidates", that is still being
-          calibrated for its first 6 weeks. HR/Admin and Leadership see it greyed out on the Dashboard,
+          calibrated for its first 6 weeks. HR/Admin and Leadership see it greyed out on the Dashboard and the Sourcing page,
           but it raises no tasks, sends no e-mail and can't be resolved yet.</p>
         ),
       },
@@ -596,7 +595,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         id: 'sourcing-hm',
         question: 'What does a Hiring Manager see?',
         answer: (
-          <p>A read-only "View only" plan for their own roles on the Dashboard: channels, tasks, dates,
+          <p>A read-only "View only" plan for their own roles on the Sourcing page: channels, tasks, dates,
           weekly results and counts, but no strategy note, post links, notes, closing reasons, plan
           history, recommended steps or provisional signals. A channel's reason for being left out and an
           exception's resolution path and dates are still shown. A Hiring Manager of another role sees

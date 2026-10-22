@@ -1,16 +1,20 @@
 import { NavLink } from 'react-router-dom';
 import { useEffect } from 'react';
-import { LayoutDashboard, Briefcase, Users, Building2, LogOut, Droplets, ListChecks, Archive, ShieldCheck, HelpCircle, X } from 'lucide-react';
+import { LayoutDashboard, Briefcase, Users, Building2, LogOut, Droplets, ListChecks, Archive, ShieldCheck, HelpCircle, X, Compass } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { PERSONAS } from '../../types/index.ts';
+import { useSourcingEnabled } from '../../hooks/useSourcingPlan.ts';
 
 // "My Tasks" (formerly "My Queue") is now visible to every persona — its
 // own contents are scoped per-persona server/client-side (see MyTasks.tsx),
 // same principle as GET /dashboard/pending, rather than the whole nav item
 // being hidden from HR/Admin the way it used to be.
+// "Sourcing" (2026-10) is every persona's page — a Hiring Manager sees the read-only plans of their own roles — but it exists only while the
+// Sourcing module is switched on (`sourcingOnly`), exactly like the module's other surfaces.
 const NAV = [
   { to: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard',   hrOnly: false, superAdminOnly: false },
   { to: '/roles',      icon: Briefcase,       label: 'Roles',       hrOnly: false, superAdminOnly: false },
+  { to: '/sourcing',   icon: Compass,         label: 'Sourcing',    hrOnly: false, superAdminOnly: false, sourcingOnly: true },
   { to: '/candidates', icon: Users,           label: 'Active Candidates',  hrOnly: false, superAdminOnly: false },
   { to: '/talent-pool',icon: Archive,         label: 'Archived Pipeline', hrOnly: false, superAdminOnly: false },
   { to: '/my-tasks',   icon: ListChecks,      label: 'My Tasks',    hrOnly: false, superAdminOnly: false },
@@ -30,10 +34,12 @@ interface SidebarProps {
 
 export default function Sidebar({ open, onClose }: SidebarProps) {
   const { user, logout, canHR, isSuperAdmin } = useAuth();
+  const { enabled: sourcingOn } = useSourcingEnabled();
 
   const visible = NAV.filter(n => {
     if (n.hrOnly && !canHR) return false;
     if (n.superAdminOnly && !isSuperAdmin) return false;
+    if (n.sourcingOnly && !sourcingOn) return false;
     return true;
   });
 

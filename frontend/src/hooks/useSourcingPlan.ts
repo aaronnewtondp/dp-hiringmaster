@@ -3,6 +3,19 @@ import { sourcingApi } from '../services/api.ts';
 import { SourcingAdvice, SourcingPlanResponse, SourcingWorkspaceResponse } from '../types/sourcing.ts';
 
 /**
+ * Is the module switched on? (`GET /sourcing/status`, open to every signed-in user.) Shared by the sidebar entry and the Sourcing page; it is the
+ * same query My Tasks and Help already run, so the answer is fetched once. `enabled` is false until the answer arrives and on any failure:
+ * nothing sourcing-related is shown on a guess. `failed` tells "the call failed" apart from "the module is off" (a blip must not read as "switched
+ * off"); `retry()` asks again.
+ */
+export function useSourcingEnabled(): { enabled: boolean; loading: boolean; failed: boolean; retry: () => void } {
+  const { data, isLoading, isError, refetch } = useQuery<{ data: { enabled?: boolean } }>({
+    queryKey: ['sourcing-status'], queryFn: () => sourcingApi.status(), staleTime: 5 * 60 * 1000, retry: false,
+  });
+  return { enabled: data?.data?.enabled === true, loading: isLoading, failed: isError && !data, retry: () => { void refetch(); } };
+}
+
+/**
  * A role's sourcing plan, or `{ enabled:false }` while the module is off. A 403 (a Hiring Manager who is not named on the
  * role) or any other failure simply yields no data — the sourcing UI hides itself instead of showing an error on a page
  * that is otherwise fine. Never retried: the answer does not change by asking again.
@@ -34,7 +47,7 @@ export function sourcingChip(view: SourcingPlanResponse | undefined): { text: st
   }
 }
 
-/** The Dashboard workspace's role switcher: roles with an active/paused plan (+ drafts for HR-tier), or `{ enabled:false }` while the module is off. */
+/** The Sourcing page's role switcher: roles with an active/paused plan (+ drafts for HR-tier), or `{ enabled:false }` while the module is off. */
 export function useSourcingWorkspace() {
   return useQuery<SourcingWorkspaceResponse>({
     queryKey: ['sourcing-workspace'],

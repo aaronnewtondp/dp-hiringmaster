@@ -121,8 +121,8 @@ export default function MyTasks() {
   const [readyCount, setReadyCount] = useState(0);
 
   // ── Sourcing box (additive; recruiters and the Super Admin only) ───────────────────────────────────────────
-  // Leadership keeps its deliberately alerts-only box and sees sourcing on the dashboard and in the weekly email; a
-  // Hiring Manager sees only the read-only role card. The box exists only while the module is switched on.
+  // Leadership keeps its deliberately alerts-only box and sees sourcing on the Sourcing page, the dashboard and in the weekly email; a
+  // Hiring Manager sees only the read-only plans of their own roles on the Sourcing page. The box exists only while the module is switched on.
   const isRecruiter = user?.persona === 'hr_recruiter' || user?.persona === 'super_admin';
   const { data: sourcingStatus, isLoading: loadingSourcingStatus } = useQuery<{ data: { enabled: boolean } }>({
     queryKey: ['sourcing-status'],
