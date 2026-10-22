@@ -480,6 +480,9 @@ exclamation marks; the blue/green skill chips are the long-standing colours, del
 - **Existing roles keep their old-style social JD until regenerated, and R019's Drive file is still on the previous hook** (it carries "Water is running dry and dirty…" and the "You'll build the brand around it" intro until it is re-uploaded in place — same file id, old revision pinned, as on 2026-10-22). `POST /api/roles/:id/regenerate-jd` (or "Regenerate JD" in RoleDetail) re-renders both
   PDFs with the template; **manual roles (`jd_source='manual'`, e.g. R019) cannot be regenerated** — R019's Drive file was replaced in place with the new design
   on 2026-10-22 (same file id, previous revision pinned). Never re-run `importManualJd.ts` for R019 expecting it to keep that file.
+  **R007 (Senior UX/Product Designer) was done by hand on 2026-10-22 too:** its Drive file (`1okA25t7…`, the one `roles.social_jd_drive_link` already pointed at) was replaced in place with the template
+  render — old revision pinned, link unchanged. Its bullets were written from the role's own must-haves / nice-to-haves / 45-day target (the model's draft had added claims the role never makes), so they are
+  NOT what `generated_jd_content` holds (old-style bullets that just repeat location and experience); do not press "Regenerate JD" on R007 expecting that file or content to survive.
 - **Preview after ANY change** to `socialJd.ts` / `socialJdLayout.ts` / `theme.ts`: `cd backend && npx tsx src/scripts/previewSocialJd.ts [out-dir]` renders every fixture in
   `services/pdf/socialJd.fixtures.ts` (the R019 reference, a long title, a short title, legacy long bullets, too many tags, a sparse role) to PDF (+ PNG when `pdftoppm`
   is installed). Look at all of them, not just R019 — the point of the template is that the bottom half adapts.
