@@ -80,7 +80,7 @@ router.get('/people', disabled, requireHR, async (_req: Request, res: Response) 
   try { res.json({ people: await listPeople() }); } catch (err) { fail(res, err, 'Loading people'); }
 });
 
-// ── Dashboard workspace: the roles you can switch between ─────────────────────────────────────────────
+// ── Sourcing page: the roles you can switch between ─────────────────────────────────────────────
 // HR-tier sees every role with a plan (active and paused ones to switch between, drafts waiting to be activated); a Hiring Manager
 // sees only the roles they are named on, never a draft.
 router.get('/workspace', disabled, async (req: Request, res: Response) => {

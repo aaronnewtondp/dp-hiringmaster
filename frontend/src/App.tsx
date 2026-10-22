@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext.tsx';
 import Layout from './components/layout/Layout.tsx';
 import Login from './pages/Login.tsx';
@@ -15,8 +15,20 @@ import AgencyDetail from './pages/AgencyDetail.tsx';
 import MyTasks from './pages/MyTasks.tsx';
 import UserManagement from './pages/UserManagement.tsx';
 import Help from './pages/Help.tsx';
+import Sourcing from './pages/Sourcing.tsx';
 import RequireSuperAdmin from './components/shared/RequireSuperAdmin.tsx';
 import { Spinner } from './components/shared/Badges.tsx';
+
+/**
+ * The Sourcing plans used to be the last section of the Dashboard. Links made then (a role page chip in a tab that was already open, a bookmark,
+ * a message) point at `/dashboard?sourcing_role=…#sourcing-workspace` — send them to the Sourcing page instead of leaving them on the Dashboard.
+ */
+export function DashboardRoute() {
+  const { search, hash } = useLocation();
+  const role = new URLSearchParams(search).get('sourcing_role');
+  if (role || hash === '#sourcing-workspace') return <Navigate to={role ? `/sourcing?sourcing_role=${encodeURIComponent(role)}` : '/sourcing'} replace />;
+  return <Dashboard />;
+}
 
 function AppRoutes() {
   const { user, loading } = useAuth();
@@ -42,7 +54,8 @@ function AppRoutes() {
     <Layout>
       <Routes>
         <Route path="/"                        element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard"               element={<Dashboard />} />
+        <Route path="/dashboard"               element={<DashboardRoute />} />
+        <Route path="/sourcing"                element={<Sourcing />} />
         <Route path="/roles"                   element={<Roles />} />
         <Route path="/roles/new"               element={<NewRole />} />
         <Route path="/roles/:id"               element={<RoleDetail />} />

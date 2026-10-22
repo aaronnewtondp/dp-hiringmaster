@@ -1,8 +1,10 @@
-// Sourcing module — what only a browser can see: where the dashboard sections sit, who gets the My Tasks box, the Dashboard "Sourcing plans"
-// workspace (role switcher, the plan panel, its dialogs), the weekly-tracker states (running / cut short / stopped while the role is on hold) and
-// the read-only Hiring Manager view. Skips itself while the module is off (SOURCING_ENABLED on the backend).
-// It creates TWO throwaway roles with an active plan: the first is only looked at and opened (its dialogs are never saved); the second ("flow" role)
-// is the one the tests change — log a post, close and reopen a channel, put the role On Hold and back. Both are removed afterwards.
+// Sourcing module — what only a browser can see: the sidebar "Sourcing" entry and its page (/sourcing: role switcher, the plan panel, its dialogs),
+// where the old Dashboard links now go (a redirect), what the Dashboard keeps ("Sourcing execution" only — the plans moved to the Sourcing page),
+// who gets the My Tasks box, the weekly-tracker states (running / cut short / stopped while the role is on hold) and the read-only Hiring Manager
+// view. Skips itself while the module is off (SOURCING_ENABLED on the backend).
+// It creates FOUR throwaway roles with an active plan: the first is only looked at and opened (its dialogs are never saved); the second is a
+// draft plan (to open and activate, never saved); the third ("flow" role) is the one the tests change — log a post, close and reopen a channel,
+// put the role On Hold and back; the fourth belongs to ANOTHER Hiring Manager (Satyadev), so Alex can be shown not to see it. All are removed afterwards.
 import { test, expect, Page, APIRequestContext } from '@playwright/test';
 import { Client } from 'pg';
 import { BASE, FRONTEND_BASE, USERS, uid, CRON_SECRET } from '../helpers/api';
@@ -28,7 +30,8 @@ test.describe('Sourcing module (browser)', () => {
   let db: Client;
   let enabled = false;
   let roleId = '', roleTitle = '', draftId = '', draftTitle = '';
-  let flowId = '', flowPlanId = '';
+  let flowId = '', flowTitle = '', flowPlanId = '';
+  let otherId = '', otherTitle = '';                                       // a role of a DIFFERENT Hiring Manager (Satyadev): Alex must not see it
   const FLOW_EMAIL = `e2e-flow+${uid()}@example.com`;
   const hrToken = async (request: APIRequestContext) => (await (await request.post(`${BASE}/api/auth/login`, { data: { email: USERS.hr.email, password: USERS.hr.password } })).json()).token as string;
 
@@ -41,10 +44,10 @@ test.describe('Sourcing module (browser)', () => {
     if (!enabled) return;
     db = new Client({ connectionString: LOCAL_DB_URL });
     await db.connect();
-    const mk = async (title: string, priority: string) => (await db.query(
+    const mk = async (title: string, priority: string, hiringManager = 'Alex') => (await db.query(
       `INSERT INTO roles (title, department, hiring_manager_name, priority, status, location, employment_type, start_date, approval_date, recruitment_mode)
-       VALUES ($1,'Tech/Devs','Alex',$2,'Live – Sourcing','Gurgaon','Full-Time / Permanent', CURRENT_DATE - 3, CURRENT_DATE - 3, ARRAY['LinkedIn','Agency']) RETURNING id`,
-      [title, priority])).rows[0].id as string;
+       VALUES ($1,'Tech/Devs',$3,$2,'Live – Sourcing','Gurgaon','Full-Time / Permanent', CURRENT_DATE - 3, CURRENT_DATE - 3, ARRAY['LinkedIn','Agency']) RETURNING id`,
+      [title, priority, hiringManager])).rows[0].id as string;
     roleTitle = `E2E Workspace Role ${uid()}`; draftTitle = `E2E Draft Role ${uid()}`;
     roleId = await mk(roleTitle, 'P1'); draftId = await mk(draftTitle, 'P1');
     const plan = await (await request.get(`${BASE}/api/sourcing/plans/${roleId}`, { headers: h })).json();     // seeds the draft plans
@@ -55,9 +58,17 @@ test.describe('Sourcing module (browser)', () => {
     } });
     expect(act.ok()).toBe(true);
 
+    // Another Hiring Manager's role, with an active plan: Satyadev is its named HM (users.name = 'Satyadev'), Alex is not.
+    otherTitle = `E2E Other HM Role ${uid()}`;
+    otherId = await mk(otherTitle, 'P1', 'Satyadev');
+    const otherPlan = await (await request.get(`${BASE}/api/sourcing/plans/${otherId}`, { headers: h })).json();
+    const act3 = await request.post(`${BASE}/api/sourcing/plans/${otherPlan.plan.id}/activate`, { headers: h, data: { channels: [{ channel: 'Agency' }] } });
+    expect(act3.ok()).toBe(true);
+
     // The role the tests change. LinkedIn: not live yet (its first task is open). Naukri/IIMjobs: live with a target. Direct Outreach: live but with no target
     // and its first task still open — what the first version of the tracker left behind. Agency: its first task is overdue, so there is a problem to resolve.
-    flowId = await mk(`E2E Flow Role ${uid()}`, 'P1');
+    flowTitle = `E2E Flow Role ${uid()}`;
+    flowId = await mk(flowTitle, 'P1');
     flowPlanId = (await (await request.get(`${BASE}/api/sourcing/plans/${flowId}`, { headers: h })).json()).plan.id;
     const act2 = await request.post(`${BASE}/api/sourcing/plans/${flowPlanId}/activate`, { headers: h, data: {
       channels: [{ channel: 'LinkedIn' }, { channel: 'Naukri/IIMjobs', already_running: true, url: 'https://example.com/e2e-flow-naukri', weekly_target: 6 }, { channel: 'Direct Outreach' }, { channel: 'Agency' }],
@@ -74,23 +85,111 @@ test.describe('Sourcing module (browser)', () => {
   test.afterAll(async () => {
     if (!db) return;
     // one transaction, no per-row foreign-key scans of the big pending_actions table (helpers/sourcing-db.ts); also removes the flow test's candidate
-    await purgeRolesFast(db, [roleId, draftId, flowId].filter(Boolean), [`${FLOW_EMAIL.split('+')[0]}+%@example.com`]);
+    await purgeRolesFast(db, [roleId, draftId, flowId, otherId].filter(Boolean), [`${FLOW_EMAIL.split('+')[0]}+%@example.com`]);
     await db.end();
   });
 
   test.beforeEach(() => { test.skip(!enabled, 'SOURCING_ENABLED is not true on the backend'); });
 
-  test('the dashboard ends with Sourcing execution and then Sourcing plans, below Operational velocity', async ({ page }) => {
+  // ── The Sourcing page (sidebar) and what the Dashboard keeps ─────────────────────────────────────
+  const sidebarLink = (page: Page) => page.locator('aside nav').getByRole('link', { name: 'Sourcing', exact: true });
+  const WRITE_BUTTONS = [/Activate plan/, /Mark done/, /Resolve/, /Skip/, /^Close /, /^Reopen /, /^Bring back /, /Edit plan/, /^Edit .*target/, /Add channel/];
+
+  test('the dashboard ends with Sourcing execution, below Operational velocity, and no longer carries the Sourcing plans section', async ({ page }) => {
     await loginViaApi(page, 'hr', '/dashboard');
     const execution = page.getByRole('heading', { name: 'Sourcing execution' });
-    const plans = page.getByRole('heading', { name: 'Sourcing plans' });
-    await expect(plans).toBeVisible({ timeout: 60_000 });
+    await expect(execution).toBeVisible({ timeout: 60_000 });
     const velocity = page.getByRole('heading', { name: 'Operational velocity' });
     await expect(velocity).toBeVisible();
-    const [e, p, v] = [await execution.boundingBox(), await plans.boundingBox(), await velocity.boundingBox()];
+    const [e, v] = [await execution.boundingBox(), await velocity.boundingBox()];
     expect(e!.y).toBeGreaterThan(v!.y);
-    expect(p!.y).toBeGreaterThan(e!.y);
-    expect(await page.locator('h2').last().textContent()).toBe('Sourcing plans');
+    expect(await page.locator('h2').last().textContent()).toBe('Sourcing execution');            // the last section now
+    // the plans moved to the Sourcing page: neither the heading, nor the section (its loading state has the id), nor a plan panel is left here
+    await expect(page.getByRole('heading', { name: 'Sourcing plans' })).toHaveCount(0);
+    await expect(page.locator('#sourcing-workspace')).toHaveCount(0);
+    await expect(page.getByTestId('sourcing-workspace')).toHaveCount(0);
+    await expect(page.getByTestId('sourcing-panel')).toHaveCount(0);
+    await expect(page.getByTestId('sourcing-summary-note')).toBeVisible();                       // …while the cross-role overview is still there
+  });
+
+  test('a row of Sourcing execution on the Dashboard opens that role\'s plan on the Sourcing page', async ({ page }) => {
+    await loginViaApi(page, 'hr', '/dashboard');
+    await expect(page.getByRole('heading', { name: 'Sourcing execution' })).toBeVisible({ timeout: 60_000 });
+    // the flow role has a live "Channel set-up overdue" problem (raised in beforeAll); the table lists 10 rows until "Show all N". Pick the link by its
+    // target, not its text: the role's title is also a link (to /roles/…) in other Dashboard sections, and "Show all 146 roles" is another section's button.
+    const row = page.locator(`a[href="/sourcing?sourcing_role=${flowId}"]`).first();
+    const showAll = page.getByRole('button', { name: /^Show all \d+$/ });
+    await expect(row.or(showAll).first()).toBeVisible({ timeout: 30_000 });
+    if (!(await row.count())) await showAll.click();
+    await expect(row).toBeVisible();
+    await expect(row).toHaveText(flowTitle);
+    await row.click();
+    await expect(page).toHaveURL(new RegExp(`/sourcing\\?sourcing_role=${flowId}$`));
+    await expect(page.getByTestId(`role-pill-${flowId}`)).toHaveAttribute('aria-pressed', 'true', { timeout: 60_000 });
+    await expect(page.getByTestId('sourcing-panel').getByRole('link', { name: flowTitle })).toBeVisible();
+  });
+
+  test('the sidebar has a Sourcing entry right after Roles for HR; it opens the Sourcing page with the plans workspace and no section heading', async ({ page }) => {
+    await loginViaApi(page, 'hr', '/dashboard');
+    const link = sidebarLink(page);
+    await expect(link).toBeVisible({ timeout: 30_000 });
+    const labels = (await page.locator('aside nav').getByRole('link').allTextContents()).map(t => t.trim());
+    expect(labels.indexOf('Sourcing')).toBe(labels.indexOf('Roles') + 1);
+    await link.click();
+    await expect(page).toHaveURL(/\/sourcing$/);
+    await expect(link).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByRole('heading', { level: 1, name: 'Sourcing', exact: true })).toBeVisible();
+    await expect(page.getByText('Pick a role to see its channels, weekly results, recommended next steps and history.')).toBeVisible();
+    await expect(page.getByTestId('sourcing-workspace')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('sourcing-panel')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole('heading', { name: 'Sourcing plans' })).toHaveCount(0);           // the page title replaces the Dashboard section heading
+    await expect(page.getByText('Sourcing is switched off')).toHaveCount(0);
+  });
+
+  test('old Dashboard links to a role\'s plan (…?sourcing_role=X, with or without #sourcing-workspace, or the hash alone) land on the Sourcing page', async ({ page }) => {
+    await loginViaApi(page, 'hr', `/dashboard?sourcing_role=${roleId}#sourcing-workspace`);
+    await expect(page).toHaveURL(new RegExp(`/sourcing\\?sourcing_role=${roleId}$`), { timeout: 60_000 });   // the hash is dropped, the role kept
+    expect(page.url()).not.toContain('/dashboard');
+    await expect(page.getByTestId(`role-pill-${roleId}`)).toHaveAttribute('aria-pressed', 'true', { timeout: 60_000 });
+    await expect(page.getByTestId('sourcing-panel').getByRole('link', { name: roleTitle })).toBeVisible();
+
+    await page.goto(`${FRONTEND_BASE}/dashboard?sourcing_role=${roleId}`);
+    await expect(page).toHaveURL(new RegExp(`/sourcing\\?sourcing_role=${roleId}$`), { timeout: 30_000 });
+
+    await page.goto(`${FRONTEND_BASE}/dashboard#sourcing-workspace`);
+    await expect(page).toHaveURL(/\/sourcing$/, { timeout: 30_000 });
+    await expect(page.getByRole('heading', { level: 1, name: 'Sourcing', exact: true })).toBeVisible();
+
+    // a plain Dashboard URL is not touched
+    await page.goto(`${FRONTEND_BASE}/dashboard`);
+    await expect(page.getByRole('heading', { name: 'Operational velocity' })).toBeVisible({ timeout: 60_000 });
+    expect(new URL(page.url()).pathname).toBe('/dashboard');
+  });
+
+  test('a Hiring Manager gets the Sourcing entry too: a read-only plan for their own role, and nothing for another Hiring Manager\'s', async ({ page }) => {
+    await loginViaApi(page, 'hm_alex', '/dashboard');
+    const link = sidebarLink(page);
+    await expect(link).toBeVisible({ timeout: 60_000 });
+    await link.click();
+    await expect(page).toHaveURL(/\/sourcing$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Sourcing', exact: true })).toBeVisible();
+    const pill = page.getByTestId(`role-pill-${roleId}`);
+    await expect(pill).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId(`role-pill-${otherId}`)).toHaveCount(0);                         // Satyadev's role is not in Alex's switcher
+    await expect(page.getByRole('link', { name: otherTitle })).toHaveCount(0);
+    await pill.click();
+    const panel = page.getByTestId('sourcing-panel');
+    await expect(panel.getByRole('link', { name: roleTitle })).toBeVisible({ timeout: 30_000 });
+    await expect(panel.getByText('View only')).toBeVisible();
+    await expect(panel.getByTestId('channel-LinkedIn')).toContainText('Weekly sourcing target: 10');
+    for (const name of WRITE_BUTTONS) await expect(panel.getByRole('button', { name })).toHaveCount(0);
+    await expect(panel.getByTestId('plan-timeline')).toHaveCount(0);
+
+    // asking for the other Hiring Manager's role by URL does not open it: the page still loads, with Alex's own plans only
+    await page.goto(`${FRONTEND_BASE}/sourcing?sourcing_role=${otherId}`);
+    await expect(page.getByTestId(`role-pill-${roleId}`)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId(`role-pill-${otherId}`)).toHaveCount(0);
+    await expect(page.getByTestId('sourcing-panel').getByRole('link', { name: otherTitle })).toHaveCount(0);
   });
 
   test('a recruiter gets a Sourcing box on My Tasks; opening it shows the queue (or its good empty state)', async ({ page }) => {
@@ -101,15 +200,20 @@ test.describe('Sourcing module (browser)', () => {
     await expect(page.getByTestId('sourcing-targets').or(page.getByText('Nothing needs your attention ✓'))).toBeVisible({ timeout: 30_000 });
     // every role with a plan is measured against its OWN weekly qualified target (these roles are P1, so they always have one)
     await expect(page.getByTestId('sourcing-targets')).toHaveText(/This week: \d+ of \d+ roles? at their own weekly qualified target/);
+    // every role link in the box opens the plan on the Sourcing page — none still points at the Dashboard section
+    await expect(page.locator('a[href*="sourcing_role="]').first()).toHaveAttribute('href', /^\/sourcing\?sourcing_role=/);
+    await expect(page.locator('a[href*="sourcing_role="]:not([href^="/sourcing?sourcing_role="])')).toHaveCount(0);
+    await expect(page.locator('a[href*="#sourcing-workspace"]')).toHaveCount(0);
   });
 
-  test('Leadership gets no Sourcing box (their box stays alerts-only)', async ({ page }) => {
+  test('Leadership gets no Sourcing box (their box stays alerts-only), but still has the Sourcing entry in the sidebar', async ({ page }) => {
     await loginViaApi(page, 'leadership', '/my-tasks');
     await expect(page.getByRole('button', { name: /Leadership Alerts|Other Pending Actions/ }).first()).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('button', { name: /^Sourcing/ })).toHaveCount(0);
+    await expect(sidebarLink(page)).toBeVisible();                                                           // the page is every persona's; only the My Tasks box is HR's
   });
 
-  test('the role page no longer carries the plan: just a chip that opens it on the Dashboard, and a read-only Recruitment Mode', async ({ page }) => {
+  test('the role page no longer carries the plan: just a chip that opens it on the Sourcing page, and a read-only Recruitment Mode', async ({ page }) => {
     await loginViaApi(page, 'hr', `/roles/${roleId}`);
     await expect(page.getByRole('heading', { name: roleTitle })).toBeVisible({ timeout: 30_000 });
     await expect(page.locator('#sourcing')).toHaveCount(0);
@@ -117,16 +221,18 @@ test.describe('Sourcing module (browser)', () => {
     await expect(page.getByText('Recruitment Mode (managed in the Sourcing plan)')).toBeVisible();
     const chip = page.getByTestId('sourcing-chip');
     await expect(chip).toBeVisible();
-    await expect(chip).toHaveAttribute('href', new RegExp(`/dashboard\\?sourcing_role=${roleId}#sourcing-workspace$`));
+    await expect(chip).toHaveAttribute('href', `/sourcing?sourcing_role=${roleId}`);
+    await expect(chip).toHaveAttribute('title', 'Open this role\'s sourcing plan on the Sourcing page');
     await chip.click();
-    await expect(page).toHaveURL(new RegExp(`/dashboard\\?sourcing_role=${roleId}`));
+    await expect(page).toHaveURL(new RegExp(`/sourcing\\?sourcing_role=${roleId}$`));
     const panel = page.getByTestId('sourcing-panel');
     await expect(panel).toBeVisible({ timeout: 60_000 });
     await expect(panel.getByRole('link', { name: roleTitle })).toBeVisible();
+    await expect(page.getByTestId(`role-pill-${roleId}`)).toHaveAttribute('aria-pressed', 'true');
   });
 
-  test('Sourcing plans: pick a role, see its tracker and target, open the dialogs, and find the plan waiting to be activated', async ({ page }) => {
-    await loginViaApi(page, 'hr', `/dashboard?sourcing_role=${roleId}#sourcing-workspace`);
+  test('Sourcing page: pick a role, see its tracker and target, open the dialogs, and find the plan waiting to be activated', async ({ page }) => {
+    await loginViaApi(page, 'hr', `/sourcing?sourcing_role=${roleId}`);
     const ws = page.getByTestId('sourcing-workspace');
     await expect(ws).toBeVisible({ timeout: 60_000 });
     await expect(page.getByTestId(`role-pill-${roleId}`)).toHaveAttribute('aria-pressed', 'true');
@@ -151,7 +257,7 @@ test.describe('Sourcing module (browser)', () => {
     await page.keyboard.press('Escape');
 
     // switching: the draft plan is listed under "waiting to be activated" and opens with an Activate button and the new fields
-    // (the Dashboard's sourcing summary also words this in a sentence, so name the switcher's own <summary>)
+    // (name the switcher's own <summary>: it is the only one on the page, but this is the text that makes it the right one)
     await page.locator('summary').filter({ hasText: /plans? waiting to be activated/ }).click();
     await page.getByTestId(`role-pill-${draftId}`).click();
     await expect(page).toHaveURL(new RegExp(`sourcing_role=${draftId}`));
@@ -166,7 +272,7 @@ test.describe('Sourcing module (browser)', () => {
   });
 
   test('the role\'s Hiring Manager sees a View-only plan with no actions, no history and no recommended steps', async ({ page }) => {
-    await loginViaApi(page, 'hm_alex', `/dashboard?sourcing_role=${roleId}#sourcing-workspace`);
+    await loginViaApi(page, 'hm_alex', `/sourcing?sourcing_role=${roleId}`);
     const panel = page.getByTestId('sourcing-panel');
     await expect(panel).toBeVisible({ timeout: 60_000 });
     await expect(panel.getByText('View only')).toBeVisible();
@@ -174,24 +280,26 @@ test.describe('Sourcing module (browser)', () => {
     await expect(panel.getByRole('link', { name: /View job post/ })).toHaveCount(0);                         // …the link is not
     // (the channel buttons' accessible names carry the channel — "Close LinkedIn", "Edit LinkedIn target and link" — so match on those, not on the visible text)
     await expect(panel.getByTestId('channel-LinkedIn')).toBeVisible();
-    for (const name of [/Activate plan/, /Mark done/, /Resolve/, /Skip/, /^Close /, /^Reopen /, /^Bring back /, /Edit plan/, /^Edit .*target/, /Add channel/]) {
+    for (const name of WRITE_BUTTONS) {
       await expect(panel.getByRole('button', { name })).toHaveCount(0);
     }
     await expect(panel.getByTestId('plan-timeline')).toHaveCount(0);
     await expect(panel.getByTestId('advice-box')).toHaveCount(0);
   });
 
-  test('a Hiring Manager of ANOTHER role gets nothing: no pill for it, no chip on the role page', async ({ page }) => {
-    await loginViaApi(page, 'hm_satyadev', `/dashboard?sourcing_role=${roleId}#sourcing-workspace`);
-    await expect(page.getByRole('heading', { name: 'Operational velocity' })).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByTestId(`role-pill-${roleId}`)).toHaveCount(0);
+  test('a Hiring Manager of ANOTHER role gets nothing of it: no pill, no plan, no chip on the role page — only their own role\'s plan', async ({ page }) => {
+    await loginViaApi(page, 'hm_satyadev', `/sourcing?sourcing_role=${roleId}`);
+    await expect(page.getByRole('heading', { level: 1, name: 'Sourcing', exact: true })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId(`role-pill-${otherId}`)).toBeVisible({ timeout: 60_000 });            // the page has loaded, and Satyadev's own role is in it…
+    await expect(page.getByTestId(`role-pill-${roleId}`)).toHaveCount(0);                                // …Alex's is not
+    await expect(page.getByTestId('sourcing-panel').getByRole('link', { name: roleTitle })).toHaveCount(0);
     await page.goto(`${FRONTEND_BASE}/roles/${roleId}`);
     await expect(page.getByRole('heading', { name: roleTitle })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('sourcing-chip')).toHaveCount(0);
   });
 
   // ── The flow role: tests that change something ───────────────────────────────────────────────────
-  const flowUrl = () => `/dashboard?sourcing_role=${flowId}#sourcing-workspace`;
+  const flowUrl = () => `/sourcing?sourcing_role=${flowId}`;
   const flowChannel = (page: Page, channel: string) => page.getByTestId('sourcing-panel').getByTestId(`channel-${channel}`);
 
   test('logging the first task of a tracked channel asks for the post link AND the weekly target, then says that weekly tracking is set up', async ({ page }) => {

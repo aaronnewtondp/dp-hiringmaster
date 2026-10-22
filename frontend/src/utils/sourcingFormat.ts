@@ -1,4 +1,4 @@
-// Display helpers for the Sourcing module — labels and small formatting rules shared by the role card, My Tasks box and
+// Display helpers for the Sourcing module — labels and small formatting rules shared by the Sourcing page, My Tasks box and
 // dashboard section so they always say the same thing.
 import { ExceptionType, PORTAL_CHANNELS, TRACKED_CHANNELS } from '../types/sourcing.ts';
 

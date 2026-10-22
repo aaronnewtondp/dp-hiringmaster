@@ -10,7 +10,6 @@ import SlaBreachesByRole from '../components/shared/SlaBreachesByRole.tsx';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 import KpiCard from '../components/shared/KpiCard.tsx';
 import SourcingExecution from '../components/sourcing/SourcingExecution.tsx';
-import SourcingWorkspace from '../components/sourcing/SourcingWorkspace.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 
@@ -457,11 +456,9 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Sourcing execution — below every existing module, by design (the module's own lazy endpoint; renders nothing while it is off) */}
+      {/* Sourcing execution — below every existing module, by design (the module's own lazy endpoint; renders nothing while it is off).
+          One role's whole plan lives on the Sourcing page (sidebar); the rows here link to it. */}
       <SourcingExecution masterFilterParams={filterParams} />
-
-      {/* Sourcing plans — one role at a time: channels, weekly results, next steps and the plan's history (moved here from the role page) */}
-      <SourcingWorkspace />
     </div>
   );
 }

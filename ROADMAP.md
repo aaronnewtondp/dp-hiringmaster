@@ -255,7 +255,7 @@ live.
       hooks (approve / hold / close / reopen / recruitment-mode reconcile), compute-on-read engine with a DB-enforced no-duplicate
       live-exception guarantee, three resolution paths, shadow mode for threshold signals, RoleDetail card + header chip, My Tasks
       "Sourcing" box, `source_tag` → `applications.sub_source`.
-- [x] **P2 leadership view + e-mails** — Dashboard "Sourcing execution" (last section), per-owner daily note and Monday leadership
+- [x] **P2 leadership view + e-mails** — Dashboard "Sourcing execution" (last section), daily note to the HR team and Monday leadership
       summary (both off until configured).
 - [x] **Schema applied to Supabase (2026-10-19)** — migration `20261019025305` `sourcing_execution_module_tables`: 8 tables, RLS on with
       no policies, matches `schema.sql` object-for-object, all empty. Guarded rollback: `docs/SourcingModule_Rollback.sql`.
@@ -265,13 +265,20 @@ live.
 - [x] **Enabled in production (2026-10-20)** — PR #9 merged (`a2f825e`), both Vercel projects deployed, `SOURCING_ENABLED=true` set on
       `dp-hiringmaster-be` Production and the backend redeployed (`dpl_36JxBH4H…`); `/api/sourcing/status` answers `enabled:true` and the
       34-test production smoke suite passes with it on. The go-live clock (`go_live_date`, `shadow_until` = +42 days) starts at the first
-      real use of the Sourcing queue or dashboard section. Rollback: flag false + redeploy, or Instant Rollback to `dpl_BoLi6zv…`.
-- [ ] **Sourcing workspace release (2026-10-21, Aaron's seven changes)** — BUILT on branch `feat/sourcing-workspace`, NOT yet released: the plan moved from the
-      role page to Dashboard → Sourcing plans (role switcher, history timeline); a weekly qualified target per role; AI next steps in Needs attention;
+      real use of the Sourcing queue, the Sourcing page or the dashboard section. Rollback: flag false + redeploy, or Instant Rollback to `dpl_BoLi6zv…`.
+- [x] **Sourcing workspace release (2026-10-21, Aaron's seven changes)** — merged and deployed 2026-10-22 (PR #11, squash `5862653`; PR #12 cosmetics; schema applied to Supabase as `20261021205937`; the live Apps Script maps the form's source tag; 34-test production smoke green): the plan moved from the
+      role page to Dashboard → Sourcing plans (role switcher, history timeline; moved again on 2026-10-22 — next item); a weekly qualified target per role; AI next steps in Needs attention;
       plan history logs every action; LinkedIn / Naukri/IIMjobs / Direct Outreach = log the post (link + weekly target) then an automatic red/green weekly
       tracker; Close channel (summary kept, reopenable) replaces Stop using; Applications by source and the tracker read the form's "How did you hear about this opening?"
       field. Release order and the production migration are in `docs/SourcingModule_Runbook.md` ("Release 2026-10-21"). Item 5.3 of the request was blank
       — the portals keep their 30-day renewal task unless told otherwise.
+- [ ] **Sourcing page in the left menu (2026-10-22)** — BUILT, unit-tested (frontend 717, backend 646) and browser-tested (e2e `08-sourcing`, 15 tests) on branch `feat/sourcing-sidebar-page`, NOT yet released: the plan workspace moved from the
+      bottom of the Dashboard to its own page, **Sourcing** (`/sourcing`, left menu right after Roles, every persona while the module is on, hidden — and the
+      page says "Sourcing is switched off" — while it is off; shared hook `useSourcingEnabled`). The Dashboard keeps only Sourcing execution; the role page keeps
+      only its chip; My Tasks' box is unchanged; `/dashboard?sourcing_role=…` and `#sourcing-workspace` links redirect (`DashboardRoute` in `App.tsx`); the
+      e-mail links are `/sourcing?sourcing_role=<id>` and the daily note's closing line points at "Sourcing in the left menu". Help, the User Access Guide
+      (Version 5.2), the PRD, the runbook and `CLAUDE.md` updated. No schema, env or flag change; deploy frontend first, then backend
+      (`docs/SourcingModule_Runbook.md`, "Release 2026-10-22").
 - [ ] **Activate plans in waves (HR)** — P0/P1 roles first, R016 or R019 as the dry run; tell the HR team before the first open. The Google
       Form dropdown (and the Apps Script change that goes with it) is OPTIONAL — it only tells you which channel an applicant came from.
       Digest e-mails stay off until switched on in settings. Order and caveats: the runbook.
@@ -285,14 +292,14 @@ live.
 - [x] **Help page, info markers and User Access Guide brought up to date (2026-10-19)** — `Help.tsx` answers rewritten against the code (My Tasks
       is boxes, Scorecard Summary is the table inside Ready for review, the Sourcing FAQ group shows only while the module is on, a
       "What e-mails does HMS send?" item that says there is no daily pending-items mail); info-marker texts corrected on Dashboard, Roles,
-      Active Candidates, Scorecard, Archived Pipeline, Agencies, My Tasks, candidate and role pages; the guide (docx + PDF) is Version 5.1 (sourcing workspace release).
+      Active Candidates, Scorecard, Archived Pipeline, Agencies, My Tasks, candidate and role pages; the guide (docx + PDF) is Version 5.1 (sourcing workspace release), Version 5.2 from 2026-10-22 (Sourcing page).
       `Help.test.tsx` pins the gate and three answers. Follow-up (2026-10-20): new markers on the three Gender columns (one shared text,
       `utils/columnInfo.ts`), the Active Candidates and Archived Pipeline subtitles, and the Archived Pipeline Stage / Fit / CTC → ECTC /
       Notice / Company-Industry / Actions headers; the narrow columns were widened so the label still shows next to the icon.
 - [ ] **P3 automation** — one-click agency brief and referral push through Gmail (auto-evidence); channel effort-vs-output once
       attribution has enough tagged applications.
 - [ ] **P4 outbound** — company lists, Sheets-API prospect sync, coverage/outbound exceptions, direct-send templated outreach with
-      guardrails (owner-mailbox sender, durable cap, suppression, signed unsubscribe), `/sourcing` page.
+      guardrails (owner-mailbox sender, durable cap, suppression, signed unsubscribe), prospect/outreach views on the Sourcing page.
 - [ ] Parked (needs a public careers page, partner access or is policy-barred): job syndication, Cutshort, Brave/GitHub search, Campus.
 
 ---

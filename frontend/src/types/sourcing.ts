@@ -93,7 +93,7 @@ export type SourcingPlanResponse = SourcingPlanView | { enabled: false };
 /** Someone who can be named as the owner of a BLOCKER. A plan itself has no individual owner: sourcing belongs to the HR/Admin persona. */
 export interface SourcingPerson { id: string; name: string; persona: string }
 
-/** The Dashboard workspace's role switcher. */
+/** The Sourcing page's role switcher. */
 export interface WorkspaceRole {
   role_id: string; title: string; priority: Priority; plan_id: string; plan_status: 'draft' | 'active' | 'paused';
   open_exceptions: number; channels_live: number; qualified: number; target: number | null; behind: boolean;

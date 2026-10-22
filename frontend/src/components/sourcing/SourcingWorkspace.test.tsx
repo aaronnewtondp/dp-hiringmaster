@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useEffect } from 'react';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { WorkspaceRole, SourcingWorkspace as Workspace } from '../../types/sourcing.ts';
@@ -29,11 +29,11 @@ const ws = (over: Partial<Workspace> = {}): { data: Workspace } => ({ data: { en
 
 function Where() { const l = useLocation(); return <div data-testid="where">{l.pathname}{l.search}{l.hash}</div>; }
 let qc: QueryClient;
-function mount(entry = '/dashboard') {
+function mount(entry = '/dashboard', props: { heading?: boolean } = {}) {
   qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={[entry]}><SourcingWorkspace /><Where /></MemoryRouter>
+      <MemoryRouter initialEntries={[entry]}><SourcingWorkspace {...props} /><Where /></MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -51,7 +51,7 @@ beforeEach(() => {
 afterEach(() => { delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView; });
 
 describe('SourcingWorkspace — whether it shows', () => {
-  it('renders nothing at all while the module is off — the dashboard is exactly what it was', async () => {
+  it('renders nothing at all while the module is off (default, headed use)', async () => {
     answers({ data: { enabled: false } });
     const { container } = mount();
     await waitFor(() => expect(workspaceCalls).toHaveBeenCalled());
@@ -218,6 +218,56 @@ describe('SourcingWorkspace — choosing a role', () => {
     expect(screen.getByTestId('plan-panel')).toHaveTextContent('Plan of R1');
   });
 
+  it('a role arrived at by link becomes the remembered one, so the sidebar link next time shows it too', async () => {
+    mount('/sourcing?sourcing_role=R2', { heading: false });
+    await screen.findByTestId('role-pill-R2');
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('hms:sourcing.role')!)).toBe('R2'));
+    cleanup();
+    mount('/sourcing', { heading: false });                            // the sidebar link: no query string
+    await screen.findByTestId('role-pill-R2');
+    expect(pill('R2')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('plan-panel')).toHaveTextContent('Plan of R2');
+  });
+
+  it('a linked role the list does not know is NOT remembered (it must not replace a good remembered role)', async () => {
+    sessionStorage.setItem('hms:sourcing.role', JSON.stringify('R1'));
+    mount('/sourcing?sourcing_role=R404', { heading: false });
+    await screen.findByTestId('role-pill-R1');
+    expect(JSON.parse(sessionStorage.getItem('hms:sourcing.role')!)).toBe('R1');
+  });
+
+  it('a link to a role that has no plan to show says so, instead of silently showing another role', async () => {
+    mount('/sourcing?sourcing_role=R404', { heading: false });
+    await screen.findByTestId('role-pill-R1');
+    expect(screen.getByTestId('wanted-role-missing')).toHaveTextContent(/That role isn't in the list/);
+    expect(screen.getByTestId('wanted-role-missing')).not.toHaveTextContent('R404');   // the id from the URL is never echoed
+    expect(screen.getByTestId('plan-panel')).toHaveTextContent('Plan of R1');
+  });
+
+  it('no note when the linked role is listed, when there is no link, or while it is still loading', async () => {
+    mount('/sourcing?sourcing_role=R2', { heading: false });
+    await screen.findByTestId('role-pill-R2');
+    expect(screen.queryByTestId('wanted-role-missing')).toBeNull();
+    cleanup();
+    mount('/sourcing', { heading: false });
+    await screen.findByTestId('role-pill-R1');
+    expect(screen.queryByTestId('wanted-role-missing')).toBeNull();
+    cleanup();
+    workspace = () => new Promise(() => {});
+    mount('/sourcing?sourcing_role=R404', { heading: false });
+    await waitFor(() => expect(workspaceCalls).toHaveBeenCalled());
+    expect(screen.queryByTestId('wanted-role-missing')).toBeNull();
+  });
+
+  it('a linked draft role counts as known: no note, and it is remembered', async () => {
+    answers(ws({ roles: [role('R1')], drafts: [role('R9', { plan_status: 'draft' })], drafts_total: 1 }));
+    mount('/sourcing?sourcing_role=R9', { heading: false });
+    await screen.findByTestId('plan-panel');
+    expect(screen.getByTestId('plan-panel')).toHaveTextContent('Plan of R9');
+    expect(screen.queryByTestId('wanted-role-missing')).toBeNull();
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('hms:sourcing.role')!)).toBe('R9'));
+  });
+
   it('a remembered role that no longer has a plan is ignored', async () => {
     sessionStorage.setItem('hms:sourcing.role', JSON.stringify('R-gone'));
     mount();
@@ -376,5 +426,243 @@ describe('SourcingWorkspace — arriving by a link', () => {
     delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
     mount('/dashboard#sourcing-workspace');
     expect(await screen.findByTestId('role-pill-R1')).toBeInTheDocument();
+  });
+});
+
+// ── The Sourcing page (sidebar → Sourcing) shows this component under its own h1, so it is mounted with heading={false}; the Dashboard-era default
+// (heading shown, scroll into view when you arrive by a link) must stay exactly as it was for anything that still mounts it bare.
+const HEADING = 'Sourcing plans';
+const SUBLINE = /pick a role to see its channels, weekly results, next steps and history/;
+const settle = () => new Promise(r => setTimeout(r, 20));
+const sectionHeading = () => screen.queryByRole('heading', { name: HEADING });
+
+describe('SourcingWorkspace — the section heading (heading prop)', () => {
+  it('is shown by default, with its sub-line, once the plans have loaded', async () => {
+    mount();
+    await screen.findByTestId('role-pill-R1');
+    expect(screen.getByRole('heading', { level: 2, name: HEADING })).toBeInTheDocument();
+    expect(screen.getByText(SUBLINE)).toBeInTheDocument();
+  });
+
+  it('heading={true} is the same as leaving it out', async () => {
+    mount('/dashboard', { heading: true });
+    await screen.findByTestId('role-pill-R1');
+    expect(screen.getByRole('heading', { level: 2, name: HEADING })).toBeInTheDocument();
+    expect(screen.getByText(SUBLINE)).toBeInTheDocument();
+  });
+
+  it('is shown by default in every state: loading, failed, empty and read-only', async () => {
+    let release: (v: unknown) => void = () => {};
+    workspace = () => new Promise(r => { release = r; });
+    const a = mount();
+    expect(sectionHeading()).toBeInTheDocument();                                     // loading
+    release(ws({ roles: [], drafts: [] }));
+    await screen.findByText('No sourcing plans yet');
+    expect(sectionHeading()).toBeInTheDocument();                                     // empty
+    a.unmount();
+
+    answers(ws({ read_only: true, roles: [], drafts: [] }));
+    const b = mount();
+    await screen.findByText('No sourcing plans yet');
+    expect(sectionHeading()).toBeInTheDocument();                                     // read-only empty
+    b.unmount();
+
+    workspace = async () => { throw new Error('boom'); };
+    mount();
+    await screen.findByRole('alert');
+    expect(sectionHeading()).toBeInTheDocument();                                     // failed
+  });
+
+  it('heading={false} draws no section heading and no sub-line once the plans have loaded', async () => {
+    mount('/sourcing', { heading: false });
+    await screen.findByTestId('role-pill-R1');
+    expect(sectionHeading()).toBeNull();
+    // Only a screen-reader-only h2 ("Plans by role"), so the plan's h3 headings do not hang straight under the page's h1; nothing visible is added.
+    const headings = screen.queryAllByRole('heading');
+    expect(headings.map(h => h.textContent)).toEqual(['Plans by role']);
+    expect(headings[0].tagName).toBe('H2');
+    expect(headings[0]).toHaveClass('sr-only');
+    expect(screen.queryByText(SUBLINE)).toBeNull();
+    expect(screen.queryByText(HEADING)).toBeNull();
+  });
+
+  it('heading={false} draws none while loading either — just the spinner', async () => {
+    workspace = () => new Promise(() => {});
+    const { container } = mount('/sourcing', { heading: false });
+    await waitFor(() => expect(workspaceCalls).toHaveBeenCalled());
+    expect(container.querySelector('.animate-spin')).not.toBeNull();
+    expect(container.querySelector('#sourcing-workspace')).not.toBeNull();
+    expect(sectionHeading()).toBeNull();
+    expect(screen.queryAllByRole('heading')).toHaveLength(0);
+    expect(screen.queryByText(SUBLINE)).toBeNull();
+  });
+
+  it('heading={false} draws none when the load fails — the alert stands alone', async () => {
+    workspace = async () => { throw new Error('boom'); };
+    mount('/sourcing', { heading: false });
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load the sourcing plans.");
+    expect(sectionHeading()).toBeNull();
+    expect(screen.queryAllByRole('heading')).toHaveLength(0);
+  });
+
+  it('heading={false} draws none in the empty states (HR and Hiring Manager wording unchanged)', async () => {
+    answers(ws({ roles: [], drafts: [] }));
+    const a = mount('/sourcing', { heading: false });
+    expect(await screen.findByText('No sourcing plans yet')).toBeInTheDocument();
+    expect(screen.getByText('A plan is created for every open role. Approve a role and it will appear here.')).toBeInTheDocument();
+    expect(sectionHeading()).toBeNull();
+    a.unmount();
+
+    answers(ws({ read_only: true, roles: [], drafts: [] }));
+    mount('/sourcing', { heading: false });
+    expect(await screen.findByText('No sourcing plans yet')).toBeInTheDocument();
+    expect(screen.getByText('A plan appears here once HR activates one for a role you are hiring for.')).toBeInTheDocument();
+    expect(sectionHeading()).toBeNull();
+  });
+
+  it('heading={false} (the Sourcing page) says "switched off" while the module is off, instead of a blank body', async () => {
+    answers({ data: { enabled: false } });
+    const { container } = mount('/sourcing', { heading: false });
+    await waitFor(() => expect(qc.getQueryState(['sourcing-workspace'])?.status).toBe('success'));
+    expect(container.querySelector('#sourcing-workspace')).toBeNull();
+    expect(screen.getByText('Sourcing is switched off')).toBeInTheDocument();
+    expect(screen.getByText(/Nothing is being tracked or chased while it is off/)).toBeInTheDocument();
+    expect(screen.queryByTestId('plan-panel')).toBeNull();
+  });
+
+  it('the default (heading shown) still renders nothing at all while the module is off', async () => {
+    answers({ data: { enabled: false } });
+    const { container } = mount('/dashboard');
+    await waitFor(() => expect(qc.getQueryState(['sourcing-workspace'])?.status).toBe('success'));
+    expect(screen.queryByText('Sourcing is switched off')).toBeNull();
+    expect(Array.from(container.children)).toEqual([screen.getByTestId('where')]);    // nothing but the test's own location readout
+  });
+
+  it('heading={false} keeps the labelled region and the id the links point at', async () => {
+    mount('/sourcing', { heading: false });
+    const region = await screen.findByRole('region', { name: HEADING });               // the accessible name stays even though no heading is drawn
+    expect(region).toHaveAttribute('id', 'sourcing-workspace');
+    expect(region).toHaveAttribute('data-testid', 'sourcing-workspace');
+  });
+
+  it('heading={false} leaves no visible spacer where the heading was: after the screen-reader-only h2 the role pills come first', async () => {
+    mount('/sourcing', { heading: false });
+    const region = await screen.findByTestId('sourcing-workspace');
+    expect(region.children[0].tagName).toBe('H2');
+    expect(region.children[0]).toHaveClass('sr-only');
+    expect(region.children[1]).toHaveAttribute('role', 'group');
+    expect(region.children[1]).toHaveAttribute('aria-label', 'Roles with a sourcing plan');
+  });
+
+  it('heading={false} changes nothing else: same pills, same panel, and picking a role writes ?sourcing_role= on /sourcing', async () => {
+    mount('/sourcing', { heading: false });
+    await screen.findByTestId('role-pill-R2');
+    expect(within(screen.getByRole('group', { name: 'Roles with a sourcing plan' })).getAllByRole('button')).toHaveLength(2);
+    expect(screen.getByTestId('plan-panel')).toHaveTextContent('Plan of R1');
+    fireEvent.click(pill('R2'));
+    expect(pill('R2')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('plan-panel')).toHaveTextContent('Plan of R2');
+    expect(where()).toBe('/sourcing?sourcing_role=R2');
+    expect(JSON.parse(sessionStorage.getItem('hms:sourcing.role')!)).toBe('R2');
+  });
+
+  it('heading={false} still opens a draft named in the URL, and lists drafts behind their disclosure', async () => {
+    answers(ws({ drafts: [role('D1', { plan_status: 'draft', target: null, title: 'Draft role 1' })] }));
+    const { container } = mount('/sourcing?sourcing_role=D1', { heading: false });
+    await screen.findByTestId('role-pill-D1');
+    expect(pill('D1')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('1 role has a plan waiting to be activated')).toBeInTheDocument();
+    expect(container.querySelector('details')!.open).toBe(true);
+    expect(sectionHeading()).toBeNull();
+  });
+});
+
+describe('SourcingWorkspace — the scroll nudge (heading prop)', () => {
+  it('by default scrolls into view once, when you arrive by ?sourcing_role=', async () => {
+    mount('/dashboard?sourcing_role=R2');
+    await screen.findByTestId('role-pill-R2');
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+    expect(scrollIntoView.mock.contexts[0]).toBe(document.getElementById('sourcing-workspace'));
+    expect(pill('R2')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('heading={true} scrolls exactly as the default does (role, hash, and both together — still once)', async () => {
+    for (const entry of ['/dashboard?sourcing_role=R2', '/dashboard#sourcing-workspace', '/dashboard?sourcing_role=R2#sourcing-workspace']) {
+      scrollIntoView.mockReset();
+      const view = mount(entry, { heading: true });
+      await screen.findByTestId('role-pill-R1');
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+      await settle();
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      view.unmount();
+    }
+  });
+
+  it('by default it still does not scroll on a plain visit', async () => {
+    mount('/dashboard');
+    await screen.findByTestId('role-pill-R1');
+    await settle();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('heading={false} never scrolls: not for ?sourcing_role=, not for the old #sourcing-workspace hash, not for both', async () => {
+    for (const entry of ['/sourcing?sourcing_role=R2', '/sourcing#sourcing-workspace', '/sourcing?sourcing_role=R2#sourcing-workspace']) {
+      const view = mount(entry, { heading: false });
+      await screen.findByTestId('role-pill-R1');
+      await settle();
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      view.unmount();
+    }
+  });
+
+  it('heading={false} still selects the linked role without scrolling (only the nudge is switched off)', async () => {
+    mount('/sourcing?sourcing_role=R2', { heading: false });
+    await screen.findByTestId('role-pill-R2');
+    await settle();
+    expect(pill('R2')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('plan-panel')).toHaveTextContent('Plan of R2');
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('heading={false} does not scroll for a linked draft, an empty workspace or a read-only one either', async () => {
+    answers(ws({ drafts: [role('D1', { plan_status: 'draft', target: null })] }));
+    const a = mount('/sourcing?sourcing_role=D1#sourcing-workspace', { heading: false });
+    await screen.findByTestId('role-pill-D1');
+    await settle();
+    a.unmount();
+
+    answers(ws({ roles: [], drafts: [] }));
+    const b = mount('/sourcing?sourcing_role=R2#sourcing-workspace', { heading: false });
+    await screen.findByText('No sourcing plans yet');
+    await settle();
+    b.unmount();
+
+    answers(ws({ read_only: true, roles: [role('R5')] }));
+    mount('/sourcing?sourcing_role=R5#sourcing-workspace', { heading: false });
+    await screen.findByTestId('role-pill-R5');
+    await settle();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('heading={false} does not scroll when the user picks a role, or while it is still loading', async () => {
+    workspace = () => new Promise(() => {});
+    const a = mount('/sourcing?sourcing_role=R2', { heading: false });
+    await settle();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    a.unmount();
+
+    answers(ws());
+    mount('/sourcing', { heading: false });
+    await screen.findByTestId('role-pill-R1');
+    fireEvent.click(pill('R2'));
+    await waitFor(() => expect(pill('R2')).toHaveAttribute('aria-pressed', 'true'));
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('heading={false} does not throw where scrollIntoView does not exist', async () => {
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    mount('/sourcing?sourcing_role=R2', { heading: false });
+    expect(await screen.findByTestId('role-pill-R2')).toBeInTheDocument();
   });
 });

@@ -1,6 +1,6 @@
 # Sourcing Execution & Accountability — Product Spec (current state)
 
-**Document status:** reflects the system **as built on 21 October 2026**. Phases P0–P2 are live in production (switched on 20 October). The 21 October **workspace release** — the Dashboard sourcing workspace, per-role qualified target, weekly channel trackers, Close/Reopen channel, plan history and AI next steps — is built and tested locally on a branch and is **not yet merged or deployed**; its database change is not yet applied in production. P3 and P4 are specified here but not built. · **Owner:** Aaron Newton (Founders Office) · **Origin:** Mansi Jain's seed PRD · **Supersedes:** the 14 October 2026 design spec (whose "as built" notes are folded in below).
+**Document status:** reflects the system **as built on 22 October 2026**. Phases P0–P2 are live in production (switched on 20 October). The 21 October **workspace release** — the plan workspace, per-role qualified target, weekly channel trackers, Close/Reopen channel, plan history and AI next steps — was merged to `main` on 22 October (PR #11) and its database change applied to production that day. **On 22 October the plan workspace also moved from the bottom of the Dashboard to its own page, Sourcing, in the left menu** (§9); that move is built and tested on a branch and is not yet merged. P3 and P4 are specified here but not built. · **Owner:** Aaron Newton (Founders Office) · **Origin:** Mansi Jain's seed PRD · **Supersedes:** the 14 October 2026 design spec (whose "as built" notes are folded in below).
 
 ---
 
@@ -8,7 +8,7 @@
 
 Every open role gets a **sourcing plan**: the channels the team will use, and dated **commitments** for each (publish the posting, brief the agencies, launch the referral push, hit the weekly outbound target). Recruiters confirm work with one click. HMS compares the plan with reality and raises a short list of **exceptions** — things that were promised and did not happen — each of which must be answered one of three ways: *catch up*, *change the plan*, or *genuine blocker*.
 
-**Sourcing is owned by the HR/Admin persona as a whole, never by an individual recruiter.** Everyone in HR sees the same queue and can act on every plan. Leadership sees an exception-led section at the bottom of the Dashboard. Hiring Managers see a read-only view of their own roles. Nothing in the existing hiring workflow, SLA engine or dashboards changes, and the whole module can be switched off with one environment variable.
+**Sourcing is owned by the HR/Admin persona as a whole, never by an individual recruiter.** Everyone in HR sees the same queue and can act on every plan. Leadership sees an exception-led section at the bottom of the Dashboard. Every role's plan is on the **Sourcing** page in the left menu, which every persona can open while the module is on; Hiring Managers see a read-only view of their own roles there. Nothing in the existing hiring workflow, SLA engine or dashboards changes, and the whole module can be switched off with one environment variable.
 
 ## 2. Problem and goals
 
@@ -30,7 +30,7 @@ It is an **execution-management layer**, not another candidate-pipeline dashboar
 2. Reuse existing HMS workflows (roles, My Tasks, the dashboard, the Gmail service).
 3. Never disrupt what exists: the SLA engine, `pending_actions`, the main dashboard payload, Source quality and `candidates.source` are untouched.
 4. Use free external APIs where they genuinely exist (only the Google Workspace APIs HMS already holds qualify).
-5. Make sourcing simpler and actionable: one queue, one card per role, six exception types.
+5. Make sourcing simpler and actionable: one queue, one plan per role, six exception types.
 6. Dashboard additions go **below** the existing modules.
 
 ## 4. Decisions on record
@@ -49,7 +49,8 @@ It is an **execution-management layer**, not another candidate-pipeline dashboar
 | E-mail digests stay **off** | Aaron, 19 Oct 2026 |
 | Stay on Vercel Hobby as is; leave the dormant e-mail-digest cron alone | Aaron, 19 Oct 2026 |
 | The Google Form change (the "How did you hear about this opening?" dropdown) was optional on 19 Oct; from 21 Oct it also feeds the weekly channel tracker, so it is needed for the tracker to count | 19 / 21 Oct 2026 |
-| Channel tasks: log the post (link + weekly sourcing target), then an automatic weekly tracker (red/green); Close channel replaces Stop using and keeps a summary; the qualified target is per role; Needs attention gives AI-written next steps; the plan history logs every action; the whole plan moved from the role page to a Dashboard workspace | 21 Oct 2026 |
+| Channel tasks: log the post (link + weekly sourcing target), then an automatic weekly tracker (red/green); Close channel replaces Stop using and keeps a summary; the qualified target is per role; Needs attention gives AI-written next steps; the plan history logs every action; the whole plan moved from the role page to a workspace (first a Dashboard section — see the next row) | 21 Oct 2026 |
+| The plan workspace moves from the bottom of the Dashboard to its **own page, Sourcing, in the left menu** (after Roles; shown to every persona, and only while the module is on); the Dashboard keeps only the Sourcing execution exceptions section; the role page keeps only its header chip; old Dashboard links (`?sourcing_role=`, `#sourcing-workspace`) redirect to the new page | 22 Oct 2026 |
 
 ## 5. Who can do what
 
@@ -57,10 +58,10 @@ It is an **execution-management layer**, not another candidate-pipeline dashboar
 |---|---|
 | **HR / Admin** (`hr_recruiter`) | Everything, on every plan: activate plans, mark tasks done, skip and undo, add or bring back channels, edit the strategy note, resolve exceptions. Has the **Sourcing box in My Tasks**. |
 | **Super Admin** | The same as HR/Admin on every plan, plus the Sourcing box. Changes thresholds in settings together with Leadership. |
-| **Leadership** | The same write rights as HR (Leadership is HR-tier); reads the dashboard section; changes sourcing settings. Has no Sourcing box in My Tasks (that box stays alerts-only by design). |
+| **Leadership** | The same write rights as HR (Leadership is HR-tier); reads the Dashboard exceptions section and every plan on the Sourcing page; changes sourcing settings. Has no Sourcing box in My Tasks (that box stays alerts-only by design). |
 | **Hiring Manager** | A **read-only view of their own roles** (matched by name, including a role with several Hiring Managers): plan structure, status, dates and counts. No strategy note, baseline, history, links, completion notes, exception reasons or provisional signals. Still included, on purpose: a channel's excluded reason and an exception's resolution path, snooze date and blocker date. A Hiring Manager of another role gets nothing. |
 
-**No individual owner.** A plan carries no owner field in the product: activation asks for none; the card shows "Owner: HR"; every HR user sees the identical My Tasks queue (there is no "mine" and no "everyone" switch); the dashboard table has no owner column. The one named person that remains is the **blocker owner** — who must unblock a blocked exception — chosen from the list of active people.
+**No individual owner.** A plan carries no owner field in the product: activation asks for none; the plan shows "Owner: HR"; every HR user sees the identical My Tasks queue (there is no "mine" and no "everyone" switch); the dashboard table has no owner column. The one named person that remains is the **blocker owner** — who must unblock a blocked exception — chosen from the list of active people.
 
 ## 6. Core model
 
@@ -111,7 +112,7 @@ The plan is reconciled from the role's **new status** and the plan's **current s
 
 ### 7.2 Managing a running plan
 
-On an **active or paused** plan, HR-tier users have these controls in the plan's panel on the Dashboard (a draft chooses its channels at activation; a closed plan is finished; a Hiring Manager sees none):
+On an **active or paused** plan, HR-tier users have these controls in the plan's panel on the Sourcing page (a draft chooses its channels at activation; a closed plan is finished; a Hiring Manager sees none):
 
 | Control | What it does |
 |---|---|
@@ -143,7 +144,7 @@ Each plan carries its own target of qualified candidates in the last 7 days (**E
 
 ## 8. The exception engine
 
-Computed on read, idempotent and isolated: it uses its own tables, its own 3-minute throttle (called when the queue or dashboard is opened) and a daily cron, and never touches the SLA engine. Correctness comes from a database rule — at most one live exception per (plan, channel, type, key) across the open, snoozed and blocked states — not from the throttle.
+Computed on read, idempotent and isolated: it uses its own tables, its own 3-minute throttle (called when the queue, the Sourcing page or the Dashboard is opened) and a daily cron, and never touches the SLA engine. Correctness comes from a database rule — at most one live exception per (plan, channel, type, key) across the open, snoozed and blocked states — not from the throttle.
 
 | Exception | Raised when | Live or provisional |
 |---|---|---|
@@ -156,24 +157,24 @@ Computed on read, idempotent and isolated: it uses its own tables, its own 3-min
 
 The overdue family rolls up to **one exception per channel at its worst state**. Severity = role priority (P0 40, P1 30, P2 20, P3 10) + days overdue (capped at 20) + 15 if the role is low on pipeline.
 
-**Shadow mode.** The first time the engine runs enabled it stamps `go_live_date` = today and `shadow_until` = today + 42 days (never overwriting a value already there). Until then, threshold signals are *provisional*: shown to HR-tier users only (greyed, on the dashboard and the role card), no My Tasks item, no Hiring Manager view, never named in an e-mail, not resolvable. This exists because, with real data, 7 of 9 P0/P1 roles would have tripped the volume rule on day one. A draft plan's volume signal is always provisional.
+**Shadow mode.** The first time the engine runs enabled it stamps `go_live_date` = today and `shadow_until` = today + 42 days (never overwriting a value already there). Until then, threshold signals are *provisional*: shown to HR-tier users only (greyed, on the Dashboard and in the role's plan on the Sourcing page), no My Tasks item, no Hiring Manager view, never named in an e-mail, not resolvable. This exists because, with real data, 7 of 9 P0/P1 roles would have tripped the volume rule on day one. A draft plan's volume signal is always provisional.
 
 ### 8.1 Resolving an exception
 
 | Path | Needs | Effect |
 |---|---|---|
 | **I'll catch up** | A reason and a date within 14 days | Snoozed; it comes back if still true on that date |
-| **Change the plan** | A reason; optionally "stop using this channel" | Closed, with the reason recorded in the plan history |
+| **Change the plan** | A reason; optionally "close the channel" | Closed, with the reason recorded in the plan history |
 | **I'm blocked** | A reason, who must unblock it, and a deadline within 60 days | Parked as blocked; raises "blocker overdue" if the deadline passes |
 
 Provisional signals cannot be resolved. System facts and the recruiter's stated cause are stored separately.
 
 ## 9. Where it appears
 
-1. **Dashboard → Sourcing plans** — the **last** section, below "Sourcing execution" (moved here from the role page on 21 Oct 2026). A pill for every role with an active or paused plan switches the panel below: the plan state and "Owner: HR", the target gauge with both qualified parts, **Needs attention** (each problem with its recommended next steps — §9.1), each channel with its weekly tracker (red/green weeks), tasks and close/reopen, applications by source, and the **plan history** timeline. Plans waiting to be activated are listed under the pills so they can be opened and activated. The role page keeps only a header chip ("Sourcing on track", "Sourcing: 2 issues", "Sourcing paused", "Sourcing plan not activated") that opens the role's plan there. A Hiring Manager sees the same panel for their own roles, read-only and without links, notes, closing reasons, history or recommended steps.
+1. **Sourcing page** (left menu, after Roles; route `/sourcing`) — one role's whole plan at a time. It was the last section of the Dashboard from 21 Oct 2026 and has been a page of its own since 22 Oct 2026 (before that, a card on each role's page). A pill for every role with an active or paused plan switches the panel below: the plan state and "Owner: HR", the target gauge with both qualified parts, **Needs attention** (each problem with its recommended next steps — §9.1), each channel with its weekly tracker (red/green weeks), tasks and close/reopen, applications by source, and the **plan history** timeline. Plans waiting to be activated are listed under the pills so they can be opened and activated. **Every persona sees the menu entry while the module is on** (HR/Admin, Hiring Manager, Leadership, Super Admin); while it is off the entry is hidden and the page, if opened directly, says "Sourcing is switched off". The role page keeps only a header chip ("Sourcing on track", "Sourcing: 2 issues", "Sourcing paused", "Sourcing plan not activated") that opens the role's plan on this page, and My Tasks, the Dashboard's exceptions table and the e-mails link there the same way (`/sourcing?sourcing_role=<role id>`). A link made before the move (`/dashboard?sourcing_role=…`, with or without `#sourcing-workspace`) is redirected to the new page. A Hiring Manager sees the same panel for their own roles, read-only and without links, notes, closing reasons, history or recommended steps.
 2. **My Tasks → Sourcing** (HR/Admin and Super Admin): plans to activate, tasks due today, open exceptions grouped by role (top 5 and "show N more"), a count of those catching up or blocked, and this week's volume against target. One shared queue for all of HR.
-3. **Dashboard → Sourcing execution** — after Operational velocity: a one-line summary (active plans / open roles, on-time % over 14 days, overdue count, open exceptions by priority) and an exceptions table (top 10, "show all") with *committed / what happened / next action / age*. Hiring Managers see only their own roles, without provisional rows or blocker dates.
-4. **E-mails** (internal only, from hr@, **off by default**): one daily note to all active HR/Admin users when something needs doing (weekdays), and a Monday summary to the configured leadership addresses. Each kind is claimed for the day first, so a retried cron cannot send twice.
+3. **Dashboard → Sourcing execution** — after Operational velocity: a one-line summary (active plans / open roles, on-time % over 14 days, overdue count, open exceptions by priority) and an exceptions table (top 10, "show all") with *committed / what happened / next action / age*; each row's role name opens that role's plan on the Sourcing page. This is the **only** sourcing section left on the Dashboard. Hiring Managers see only their own roles, without provisional rows or blocker dates.
+4. **E-mails** (internal only, from hr@, **off by default**): one daily note to all active HR/Admin users when something needs doing (weekdays), and a Monday summary to the configured leadership addresses. Each role in a note links to its plan on the Sourcing page, and the daily note ends by pointing to "Sourcing in the left menu of HMS (or My Tasks → Sourcing)". Each kind is claimed for the day first, so a retried cron cannot send twice.
 
 ### 9.1 Recommended next steps (AI)
 
@@ -219,10 +220,11 @@ All routes answer `{ enabled: false }` (reads) or 503 (writes) while the module 
 | `PUT /plans/:planId/channel` | Add, bring back or leave out a channel (channel in the body — `Naukri/IIMjobs` contains a slash) | HR-tier |
 | `POST /commitments/:id/complete`, `/skip`, `/reopen` | Mark done, skip with a reason, undo a skip | HR-tier |
 | `POST /exceptions/:id/resolve` | Catch up / change the plan / blocker | HR-tier |
+| `GET /workspace` | The roles on the Sourcing page: active and paused plans to switch between, plus draft plans waiting to be activated (HR-tier only) | HR-tier: every role; a Hiring Manager: only roles named on them, read-only; others: 403 |
 | `GET /queue` | The shared My Tasks queue | HR-tier |
 | `GET /people` | Who can be named as a blocker owner (never includes automation accounts) | HR-tier |
 | `GET`/`PUT /settings` | Read (HR-tier); change (Leadership / Super Admin) | — |
-| `GET /api/dashboard/sourcing` | The dashboard section | any signed-in user, role-locked for Hiring Managers |
+| `GET /api/dashboard/sourcing` | The Dashboard's Sourcing execution section | any signed-in user, role-locked for Hiring Managers |
 | `GET`/`POST /api/cron/sourcing-check` | The daily engine run (cron secret) | Vercel Cron |
 
 ## 13. Safety, non-disruption and rollout
@@ -232,18 +234,18 @@ All routes answer `{ enabled: false }` (reads) or 503 (writes) while the module 
 - **PII.** Plan payloads carry no candidate personal data, and the Hiring Manager view is redacted (see §5).
 - **Production today.** The schema is applied in Supabase (migration `20261019025305`, eight empty tables, matching the repo exactly). The code was merged on 20 October (PR #9) and `SOURCING_ENABLED=true` was set on the production backend the same day, so the module is on; its go-live clock starts at the first real use. As of 21 October one plan (R003) has been activated by HR. Six production roles' Hiring Manager names were corrected to the users' full names on 19 October (R003, R005, R007, R012, R0015, R020) so the Hiring Manager rules match.
 - **Go-live order.** Deploy the backend, then the frontend (the dashboard shows a "couldn't load" card until the backend is live); set the flag and redeploy; activate P0/P1 roles in waves, with R016 as a dry run. (Optional: the Google Form change in §10.)
-- **Vercel Hobby** is non-commercial and allows one cron run a day; the engine therefore also runs whenever the queue or dashboard is opened. Staying on Hobby was a deliberate choice.
+- **Vercel Hobby** is non-commercial and allows one cron run a day; the engine therefore also runs whenever the queue, the Sourcing page or the Dashboard is opened. Staying on Hobby was a deliberate choice.
 
 ## 14. Quality
 
-Backend unit tests (engine detectors, working days, templates, e-mail builders, the plan-transition table) — 129 tests across 7 files; frontend component tests (the card and its dialogs, the dashboard section, My Tasks) — 78 tests across 6 files; a 39-test integration suite against a real database (plan lifecycle, the engine and its concurrency, role-status chains, channel management, the no-owner rule, Hiring Manager redaction) and a browser suite for the screens. The whole local suite — 592 tests across the API, database, browser and smoke projects — passes with the module switched on, and the 34-test read-only smoke suite passes against the live production deployment. An independent review found and drove fixes for a deadlock between task actions and plan-level actions, a paused-plan date error and several silent re-opening paths; each fix has a test proven to fail without it.
+Backend unit tests (engine detectors, working days, templates, e-mail builders, the plan-transition table) — 129 tests across 7 files; frontend component tests (the Sourcing page and its panels and dialogs, the sidebar entry and the legacy-link redirect, the dashboard section, My Tasks, Help) — 717 tests across 28 files for the whole frontend; backend 646 tests across 36 files for the whole backend; a 39-test integration suite against a real database (plan lifecycle, the engine and its concurrency, role-status chains, channel management, the no-owner rule, Hiring Manager redaction) and a browser suite for the screens. The whole local suite (API, database, browser and smoke projects, 646 tests at the 22 October release) passes with the module switched on apart from one pre-existing, unrelated timeout in the unmatched-candidates test, and the 34-test read-only smoke suite passes against the live production deployment. An independent review found and drove fixes for a deadlock between task actions and plan-level actions, a paused-plan date error and several silent re-opening paths; each fix has a test proven to fail without it.
 
 ## 15. Not built yet
 
 | Phase | Scope |
 |---|---|
 | **P3 Automation** | One-click **agency brief** and follow-up, and **referral push**, sent through Gmail with the message id captured as automatic evidence; channel effort-versus-output once attribution is reliable |
-| **P4 Outbound** | Company lists and prospect tracking in Google Sheets pulled via the Sheets API (the sheet owns status and dates; HMS keeps a touch log so weekly activity can be rebuilt); coverage and output exceptions; **direct-send templated outreach** from the owner's mailbox with guardrails (recruiter-supplied email only, never hr@, reserve-then-send log, per-person daily cap, signed unsubscribe link, suppression list, kill switch, DPDP notice); a `/sourcing` page |
+| **P4 Outbound** | Company lists and prospect tracking in Google Sheets pulled via the Sheets API (the sheet owns status and dates; HMS keeps a touch log so weekly activity can be rebuilt); coverage and output exceptions; **direct-send templated outreach** from the owner's mailbox with guardrails (recruiter-supplied email only, never hr@, reserve-then-send log, per-person daily cap, signed unsubscribe link, suppression list, kill switch, DPDP notice); prospect and outreach views on the Sourcing page (the page itself now exists as the plan workspace) |
 | **Parked** | Free job syndication (needs a public careers page), Cutshort, Brave search, GitHub search, Campus as a channel |
 
 **Verified external options (14 October 2026).** *Used:* Gmail send, Drive, Calendar and the Sheets API — all free and already held by HMS. *Do not build against:* LinkedIn's posting/apply APIs (partner and paid) and any scraping or reseller of LinkedIn, Naukri, Indeed, foundit, Apna, Hirist or Internshala; Google Custom Search and Bing Search (closed); the free tiers of contact-data vendors; polling job boards for liveness. **LinkedIn data stays human-entered.**
@@ -269,4 +271,4 @@ Backend unit tests (engine detectors, working days, templates, e-mail builders, 
 | Take-down tracking on close | None | Aaron: not worth the complexity |
 | Candidate source from existing fields | Optional form dropdown → application-level `sub_source` | Existing source data is wrong (every form applicant is `LinkedIn`) |
 | Portal liveness tracking | Attested plus expected expiry; "unknown", never "closed" | No free API; scraping is prohibited |
-| Leadership, HR and recruiter dashboards | An exceptions-led dashboard section, one My Tasks box, the role card | Avoid a wall of numbers |
+| Leadership, HR and recruiter dashboards | An exceptions-led Dashboard section, one My Tasks box, one plan per role on a Sourcing page (a chip on the role page) | Avoid a wall of numbers |

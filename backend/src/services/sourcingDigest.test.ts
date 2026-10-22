@@ -88,17 +88,17 @@ describe('daily HR digest — one message to the HR/Admin team, because sourcing
     const saved = process.env.FRONTEND_URL;
     afterEach(() => { if (saved === undefined) delete process.env.FRONTEND_URL; else process.env.FRONTEND_URL = saved; });
 
-    it('each role links to its plan in the Dashboard\'s Sourcing workspace, and the old role-page anchor is gone', async () => {
+    it('each role links to its plan on the Sourcing page, and the old Dashboard anchor is gone', async () => {
       process.env.FRONTEND_URL = 'https://hms.example.com/';
       exceptionRows = [exc(), exc('R6')];
       await sendSourcingDigests(WED, send);
       expect(sent).toHaveLength(1);
       expect(sent[0].text.match(/https?:\/\/\S+/g)).toEqual([
-        'https://hms.example.com/dashboard?sourcing_role=R5#sourcing-workspace',
-        'https://hms.example.com/dashboard?sourcing_role=R6#sourcing-workspace',
+        'https://hms.example.com/sourcing?sourcing_role=R5',
+        'https://hms.example.com/sourcing?sourcing_role=R6',
       ]);
       expect(sent[0].text).not.toMatch(/\/roles\/|#sourcing(?!-)/);
-      expect(sent[0].text).toContain('Sourcing plans section on the Dashboard');
+      expect(sent[0].text).toContain('Sourcing in the left menu of HMS');
     });
 
     it('with no FRONTEND_URL the message carries no link at all (never a broken relative one)', async () => {
@@ -181,15 +181,15 @@ describe('weekly summary', () => {
     expect(sent[0].text).toContain('2 provisional signals');
   });
 
-  it('every exception links to its role\'s plan in the Dashboard\'s Sourcing workspace', async () => {
+  it('every exception links to its role\'s plan on the Sourcing page', async () => {
     const saved = process.env.FRONTEND_URL;
     process.env.FRONTEND_URL = 'https://hms.example.com';
     try {
       exceptionRows = [exc(), exc('R6')];
       await sendSourcingDigests(MON, send);
       expect(sent[0].text.match(/https?:\/\/\S+/g)).toEqual([
-        'https://hms.example.com/dashboard?sourcing_role=R5#sourcing-workspace',
-        'https://hms.example.com/dashboard?sourcing_role=R6#sourcing-workspace',
+        'https://hms.example.com/sourcing?sourcing_role=R5',
+        'https://hms.example.com/sourcing?sourcing_role=R6',
       ]);
       expect(sent[0].text).not.toMatch(/\/roles\/|#sourcing(?!-)/);
     } finally {

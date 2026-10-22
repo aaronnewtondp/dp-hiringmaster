@@ -33,7 +33,7 @@ type Dialog =
 
 /**
  * One role's sourcing plan: target, what needs attention (with recommended next steps), every channel with its weekly tracker, applications
- * by source and the full activity timeline. Lives in the Dashboard's Sourcing workspace (it used to be a card on the role page). HR-tier acts;
+ * by source and the full activity timeline. Lives on the Sourcing page (it used to be a Dashboard section, and before that a card on the role page). HR-tier acts;
  * the role's own Hiring Manager gets the read-only, partly redacted view the server sends.
  */
 export default function SourcingPlanPanel({ roleId }: { roleId: string }) {

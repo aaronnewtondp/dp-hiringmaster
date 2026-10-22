@@ -75,7 +75,7 @@ export default function SourcingQueue({ queue, loading, failed, onRetry, onChang
           {queue.volume.length > 0
             ? <>This week: <span className="font-medium text-gray-700">{queue.volume_ok} of {plural(queue.volume.length, 'role')}</span> at their own weekly qualified target.
                 {under.length > 0 && <> Below target: {under.slice(0, 3).map((v, i) => (
-                  <span key={v.role_id}>{i > 0 ? ', ' : ''}<Link to={`/dashboard?sourcing_role=${v.role_id}#sourcing-workspace`} className="text-dp-600 hover:underline">{v.title}</Link> ({v.qualified})</span>
+                  <span key={v.role_id}>{i > 0 ? ', ' : ''}<Link to={`/sourcing?sourcing_role=${v.role_id}`} className="text-dp-600 hover:underline">{v.title}</Link> ({v.qualified})</span>
                 ))}{under.length > 3 ? ` +${under.length - 3} more` : ''}.</>}
               </>
             : <>{plural(queue.active_plans, 'active plan')}. A role's weekly qualified target applies once it has one (5 by default for P0 and P1 roles).</>}
@@ -91,10 +91,10 @@ export default function SourcingQueue({ queue, loading, failed, onRetry, onChang
               <li key={p.plan_id} className="px-5 py-3 flex items-center gap-3">
                 <PriorityBadge priority={p.priority} />
                 <div className="flex-1 min-w-0">
-                  <Link to={`/dashboard?sourcing_role=${p.role_id}#sourcing-workspace`} className="text-sm font-medium text-gray-900 hover:text-dp-600">{p.title}</Link>
+                  <Link to={`/sourcing?sourcing_role=${p.role_id}`} className="text-sm font-medium text-gray-900 hover:text-dp-600">{p.title}</Link>
                   <div className="text-xs text-gray-400">{p.approval_date ? `Approved ${p.approval_date}` : 'Approved'}</div>
                 </div>
-                <Link to={`/dashboard?sourcing_role=${p.role_id}#sourcing-workspace`} className="btn-secondary text-xs py-1.5 px-3 shrink-0">Activate</Link>
+                <Link to={`/sourcing?sourcing_role=${p.role_id}`} className="btn-secondary text-xs py-1.5 px-3 shrink-0">Activate</Link>
               </li>
             ))}
           </ul>
@@ -111,7 +111,7 @@ export default function SourcingQueue({ queue, loading, failed, onRetry, onChang
                 <div className="flex-1 min-w-0">
                   <div className="text-sm text-gray-900">{d.title}</div>
                   <div className="text-xs text-gray-400">
-                    <Link to={`/dashboard?sourcing_role=${d.role_id}#sourcing-workspace`} className="hover:text-dp-600">{d.role_title}</Link> · {d.channel} · {dueLabel(d.due_date, queue.today)}
+                    <Link to={`/sourcing?sourcing_role=${d.role_id}`} className="hover:text-dp-600">{d.role_title}</Link> · {d.channel} · {dueLabel(d.due_date, queue.today)}
                   </div>
                 </div>
                 <button type="button" className="btn-secondary text-xs py-1.5 px-3 shrink-0"
@@ -130,7 +130,7 @@ export default function SourcingQueue({ queue, loading, failed, onRetry, onChang
               <div key={g.role_id} className="px-5 py-3">
                 <div className="flex items-center gap-2 mb-1.5">
                   <PriorityBadge priority={g.priority} />
-                  <Link to={`/dashboard?sourcing_role=${g.role_id}#sourcing-workspace`} className="text-sm font-medium text-gray-900 hover:text-dp-600">{g.title}</Link>
+                  <Link to={`/sourcing?sourcing_role=${g.role_id}`} className="text-sm font-medium text-gray-900 hover:text-dp-600">{g.title}</Link>
                         </div>
                 <ul className="space-y-2">
                   {g.items.map(e => (

@@ -47,7 +47,7 @@ describe('Dashboard → Sourcing execution', () => {
     expect(screen.getByText('6 / 14')).toBeInTheDocument();
     expect(screen.getByText('80%')).toBeInTheDocument();
     const link = screen.getByRole('link', { name: 'Role 1' });
-    expect(link).toHaveAttribute('href', '/dashboard?sourcing_role=R1#sourcing-workspace');
+    expect(link).toHaveAttribute('href', '/sourcing?sourcing_role=R1');
     expect(screen.getByText('LinkedIn: Publish the posting (1)')).toBeInTheDocument();
     expect(screen.getByText('Not done — 2 days overdue')).toBeInTheDocument();
     expect(screen.getByText('Publish on LinkedIn and mark it done')).toBeInTheDocument();
@@ -58,9 +58,9 @@ describe('Dashboard → Sourcing execution', () => {
     mount(payload({}, [row(1), row(2, { role_title: 'Sr. Backend Developer', role_id: 'R019' }), row(3, { provisional: true, type: 'VOLUME_GAP', channel: '*', role_id: 'R7', role_title: 'Designer' })]));
     await screen.findByText('Role 1');
     const hrefs = Object.fromEntries(screen.getAllByRole('link').map(a => [a.textContent, a.getAttribute('href')]));
-    expect(hrefs['Role 1']).toBe('/dashboard?sourcing_role=R1#sourcing-workspace');
-    expect(hrefs['Sr. Backend Developer']).toBe('/dashboard?sourcing_role=R019#sourcing-workspace');
-    expect(hrefs['Designer']).toBe('/dashboard?sourcing_role=R7#sourcing-workspace');
+    expect(hrefs['Role 1']).toBe('/sourcing?sourcing_role=R1');
+    expect(hrefs['Sr. Backend Developer']).toBe('/sourcing?sourcing_role=R019');
+    expect(hrefs['Designer']).toBe('/sourcing?sourcing_role=R7');
     expect(screen.getAllByRole('link').some(a => a.getAttribute('href')?.startsWith('/roles/'))).toBe(false);
   });
 
@@ -69,7 +69,7 @@ describe('Dashboard → Sourcing execution', () => {
     await screen.findAllByRole('link', { name: 'Role 1' });
     const links = screen.getAllByRole('link', { name: 'Role 1' });
     expect(links).toHaveLength(2);
-    for (const l of links) expect(l).toHaveAttribute('href', '/dashboard?sourcing_role=R1#sourcing-workspace');
+    for (const l of links) expect(l).toHaveAttribute('href', '/sourcing?sourcing_role=R1');
   });
 
   it('provisional rows are marked and explained with the date they go live', async () => {

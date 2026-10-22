@@ -187,7 +187,7 @@ tests/
     ├── 06-schedule-round.spec.ts        # ScheduleRoundModal — IST timezone regression, email
     │                                    # validation, stage-gated button visibility
     ├── 07-create-role-and-filters.spec.ts
-    └── 08-sourcing.spec.ts              # Sourcing module in the browser: dashboard section is last, recruiter gets a My Tasks Sourcing box, Leadership gets none, role card + header chip + read-only Recruitment Mode, Hiring Manager read-only card, other-role HM gets no card. Skips itself unless SOURCING_ENABLED=true
+    └── 08-sourcing.spec.ts              # Sourcing module in the browser: the sidebar "Sourcing" entry (every persona) and its /sourcing page (role switcher, plan panel, dialogs, weekly trackers), the Dashboard keeps only "Sourcing execution" (its rows link to /sourcing) and no longer has the plans, old /dashboard?sourcing_role=X#sourcing-workspace links redirect to /sourcing, recruiter gets a My Tasks Sourcing box (links to /sourcing), Leadership gets none, header chip + read-only Recruitment Mode, Hiring Manager read-only plan on their own role and none for another HM's role. Skips itself unless SOURCING_ENABLED=true
 ```
 
 ## Module/logic-level tests (Vitest) — a separate layer from this suite
