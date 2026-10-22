@@ -20,8 +20,8 @@ const COLUMN_INFO: Record<string, string> = {
   'Gender': GENDER_COLUMN_INFO,
   'Stage': "The stage this application had reached. Putting it on hold, rejecting or withdrawing it changes its status, not its stage, so this is where it was left.",
   'Fit': "ResumeIQ's score (0-100) for this application: the average of its 8 dimensions (for the Senior UX/Product Designer role, a Portfolio score is added once its portfolio review finishes), scored automatically when the candidate applied.",
-  'CTC → ECTC': "Current fixed CTC → expected CTC from the candidate's own profile, in ₹ lakhs (one figure per candidate, so the same on each of their rows). There is no Over Budget flag here. A dash means not recorded or, for a Hiring Manager, a candidate on none of their roles.",
-  'Notice': "Notice period in days, from the candidate's profile.",
+  'Current CTC → Expected CTC': "Current fixed CTC → expected CTC from the candidate's own profile, in ₹ lakhs (one figure per candidate, so the same on each of their rows). There is no Over Budget flag here. A dash means not recorded or, for a Hiring Manager, a candidate on none of their roles.",
+  'Notice Period': "Notice period in days, from the candidate's profile.",
   'Company / Industry': "Current company and industry from the candidate's own profile, shown as one field.",
   'Actions': "Reactivate (HR/Admin, Leadership and Super Admin only) links the candidate to a role that is Live – Sourcing and that they haven't applied to yet. It creates a new application at Applied and Screened, scored by ResumeIQ, with the source “Talent Pool Reactivation”; the archived application stays as it is.",
   'Status': "The application's status. A candidate is listed when at least one application is Hold for Future (or, under Archived, Rejected or Withdrawn); all of their applications are shown, each with its own status.",
@@ -191,8 +191,8 @@ export default function TalentPool() {
       </div>
 
       {/* Results — table, same column model as Candidates.tsx (item #8.2):
-          Candidate, Role, Stage, Status, Fit, CTC → ECTC, Notice, Preferred
-          Location, Company / Industry, Resume Link, Application Date, Last
+          Candidate, Role, Stage, Status, Fit, Current CTC → Expected CTC, Notice
+          Period, Preferred Location, Company / Industry, Resume Link, Application Date, Last
           Added (= last_updated, just relabeled since this page reads as
           "when this candidate's application last moved" rather than "last
           edited"), Actions. */}
@@ -209,6 +209,10 @@ export default function TalentPool() {
           <table className="w-full table-fixed">
             <thead className="border-b border-gray-100 bg-gray-50">
               <tr>
+                {/* Header labels are written out in full and WRAP (never truncate): a column's
+                    width is its longest unbreakable word at this size (12px uppercase) + the 16px
+                    of padding (+ ~18px for each sort chevron or info marker it carries). Same rule
+                    as the Candidates and Ready for Review tables. */}
                 {[
                   { label: 'Candidate', width: 'w-[150px]' },
                   { label: 'Gender', width: 'w-[88px]' },
@@ -216,27 +220,29 @@ export default function TalentPool() {
                   { label: 'Stage', width: 'w-[90px]' },
                   { label: 'Status', width: 'w-[90px]' },
                   { label: 'Fit', width: 'w-[84px]', sortKey: 'fit' as const },
-                  { label: 'CTC → ECTC', width: 'w-[105px]' },
-                  { label: 'Notice', width: 'w-[82px]' },
+                  { label: 'Current CTC → Expected CTC', width: 'w-[132px]' },
+                  { label: 'Notice Period', width: 'w-[82px]' },
                   { label: 'Preferred Location', width: 'w-[110px]' },
                   { label: 'Company / Industry', width: 'w-[182px]' },
                   { label: 'Resume Link', width: 'w-[68px]' },
-                  { label: 'Application Date', width: 'w-[122px]', sortKey: 'application_date' as const },
+                  { label: 'Application Date', width: 'w-[134px]', sortKey: 'application_date' as const },
                   { label: 'Last Added', width: 'w-[100px]', sortKey: 'last_added' as const },
-                  { label: 'Actions', width: 'w-[104px]' },
+                  // last column: its popover opens leftward, or a centered one runs past the table's right edge
+                  { label: 'Actions', width: 'w-[104px]', infoAlign: 'right' as const },
                 ].map(col => (
-                  // overflow-hidden unconditional — see Candidates.tsx's own
-                  // header cells for why (a too-wide label used to visually
-                  // bleed into the next column's header).
-                  <th key={col.label} title={col.label} className={`table-th px-2 tracking-normal overflow-hidden ${col.width}`}>
+                  // overflow-hidden stays as a safety net (see Candidates.tsx's own header
+                  // cells) — except on a header that carries an info marker, whose popover hangs
+                  // below the cell and was being clipped to a sliver by it. whitespace-normal
+                  // overrides .table-th's nowrap so the label wraps instead of truncating.
+                  <th key={col.label} title={col.label} className={`table-th px-2 tracking-normal whitespace-normal align-bottom leading-tight ${COLUMN_INFO[col.label] ? '' : 'overflow-hidden'} ${col.width}`}>
                     <div className="flex items-center gap-1 min-w-0">
                       {col.sortKey ? (
                         <button
                           type="button"
                           onClick={() => toggleSort(col.sortKey)}
-                          className="flex items-center gap-1 min-w-0 hover:text-dp-600 transition-colors group"
+                          className="flex items-center gap-1 min-w-0 text-left uppercase hover:text-dp-600 transition-colors group"
                         >
-                          <span className="truncate">{col.label}</span>
+                          <span>{col.label}</span>
                           {sortKey === col.sortKey ? (
                             sortDir === 'asc'
                               ? <ChevronUp className="w-3.5 h-3.5 shrink-0 text-dp-600" strokeWidth={3} />
@@ -246,9 +252,9 @@ export default function TalentPool() {
                           )}
                         </button>
                       ) : (
-                        <span className="truncate">{col.label}</span>
+                        <span>{col.label}</span>
                       )}
-                      {COLUMN_INFO[col.label] && <InfoTooltip text={COLUMN_INFO[col.label]} width="w-60" />}
+                      {COLUMN_INFO[col.label] && <InfoTooltip text={COLUMN_INFO[col.label]} width="w-60" align={col.infoAlign} />}
                     </div>
                   </th>
                 ))}
