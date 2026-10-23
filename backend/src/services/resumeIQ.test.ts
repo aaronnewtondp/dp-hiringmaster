@@ -1,6 +1,16 @@
-import { describe, it, expect } from 'vitest';
-import { buildRoleRequirementsSection, bulletList } from './resumeIQ.js';
-import { Role } from '../types/index.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Role, Candidate } from '../types/index.js';
+
+// resumeIQ.ts does `new Anthropic()` at module load, so the SDK must be mocked
+// before it's imported — this stands in for the client and captures the prompt.
+const { createMock } = vi.hoisted(() => ({ createMock: vi.fn() }));
+vi.mock('@anthropic-ai/sdk', () => ({
+  default: class {
+    messages = { create: createMock };
+  },
+}));
+
+import { buildRoleRequirementsSection, bulletList, scoreCandidate } from './resumeIQ.js';
 
 describe('bulletList', () => {
   it('joins items as "- item" lines', () => {
@@ -78,5 +88,49 @@ describe('buildRoleRequirementsSection', () => {
     const role = { generated_jd_content: { goodToHaves: ['x'] } } as unknown as Role;
     const section = buildRoleRequirementsSection(role);
     expect(section).toContain('GOOD TO HAVE:\n- x');
+  });
+});
+
+describe('scoreCandidate prompt', () => {
+  const candidate = { full_name: 'Test Candidate' } as unknown as Candidate;
+  const role = { title: 'Test Role', generated_jd_content: null } as unknown as Role;
+
+  beforeEach(() => {
+    // Only Date is faked so the awaited mock call resolves normally.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-30T12:00:00Z'));
+    createMock.mockReset();
+    createMock.mockResolvedValue({ content: [{ type: 'text', text: '{}' }] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function capturePrompt(): Promise<string> {
+    await scoreCandidate(candidate, role, 'Acme Corp, Jan 2024 - Jun 2026');
+    expect(createMock).toHaveBeenCalledTimes(1);
+    return createMock.mock.calls[0][0].messages[0].content as string;
+  }
+
+  it("states today's real date near the top, before the role and resume sections", async () => {
+    const prompt = await capturePrompt();
+    expect(prompt).toContain("TODAY'S DATE: 2026-09-30");
+    expect(prompt.indexOf("TODAY'S DATE")).toBeLessThan(prompt.indexOf('ROLE: Test Role'));
+    expect(prompt.indexOf("TODAY'S DATE")).toBeLessThan(prompt.indexOf('RESUME CONTENT:'));
+  });
+
+  it('tells the model dates up to today are past and only genuinely later dates are future', async () => {
+    const prompt = await capturePrompt();
+    expect(prompt).toContain(
+      'Dates up to and including today are in the past and must not be flagged as future dates; only flag a date that is genuinely after today.'
+    );
+  });
+
+  it('tracks the real clock rather than a hardcoded date', async () => {
+    vi.setSystemTime(new Date('2027-01-15T08:00:00Z'));
+    const prompt = await capturePrompt();
+    expect(prompt).toContain("TODAY'S DATE: 2027-01-15");
+    expect(prompt).not.toContain('2026-09-30');
   });
 });
