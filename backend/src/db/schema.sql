@@ -1211,3 +1211,19 @@ INSERT INTO sourcing_plan_changes (plan_id, "by", change, reason, at)
 SELECT plan_id, NULL, jsonb_build_object('type', 'task_handed_back', 'channel', channel, 'commitment', title),
        'Handed back by the weekly-tracker release: the tracker needs a post link and a weekly sourcing target for this live channel', NOW()
   FROM handed_back;
+
+-- ─── Portfolio review kinds + the 'unreviewable' status (2026-10-22, R019 work-sample review) ───
+-- roles.portfolio_review_kind picks WHICH review a role with portfolio_analysis_enabled gets: the designer portfolio
+-- review (R007 — the default, so every role already flagged keeps its behaviour with no data change) or the marketing
+-- work-sample review (R019, set by SQL like the flag itself — no API or UI toggle).
+-- 'unreviewable' is the neutral outcome for work a machine cannot open (bot walls, social platforms, video-only links):
+-- unlike 'inaccessible' it is never held against the candidate. Additive and idempotent.
+-- Production order: apply this BEFORE deploying the code that writes the new status (the CHECK would reject it).
+ALTER TABLE roles ADD COLUMN IF NOT EXISTS portfolio_review_kind TEXT NOT NULL DEFAULT 'design_portfolio';
+ALTER TABLE roles DROP CONSTRAINT IF EXISTS roles_portfolio_review_kind_check;
+ALTER TABLE roles ADD CONSTRAINT roles_portfolio_review_kind_check
+  CHECK (portfolio_review_kind IN ('design_portfolio','marketing_work'));
+ALTER TABLE applications DROP CONSTRAINT IF EXISTS applications_portfolio_status_check;
+ALTER TABLE applications ADD CONSTRAINT applications_portfolio_status_check
+  CHECK (portfolio_analysis_status IS NULL OR portfolio_analysis_status IN
+    ('pending','running','completed','failed','no_portfolio','inaccessible','unreviewable'));

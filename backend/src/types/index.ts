@@ -56,6 +56,8 @@ export interface Role {
   generated_jd_content?:    Record<string, unknown> | null;
   jd_source?:               'generated' | 'manual';
   portfolio_analysis_enabled?: boolean;
+  // Which review a role with portfolio_analysis_enabled gets (default design_portfolio; R019 is marketing_work). See services/portfolio/profiles.ts.
+  portfolio_review_kind?:   'design_portfolio' | 'marketing_work';
   whatsapp_forward_link?:   string;
   referral_message_link?:   string;
   approval_summary_link?:   string;
@@ -183,8 +185,8 @@ export interface Application {
   score_computed_at?:           string;
   // Portfolio review — the 9th ResumeIQ dimension, only for roles with
   // roles.portfolio_analysis_enabled (see services/portfolio/).
-  portfolio_urls?:              Array<{ url: string; host: string; platform: string }> | null;
-  portfolio_analysis_status?:   'pending' | 'running' | 'completed' | 'failed' | 'no_portfolio' | 'inaccessible' | null;
+  portfolio_urls?:              Array<{ url: string; host: string; platform: string; handler?: string }> | null;
+  portfolio_analysis_status?:   'pending' | 'running' | 'completed' | 'failed' | 'no_portfolio' | 'inaccessible' | 'unreviewable' | null;
   portfolio_analysis_error?:    string | null;
   portfolio_started_at?:        string | null;
   portfolio_analyzed_at?:       string | null;

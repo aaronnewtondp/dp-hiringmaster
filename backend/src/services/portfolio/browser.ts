@@ -4,7 +4,7 @@
 // serverless bundle. The main app only ever imports enqueue.ts / links.ts.
 import fs from 'fs';
 import path from 'path';
-import type { Browser } from 'puppeteer-core';
+import type { Browser, LaunchOptions } from 'puppeteer-core';
 
 // Where to get a browser, in priority order:
 //   1. PORTFOLIO_BROWSER_WS_ENDPOINT — attach to an already-running remote
@@ -97,15 +97,140 @@ function findLocalChrome(): string | null {
   return null;
 }
 
-export async function withBrowser<T>(fn: (browser: Browser) => Promise<T>, opts: { maxWaitMs?: number } = {}): Promise<T> {
+/**
+ * How long a browser we launched gets to close before it is killed (closeBrowser below). Chromium needs well under a second to close
+ * after an ordinary page; ten seconds is generous, and short enough that the review's budget (and the one-browser-at-a-time slot, which
+ * is held until the close is over) is not spent waiting on a browser that will never answer.
+ */
+export const BROWSER_CLOSE_MS = 10_000;
+
+export interface BrowserOptions {
+  /** How long to wait for another review on this instance to let go of the browser (default 45 s). */
+  maxWaitMs?: number;
+  /** Test seam: how long a browser may take to close or disconnect before it is killed / given up on. Default BROWSER_CLOSE_MS; no caller sets it. */
+  closeTimeoutMs?: number;
+  /**
+   * Launch Chromium so that a page cannot reach the network around the per-page request filter by opening windows or pinging.
+   * A popup (window.open, a target=_blank link or form) is a new page target the filter never sees, so a candidate's site could use
+   * it to send blind GET/POST requests to a loopback, private or metadata address (reproduced with the real capture code: three
+   * requests reached a local listener). A hyperlink-audit ping (`<a ping="url">`, which a page script can trigger with a click) is a
+   * POST the browser sends on its own, also unfiltered, and so are Chromium's own reports (the Reporting API: a page's
+   * `Reporting-Endpoints` / `Report-To` / NEL headers name an address the browser then contacts itself). Four launch changes, because
+   * the Chromium builds we run answer to different ones (measured, 2026-10-22 and 2026-10-23):
+   *  - `--block-new-web-contents`: a content-layer switch that refuses every page-script-opened window outright, gesture or no
+   *    gesture. This is what protects PRODUCTION: @sparticuz/chromium is a headless SHELL, which has no popup blocker at all
+   *    (the same page opened all three popups with the blocker "on" and "off"), and this switch stopped all three there.
+   *    Desktop Chrome (local development) does not honour it for a window opened on a user gesture.
+   *  - dropping puppeteer's default `--disable-popup-blocking`: desktop Chrome's own blocker then refuses a window opened with
+   *    no user gesture. It needs capture.ts not to grant one (`withoutUserGesture`), and does nothing in the headless shell.
+   *  - `--no-pings`: hyperlink auditing off. A script-clicked `<a ping=internal>` made the browser POST to a local listener in
+   *    desktop Chrome (7 of 8 runs) and in @sparticuz/chromium in the Lambda image (2 of 8). The flag took the desktop number to 0 of 8;
+   *    @sparticuz/chromium already ships it and it made no measurable difference there (what stops the ping in that build is the
+   *    teardown guard in capture.ts, see makeTeardownGuard).
+   *  - `--disable-features=Reporting`: the Reporting API off. With an HTTPS site whose headers named an HTTPS "internal" endpoint, Chrome
+   *    for Testing sent CORS preflights to it, at 2-7 s and again at about 62-67 s, with no request the filter could see; with the
+   *    feature off, none in 75 s (`NetworkErrorLogging` alone did not stop it). Brave, chrome-headless-shell and @sparticuz/chromium sent
+   *    nothing in 80-90 s with or without it, so for the build we run in production this is a no-op, kept for desktop Chrome. Puppeteer
+   *    merges every `--disable-features` argument into its own list, @sparticuz/chromium's included.
+   * One option for all of them because they are one decision, the marketing review's launch lockdown, and every caller already
+   * passes it as `browserOptionsFor(MARKETING_CAPTURE_OPTS)` (capture.ts). Marketing review only: the designer review launches with
+   * exactly the arguments it always had. No effect when attaching to PORTFOLIO_BROWSER_WS_ENDPOINT — a connection cannot change how
+   * the remote browser was started (see the note in withBrowser).
+   */
+  blockPopups?: boolean;
+}
+
+// puppeteer.launch() adds `--disable-popup-blocking` to Chromium's defaults. `ignoreDefaultArgs: [flag]` removes just that one
+// and keeps every other default (`true` would drop them all).
+export const POPUP_BLOCKING_DISABLED_FLAG = '--disable-popup-blocking';
+export const BLOCK_NEW_WEB_CONTENTS_FLAG = '--block-new-web-contents';
+export const NO_PINGS_FLAG = '--no-pings';
+export const DISABLE_REPORTING_FLAG = '--disable-features=Reporting';
+const popupArgs = (blockPopups: boolean | undefined): string[] => (blockPopups ? [BLOCK_NEW_WEB_CONTENTS_FLAG, NO_PINGS_FLAG, DISABLE_REPORTING_FLAG] : []);
+const popupLaunchOptions = (blockPopups: boolean | undefined): Pick<LaunchOptions, 'ignoreDefaultArgs'> =>
+  blockPopups ? { ignoreDefaultArgs: [POPUP_BLOCKING_DISABLED_FLAG] } : {};
+
+/** puppeteer.launch() options on Vercel / Lambda (@sparticuz/chromium). With `blockPopups` off this is exactly what shipped before. */
+export function lambdaLaunchOptions(o: { chromiumArgs: readonly string[]; executablePath: string; blockPopups?: boolean }): LaunchOptions {
+  return {
+    args: [...o.chromiumArgs.filter(a => !UNWANTED_FLAGS.has(a)), ...popupArgs(o.blockPopups)],
+    executablePath: o.executablePath,
+    headless: 'shell',
+    protocolTimeout: PROTOCOL_TIMEOUT_MS,
+    ...popupLaunchOptions(o.blockPopups),
+  };
+}
+
+/** puppeteer.launch() options for a Chrome found on this machine. With `blockPopups` off this is exactly what shipped before. */
+export function localLaunchOptions(o: { executablePath: string; blockPopups?: boolean }): LaunchOptions {
+  return {
+    executablePath: o.executablePath, headless: true, protocolTimeout: PROTOCOL_TIMEOUT_MS,
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', ...popupArgs(o.blockPopups)],
+    ...popupLaunchOptions(o.blockPopups),
+  };
+}
+
+/** Settles with true when `p` settled (either way) within `ms`, with false when it did not. Never rejects; leaves no timer behind. */
+async function settlesWithin(p: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      p.then(() => true, () => true),
+      new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), ms); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Closes a browser WE launched, but never waits on it for more than `timeoutMs`; past that the browser process is killed. Never throws.
+ * puppeteer's close() is `await cdp.closeBrowser(); await browserProcess.hasClosed()` with no timeout of its own, and a single-process
+ * Chromium (@sparticuz/chromium on Lambda) whose one renderer is in an endless loop never answers either: a candidate page as small as
+ * `setTimeout(() => { for (;;) {} }, 400)` left close() pending for 7-11 minutes in the Lambda image (reproduced with the teardown guard
+ * off as well, so it is not the guard). Nothing then ended the review but Vercel's 300 s kill, the queue redelivered it up to three times
+ * and the one-browser slot was never given back, for the price of one link in a public form. This is shared with the designer review on
+ * purpose: it changes nothing unless close() has not returned within the limit, which is exactly the case that used to hang.
+ * SIGKILL, not a polite signal: a Chromium that is not answering will not act on one. The abandoned close() then settles by itself (the
+ * process exits, its pipe closes) and is already handled, so it cannot become an unhandled rejection. A browser with no process of
+ * ours (it was connected to, or the launcher gave none) is disconnected from instead: there is nothing of ours to kill.
+ * Returns how it ended: closed by itself, killed, or (no process to kill) disconnected from and left.
+ */
+export async function closeBrowser(browser: Browser, timeoutMs: number = BROWSER_CLOSE_MS): Promise<'closed' | 'killed' | 'abandoned'> {
+  let closing: Promise<unknown>;
+  try { closing = Promise.resolve(browser.close()); } catch { return 'closed'; }
+  if (await settlesWithin(closing, timeoutMs)) return 'closed';
+  console.warn(`[portfolio] the browser did not close within ${Math.round(timeoutMs / 1000)}s; killing it`);
+  let proc: ReturnType<Browser['process']> = null;
+  try { proc = browser.process(); } catch { /* not a launched browser */ }
+  if (proc) {
+    try { proc.kill('SIGKILL'); return 'killed'; } catch { /* it is already gone */ }
+  }
+  try { void Promise.resolve(browser.disconnect()).catch(() => {}); } catch { /* nothing left to drop */ }
+  return 'abandoned';
+}
+
+/** `browser.disconnect()` for a browser someone else owns, bounded the same way: the slot must not depend on a remote that never answers. */
+async function disconnectBrowser(browser: Browser, timeoutMs: number): Promise<void> {
+  let disconnecting: Promise<unknown>;
+  try { disconnecting = Promise.resolve(browser.disconnect()); } catch { return; }
+  await settlesWithin(disconnecting, timeoutMs);
+}
+
+export async function withBrowser<T>(fn: (browser: Browser) => Promise<T>, opts: BrowserOptions = {}): Promise<T> {
   const release = await acquireBrowserSlot(opts.maxWaitMs ?? 45_000);
+  const closeMs = opts.closeTimeoutMs ?? BROWSER_CLOSE_MS;
   try {
     const puppeteer = await import('puppeteer-core');
 
     const ws = process.env.PORTFOLIO_BROWSER_WS_ENDPOINT;
     if (ws) {
+      // A remote browser was started by someone else with their flags, so `blockPopups` cannot be applied here. What still
+      // protects a marketing capture on this path: capture.ts closes any extra page target the moment it appears and the
+      // in-page lockdown takes window.open away. And a hosted browser (Browserbase and the like) runs on the provider's
+      // network, not ours, so a blind request from it cannot reach this deployment's internal services in the first place.
       const browser = await puppeteer.connect({ browserWSEndpoint: ws, protocolTimeout: PROTOCOL_TIMEOUT_MS });
-      try { return await fn(browser); } finally { await browser.disconnect().catch(() => {}); }
+      try { return await fn(browser); } finally { await disconnectBrowser(browser, closeMs); }
     }
 
     let browser: Browser;
@@ -117,21 +242,13 @@ export async function withBrowser<T>(fn: (browser: Browser) => Promise<T>, opts:
       const chromium = (await import('@sparticuz/chromium')).default;
       const executablePath = await chromium.executablePath();
       try { fs.writeFileSync(READY_MARKER, String(Date.now())); } catch { /* /tmp not writable would fail launch anyway */ }
-      browser = await puppeteer.launch({
-        args: chromium.args.filter(a => !UNWANTED_FLAGS.has(a)),
-        executablePath,
-        headless: 'shell',
-        protocolTimeout: PROTOCOL_TIMEOUT_MS,
-      });
+      browser = await puppeteer.launch(lambdaLaunchOptions({ chromiumArgs: chromium.args, executablePath, blockPopups: opts.blockPopups }));
     } else {
       const exe = findLocalChrome();
       if (!exe) throw new Error('No local Chrome/Chromium found — set PORTFOLIO_CHROME_PATH or PORTFOLIO_BROWSER_WS_ENDPOINT');
-      browser = await puppeteer.launch({
-        executablePath: exe, headless: true, protocolTimeout: PROTOCOL_TIMEOUT_MS,
-        args: ['--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars'],
-      });
+      browser = await puppeteer.launch(localLaunchOptions({ executablePath: exe, blockPopups: opts.blockPopups }));
     }
-    try { return await fn(browser); } finally { await browser.close().catch(() => {}); }
+    try { return await fn(browser); } finally { await closeBrowser(browser, closeMs); }
   } finally {
     release();
   }

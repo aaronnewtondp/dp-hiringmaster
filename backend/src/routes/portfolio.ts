@@ -4,9 +4,12 @@ import { authenticate, requireHR } from '../middleware/auth.js';
 import { Application, Candidate, Role } from '../types/index.js';
 import { fetchResumeTextAndLinks } from '../services/driveService.js';
 import { pickPortfolioLinks } from '../services/portfolio/links.js';
-import { preparePortfolioReview } from '../services/portfolio/enqueue.js';
+import { prepareMarketingReview, preparePortfolioReview } from '../services/portfolio/enqueue.js';
+import { pickAnswerLinks } from '../services/portfolio/answerLinks.js';
 import { STALE_RUNNING_SECONDS } from '../services/portfolio/jobState.js';
 import { hasReadableText } from '../services/portfolio/text.js';
+import { isReviewKind, reviewProfileFor } from '../services/portfolio/profiles.js';
+import type { PortfolioReviewKind } from '../services/portfolio/types.js';
 
 // Mounted at /api/applications, ahead of applicationsRouter. Auth is applied
 // per route (not router-wide) because the batch endpoint is secret-protected
@@ -14,17 +17,18 @@ import { hasReadableText } from '../services/portfolio/text.js';
 const router = Router();
 
 /**
- * Re-reads the resume for portfolio links and (re)queues the review. This is
- * both the manual "Re-run" action and the backfill primitive — re-extracting
- * each time means a link the first extraction missed can be picked up.
+ * Re-reads the candidate's links (the resume's hyperlinks for the designer review, the screening answer for the
+ * marketing one) and (re)queues the review. This is both the manual "Re-run" action and the backfill primitive —
+ * re-extracting each time means a link the first extraction missed can be picked up.
  */
-async function requeue(applicationId: string): Promise<
+export async function requeue(applicationId: string): Promise<
   { ok: true; status: string; links: number; queued: boolean } | { ok: false; code: number; error: string }
 > {
   const app = await queryOne<Application>('SELECT * FROM applications WHERE id=$1', [applicationId]);
   if (!app) return { ok: false, code: 404, error: 'Application not found' };
   const role = await queryOne<Role>('SELECT * FROM roles WHERE id=$1', [app.role_id]);
-  if (!role?.portfolio_analysis_enabled) return { ok: false, code: 400, error: 'Portfolio review is not enabled for this role' };
+  const profile = reviewProfileFor(role);
+  if (!profile) return { ok: false, code: 400, error: 'Portfolio review is not enabled for this role' };
   if (app.score_avg == null) return { ok: false, code: 409, error: 'Resume scoring has not completed for this application yet' };
   // 'running' only counts while the job could still be alive — a row stuck
   // there past the function's hard limit belongs to a killed job and is fair game.
@@ -35,6 +39,15 @@ async function requeue(applicationId: string): Promise<
 
   const candidate = await queryOne<Candidate>('SELECT * FROM candidates WHERE id=$1', [app.candidate_id]);
   if (!candidate) return { ok: false, code: 404, error: 'Candidate not found' };
+
+  // Work-sample review: the links are the screening answer already in the database, so there is no Drive read
+  // that could fail and nothing to guard with a 502.
+  if (profile.source === 'screening') {
+    const pick = pickAnswerLinks(app.screening_answers, { candidateName: candidate.full_name });
+    const prepared = await prepareMarketingReview({ applicationId, pick });
+    if (prepared.status === 'busy') return { ok: false, code: 409, error: 'A portfolio review is already running' };
+    return { ok: true, status: prepared.status, links: prepared.links.length, queued: prepared.queued };
+  }
 
   let links: ReturnType<typeof pickPortfolioLinks> = [];
   let resumeRead = false;
@@ -56,16 +69,34 @@ async function requeue(applicationId: string): Promise<
   return { ok: true, status: prepared.status, links: prepared.links.length, queued: prepared.queued };
 }
 
+/**
+ * The kind a GET reports: the stored review's own when it is valid; 'design_portfolio' for a stored review that has
+ * none (it predates kinds, and only designer reviews existed then); the role's kind (else 'design_portfolio') only
+ * while no review is stored. Pure, so the rule can be pinned without a database.
+ */
+export function storedReviewKind(
+  stored: { analysis: { kind?: unknown } | null } | null | undefined,
+  roleKind: unknown,
+): PortfolioReviewKind {
+  if (stored) return isReviewKind(stored.analysis?.kind) ? stored.analysis!.kind : 'design_portfolio';
+  return isReviewKind(roleKind) ? roleKind : 'design_portfolio';
+}
+
 // GET — the review for one application (any signed-in user; it contains no
 // compensation data, so it follows the same visibility as the score itself).
 router.get('/:id/portfolio-analysis', authenticate, async (req: Request, res: Response) => {
-  const app = await queryOne<Application>(
-    `SELECT id, role_id, portfolio_urls, portfolio_analysis_status, portfolio_analysis_error,
-            portfolio_analyzed_at, score_portfolio, score_portfolio_note
-     FROM applications WHERE id=$1`, [req.params.id]);
+  const app = await queryOne<Application & { review_kind: string | null }>(
+    `SELECT a.id, a.role_id, a.portfolio_urls, a.portfolio_analysis_status, a.portfolio_analysis_error,
+            a.portfolio_analyzed_at, a.score_portfolio, a.score_portfolio_note, r.portfolio_review_kind AS review_kind
+     FROM applications a LEFT JOIN roles r ON r.id = a.role_id WHERE a.id=$1`, [req.params.id]);
   if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
-  const row = await queryOne<{ analysis: unknown }>('SELECT analysis FROM portfolio_analyses WHERE application_id=$1', [req.params.id]);
+  const row = await queryOne<{ analysis: { kind?: string } | null }>('SELECT analysis FROM portfolio_analyses WHERE application_id=$1', [req.params.id]);
   res.json({
+    // Which review this is. A stored review names its own kind; one that names none (every review made before kinds
+    // existed, or an unreadable value) is a designer review — so a later change to the role's kind can never relabel
+    // an old review, whatever the role says now. Only before any review exists does the role's kind say which one is
+    // on its way (and a role without a valid kind is a designer role).
+    kind:        storedReviewKind(row, app.review_kind),
     status:      app.portfolio_analysis_status ?? null,
     message:     app.portfolio_analysis_error ?? null,
     urls:        app.portfolio_urls ?? [],
@@ -97,9 +128,9 @@ router.post('/portfolio-backfill', async (req: Request, res: Response) => {
   const offset  = Math.max(parseInt(String(req.body?.offset ?? '0'), 10) || 0, 0);
   const dryRun  = req.body?.dry_run === true;
   if (!roleId) { res.status(400).json({ error: 'role_id required' }); return; }
-  const role = await queryOne<Role>('SELECT id, portfolio_analysis_enabled FROM roles WHERE id=$1', [roleId]);
+  const role = await queryOne<Role>('SELECT id, portfolio_analysis_enabled, portfolio_review_kind FROM roles WHERE id=$1', [roleId]);
   if (!role) { res.status(404).json({ error: 'Role not found' }); return; }
-  if (!role.portfolio_analysis_enabled) { res.status(400).json({ error: 'Portfolio review is not enabled for this role' }); return; }
+  if (!reviewProfileFor(role)) { res.status(400).json({ error: 'Portfolio review is not enabled for this role' }); return; }
 
   // Only applications that have never been through portfolio review.
   const rows = await query<{ id: string }>(

@@ -2,8 +2,10 @@
 // the queue; the browser/Claude work lives in run.ts, which only the separate
 // worker function (api/portfolio-worker.ts) ever imports.
 import { query } from '../../db/index.js';
-import { PortfolioLink } from './types.js';
+import { PortfolioAnalysisResult, PortfolioLink } from './types.js';
 import { applyPortfolioOutcome } from './scoring.js';
+import type { PortfolioOutcome } from './scoring.js';
+import type { AnswerLinkPick } from './answerLinks.js';
 import { STALE_RUNNING_SECONDS } from './jobState.js';
 
 export const PORTFOLIO_TOPIC = 'portfolio-analysis';
@@ -44,8 +46,12 @@ export async function enqueuePortfolioAnalysis(
 }
 
 export interface PreparedPortfolio {
-  /** 'busy' = a live review is running for this application right now; nothing was changed. */
-  status: 'pending' | 'no_portfolio' | 'busy';
+  /**
+   * 'busy' = a live review is running for this application right now; nothing was changed.
+   * 'unreviewable' and 'failed' only come from prepareMarketingReview: every link is on a platform that cannot be
+   * opened automatically, or a re-run could not settle and the earlier review was kept.
+   */
+  status: 'pending' | 'no_portfolio' | 'unreviewable' | 'failed' | 'busy';
   links:  PortfolioLink[];
   queued: boolean;
 }
@@ -140,4 +146,122 @@ export async function preparePortfolioReview(args: {
   if (!reset.length) return { status: 'busy', links, queued: false };
   const { enqueued } = await enqueuePortfolioAnalysis(applicationId);
   return { status: 'pending', links, queued: enqueued };
+}
+
+/**
+ * A valid, empty marketing review for the outcomes decided without opening anything. No model ran, so the
+ * review carries only what code knows: the candidate's own wording and the links that were not opened. The real
+ * score lives in applications.score_portfolio, which stays NULL here (`score` below is a placeholder, never read).
+ */
+export function minimalMarketingAnalysis(args: {
+  summary:     string;
+  claimText?:  string;
+  unreviewed?: AnswerLinkPick['listedNotReviewed'];
+}): PortfolioAnalysisResult {
+  return {
+    version: 1, kind: 'marketing_work', analyzedAt: new Date().toISOString(), model: 'none',
+    portfolios: [], criteria: [], jdAlignment: { mustHaves: [], niceToHaves: [] },
+    modelScore: 0, checklistScore: 0, score: 0, scoreNote: '', highlights: [], redFlags: [],
+    summary: args.summary,
+    ...(args.claimText ? { claimText: args.claimText } : {}),
+    ...(args.unreviewed?.length ? { unreviewed: args.unreviewed.map(({ url, platform, reason }) => ({ url, platform, reason })) } : {}),
+  };
+}
+
+interface UnscoredMarketingCase {
+  status:  'no_portfolio' | 'unreviewable';
+  /** Stored in portfolio_analysis_error and shown next to the status. */
+  message: string;
+  summary: string;
+  /** Why nothing could be reviewed this time, worded to lead "<this> — the earlier review (N/10) still applies". */
+  now:     string;
+  extra:   { claimText?: string; unreviewed?: AnswerLinkPick['listedNotReviewed'] };
+}
+
+/**
+ * The answers that need no job at all: nothing to open (blank, "N/A", "under NDA"), only words, or only links that
+ * are never opened automatically (LinkedIn, social, file-transfer). null = at least one link will be opened.
+ */
+function unscoredMarketingCase(pick: AnswerLinkPick): UnscoredMarketingCase | null {
+  if (!pick.answered) {
+    return {
+      status: 'no_portfolio', message: 'No work samples provided; this dimension is not applied',
+      summary: 'No work samples were provided.', now: 'No work samples were found in the answer this time', extra: {},
+    };
+  }
+  if (pick.textOnly) {
+    return {
+      status: 'no_portfolio',
+      message: 'Only a written description was provided - there were no work samples to review; this dimension is not applied',
+      summary: 'Only a written description was provided; there were no work samples to review.',
+      now: 'Only a written description was found this time', extra: { claimText: pick.claimText },
+    };
+  }
+  if (!pick.links.length) {
+    return {
+      status: 'unreviewable', message: 'The links are on platforms that cannot be opened automatically - open them by hand',
+      summary: 'Every link is on a platform that cannot be opened automatically. Open them by hand.',
+      now: 'The links could not be opened this time (their platforms cannot be opened automatically)',
+      extra: { unreviewed: pick.listedNotReviewed },
+    };
+  }
+  return null;
+}
+
+/**
+ * The marketing work-sample review's counterpart of preparePortfolioReview: called right after the base score is
+ * saved (and by Re-run) with the links picked from the candidate's screening answer. Whatever cannot be opened is
+ * settled at once with score NULL — the dimension is simply not applied, never a 0 — and with no model call; the
+ * rest is stored and queued for the worker.
+ */
+export async function prepareMarketingReview(args: {
+  applicationId: string;
+  pick:          AnswerLinkPick;
+}): Promise<PreparedPortfolio> {
+  const { applicationId, pick } = args;
+  const unscored = unscoredMarketingCase(pick);
+  const links = unscored ? [] : pick.links;
+
+  // Same conditional reset as the designer path (see NOT_RUNNING_SQL), plus the score a previous review left.
+  // The stored links are replaced in every case EXCEPT one: a re-run that finds nothing to open ($4) while an earlier
+  // review exists. That run ends 'failed … the earlier review still applies' (below), so the links that review was
+  // built from must survive it — they are what the application row says the kept score is based on. Deciding it in
+  // the same statement (score_portfolio is the row's value before the update) leaves no gap for a worker to slip a
+  // score in between a read and this write. A run that DOES queue always replaces them: the worker treats
+  // portfolio_urls as authoritative, so keeping the old ones would review the wrong links.
+  const reset = await query<{ id: string; score_portfolio: number | null }>(
+    `UPDATE applications
+     SET portfolio_urls=CASE WHEN $4::boolean AND score_portfolio IS NOT NULL THEN portfolio_urls ELSE $1::jsonb END,
+         portfolio_analysis_status='pending', portfolio_analysis_error=NULL
+     WHERE id=$2 AND ${NOT_RUNNING_SQL} RETURNING id, score_portfolio`,
+    [JSON.stringify(links), applicationId, String(STALE_RUNNING_SECONDS), unscored !== null],
+  );
+  if (!reset.length) return { status: 'busy', links, queued: false };
+
+  if (!unscored) {
+    const { enqueued } = await enqueuePortfolioAnalysis(applicationId);
+    return { status: 'pending', links, queued: enqueued };
+  }
+
+  // A re-run that finds nothing to review must not overwrite a good review: the earlier score is already folded
+  // into the average, and a 'no_portfolio' / 'unreviewable' status beside it would contradict that. Same rule the
+  // worker applies when a re-run comes back without a score.
+  const earlier = reset[0].score_portfolio;
+  if (earlier != null) {
+    await markPortfolioFailed(applicationId, `${unscored.now} — the earlier review (${earlier}/10) still applies. Use Re-run to retry.`);
+    return { status: 'failed', links: [], queued: false };
+  }
+
+  const outcome: PortfolioOutcome = {
+    status: unscored.status, score: null, note: '', redFlags: [], message: unscored.message,
+    analysis: minimalMarketingAnalysis({ summary: unscored.summary, ...unscored.extra }),
+  };
+  try {
+    await applyPortfolioOutcome(applicationId, outcome);
+  } catch (err) {
+    // The row is 'pending' and nothing is queued: say so, with a Re-run action, instead of leaving it waiting forever.
+    await markPortfolioFailed(applicationId, 'The review could not be recorded. Use Re-run to retry.');
+    throw err;
+  }
+  return { status: unscored.status, links: [], queued: false };
 }

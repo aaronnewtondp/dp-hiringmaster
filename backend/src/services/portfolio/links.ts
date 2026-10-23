@@ -99,6 +99,12 @@ const PLATFORM_RANK: Record<PortfolioPlatform, number> = {
   wix: 1, squarespace: 1, carrd: 1, cargo: 1, adobe_portfolio: 1,
   behance: 2, dribbble: 2, notion: 2,
   figma_file: 3, google_slides: 3, pdf_file: 3,
+  // Marketing work-sample platforms: ranked by answerLinks.ts (its own picker), never by pickPortfolioLinks —
+  // listed so this table stays exhaustive over PortfolioPlatform.
+  canva: 2, medium: 2,
+  gdrive_file: 3, gdrive_folder: 3, google_doc: 3, google_sheet: 3, docx_file: 3, pptx_file: 3, image_file: 3,
+  cloud_file: 4, video_file: 4, youtube: 4, vimeo: 4, loom: 4,
+  instagram: 5, linkedin: 5, social_other: 5, link_hub: 5,
 };
 const MULTI_PER_HOST: ReadonlySet<PortfolioPlatform> = new Set(['behance', 'dribbble', 'notion']);
 

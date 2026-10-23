@@ -14,7 +14,7 @@
     },
     "api/portfolio-worker.ts": {
       "maxDuration": 300,
-      "includeFiles": "node_modules/@sparticuz/chromium/bin/**",
+      "includeFiles": "node_modules/{@sparticuz/chromium/bin/**,pdf-parse/dist/pdf-parse/cjs/index.cjs,pdf-parse/dist/pdf-parse/cjs/pdf.worker.mjs}",
       "experimentalTriggers": [
         {
           "type": "queue/v2beta",

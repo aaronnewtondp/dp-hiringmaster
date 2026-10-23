@@ -6,22 +6,17 @@ import { BrowserBusyError, isBrowserInUse, withBrowser } from './browser.js';
 import { capturePortfolios, CapturedPortfolio } from './capture.js';
 import { analyzePortfolios } from './analyze.js';
 import { applyPortfolioOutcome } from './scoring.js';
-import { MAX_ATTEMPTS, STALE_RUNNING_SECONDS } from './jobState.js';
+import { BUSY_WAIT_MS, MAX_ATTEMPTS, STALE_RUNNING_SECONDS, TOTAL_BUDGET_MS } from './jobState.js';
+import { reviewProfileFor } from './profiles.js';
+import { runMarketingReview } from './run.marketing.js';
 import { PortfolioAnalysisResult, PortfolioLink, PortfolioReviewed } from './types.js';
 
-// Wall-clock budget for the whole job. The function limit is 300s; browser work
-// gets what's left after reserving time for the model call and DB writes.
-const TOTAL_BUDGET_MS = 270_000;
+// Browser work gets what is left of the job's wall-clock budget (jobState.TOTAL_BUDGET_MS) after reserving time for
+// the model call and DB writes.
 const ANALYSIS_RESERVE_MS = 75_000;
 
-export { MAX_ATTEMPTS };
-
-/**
- * How long a review waits for this instance's browser before reporting 'busy'. Short on
- * purpose: the occupant needs minutes, so waiting longer only burns billed time — the
- * caller hands the review back to the queue to be tried again later instead.
- */
-export const BUSY_WAIT_MS = 3_000;
+// Re-exported: the budget and the busy wait are defined in jobState.ts (shared with run.marketing.ts, which run.ts imports).
+export { BUSY_WAIT_MS, MAX_ATTEMPTS, TOTAL_BUDGET_MS };
 
 export interface RunResult {
   ran:     boolean;
@@ -109,7 +104,18 @@ export async function runPortfolioAnalysis(applicationId: string, opts: { attemp
       queryOne<Role>('SELECT * FROM roles WHERE id=$1', [app.role_id]),
     ]);
     if (!candidate || !role) { await fail(applicationId, 'Candidate or role not found'); return { ran: true, status: 'failed' }; }
-    if (!role.portfolio_analysis_enabled) { await fail(applicationId, 'Portfolio review is not enabled for this role'); return { ran: true, status: 'failed' }; }
+    const profile = reviewProfileFor(role);
+    if (!profile) { await fail(applicationId, 'Portfolio review is not enabled for this role'); return { ran: true, status: 'failed' }; }
+
+    // The marketing work-sample review has its own flow. Known limitation: the isBrowserInUse() bounce and the claim
+    // above come first, so a marketing job that needs no browser (documents and videos only) is still handed back
+    // while this instance's browser is busy.
+    if (profile.kind === 'marketing_work') {
+      return await runMarketingReview({
+        applicationId, app, candidate, role, profile, startedAt, attempt, settleFailure,
+        release: () => release(applicationId),
+      });
+    }
 
     const links = (app.portfolio_urls || []) as PortfolioLink[];
     if (!links.length) { await fail(applicationId, 'No portfolio links stored for this application'); return { ran: true, status: 'failed' }; }
@@ -140,6 +146,17 @@ export async function runPortfolioAnalysis(applicationId: string, opts: { attemp
     }
 
     if (!ok.length) {
+      // Every link sat behind a bot check we cannot pass: neutral, never held against the candidate
+      // (so not the 1/3 scores below) — the dimension is simply not applied.
+      const unreviewable = captured.filter(c => c.access === 'unreviewable');
+      if (!blocked.length && !skipped.length && unreviewable.length) {
+        await applyPortfolioOutcome(applicationId, {
+          status: 'unreviewable', score: null, note: '', redFlags: [],
+          message: unreviewable.map(c => c.accessNote).filter(Boolean).join('; ') || undefined,
+        });
+        return { ran: true, status: 'unreviewable' };
+      }
+
       // Only blocked / file-link portfolios. Nothing for a reviewer to look at.
       const reviewed = captured.map(reviewedFromCapture);
       const why = [...blocked, ...skipped].map(c => c.accessNote).filter(Boolean).join('; ');

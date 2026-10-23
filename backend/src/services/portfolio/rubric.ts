@@ -49,7 +49,9 @@ const VERDICTS: ReadonlySet<string> = new Set(['strong', 'partial', 'not_evidenc
 // ─── Deterministic checks ────────────────────────────────────────────────────
 // html_based is a property of WHERE the portfolio lives, not of its content,
 // so it is decided from the platform rather than asked of the model.
-const HTML_VERDICT: Record<PortfolioPlatform, { verdict: CriterionVerdict; why: string }> = {
+// Partial: only designer-portfolio platforms have an opinion here. The marketing work-sample kinds (canva,
+// youtube, gdrive_file, …) never reach this table — and an unlisted platform falls back to `custom` below.
+const HTML_VERDICT: Partial<Record<PortfolioPlatform, { verdict: CriterionVerdict; why: string }>> & { custom: { verdict: CriterionVerdict; why: string } } = {
   custom:          { verdict: 'strong',  why: 'Own-domain website' },
   framer:          { verdict: 'strong',  why: 'Published Framer site (real HTML, fully custom design)' },
   webflow:         { verdict: 'strong',  why: 'Webflow site (real HTML, fully custom design)' },

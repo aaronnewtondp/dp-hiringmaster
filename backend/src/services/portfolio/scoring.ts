@@ -15,7 +15,7 @@ const SUMMARY_MARK = ' Portfolio review: ';
 const FLAG_PREFIX = 'Portfolio: ';
 
 export interface PortfolioOutcome {
-  status:   'completed' | 'inaccessible' | 'no_portfolio';
+  status:   'completed' | 'inaccessible' | 'no_portfolio' | 'unreviewable';
   /** null = the dimension is not applied at all (e.g. the resume itself was unreadable). */
   score:    number | null;
   note:     string;
@@ -26,7 +26,9 @@ export interface PortfolioOutcome {
   analysis?: PortfolioAnalysisResult;
 }
 
-export async function applyPortfolioOutcome(applicationId: string, out: PortfolioOutcome): Promise<{ avg: number | null }> {
+export async function applyPortfolioOutcome(
+  applicationId: string, out: PortfolioOutcome, opts: { foldPolicy?: 'always' | 'upside_only' } = {},
+): Promise<{ avg: number | null }> {
   return transaction(async (client) => {
     const { rows } = await client.query('SELECT * FROM applications WHERE id=$1 FOR UPDATE', [applicationId]);
     const app = rows[0];
@@ -38,13 +40,20 @@ export async function applyPortfolioOutcome(applicationId: string, out: Portfoli
     ];
     const haveBase = base.every(v => v != null);
 
-    let avg: number | null = null;
-    if (out.score != null && haveBase) {
-      avg = computeAvg(base as number[], out.score);
+    // 'upside_only' (a profile knob, off by default): a score below the candidate's own 8-dimension average is
+    // stored and shown but not folded in, so a weak sample can't rank someone under having submitted nothing.
+    const scored = out.score != null && haveBase;
+    const foldable = scored
+      && !(opts.foldPolicy === 'upside_only' && (out.score as number) < computeAvg(base as number[]));
+
+    // One statement for both ways of writing the average, so 'always' stays exactly as it was. `portfolioScore` is null when the
+    // average is the candidate's own (nothing folded in).
+    const writeAverage = async (portfolioScore: number | null, summaryLine: string | undefined, flagsFromReview: string[]): Promise<number> => {
+      const value = computeAvg(base as number[], portfolioScore);
       const baseSummary = String(app.score_summary || '').split(SUMMARY_MARK)[0].trim();
-      const summary = out.oneLiner ? `${baseSummary}${SUMMARY_MARK}${out.oneLiner}` : baseSummary;
+      const summary = summaryLine ? `${baseSummary}${SUMMARY_MARK}${summaryLine}` : baseSummary;
       const keptFlags = ((app.score_red_flags as string[] | null) || []).filter(f => !f.startsWith(FLAG_PREFIX));
-      const flags = [...keptFlags, ...out.redFlags.slice(0, 3).map(f => `${FLAG_PREFIX}${f}`)];
+      const flags = [...keptFlags, ...flagsFromReview.slice(0, 3).map(f => `${FLAG_PREFIX}${f}`)];
       await client.query(
         `UPDATE applications SET
            score_portfolio=$1, score_portfolio_note=$2,
@@ -54,12 +63,26 @@ export async function applyPortfolioOutcome(applicationId: string, out: Portfoli
            portfolio_analysis_status=$9, portfolio_analysis_error=$10, portfolio_analyzed_at=NOW()
          WHERE id=$11`,
         [
-          out.score, out.note.slice(0, 120), avg, Math.round(avg * 10), priorityBucketFromScore(avg),
+          out.score, out.note.slice(0, 120), value, Math.round(value * 10), priorityBucketFromScore(value),
           summary, flags,
-          avg >= 8 ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL,
+          value >= 8 ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL,
           out.status, out.message ?? null, applicationId,
         ],
       );
+      return value;
+    };
+
+    let avg: number | null = null;
+    if (foldable) {
+      avg = await writeAverage(out.score, out.oneLiner, out.redFlags);
+    } else if (scored) {
+      // foldPolicy 'upside_only' and the score is below the candidate's own average: the review and its score stay
+      // visible but are not part of the average. An EARLIER run may have folded a higher score in, though (a re-run
+      // that does worse), and leaving that behind would keep a number the stored review no longer supports — so the
+      // average, fit score, bucket, SLA, summary and flags are put back to what the 8 base scores alone give: the
+      // summary mark and the 'Portfolio: ' flags this feature wrote are removed, nothing of the review is added.
+      // `avg` stays null: nothing was folded in, which the activity line below says.
+      await writeAverage(null, undefined, []);
     } else {
       // The dimension isn't applied (or there's no base score to fold it into yet).
       await client.query(
@@ -83,7 +106,9 @@ export async function applyPortfolioOutcome(applicationId: string, out: Portfoli
         applicationId, app.candidate_id, app.role_id,
         out.score != null && avg != null
           ? `Portfolio ${out.score}/10 (${out.status}) — overall score now ${avg}/10`
-          : `Portfolio review: ${out.status}`,
+          : out.score != null && haveBase
+            ? `Portfolio ${out.score}/10 (${out.status}) — below the candidate's own average, so not folded into the overall score`
+            : `Portfolio review: ${out.status}`,
         out.status,
       ],
     );
