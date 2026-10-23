@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import { applicationsApi, rolesApi } from '../services/api.ts';
 import { Application, PRIORITIES, APPLICATION_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
 import { Spinner, EmptyState, OverBudgetBadge, StageBadge, GenderBadge } from '../components/shared/Badges.tsx';
-import PortfolioReviewCard from '../components/PortfolioReviewCard.tsx';
+import PortfolioReviewCard, { isNotQueued } from '../components/PortfolioReviewCard.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import StageChangeModal from '../components/shared/StageChangeModal.tsx';
 import RejectReasonModal from '../components/shared/RejectReasonModal.tsx';
@@ -47,6 +47,41 @@ function ScoreCell({ score }: { score?: number }) {
     score >= 4    ? 'text-amber-600' :
     'text-red-500';
   return <span className={`text-xs ${color}`}>{score != null ? score : '—'}</span>;
+}
+
+// Why a review with no score has none, for the hover on its dash. (A designer review with no usable portfolio is scored
+// 0-3 and shows that number; only the marketing review leaves its dimension out, so only it ends up here.)
+const NOT_SCORED_TITLE: Partial<Record<NonNullable<Application['portfolio_analysis_status']>, string>> = {
+  no_portfolio: 'Not scored: no work samples to review',
+  inaccessible: 'Not scored: the linked work is private or unavailable',
+  unreviewable: 'Not scored: the linked work cannot be opened automatically',
+};
+
+// The Portfolio column. Every state says something, because a bare '—' or '!' left HR guessing: a failed RE-RUN keeps the
+// earlier review's score in the average (so the score still shows, with a red dot), and a review with no score says why.
+function PortfolioCell({ app }: { app: Application }) {
+  const status = app.portfolio_analysis_status;
+  const score = app.score_portfolio ?? undefined;
+  if (status === 'pending' && isNotQueued(app.portfolio_analysis_error)) {
+    return <span title="Portfolio review could not be queued — open the candidate to re-run it" className="text-xs text-amber-600">!</span>;
+  }
+  if (status === 'pending' || status === 'running') {
+    return <span title="Portfolio review in progress — the average is provisional" className="text-xs text-gray-400">…</span>;
+  }
+  if (status === 'failed') {
+    if (score == null) return <span title="Portfolio review failed — open the candidate to re-run it" className="text-xs text-red-500">!</span>;
+    return (
+      <span className="inline-flex items-center justify-end gap-1">
+        <ScoreCell score={score} />
+        <span role="img" aria-label="A later re-run failed — this is the earlier review" title="A later re-run failed — this is the earlier review"
+          className="inline-block w-1.5 h-1.5 rounded-full bg-red-500" />
+      </span>
+    );
+  }
+  if (score == null && status && NOT_SCORED_TITLE[status]) {
+    return <span title={NOT_SCORED_TITLE[status]} className="text-xs text-gray-400 cursor-help">—</span>;
+  }
+  return <ScoreCell score={score} />;
 }
 
 // Mirrors ResumeIQPanel.tsx's private recColor mapping (copied, same reasoning).
@@ -650,13 +685,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                       <td key={d.key} className="table-td px-1.5 py-3 text-right"><ScoreCell score={app[d.key] as number | undefined} /></td>
                     ))}
                     {showPortfolioCol && (
-                      <td className="table-td px-1.5 py-3 text-right">
-                        {app.portfolio_analysis_status === 'pending' || app.portfolio_analysis_status === 'running'
-                          ? <span title="Portfolio review in progress — the average is provisional" className="text-xs text-gray-400">…</span>
-                          : app.portfolio_analysis_status === 'failed'
-                            ? <span title="Portfolio review failed — open the candidate to re-run it" className="text-xs text-red-500">!</span>
-                            : <ScoreCell score={app.score_portfolio ?? undefined} />}
-                      </td>
+                      <td className="table-td px-1.5 py-3 text-right"><PortfolioCell app={app} /></td>
                     )}
                     <td className="table-td px-1.5 py-3 text-sm font-semibold text-gray-900">
                       {app.score_avg != null ? Number(app.score_avg).toFixed(1) : '—'}
@@ -732,7 +761,14 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                           </div>
                         </div>
                         {app.portfolio_analysis_status && (
-                          <div className="mt-4"><PortfolioReviewCard applicationId={app.id} status={app.portfolio_analysis_status} /></div>
+                          // This cell spans the whole table (2,000+ px), so a card sized to it laid its two-column grids out far
+                          // beyond the visible area. sticky keeps the card in view while the table scrolls sideways; the width is
+                          // the card's own (64rem), but never more than the screen leaves once the menu (from lg:), the page
+                          // padding and the 1rem the card sits in from the left are taken off.
+                          <div data-testid="portfolio-card-frame"
+                            className="mt-4 sticky left-4 max-w-5xl w-[min(100%,64rem,calc(100vw_-_4.5rem))] lg:w-[min(100%,64rem,calc(100vw_-_19rem))]">
+                            <PortfolioReviewCard applicationId={app.id} status={app.portfolio_analysis_status} />
+                          </div>
                         )}
                       </td>
                     </tr>

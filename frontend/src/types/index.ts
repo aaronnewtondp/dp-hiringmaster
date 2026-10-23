@@ -59,6 +59,8 @@ export interface Role {
   social_jd_drive_link?:    string;
   jd_source?:               'generated' | 'manual';
   portfolio_analysis_enabled?: boolean;
+  // Which review a role with portfolio review enabled gets: the designer portfolio (default) or the Head of Marketing work samples.
+  portfolio_review_kind?:   PortfolioReviewKind;
   whatsapp_forward_link?:   string;
   referral_message_link?:   string;
   approval_summary_link?:   string;
@@ -209,7 +211,7 @@ export interface Application {
   score_resume_read?:          boolean;
   score_computed_at?:          string;
   // Portfolio review — the 9th ResumeIQ dimension; only set for roles with
-  // portfolio review enabled (Senior UX/Product Designer).
+  // portfolio review enabled (Senior UX/Product Designer, Head of Marketing & Creative Direction).
   portfolio_analysis_status?:  PortfolioStatus | null;
   portfolio_analysis_error?:   string | null;
   score_portfolio?:            number | null;
@@ -546,18 +548,33 @@ export const PRIORITY_COLORS: Record<Priority, string> = {
 };
 
 // ─── Portfolio review (mirrors backend/src/services/portfolio/types.ts) ──────
-export type PortfolioStatus = 'pending' | 'running' | 'completed' | 'failed' | 'no_portfolio' | 'inaccessible';
+// 'unreviewable' = work a machine cannot open (bot wall, social platform, video-only link, unsupported type):
+// neutral, never held against the candidate (unlike 'inaccessible', a private/dead link).
+export type PortfolioStatus = 'pending' | 'running' | 'completed' | 'failed' | 'no_portfolio' | 'inaccessible' | 'unreviewable';
+export type PortfolioReviewKind = 'design_portfolio' | 'marketing_work';
 export type CriterionVerdict = 'strong' | 'partial' | 'not_evidenced' | 'concern';
 
-export interface PortfolioCriterion { id: string; label: string; verdict: CriterionVerdict; evidence: string }
+export interface PortfolioCriterion {
+  id: string; label: string; verdict: CriterionVerdict; evidence: string;
+  // Marketing work-sample review only (absent on designer reviews).
+  group?:      'direct' | 'corroboration' | 'quality';
+  weight?:     number;
+  // seen = in an artifact that was looked at, read = in extracted text, claimed = stated without evidence, none = no source.
+  basis?:      'seen' | 'read' | 'claimed' | 'none';
+  source?:     string;      // 'L1', 'L2' ... or 'answer'
+  // false = left out of the checklist denominator (a portfolio can't prove it; the base 8 dimensions cover it).
+  assessable?: boolean;
+}
 export interface PortfolioAlignmentItem { item: string; verdict: CriterionVerdict; evidence: string }
 export interface PortfolioReviewedSite {
   url: string;
   platform: string;
   isPortfolio: boolean;
   belongsToCandidate: boolean | null;
+  // true = the link's text tried to instruct or sway an AI reviewer.
+  attemptsToInfluenceReviewer?: boolean;
   accessible: boolean;
-  accessKind?: 'ok' | 'blocked' | 'error' | 'skipped';
+  accessKind?: 'ok' | 'blocked' | 'error' | 'skipped' | 'unreviewable';
   accessNote?: string;
   pagesReviewed: number;
   pageTitles: string[];
@@ -566,11 +583,29 @@ export interface PortfolioReviewedSite {
     mobileOverflow: boolean | null; loadMs: number | null; truncated: boolean;
   };
   note?: string;
+  // Marketing work-sample review only (absent on designer reviews).
+  ref?:           string;     // 'L1', 'L2' ...
+  handler?:       'site' | 'document' | 'image' | 'video' | 'social' | 'resolve' | 'none';
+  outcome?:       'ok' | 'partial' | 'inaccessible' | 'failed' | 'unreviewable';
+  basis?:         'artifact' | 'metadata';
+  // Set only for a link whose content really reached the reviewer; a link without it was not read.
+  coverage?:      'full' | 'partial' | 'metadata_only';
+  relevance?:     'work_sample' | 'profile_only' | 'employer_site_no_attribution' | 'irrelevant';
+  attribution?:   'candidate_owned' | 'led_team' | 'employer_or_client' | 'unattributed' | 'other_person' | 'unknown';
+  campaignsSeen?: number;
+  summary?:       string;
+  facts?:         string[];   // our own measurements, e.g. 'PDF, 18 of 18 pages read'
+  reason?:        string;     // plain-language reason shown when the link was not (fully) reviewed
 }
+export interface PortfolioCampaign { name: string; ref?: string; metric?: string; roleStated?: 'led' | 'contributed' | 'unclear' }
 export interface PortfolioAnalysis {
   version: 1;
+  // Which review produced this. Absent on every review made before the marketing kind existed => design_portfolio.
+  kind?: PortfolioReviewKind;
   analyzedAt: string;
   model: string;
+  // Every link that was acquired. A marketing review lists the ones it could not read here too (outcome and reason set),
+  // and only a link the model was actually shown has `coverage`.
   portfolios: PortfolioReviewedSite[];
   criteria: PortfolioCriterion[];
   jdAlignment: { mustHaves: PortfolioAlignmentItem[]; niceToHaves: PortfolioAlignmentItem[] };
@@ -581,11 +616,30 @@ export interface PortfolioAnalysis {
   highlights: string[];
   redFlags: string[];
   summary: string;
+  // Marketing work-sample review only (absent on designer reviews).
+  confidence?: 'high' | 'medium' | 'low';
+  campaigns?: PortfolioCampaign[];
+  // Links that were never opened, by policy (LinkedIn, links over the cap, social profiles) and why — built by the
+  // backend, never by the model. A review stored by an earlier build ALSO repeated here every link it opened but
+  // could not use, so a reader must treat `portfolios` + `unreviewed` as one list de-duplicated by URL.
+  unreviewed?: Array<{ url: string; platform: string; reason: string }>;
+  unverifiedClaims?: string[];
+  // The candidate's own screening answer (capped): described, unverified.
+  claimText?: string;
+  usage?: { inputTokens: number; outputTokens: number };
+  // Human-readable caps that really lowered the score, e.g. 'Metadata-only evidence: capped at 5'. A review stored by
+  // an earlier build also mixed audit notes in here — a reader shows only the strings that say 'capped at'.
+  caps?: string[];
+  // How the evidence was checked: verdicts lowered because the quote or source did not hold up, the fairness-filter
+  // note, size trimming. For audit — never shown as a score cap. Criterion ids may prefix a note ('mh3: …').
+  evidenceNotes?: string[];
 }
 export interface PortfolioReviewResponse {
+  // Which review this is. Optional because an older backend does not send it; readers treat a missing kind as the designer review.
+  kind?: PortfolioReviewKind;
   status: PortfolioStatus | null;
   message: string | null;
-  urls: Array<{ url: string; host: string; platform: string }>;
+  urls: Array<{ url: string; host: string; platform: string; handler?: string }>;
   analyzed_at: string | null;
   score: number | null;
   note: string | null;

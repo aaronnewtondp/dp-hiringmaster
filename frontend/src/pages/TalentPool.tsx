@@ -19,7 +19,7 @@ const LIMIT = 50;
 const COLUMN_INFO: Record<string, string> = {
   'Gender': GENDER_COLUMN_INFO,
   'Stage': "The stage this application had reached. Putting it on hold, rejecting or withdrawing it changes its status, not its stage, so this is where it was left.",
-  'Fit': "ResumeIQ's score (0-100) for this application: the average of its 8 dimensions (for the Senior UX/Product Designer role, a Portfolio score is added once its portfolio review finishes), scored automatically when the candidate applied.",
+  'Fit': "ResumeIQ's score (0-100) for this application: the average of its 8 dimensions (for the Senior UX/Product Designer and Head of Marketing roles, a Portfolio score is added once its portfolio review finishes; for Head of Marketing it is left out when there is no work that could be reviewed), scored automatically when the candidate applied.",
   'Current CTC → Expected CTC': "Current fixed CTC → expected CTC from the candidate's own profile, in ₹ lakhs (one figure per candidate, so the same on each of their rows). There is no Over Budget flag here. A dash means not recorded or, for a Hiring Manager, a candidate on none of their roles.",
   'Notice Period': "Notice period in days, from the candidate's profile.",
   'Company / Industry': "Current company and industry from the candidate's own profile, shown as one field.",
