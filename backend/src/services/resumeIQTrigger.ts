@@ -11,14 +11,16 @@ import { Application, Candidate, Role, SLA_HOURS } from '../types/index.js';
 import { scoreCandidate, priorityBucketFromScore } from './resumeIQ.js';
 import { fetchResumeText, fetchResumeTextAndLinks } from './driveService.js';
 import { LinkInput, pickPortfolioLinks } from './portfolio/links.js';
-import { markPortfolioFailed, preparePortfolioReview } from './portfolio/enqueue.js';
+import { markPortfolioFailed, prepareMarketingReview, preparePortfolioReview } from './portfolio/enqueue.js';
 import { hasReadableText } from './portfolio/text.js';
+import { reviewProfileFor } from './portfolio/profiles.js';
+import { pickAnswerLinks } from './portfolio/answerLinks.js';
 
 export interface ResumeIqTriggerResult {
   scored: boolean;
   error?: string;
   /** Set for roles with portfolio review enabled: what happened to the queued review. */
-  portfolio?: { status: 'pending' | 'no_portfolio' | 'busy' | 'failed'; queued: boolean; links: number };
+  portfolio?: { status: 'pending' | 'no_portfolio' | 'unreviewable' | 'busy' | 'failed'; queued: boolean; links: number };
 }
 
 // Guarded by !app.score_avg by the caller (or here, redundantly, since a
@@ -33,6 +35,9 @@ export async function runResumeIQScoring(applicationId: string): Promise<ResumeI
     const candidate = await queryOne<Candidate>('SELECT * FROM candidates WHERE id=$1', [app.candidate_id]);
     const role      = await queryOne<Role>('SELECT * FROM roles WHERE id=$1', [app.role_id]);
     if (!candidate || !role) return { scored: false, error: 'Candidate or role not found' };
+    // Which portfolio review (if any) this role gets. Only the resume-sourced review reads the resume's hyperlinks.
+    const reviewProfile = reviewProfileFor(role);
+    const resumeReview = reviewProfile?.source === 'resume';
 
     // Fetch actual resume text from Drive if a link is on file. Falls back
     // gracefully to profile-fields-only scoring on any failure.
@@ -42,7 +47,7 @@ export async function runResumeIQScoring(applicationId: string): Promise<ResumeI
     if (candidate.resume_drive_link) {
       // Roles with portfolio review also need every hyperlink in the file —
       // fetched in the same download, so it costs no extra Drive round trip.
-      if (role.portfolio_analysis_enabled) {
+      if (resumeReview) {
         const fetched = await fetchResumeTextAndLinks(candidate.resume_drive_link);
         resumeText = fetched.text;
         resumeLinks = fetched.links;
@@ -108,7 +113,7 @@ export async function runResumeIQScoring(applicationId: string): Promise<ResumeI
     // roles the portfolio review is a separate, slower job (35-140s) that
     // later adds the 9th dimension — queue it (or settle it right away if the
     // resume has no portfolio link). A failure here must never undo the score.
-    if (role.portfolio_analysis_enabled) {
+    if (resumeReview) {
       try {
         if (linksError) {
           // We could read the resume but not its hyperlinks. "No links found"
@@ -122,6 +127,18 @@ export async function runResumeIQScoring(applicationId: string): Promise<ResumeI
         return { scored: true, portfolio: { status: prepared.status, queued: prepared.queued, links: prepared.links.length } };
       } catch (err) {
         console.error('[ResumeIQ] Portfolio preparation failed for', app.id, err);
+        return { scored: true };
+      }
+    }
+    // Work-sample review (Head of Marketing): the links come from the screening answer, not the resume. Blank,
+    // text-only and unopenable answers settle right here with the dimension not applied; the rest is queued.
+    if (reviewProfile?.source === 'screening') {
+      try {
+        const pick = pickAnswerLinks(app.screening_answers, { candidateName: candidate.full_name });
+        const prepared = await prepareMarketingReview({ applicationId: app.id, pick });
+        return { scored: true, portfolio: { status: prepared.status, queued: prepared.queued, links: prepared.links.length } };
+      } catch (err) {
+        console.error('[ResumeIQ] Work-sample review preparation failed for', app.id, err);
         return { scored: true };
       }
     }

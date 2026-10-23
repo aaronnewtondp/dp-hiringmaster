@@ -165,12 +165,13 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         answer: (
           <>
             <p><strong>My Tasks</strong> is your own worklist, shown as a row of boxes with counts: <strong>Ready for review</strong> (candidates awaiting a shortlist decision — HR/Admin and Super Admin see everyone, a Hiring Manager sees only their own role's candidates, and Leadership sees only candidates flagged for Founder Review, since day-to-day shortlisting is HR/HM's job rather than a leadership task), <strong>Feedback Due</strong> (overdue interview and assignment feedback — HR/Admin and Super Admin see everyone's, a Hiring Manager only the rounds they're an interviewer on), and a third box that differs by persona: HR/Admin and Super Admin see <strong>Other Pending Actions</strong> (everything else actually theirs to resolve), plus a separate <strong>Leadership Alerts</strong> panel — company-wide notices like role-aging flags or the Feedback-Overdue escalation that nobody individually owns, kept visible but not counted toward the actionable badge; a Hiring Manager sees their own Other Pending Actions; Leadership sees Leadership Alerts directly. HR/Admin and Super Admin also get a fourth box, <strong>Sourcing</strong>, when the Sourcing module is switched on. Each list shows the 100 highest-priority, oldest open items. A Leadership user who is also the named Hiring Manager of a role (a name on the role's Hiring Manager field) keeps all of that and additionally gets that role's Hiring Manager work: its candidates join Ready for review, its overdue shortlist decisions land in Other Pending Actions, and the interview feedback they personally owe on that role (rounds where they're the listed interviewer, or that have no interviewer assigned) lands in Feedback Due — with a line at the top naming the role(s). Only that role — it doesn't make them a Hiring Manager anywhere else.</p>
-            <p className="mt-1.5"><strong>Scorecard Summary</strong> is the table inside Ready for review — not a separate page (a role's Scorecard Summary button opens it filtered to that role). It lists scored candidates side by side with all 8 dimension scores (plus Portfolio for designer roles) and the verdict, filterable and searchable; only candidates at Applied and Screened have checkboxes and the Shortlist / Hold for Future / Reject actions, individually or in bulk — later-stage rows are there for comparison. Instead of a chevron, a centered <strong>View Highlights and Summary</strong> button under the score columns expands a candidate's strengths, red flags, and executive summary. HR/Admin also see a banner when some candidates have no ResumeIQ score (the automatic scoring didn't complete) with a <strong>Retry scoring</strong> button.</p>
+            <p className="mt-1.5"><strong>Scorecard Summary</strong> is the table inside Ready for review — not a separate page (a role's Scorecard Summary button opens it filtered to that role). It lists scored candidates side by side with all 8 dimension scores (plus Portfolio for designer and Head of Marketing roles) and the verdict, filterable and searchable; only candidates at Applied and Screened have checkboxes and the Shortlist / Hold for Future / Reject actions, individually or in bulk — later-stage rows are there for comparison. Instead of a chevron, a centered <strong>View Highlights and Summary</strong> button under the score columns expands a candidate's strengths, red flags, and executive summary. HR/Admin also see a banner when some candidates have no ResumeIQ score (the automatic scoring didn't complete) with a <strong>Retry scoring</strong> button.</p>
             <p className="mt-1.5">For roles that get a <strong>portfolio review</strong> (today the
-            Senior UX/Product Designer role), Ready for review has a <strong>Portfolio ≥ 7.5</strong>{' '}
+            Senior UX/Product Designer role and the Head of Marketing &amp; Creative Direction role), Ready for review has a <strong>Portfolio ≥ 7.5</strong>{' '}
             button beside the search box: it narrows the list to candidates whose portfolio
             review scored 7.5 or higher. Portfolio scores are whole numbers (0–10), so that means 8 or
-            more, and candidates with no portfolio score — including every other role's — are hidden
+            more, and candidates with no portfolio score — including every other role's, and any
+            Head of Marketing candidate whose work could not be reviewed — are hidden
             while it is on. The button only appears when the Role filter is clear or includes such a
             role.</p>
           </>
@@ -352,27 +353,59 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
       },
       {
         id: 'portfolio-review',
-        question: 'How does the Portfolio review work for designer roles?',
+        question: 'How does the Portfolio review work (designer and Head of Marketing roles)?',
         answer: (
           <>
-            <p>For the Senior UX/Product Designer role, ResumeIQ adds a ninth dimension —{' '}
-            <strong>Portfolio</strong>. Right after the normal 8-dimension score is saved, the
-            portfolio links in the candidate's resume (Behance, Framer, Figma, their own site, and
-            so on — including links hidden behind a word like "Portfolio") are opened in a
-            browser and reviewed page by page against the JD and the hiring manager's 15 criteria
-            — full ownership of a product, storytelling and process, field research, design
-            system work, whether the site itself works, and so on. This takes a few minutes, so
-            the overall score shown at first is <strong>provisional</strong> (marked "…" in the
-            Portfolio column) and updates when the review finishes.</p>
+            <p>Two roles — the Senior UX/Product Designer and the Head of Marketing &amp; Creative
+            Direction — get a ninth ResumeIQ dimension, <strong>Portfolio</strong>. Right after the
+            normal 8-dimension score is saved, a review runs in the background and takes a few
+            minutes, so the overall score shown at first is <strong>provisional</strong> (marked "…"
+            in the Portfolio column) and updates when the review finishes.</p>
+            <p className="mt-2"><strong>Designer roles.</strong> The portfolio links in the
+            candidate's resume (Behance, Framer, Figma, their own site, and so on — including links
+            hidden behind a word like "Portfolio") are opened in a browser and reviewed page by page
+            against the JD and the hiring manager's 15 criteria — full ownership of a product,
+            storytelling and process, field research, design system work, whether the site itself
+            works, and so on. A missing portfolio link, or a dead or private one, is a concern and
+            lowers the score.</p>
+            <p className="mt-2"><strong>Head of Marketing.</strong> The review looks at the links in
+            the candidate's answer to "Links to public resources/portfolio to highlight your past
+            work?" on the application form — Google Drive documents, decks and PDFs, Word and
+            PowerPoint files, images, their own site, Behance, Canva or Notion pages — and reads them
+            against the role's must-haves and nice-to-haves. It weighs how much of the work can be
+            attributed to the candidate, how well it is measured and how finished it is, as well as
+            what it shows. YouTube and Vimeo links are judged from the title, description and
+            thumbnails only (the video is not watched), an Instagram link from its public caption
+            only, and LinkedIn is never opened. <strong>A missing or "N/A" answer, a text-only answer,
+            a private or dead link, a link a machine cannot open, or work the review could not
+            assess (unreadable, or in a language it cannot judge) is not scored</strong> — the
+            Portfolio dimension is simply left out, the overall score stays the average of the other 8
+            dimensions, and the candidate's page says why. A link that cannot be opened is never held
+            against the candidate. Inside the review (under View Highlights and Summary, or on the
+            candidate's page) the score is shown with how many of the links it is based on and a
+            confidence level, it is capped when the evidence is thin, and anything that was not reviewed
+            is listed once under "Not reviewed — open these by hand" so you can look at it yourself.
+            The Portfolio column shows the score on its own; hover a dash to see why there is none.</p>
             <p className="mt-2">The result appears under <strong>View Highlights and Summary</strong>{' '}
             and on the candidate's page: a 0-10 portfolio score (included in the overall score),
             what was reviewed, strengths and concerns, and each criterion marked Evidenced /
-            Partly / Not evidenced / Concern with a line of evidence. "Not evidenced" only means
-            the portfolio doesn't show it — it is not held against the candidate. A missing
-            portfolio link, or a dead or private one, is a concern and lowers the score.
-            If a review fails on our side it never counts against the candidate; HR can press{' '}
-            <strong>Re-run</strong> to retry, which also re-reads the resume in case a link was
-            missed.</p>
+            Partly / Not evidenced / Concern with a line of evidence. "Not evidenced" is not an
+            accusation — it means the work doesn't show it — but it is not neutral either: on what
+            the work should show it counts for less than "Partly" and <strong>lowers the score</strong>.
+            For Head of Marketing there are two exceptions. The few criteria a portfolio can rarely prove
+            (a team led, working within limits, a mission, a pitch, time in a start-up — the 8 ResumeIQ dimensions
+            already cover them) are left out of the maths unless the work itself clearly shows them, so missing
+            or partial evidence of those never lowers the score. And "Personal role shown" — whether the
+            candidate's own part in the work is evidenced — only counts when it is clear either way: a named
+            credit or an explicit first-person role raises the score, a different person credited (or a claim the
+            work contradicts) lowers it, and "Partly" or "Not evidenced" there (a plausible owner, or a brand page
+            with no credit) leaves it out of the maths altogether. A criterion the reviewer could not assess at all
+            is left out too. If a review fails on
+            our side it never counts against the candidate; HR can press <strong>Re-run</strong> to
+            retry, which re-reads the resume (designer roles, in case a link was missed) or the
+            application answer (Head of Marketing). For Head of Marketing, if a Re-run finds nothing
+            new, the earlier score stays in the average and the Portfolio column shows it with a small
+            red dot.</p>
           </>
         ),
       },

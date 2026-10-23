@@ -23,7 +23,7 @@ const UNMATCHED_PAGE_SIZE = 50;
 
 const COLUMN_INFO: Record<string, string> = {
   'Gender': GENDER_COLUMN_INFO,
-  'Fit': "ResumeIQ's score (0-100): the average of its 8 dimensions (Technical, Experience, Industry Fit, Culture Fit, Role Alignment, Trajectory, Leadership, Communication) × 10. The Senior UX/Product Designer role adds a ninth, Portfolio, once that review finishes. Scored automatically when the candidate applies; 75+ also tightens SLA windows to 24h.",
+  'Fit': "ResumeIQ's score (0-100): the average of its 8 dimensions (Technical, Experience, Industry Fit, Culture Fit, Role Alignment, Trajectory, Leadership, Communication) × 10. The Senior UX/Product Designer and Head of Marketing roles add a ninth, Portfolio, once that review finishes (for Head of Marketing it is left out when there is no work that could be reviewed). Scored automatically when the candidate applies; 75+ also tightens SLA windows to 24h.",
   'Current CTC → Expected CTC': "Current fixed CTC → expected CTC, both from the candidate's own profile (one figure per candidate, not per role), in ₹ lakhs. 'Over Budget' = expected CTC above the top of the role's CTC band.",
   'Application Date': 'Days since the candidate applied — not the same as Last Updated.',
   'Company / Industry': "Current company and industry from the candidate's own profile, shown as one field.",

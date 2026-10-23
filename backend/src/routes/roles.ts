@@ -81,9 +81,11 @@ router.get('/filter-options', async (_req: Request, res: Response) => {
     // Role master filter (Dashboard + Candidates) — every role not in a
     // Closed state, so it stays current automatically as roles are created
     // or closed, with no separate list to maintain.
-    // portfolio_analysis_enabled lets the UI offer the portfolio-score filter only where it can match anything.
-    query<{ id: string; title: string; portfolio_analysis_enabled: boolean }>(
-      `SELECT id, title, COALESCE(portfolio_analysis_enabled, false) AS portfolio_analysis_enabled
+    // portfolio_analysis_enabled lets the UI offer the portfolio-score filter only where it can match anything;
+    // portfolio_review_kind says which review that is (designer portfolio or marketing work samples).
+    query<{ id: string; title: string; portfolio_analysis_enabled: boolean; portfolio_review_kind: string }>(
+      `SELECT id, title, COALESCE(portfolio_analysis_enabled, false) AS portfolio_analysis_enabled,
+              COALESCE(portfolio_review_kind, 'design_portfolio') AS portfolio_review_kind
          FROM roles WHERE status NOT IN ('Closed – Filled','Closed – Cancelled') ORDER BY title`
     ),
   ]);

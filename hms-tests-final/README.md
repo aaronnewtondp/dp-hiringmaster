@@ -113,9 +113,14 @@ tests/
 │   ├── global-setup.ts   # pre-auth all users once per run
 │   ├── api.ts            # token cache, authed() helper, data factories,
 │   │                      # ingest secrets, pollUntil() async-condition poller
-│   └── calendar.ts       # real Google Calendar helper (get/delete event, credential
-│                          # detection) — used by the one real-round-trip Calendar test
-│                          # and its e2e counterpart, see below
+│   ├── calendar.ts       # real Google Calendar helper (get/delete event, credential
+│   │                      # detection) — used by the one real-round-trip Calendar test
+│   │                      # and its e2e counterpart, see below
+│   ├── smoke-env.ts      # loads the production smoke-account credentials (.env.smoke.local / env)
+│   └── sourcing-db.ts    # LOCAL ONLY: purgeRolesFast() (one-transaction cleanup of throwaway roles —
+│                          # pending_actions is unindexed and millions of rows locally) and
+│                          # trackerMigrationSql() (the migration block at the end of schema.sql);
+│                          # used by the sourcing specs and 15-marketing-work-review
 ├── api/  (41 files)
 │   ├── 01-auth.spec.ts
 │   ├── 02-roles.spec.ts
@@ -160,7 +165,7 @@ tests/
 │   ├── 39-dashboard-funnel-snapshot-endpoint.spec.ts # GET /api/dashboard/funnel-snapshot
 │   ├── 40-candidate-gender.spec.ts                 # auto-tag from name, manual correction, gender filter
 │   └── 41-multiple-rejection-reasons.spec.ts       # rejection_reason_cats[]: stored '; '-joined, legacy single field, validation, HM path
-├── db/  (14 files — direct Postgres via `pg`, LOCAL ONLY, never prod)
+├── db/  (16 files — direct Postgres via `pg`, LOCAL ONLY, never prod)
 │   ├── 00-schema-integrity.spec.ts        # dedicated sequences, GIN indexes, sourcing tables (RLS, live-exception partial unique index, cascade)
 │   ├── 01-talent-pool-archival.spec.ts    # 90-day archival threshold (backdates last_updated directly)
 │   ├── 02-role-discard-activity-log.spec.ts
@@ -168,13 +173,15 @@ tests/
 │   ├── 04-role-aging-close-target.spec.ts # aging_alert anchored to target_closure_date, not days-open
 │   ├── 05-aging-roles-no-movement.spec.ts # no_recent_candidate_activity flag (backdates activity_log)
 │   ├── 06-manual-jd-source.spec.ts        # roles.jd_source='manual' guard on auto-gen + regenerate-jd
-│   ├── 07-portfolio-review.spec.ts        # portfolio review (9th ResumeIQ dimension): schema, route gating, killed-job recovery, backfill guards — no browser/model calls
+│   ├── 07-portfolio-review.spec.ts        # portfolio review (9th ResumeIQ dimension, designer R007 path): schema, route gating, killed-job recovery, backfill guards — no browser/model calls for the portfolio review itself (its candidates ARE scored by the real model: POST /api/candidates runs ResumeIQ, so 3 of its 15 tests fail while the LOCAL Anthropic key is over its usage limit — see "Known environmental failure" below)
 │   ├── 08-low-pipeline-breakdown.spec.ts  # Low Pipeline Roles: the rule (<3 shortlisted AND <8 active, exact boundaries) + the Pipeline / Scored >60 / Shortlisted / Shortlisted >60 counts (sets fit scores + stages directly)
 │   ├── 09-sla-by-role.spec.ts             # GET /api/dashboard/sla-by-role: shape, reconciles with funnel-snapshot, filters/owner/HM lock, stale-role move, closed roles (real breaches via backdated stage_entry_time + /api/cron/sla-check)
 │   ├── 10-leadership-role-hiring-manager.spec.ts # a Leadership user who is also a role's named HM: /pending adds that role's HM queue + hm_roles (role-scoped), applications founder_flag+or_role_id union, persona/dashboard unchanged
 │   ├── 11-co-hiring-managers.spec.ts      # several Hiring Managers in one hiring_manager_name ("A, B"): comp visibility, dashboard lock, SLA row attribution + My Tasks queue, SLA KPI, Leadership co-HM, look-alike names rejected, SQL-vs-TypeScript parity of the name rule
 │   ├── 12-portfolio-score-filter.spec.ts  # GET /api/applications?min_portfolio_score (whole-number scores, inclusive, NULL never matches, 400 on junk, composes with other filters) + roles/filter-options portfolio_analysis_enabled
-│   └── 13-sourcing-plans.spec.ts          # Sourcing module: seed/activate/complete, engine firing + clearing (no duplicates under 6 concurrent runs), the 3 resolution paths, shadow mode, HM redaction (no PII), role hooks (hold/close — nothing is queued on close — reopen, and multi-hop status chains that must not strand a plan), managing a running plan (a channel added mid-flight gets its first commitment, follow-ons revive when an activation is completed again, Undo-skip rules, owner / strategy-note edits), hooks survive missing tables, source_tag → sub_source (35 tests). NEEDS SOURCING_ENABLED=true on the backend (skips itself otherwise)
+│   ├── 13-sourcing-plans.spec.ts          # Sourcing module: seed/activate/complete, engine firing + clearing (no duplicates under 6 concurrent runs), the 3 resolution paths, shadow mode, HM redaction (no PII), role hooks (hold/close — nothing is queued on close — reopen, and multi-hop status chains that must not strand a plan), managing a running plan (a channel added mid-flight gets its first commitment, follow-ons revive when an activation is completed again, Undo-skip rules, owner / strategy-note edits), hooks survive missing tables, source_tag → sub_source (39 tests). NEEDS SOURCING_ENABLED=true on the backend (skips itself otherwise)
+│   ├── 14-sourcing-workspace.spec.ts      # Sourcing workspace release (83 serial tests): the first task's link + weekly target, the weekly tracker weeks (target met / missed, IST edges, idempotent + race-safe sync), Close / Reopen channel and every path that stops a tracker, hold and resume, the per-role qualified target, the plan history, the workspace endpoint and summary, channel settings, the AI-advice cache, HM redaction, form source tags, and the data migration run against production-shaped rows inside a rolled-back transaction. NEEDS SOURCING_ENABLED=true (skips itself otherwise)
+│   └── 15-marketing-work-review.spec.ts   # (65 tests) R019 work-sample review, the 2nd kind of the shared Portfolio review (roles.portfolio_review_kind = 'marketing_work'): schema (kind default / NOT NULL / CHECK, the 'unreviewable' status, schema.sql replay), no API toggle, a flag-only role still takes the designer (resume) path, blank / "N/A" / text-only / LinkedIn-only answers are NOT scored (NULL score, average untouched, message + stored review), real link answers (handlers, ranking, caps, de-duplication, local "could not be queued" note), the re-run guard (an earlier good review is never overwritten, and the links it was built from are kept), personas, 404/409, running vs stale, concurrent Re-runs, an induced write failure, GET `kind` (a stored review names its own; one without a kind stays a designer review whatever the role says now), filter-options, answer selection by question wording, min_portfolio_score for both kinds, backfill. Applications are made with SQL so NO model or browser runs
 ├── smoke/
 │   ├── production.spec.ts      # safe for live Vercel — READ-ONLY API checks + auth-rejection checks, as the two smoke accounts
 │   └── production-ui.spec.ts   # the same idea in a real browser: every main page opens for both personas
@@ -212,6 +219,21 @@ gotcha). Frontend coverage includes both pure utils (`budget.ts`,
 `rejectionEmailTemplates.ts`) and component-level tests via React Testing
 Library (`components/shared/Badges.tsx`) — proving both layers work, not
 just pure functions.
+
+The Portfolio review (the designer and the Head of Marketing work-sample kinds) is mostly covered at this layer rather than in this suite, because its
+browser, model and file-parsing parts cannot run on local Docker: `backend/src/services/portfolio/**` (52 test files, 6,983 backend tests in all on 2026-10-23: the rubric and scoring rules, answer-link
+picking, the injection and fairness filters, capture and its teardown guard, the PDF pre-flight and its child-process sandbox (`acquire/pdfSandbox.test.ts` starts real children; `acquire/pdf.cpu.test.ts` bounds the CPU and event-loop gap of every pre-flight and scan step), the Word/PowerPoint readers; several have a
+`*.heldout*.test.ts` of cases written after the rule was tuned, whose first-measurement numbers sit in their comments) plus the `PortfolioReviewCard` frontend tests (950 frontend tests). Two kinds of test are timing-based (the masking and hostile-text speed tests in `analyze.marketing*.test.ts`, the heartbeat gaps in `pdf.cpu.test.ts`) and can fail on a heavily loaded machine; they pass in isolation, so re-run them before suspecting the code. One file needs a real browser and is skipped
+by default: `capture.realBrowser.test.ts` (14 tests) runs only with `PORTFOLIO_REAL_BROWSER_TEST=1` (a real desktop Chrome, not the headless shell production runs — the
+Lambda-image check in `docs/MarketingWorkSampleReview_Runbook.md`, step 0, covers that one and the PDF sandbox). The Playwright spec `db/15-marketing-work-review.spec.ts` above is what pins the schema, the
+routes and the outcomes that settle without a worker, through real HTTP and Postgres.
+
+## Known environmental failure: the local Anthropic key (until 2026-11-01)
+
+As of 2026-10-23 the Anthropic key behind the LOCAL backend has reached its usage limit. Any test that needs a REAL base ResumeIQ score then fails, which is the environment and not a code defect. In this suite that is **3 of the 15 tests of `tests/db/07-portfolio-review.spec.ts`**, all in the "creation-time hook on a portfolio-enabled role" block, which make a candidate through `POST /api/candidates` and wait for the real score:
+"a candidate with NO readable resume gets the base score untouched and no portfolio penalty" (`Expected: "no_portfolio", Received: null`), "an HR re-run on a scored application re-checks the resume and answers 202" and "a review stuck in \"running\" past the function limit (killed job) can be re-run" (both `Expected: 202, Received: 409` — the application never got a base score, so there is nothing to re-run).
+The other 12 tests of that spec and all 65 of `15-marketing-work-review.spec.ts` pass (111 of the 114 tests of specs 00, 05, 06, 07, 12 and 15 on 2026-10-23), because spec 15 builds its applications with SQL and never calls the model. The two tests described in the next section that make real Anthropic calls (JD generation and scoring) would fail for the same reason.
+**How to confirm it:** `docker logs dp_hms_backend 2>&1 | grep 'usage limits'` — the backend logs `[ResumeIQ] Scoring failed for A… BadRequestError: 400 … "You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC."`. It clears by itself on 2026-11-01, or earlier with a key that has headroom in the local `.env` and `docker-compose up -d --force-recreate backend`. If those three tests fail and that line is NOT in the log, it is a real regression.
 
 ## A note on real external calls (real cost, real time)
 

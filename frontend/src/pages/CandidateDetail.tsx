@@ -22,6 +22,7 @@ import AssignmentOutcomeModal from '../components/AssignmentOutcomeModal.tsx';
 import AddReferenceCheckModal from '../components/AddReferenceCheckModal.tsx';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
+import LinkifiedText from '../components/shared/LinkifiedText.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { isNamedHiringManager } from '../utils/hiringManagers.ts';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -797,7 +798,7 @@ export default function CandidateDetail() {
                               {app.screening_answers.map((qa, i) => (
                                 <div key={i} className="text-xs">
                                   <p className="text-gray-500 font-medium">{qa.question}</p>
-                                  <p className="text-gray-700 mt-0.5">{qa.answer}</p>
+                                  <p className="text-gray-700 mt-0.5 whitespace-pre-line break-words"><LinkifiedText text={qa.answer} /></p>
                                 </div>
                               ))}
                             </div>
