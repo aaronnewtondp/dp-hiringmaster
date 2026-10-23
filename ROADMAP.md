@@ -160,6 +160,46 @@ live.
       byte-for-byte unchanged, for any role without generated content — no
       behavior change for roles not yet through the Approved+JD-generation
       flow. Verified both code paths directly against real data (R008).
+- [x] **Head of Marketing work-sample review — the 9th ResumeIQ dimension for R019 (built 2026-10-22; NOT live
+      yet).** Generalises the designer (R007) portfolio review: `roles.portfolio_review_kind`
+      (`design_portfolio` default | `marketing_work`) picks the review, `portfolio_analysis_enabled` stays the
+      switch, both set by SQL. For R019 the links in the screening answer "Links to public resources/portfolio…"
+      are fetched anonymously (never with the service account) — Drive/Docs/Slides/PDF/Word/PowerPoint/images,
+      own sites in Chromium, YouTube/Vimeo as metadata only, Instagram caption only, LinkedIn never — and judged
+      by one model call against the role's raw must/nice-to-have lists, with a code-enforced evidence rubric,
+      hard caps, a model that is never given the candidate's name or personal data, and a protected-attribute
+      filter. The score folds into `score_avg` like R007's, but work that cannot really be reviewed
+      (blank/"N/A", text only, private, bot-walled, social/video-only, a scan the model cannot read) is **not
+      scored** — never 0, and a review the model was never shown any work for, or could assess none of, cannot
+      be recorded as completed. New neutral `unreviewable` status; ONE intended change also reaches R007's
+      browser capture (the neutral Cloudflare/captcha handling) — the WebSocket lockdown, popup blocking and
+      teardown guard are marketing-only, so R007 keeps its pre-existing exposure by decision. Hardened for hostile
+      candidate files after three adversarial reviews and four fix rounds: bounded zip reader, a CPU-bounded
+      cooperative PDF pre-flight, PDF parsing in a killable CHILD PROCESS (it replaced a worker thread that one huge
+      allocation could take down with the whole process; resource isolation, not a security sandbox), a browser
+      teardown guard against requests a page starts as it unloads, a fairness layer (name masking as fuzzy as the
+      name signal, personal-statement redaction at about 85-90% recall on unseen wording) and an ownership concern
+      that needs a quoted credit; the findings were fixed, or documented as open.
+      Design record: CLAUDE.md "Marketing work-sample review (2026-10-22, R019)"; runbook with the tested
+      rollback SQL: `docs/MarketingWorkSampleReview_Runbook.md`. Backend 84 files / 6,983 tests and
+      frontend 35 / 950 pass; local Playwright spec 15 has 65 tests (all pass; 3 of the designer spec 07's 15
+      fail locally only because the local Anthropic key is over its usage limit until 2026-11-01); one real-model
+      canary run (not Chromium, and it pre-dates fix rounds 3 and 4).
+- [ ] **Go-live of the work-sample review (Aaron-run).** Schema block to Supabase first → deploy → R007 re-run
+      on the deployed worker (the worker's `includeFiles` is now one brace-glob string carrying pdf-parse's
+      `index.cjs` and `pdf.worker.mjs` AND the Chromium binaries: confirmed locally and by an nft trace, NOT on
+      Vercel, and a bad glob would break designer reviews too) → flag R019 → canary (the first Chromium capture of
+      R019 anywhere, plus a real PDF: the only check of the PDF sandbox on Vercel — it must prove the worker can
+      `spawn` `process.execPath` with `-e` and `--max-old-space-size` and read `/proc/<pid>/status`) → backfill
+      (~90 answers with links, ~18 text-only, ~17 blank; no concurrency throttle, so go in waves) → Mansi's
+      spot-check. To settle first: the form's privacy-notice check and the optional dedicated Anthropic key; after
+      touching any browser launch argument, the teardown guard or the PDF sandbox, repeat the Lambda-image check
+      (runbook step 0: popups, teardown vectors, the partial crawl, the PDF reader). Follow-ups, not built:
+      **reuse the PDF sandbox in the main API so resume parsing (`driveService.ts`, every role) stops running
+      pdfjs on the API function's main thread** (recommended, pre-existing; a separate session was started for it),
+      cap `candidates.full_name` at ingest, and network-level egress filtering or a validating proxy for the
+      browser (socket/popup/teardown SSRF is only mitigated for R019 and not at all for R007's capture) — see the
+      runbook and the "Known gaps" in CLAUDE.md.
 - [ ] **Drive auto-folder creation** on Role and Candidate creation — every
       role/candidate should get a Drive folder automatically; currently none
       do. (`driveService.ts` already has working Drive API access via the

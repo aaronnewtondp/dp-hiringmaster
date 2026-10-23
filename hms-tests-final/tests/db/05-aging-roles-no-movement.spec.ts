@@ -5,7 +5,9 @@
 // driven aging_alert coloring: true when no genuine activity_log event tied
 // to an application under the role (excluding 'Application Created' and
 // 'ResumeIQ Scoring Completed' — the two event_types a brand-new application
-// generates on its own, with zero human action) has happened in the last 3
+// generates on its own, with zero human action — and 'Portfolio Review
+// Completed', the automatic portfolio-review result a designer-role (R007)
+// application gets minutes after it arrives) has happened in the last 3
 // days. The whole point is that a role can't look "active" just because new
 // applications keep arriving with nobody actually working the pipeline.
 //
@@ -16,13 +18,13 @@
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
 import { getToken, authed } from '../helpers/api';
+import { purgeRolesFast } from '../helpers/sourcing-db';
 
 const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
 
 test.describe('Aging Roles — no_recent_candidate_activity flag', () => {
   let client: Client;
   const createdRoleIds: string[] = [];
-  const createdCandidateIds: string[] = [];
 
   test.beforeAll(async () => {
     client = new Client({ connectionString: LOCAL_DB_URL });
@@ -30,15 +32,9 @@ test.describe('Aging Roles — no_recent_candidate_activity flag', () => {
   });
 
   test.afterAll(async () => {
-    if (createdRoleIds.length) {
-      await client.query(`DELETE FROM activity_log WHERE role_id = ANY($1)`, [createdRoleIds]);
-      await client.query(`DELETE FROM applications WHERE role_id = ANY($1)`, [createdRoleIds]);
-      await client.query(`DELETE FROM pending_actions WHERE role_id = ANY($1)`, [createdRoleIds]);
-      await client.query(`DELETE FROM roles WHERE id = ANY($1)`, [createdRoleIds]);
-    }
-    if (createdCandidateIds.length) {
-      await client.query(`DELETE FROM candidates WHERE id = ANY($1)`, [createdCandidateIds]);
-    }
+    // purgeRolesFast, not one DELETE per row: the local pending_actions table is millions of rows with unindexed
+    // foreign keys, so deleting this spec's ~25 applications one by one (~0.5 s each) overran the 30 s hook timeout.
+    await purgeRolesFast(client, createdRoleIds, ['nomovement+%@example.com']);
     await client.end();
   });
 
@@ -60,7 +56,6 @@ test.describe('Aging Roles — no_recent_candidate_activity flag', () => {
       [`No-Movement Test Candidate ${Date.now()}`, `nomovement+${Date.now()}@example.com`]
     );
     const candidateId = candRows[0].id;
-    createdCandidateIds.push(candidateId);
 
     const { rows: appRows } = await client.query(
       `INSERT INTO applications (candidate_id, role_id) VALUES ($1, $2) RETURNING id`,
@@ -139,6 +134,64 @@ test.describe('Aging Roles — no_recent_candidate_activity flag', () => {
 
     const entry = await findAgingRole(request, roleId);
     expect(entry.no_recent_candidate_activity).toBe(true);
+  });
+
+  // 'Portfolio Review Completed' (services/portfolio/scoring.ts) is written by
+  // the queue worker with no human involved, so it is excluded exactly like
+  // 'ResumeIQ Scoring Completed' (dashboard.ts's NOT IN list). Without that,
+  // every auto-review would make a stalled designer role look active.
+  test("a role whose only activity_log row is an automatic 'Portfolio Review Completed' — even from today — is still flagged", async ({ request }) => {
+    const roleId = await createRole();
+    const appId = await createApplication(roleId);
+    await insertActivity(roleId, appId, 'Portfolio Review Completed', 0);
+
+    const entry = await findAgingRole(request, roleId);
+    expect(entry.no_recent_candidate_activity).toBe(true);
+  });
+
+  test('the full automatic trio a new designer application generates (Application Created + ResumeIQ Scoring Completed + Portfolio Review Completed), all from today, is still flagged', async ({ request }) => {
+    const roleId = await createRole();
+    const appId = await createApplication(roleId);
+    await insertActivity(roleId, appId, 'Application Created', 0);
+    await insertActivity(roleId, appId, 'ResumeIQ Scoring Completed', 0);
+    await insertActivity(roleId, appId, 'Portfolio Review Completed', 0);
+
+    const entry = await findAgingRole(request, roleId);
+    expect(entry.no_recent_candidate_activity).toBe(true);
+  });
+
+  test("a fresh 'Portfolio Review Completed' does not clear a stale flag from a real action 5 days ago", async ({ request }) => {
+    const roleId = await createRole();
+    const appId = await createApplication(roleId);
+    await insertActivity(roleId, appId, 'Status Changed', 5);
+    await insertActivity(roleId, appId, 'Portfolio Review Completed', 0);
+
+    const entry = await findAgingRole(request, roleId);
+    expect(entry.no_recent_candidate_activity).toBe(true);
+  });
+
+  // Control: the exclusion is by event_type only — it must not hide a real
+  // action that happens to sit next to an automatic portfolio review.
+  test("a genuine action in the last 3 days still clears the flag when a 'Portfolio Review Completed' row sits beside it", async ({ request }) => {
+    const roleId = await createRole();
+    const appId = await createApplication(roleId);
+    await insertActivity(roleId, appId, 'Portfolio Review Completed', 0);
+    await insertActivity(roleId, appId, 'Stage Changed', 1);
+
+    const entry = await findAgingRole(request, roleId);
+    expect(entry.no_recent_candidate_activity).toBe(false);
+  });
+
+  test('a genuine action in the last 3 days clears the flag on a DIFFERENT application of the role than the one with the portfolio review', async ({ request }) => {
+    const roleId = await createRole();
+    const reviewedApp = await createApplication(roleId);
+    await insertActivity(roleId, reviewedApp, 'Portfolio Review Completed', 0);
+
+    const actedOnApp = await createApplication(roleId);
+    await insertActivity(roleId, actedOnApp, 'Interview Feedback Submitted', 2);
+
+    const entry = await findAgingRole(request, roleId);
+    expect(entry.no_recent_candidate_activity).toBe(false);
   });
 
   test('a genuine action on ANY application under the role — not just the most recently created one — clears the flag', async ({ request }) => {
