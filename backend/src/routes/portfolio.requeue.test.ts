@@ -316,6 +316,70 @@ describe('the routes that call requeue', () => {
     expect(prepareMarketingReview).not.toHaveBeenCalled();
   });
 
+  // ─── the backfill's optional score floor ───────────────────────────────────
+  describe('the backfill min_score filter', () => {
+    const secret = { 'x-ingest-secret': 'test-secret' };
+    const pageSql = () => norm(query.mock.calls[0][0] as string);
+    const pageParams = () => query.mock.calls[0][1] as unknown[];
+    const countCall = () => queryOne.mock.calls.find(c => /count\(\*\)/.test(String(c[0])))!;
+
+    it('hands the floor to BOTH queries as a numeric parameter, so the page and the remaining count agree, and echoes it', async () => {
+      query.mockResolvedValue([{ id: 'A0619' }]);
+      const res = await post('/api/applications/portfolio-backfill', { role_id: 'R019', min_score: 4, limit: 5, offset: 2, dry_run: true }, secret);
+      expect(res.status).toBe(200);
+      expect((await res.json() as Record<string, unknown>).min_score).toBe(4);
+      expect(pageSql()).toContain('($5::numeric IS NULL OR score_avg >= $5::numeric)');
+      expect(pageParams()).toEqual(['R019', ['Active'], 5, 2, 4]);
+      expect(norm(countCall()[0])).toContain('($3::numeric IS NULL OR score_avg >= $3::numeric)');
+      expect(countCall()[1]).toEqual(['R019', ['Active'], 4]);
+    });
+
+    it('is optional: without it the parameter is null (no filter) and the response keeps its old shape (no min_score key)', async () => {
+      query.mockResolvedValue([]);
+      const res = await post('/api/applications/portfolio-backfill', { role_id: 'R019', dry_run: true }, secret);
+      expect(Object.keys(await res.json() as Record<string, unknown>).sort()).toEqual(['dry_run', 'left_unchanged', 'next_offset', 'processed', 'remaining_before', 'results']);
+      expect(pageParams()[4]).toBeNull();
+      expect(countCall()[1]).toEqual(['R019', ['Active'], null]);
+    });
+
+    it.each([[4, 4], ['4', 4], ['4.0', 4], [0, 0], [10, 10], [7.5, 7.5], [' 4.5 ', 4.5]])('accepts %j as %j', async (given, expected) => {
+      query.mockResolvedValue([]);
+      const res = await post('/api/applications/portfolio-backfill', { role_id: 'R019', min_score: given, dry_run: true }, secret);
+      expect(res.status).toBe(200);
+      expect(pageParams()[4]).toBe(expected);
+    });
+
+    it('null counts as absent (a caller that always sends the field)', async () => {
+      query.mockResolvedValue([]);
+      const res = await post('/api/applications/portfolio-backfill', { role_id: 'R019', min_score: null, dry_run: true }, secret);
+      expect(res.status).toBe(200);
+      expect(pageParams()[4]).toBeNull();
+    });
+
+    it.each([[-1], [10.01], [11], ['abc'], [''], ['  '], [true], [false], [[4]], [[]], [{}], ['4,5'], ['Infinity'], ['-Infinity'], ['0x4']])(
+      'a bad floor (%j) is a 400, never a silently dropped filter: nothing is queried or queued', async (bad) => {
+        const res = await post('/api/applications/portfolio-backfill', { role_id: 'R019', min_score: bad }, secret);
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: 'min_score must be a number from 0 to 10' });
+        expect(query).not.toHaveBeenCalled();
+        expect(prepareMarketingReview).not.toHaveBeenCalled();
+      });
+
+    it('the secret is checked before the floor (an unauthenticated caller learns nothing about validation)', async () => {
+      const res = await post('/api/applications/portfolio-backfill', { role_id: 'R019', min_score: 'abc' });
+      expect(res.status).toBe(401);
+    });
+
+    it('a real pass with a floor queues the rows it was given exactly as before', async () => {
+      query.mockResolvedValue([{ id: 'A0619' }]);
+      prepareMarketingReview.mockResolvedValueOnce({ status: 'pending', links: [SITE], queued: true });
+      const res = await post('/api/applications/portfolio-backfill', { role_id: 'R019', min_score: 4 }, secret);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ processed: 1, min_score: 4, results: [{ id: 'A0619', status: 'pending', queued: true }] });
+      expect(prepareMarketingReview).toHaveBeenCalledTimes(1);
+    });
+  });
+
   // ─── GET: which review is this (kind) ──────────────────────────────────────
   describe('GET /:id/portfolio-analysis — kind', () => {
     const get = async (id = 'A0619') => {
