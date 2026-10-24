@@ -3,16 +3,18 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import vm from 'vm';
+import PDFDocument from 'pdfkit';
 import { spawn } from 'child_process';
 import type { ChildProcess } from 'child_process';
 import {
-  CHILD_HARD_CAP_SLACK_MS, CHILD_PARENT_POLL_MS, PDF_CHILD_HEAP_MB, PDF_CHILD_SOURCE, PDF_GLOBALS_SOURCE, PDF_MAX_OUTPUT_BYTES, PDF_MEMORY_WATCH, PDF_PARSE_MS, PDF_WATCHDOG_SOURCE,
+  CHILD_HARD_CAP_SLACK_MS, CHILD_PARENT_POLL_MS, PDF_CHILD_HEAP_MB, PDF_CHILD_SOURCE, PDF_GLOBALS_SOURCE, PDF_MAX_LINKS, PDF_MAX_LINK_CHARS, PDF_MAX_OUTPUT_BYTES, PDF_MEMORY_WATCH, PDF_PARSE_MS, PDF_WATCHDOG_SOURCE,
   childResidentBytes, killLiveSandboxChildren, pdfParseEntry, readPdfInSandbox,
-} from './pdfSandbox.js';
-import type { PdfReadOptions, PdfReadResult } from './pdfSandbox.js';
-import { fontsPdf, formBombPdf, formCyclePdf, hugeStringPdf, pages, pdfkitPdf, rawPdf } from './pdf.fixtures.js';
-import { preflightPdf, preparePdf, TOO_COMPLEX_REASON } from './pdf.js';
-import { BudgetTracker } from './budget.js';
+} from './sandbox.js';
+import type { PdfReadOptions, PdfReadResult } from './sandbox.js';
+import { fontsPdf, formBombPdf, formCyclePdf, hugeStringPdf, pages, pdfkitPdf, rawPdf } from '../portfolio/acquire/pdf.fixtures.js';
+import { preflightPdf } from './preflight.js';
+import { preparePdf, TOO_COMPLEX_REASON } from '../portfolio/acquire/pdf.js';
+import { BudgetTracker } from '../portfolio/acquire/budget.js';
 
 // A stand-in for pdf-parse, loaded by the child process in place of the real module (the child takes the module's path as an argument).
 // It does what the "PDF" bytes say, so each test can make the child spin, run out of heap in one step or in many, die, never answer, throw,
@@ -25,7 +27,7 @@ class PDFParse {
     this.mode = Buffer.from(opts.data).toString('latin1');
     if (this.mode === 'construct-throws') throw new Error('constructor exploded');
   }
-  async getInfo() {
+  async getInfo(params) {
     const m = this.mode;
     if (m === 'spin') { for (;;) {} }
     if (m.startsWith('flag:')) { fs.writeFileSync(m.slice(5), 'parsing'); for (;;) {} }   // says it is inside the parser (the ready mark is already written), then spins
@@ -45,6 +47,16 @@ class PDFParse {
     if (m === 'flood') { const chunk = 'x'.repeat(1 << 20); for (let i = 0; i < 64; i++) process.stdout.write(chunk); await new Promise(r => setTimeout(r, 20000)); }
     if (m === 'stray') process.stdout.write('stray text from a dependency before the answer' + String.fromCharCode(10));
     if (m === 'noisy') for (let i = 0; i < 6; i++) fs.writeSync(2, 'e'.repeat(1 << 20));
+    if (m === 'links' || m === 'links-fail' || m === 'many-links' || m === 'long-link' || m === 'links-need-password') {
+      const wantLinks = !!(params && params.parsePageInfo);
+      if (m === 'links-fail' && wantLinks) throw new Error('annotation parse exploded');
+      if (m === 'links-need-password') throw Object.assign(new Error('No password given'), { name: 'PasswordException' });
+      if (!wantLinks) return { total: 2, permission: null };
+      const mk = (u, t) => ({ url: u, text: t });
+      if (m === 'many-links') return { total: 1, permission: null, pages: [{ links: Array.from({ length: 700 }, (_, i) => mk('https://x.example/' + i, 'l' + i)) }] };
+      if (m === 'long-link') return { total: 1, permission: null, pages: [{ links: [mk('https://x.example/' + 'a'.repeat(5000), 'z'.repeat(300))] }] };
+      return { total: 2, permission: null, pages: [{ links: [mk('https://janedoe.example/work', '  My Portfolio  '), mk('', 'empty url'), { text: 'no url' }, mk(42, 'bad')] }, { links: [mk('https://github.com/janedoe', '')] }] };
+    }
     if (m === 'zero') return { total: 0, permission: null };
     if (m === 'locked') return { total: 2, permission: [] };
     return { total: 3, permission: null };
@@ -565,6 +577,66 @@ describe('readPdfInSandbox — one PDF at a time', { timeout: 60_000 }, () => {
 // The parent kills the child at a deadline and on its own exit, but a parent that dies by SIGKILL (the OOM killer) or by a default-disposition SIGTERM runs
 // no exit handler, and the child had no deadline of its own: an orphan spun at 100% of a core for as long as its parse took (four were found 13 hours old).
 // These tests run REAL children (the real PDF_CHILD_SOURCE, the stand-in parser) and look at the operating system's process table, not at a mock.
+describe('readPdfInSandbox — link annotations (withLinks)', { timeout: 60_000 }, () => {
+  it('without withLinks nothing is asked of pdfjs\'s per-page parse, and the answer carries no links', async () => {
+    const r = await fakeRead('links');
+    expect(r).toMatchObject({ kind: 'read', total: 2 });
+    if (r.kind === 'read') { expect(r.links).toBeUndefined(); expect(r.linksFailed).toBeUndefined(); }
+  });
+
+  it('with withLinks it returns the annotations in page order: well-formed ones only, the words trimmed', async () => {
+    const r = await fakeRead('links', { withLinks: true });
+    expect(r).toMatchObject({ kind: 'read', total: 2 });
+    if (r.kind !== 'read') return;
+    expect(r.linksFailed).toBeUndefined();
+    expect(r.links).toEqual([{ url: 'https://janedoe.example/work', text: 'My Portfolio' }, { url: 'https://github.com/janedoe', text: '' }]);
+  });
+
+  it('annotations that cannot be read do not lose the text: linksFailed, and no links claimed (the caller must not read that as "no links")', async () => {
+    const r = await fakeRead('links-fail', { withLinks: true });
+    expect(r).toMatchObject({ kind: 'read', total: 2, linksFailed: true });
+    if (r.kind !== 'read') return;
+    expect(r.links).toBeUndefined();
+    expect(r.pages[0].text).toBe('first=2');          // the text of the file was still read
+  });
+
+  it('a password request while looking for links is still a parser-error about the file, not a links failure', async () => {
+    expect(await fakeRead('links-need-password', { withLinks: true })).toMatchObject({ kind: 'parser-error', name: 'PasswordException' });
+  });
+
+  it('at most PDF_MAX_LINKS links come back, a destination is cut at PDF_MAX_LINK_CHARS and the words at 80', async () => {
+    const many = await fakeRead('many-links', { withLinks: true });
+    if (many.kind !== 'read') throw new Error('not read');
+    expect(many.links).toHaveLength(PDF_MAX_LINKS);
+    expect(many.links![0]).toEqual({ url: 'https://x.example/0', text: 'l0' });
+    const long = await fakeRead('long-link', { withLinks: true });
+    if (long.kind !== 'read') throw new Error('not read');
+    expect(long.links![0].url).toHaveLength(PDF_MAX_LINK_CHARS);
+    expect(long.links![0].text).toHaveLength(80);
+  });
+
+  it('a REAL PDF with hyperlink annotations, read by the real pdf-parse: the destination and the words it covers', async () => {
+    const bytes = await new Promise<Buffer>(resolve => {
+      const doc = new PDFDocument({ size: 'A4' });
+      const chunks: Buffer[] = [];
+      doc.on('data', (c: Buffer) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.text('Jane Doe, product designer');
+      doc.text('My Portfolio', { link: 'https://janedoe.example/work', underline: true });
+      doc.addPage().text('Second page', { link: 'https://www.behance.net/janedoe' });
+      doc.end();
+    });
+    const r = await readPdfInSandbox(bytes, { maxPages: 20, withLinks: true, deadline: Date.now() + 30_000 });
+    expect(r).toMatchObject({ kind: 'read', total: 2 });
+    if (r.kind !== 'read') return;
+    expect(r.linksFailed).toBeUndefined();
+    expect(r.links).toEqual([
+      { url: 'https://janedoe.example/work', text: 'My Portfolio' },
+      { url: 'https://www.behance.net/janedoe', text: 'Second page' },
+    ]);
+  });
+});
+
 describe('the child\'s deadman switch — a child never outlives its parent or its own hard cap', { timeout: 90_000 }, () => {
   const alive: number[] = [];
   const holders: ChildProcess[] = [];
@@ -616,7 +688,14 @@ describe('the child\'s deadman switch — a child never outlives its parent or i
     expect(argv.slice(1, 4)).toEqual(['20', '400000', '1200000']);
     expect(argv[4]).toBe(String(5000 + CHILD_HARD_CAP_SLACK_MS));      // the hard cap: the parent's timeout for this very read, plus the slack
     expect(argv[5]).toBe(String(process.pid));                         // the parent that started it
-    expect(argv).toHaveLength(6);
+    expect(argv[6]).toBe('0');                                         // withLinks: not asked for
+    expect(argv).toHaveLength(7);
+  });
+
+  it('...and is told to look at the link annotations only when the caller asked', async () => {
+    const r = await fakeRead('argv', { capMs: 5000, withLinks: true });
+    if (r.kind !== 'read') throw new Error('not read');
+    expect((JSON.parse(r.pages[0].text) as string[])[6]).toBe('1');
   });
 
   it('the hard cap follows the read\'s own limit, whichever is nearer (the item\'s deadline, not just the per-PDF cap)', async () => {

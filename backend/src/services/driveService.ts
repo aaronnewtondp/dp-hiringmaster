@@ -2,6 +2,8 @@ import { google } from 'googleapis';
 import { Readable } from 'stream';
 import { getGoogleCredentials } from './googleAuth.js';
 import { extractUrlsFromText, mergeResumeLinks, LinkInput } from './portfolio/links.js';
+import { RESUME_MAX_BYTES, readResumePdf } from './pdfSandbox/resume.js';
+import { readResumeDocx } from './boundedFiles/resumeDocx.js';
 
 let driveClient: ReturnType<typeof google.drive> | null = null;
 
@@ -117,7 +119,8 @@ export function extractDriveFileId(url: string): string | null {
   return null;
 }
 
-// Returns null on any failure — scoring should degrade gracefully rather than crash.
+// Returns null on any failure — scoring should degrade gracefully rather than crash. That includes a resume PDF that is hostile, too complex, too large,
+// password-protected or that the PDF reader could not open: PDFs are never parsed on this process (see readResumePdf), so none of them can hurt the API function.
 export async function fetchResumeText(driveUrl: string): Promise<string | null> {
   return (await loadResume(driveUrl, false)).text;
 }
@@ -141,7 +144,7 @@ async function loadResume(driveUrl: string, withLinks: boolean): Promise<{ text:
 
   try {
     const drive = getDriveClient();
-    const meta = await drive.files.get({ fileId, fields: 'mimeType, name' });
+    const meta = await drive.files.get({ fileId, fields: 'mimeType, name, size' });
     const mimeType = meta.data.mimeType || '';
 
     if (mimeType === 'application/vnd.google-apps.document') {
@@ -165,26 +168,24 @@ async function loadResume(driveUrl: string, withLinks: boolean): Promise<{ text:
     }
 
     if (mimeType === 'application/pdf' || mimeType.includes('wordprocessingml')) {
+      // A file's size is known before it is downloaded: one of hundreds of MB is never pulled into this process's memory (a candidate uploads these).
+      const declaredBytes = Number(meta.data.size);
+      if (Number.isFinite(declaredBytes) && declaredBytes > RESUME_MAX_BYTES) {
+        console.warn(`[Drive] Resume ${fileId} is larger than ${RESUME_MAX_BYTES} bytes — not opened`);
+        return empty;
+      }
       const res = await drive.files.get(
         { fileId, alt: 'media' },
         { responseType: 'arraybuffer' }
       );
       const buffer = Buffer.from(res.data as ArrayBuffer);
-      const isPdf = mimeType === 'application/pdf';
-      const text = isPdf ? await extractPdfText(buffer) : await extractDocxText(buffer);
-      let links: LinkInput[] = [];
-      // A failed extraction must be distinguishable from "the resume has no
-      // links": the caller scores the second against the candidate, never the first.
-      let linksError = false;
-      if (withLinks) {
-        try {
-          links = isPdf ? await extractPdfLinks(buffer) : await extractDocxLinks(buffer);
-        } catch (err) {
-          linksError = true;
-          console.warn(`[Drive] Link extraction failed for ${fileId}:`, (err as Error).message);
-        }
+      if (buffer.length > RESUME_MAX_BYTES) {
+        console.warn(`[Drive] Resume ${fileId} is larger than ${RESUME_MAX_BYTES} bytes — not opened`);
+        return empty;
       }
-      return { text, links: withLinks ? finishLinks(links, text) : [], ...(linksError ? { linksError } : {}) };
+      // Neither kind of file is handed to a library that cannot be told to stop (pdfjs and mammoth cannot) on THIS process: see settleResume.
+      if (mimeType === 'application/pdf') return settleResume(await readResumePdf(buffer, { withLinks }), fileId, withLinks);
+      return settleResume(readResumeDocx(buffer, { withLinks }), fileId, withLinks);
     }
 
     console.warn(`[Drive] Unsupported mime type for resume: ${mimeType}`);
@@ -193,6 +194,32 @@ async function loadResume(driveUrl: string, withLinks: boolean): Promise<{ text:
     console.error(`[Drive] Failed to fetch resume ${fileId}:`, (err as Error).message);
     return empty;
   }
+}
+
+// A resume is untrusted input, read by code that can refuse and never by a library that cannot: a PDF by pdfSandbox/resume.ts (a bounded pre-flight, then a child process that is
+// killed at a deadline or when its memory balloons), a Word file by boundedFiles/resumeDocx.ts (the bounded zip reader and a linear XML walk). "Not read" is never an error here,
+// and what it means for the caller depends on whose doing it was:
+//  - a verdict on the FILE (hostile or too complex, too large, password-protected, not a PDF / Word file): text null, no links, no linksError — the neutral "unreadable resume":
+//    ResumeIQ scores from the profile fields, and a portfolio-review role applies no portfolio dimension (never a 0);
+//  - OUR failure (the PDF reader would not start, or ran out of the budget behind other files; an unforeseen error): text null AND — when the caller asked for links —
+//    linksError, so a portfolio-review role records a visible, retryable 'failed' instead of a silent "no portfolio";
+//  - text read but the links not: the text and linksError, so "no links" is never concluded from a failure.
+type BoundedResumeRead =
+  | { kind: 'read'; text: string; links: LinkInput[]; linksFailed: boolean }
+  | { kind: 'unreadable'; why: string }
+  | { kind: 'unavailable'; message: string };
+
+function settleResume(read: BoundedResumeRead, fileId: string, withLinks: boolean): { text: string | null; links: LinkInput[]; linksError?: boolean } {
+  if (read.kind === 'read') {
+    if (withLinks && read.linksFailed) console.warn(`[Drive] Link extraction failed for ${fileId}`);
+    return { text: read.text, links: withLinks ? finishLinks(read.links, read.text) : [], ...(withLinks && read.linksFailed ? { linksError: true } : {}) };
+  }
+  if (read.kind === 'unavailable') {
+    console.error(`[Drive] The resume reader could not read resume ${fileId} (our side, not the file's): ${read.message}`);
+    return { text: null, links: [], ...(withLinks ? { linksError: true } : {}) };
+  }
+  console.warn(`[Drive] Resume ${fileId} was not opened (${read.why}) — scoring from profile fields only`);
+  return { text: null, links: [] };
 }
 
 // Union of structural hyperlinks and URLs typed as visible text, normalized
@@ -327,6 +354,8 @@ async function installCanvasPolyfills(): Promise<void> {
   if (!g.ImageData) g.ImageData = native?.ImageData || ImageDataPolyfill;
 }
 
+// TRUSTED PDFs ONLY: this runs pdfjs on THIS process, with no limit on time or memory. It is for files HMS made or a founder wrote (the JD import script, the
+// tests that read back a JD it rendered) — never for anything a candidate uploaded; resumes go through readResumePdf (see settleResume).
 export async function extractPdfText(buffer: Buffer): Promise<string> {
   await installCanvasPolyfills();
   // pdf-parse (via pdfjs-dist) resolves its worker script from a relative
@@ -345,39 +374,4 @@ export async function extractPdfText(buffer: Buffer): Promise<string> {
   const parser = new PDFParse({ data: buffer });
   const result = await parser.getText();
   return result.text;
-}
-
-async function extractDocxText(buffer: Buffer): Promise<string> {
-  const mammoth = await import('mammoth');
-  const result = await mammoth.extractRawText({ buffer });
-  return result.value;
-}
-
-// Real hyperlink destinations from a PDF's Link annotations. Uses the same
-// PDFParse class (and therefore the same polyfills / worker bundling) as
-// extractPdfText — no new dependency.
-async function extractPdfLinks(buffer: Buffer): Promise<LinkInput[]> {
-  await installCanvasPolyfills();
-  const { PDFParse } = await import('pdf-parse');
-  const parser = new PDFParse({ data: buffer });
-  try {
-    const info = await parser.getInfo({ parsePageInfo: true } as never) as unknown as {
-      pages?: Array<{ links?: Array<{ url?: string; text?: string }> }>;
-    };
-    const urls: LinkInput[] = [];
-    for (const page of info.pages || []) for (const l of page.links || []) {
-      if (l.url) urls.push({ url: l.url, ...(l.text?.trim() ? { label: l.text.trim().slice(0, 80) } : {}) });
-    }
-    return urls;
-  } finally {
-    await (parser as unknown as { destroy?: () => Promise<void> }).destroy?.().catch(() => {});
-  }
-}
-
-// mammoth.extractRawText (used for the scoring text) discards hyperlink
-// destinations; convertToHtml keeps them as <a href>.
-async function extractDocxLinks(buffer: Buffer): Promise<LinkInput[]> {
-  const mammoth = await import('mammoth');
-  const result = await mammoth.convertToHtml({ buffer });
-  return extractHrefs(result.value);
 }

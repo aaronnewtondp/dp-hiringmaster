@@ -870,6 +870,15 @@ describe('worker packaging - pdf-parse loads pdf.worker.mjs by a path no tracer 
     expect(matches(vercel.functions['api/index.ts'].includeFiles!, WORKER_FILE)).toBe(true);
   });
 
+  it('the main API ships what the PDF child process loads, too: resume parsing runs the sandbox there (pdf-parse\'s CommonJS entry and pdf.worker.mjs), and no Chromium; it uses a plain "*" glob (the style that already ships the Chromium binaries in production), not braces, because the file that works today must not depend on a pattern form that has never run on Vercel', () => {
+    const include = vercel.functions['api/index.ts'].includeFiles!;
+    expect(typeof include).toBe('string');
+    expect(include).not.toContain('{');
+    expect(matches(include, 'node_modules/pdf-parse/dist/pdf-parse/cjs/index.cjs')).toBe(true);
+    expect(matches(include, WORKER_FILE)).toBe(true);
+    expect(matches(include, 'node_modules/@sparticuz/chromium/bin/chromium.br')).toBe(false);
+  });
+
   it('the matcher used here rejects what it should', () => {
     expect(matches('node_modules/{a/**,b/c.mjs}', 'node_modules/b/c.mjs')).toBe(true);
     expect(matches('node_modules/{a/**,b/c.mjs}', 'node_modules/a/x/y.br')).toBe(true);
