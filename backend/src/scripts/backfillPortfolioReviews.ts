@@ -5,7 +5,9 @@
 // keeps going until the route reports there is nothing left.
 //
 //   HMS_API_URL=https://<your-backend>.vercel.app ROLE_INGEST_SECRET=... \
-//     npx tsx src/scripts/backfillPortfolioReviews.ts --role R007 [--statuses Active,"Hold for Future"] [--limit 6] [--dry-run]
+//     npx tsx src/scripts/backfillPortfolioReviews.ts --role R007 [--statuses Active,"Hold for Future"] [--min-score 4] [--limit 6] [--dry-run]
+//
+// --min-score N queues only applications whose ResumeIQ average (0-10) is at least N (e.g. skip the weakest before spending model time).
 //
 // The reviews themselves run afterwards on the portfolio worker, ~1-2 minutes
 // each, via the queue — this script only queues them, so it finishes quickly.
@@ -22,19 +24,25 @@ async function main() {
   const secret = process.env.ROLE_INGEST_SECRET;
   const roleId = arg('role');
   if (!base || !secret || !roleId) {
-    console.error('Usage: HMS_API_URL=<backend url> ROLE_INGEST_SECRET=<secret> npx tsx src/scripts/backfillPortfolioReviews.ts --role R007 [--statuses Active] [--limit 6] [--dry-run]');
+    console.error('Usage: HMS_API_URL=<backend url> ROLE_INGEST_SECRET=<secret> npx tsx src/scripts/backfillPortfolioReviews.ts --role R007 [--statuses Active] [--min-score 4] [--limit 6] [--dry-run]');
     process.exit(1);
   }
   const statuses = (arg('statuses', 'Active') as string).split(',').map(s => s.trim()).filter(Boolean);
   const limit = Math.min(parseInt(arg('limit', '6') as string, 10) || 6, 10);
   const dryRun = has('dry-run');
+  const minScoreArg = arg('min-score');
+  const minScore = minScoreArg === undefined ? undefined : Number(minScoreArg);
+  if (minScore !== undefined && (!Number.isFinite(minScore) || minScore < 0 || minScore > 10)) {
+    console.error(`--min-score must be a number from 0 to 10 (got "${minScoreArg}")`);
+    process.exit(1);
+  }
 
   let offset = 0, queued = 0, settled = 0, unchanged = 0, pages = 0;
   for (;;) {
     const res = await fetch(`${base}/api/applications/portfolio-backfill`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-ingest-secret': secret },
-      body: JSON.stringify({ role_id: roleId, statuses, limit, offset, dry_run: dryRun }),
+      body: JSON.stringify({ role_id: roleId, statuses, limit, offset, dry_run: dryRun, ...(minScore !== undefined ? { min_score: minScore } : {}) }),
     });
     if (!res.ok) { console.error(`HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`); process.exit(1); }
     const body = await res.json() as {
@@ -42,7 +50,7 @@ async function main() {
       results: Array<{ id: string; status: string; links?: number; queued?: boolean; error?: string }>;
     };
     pages++;
-    if (pages === 1) console.log(`${body.remaining_before} application(s) of ${roleId} (${statuses.join(', ')}) have never been reviewed${dryRun ? ' — DRY RUN, nothing will be queued' : ''}`);
+    if (pages === 1) console.log(`${body.remaining_before} application(s) of ${roleId} (${statuses.join(', ')}${minScore !== undefined ? `, average >= ${minScore}` : ''}) have never been reviewed${dryRun ? ' — DRY RUN, nothing will be queued' : ''}`);
     for (const r of body.results) {
       if (r.status === 'pending') queued += r.queued ? 1 : 0;
       else if (r.status === 'no_portfolio') settled++;

@@ -376,6 +376,8 @@ HMS_API_URL=https://dp-hiringmaster-be.vercel.app ROLE_INGEST_SECRET=... \
   npx tsx src/scripts/backfillPortfolioReviews.ts --role R019 --dry-run     # counts only, queues nothing
 HMS_API_URL=https://dp-hiringmaster-be.vercel.app ROLE_INGEST_SECRET=... \
   npx tsx src/scripts/backfillPortfolioReviews.ts --role R019               # Active first (the default --statuses)
+# only the applications whose ResumeIQ average is at least N (inclusive; applied to the dry run's count too), e.g. skip the weakest:
+#   npx tsx src/scripts/backfillPortfolioReviews.ts --role R019 --min-score 4.0 [--dry-run]
 # then, if wanted:  --statuses "Hold for Future"
 ```
 

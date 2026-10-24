@@ -1005,7 +1005,7 @@ stored, and neither are the marketing review's downloaded files (only the struct
 resume for designer roles, from the screening answer for marketing roles) and
 re-queues (also the way to pick up a link the first pass missed).
 `POST /api/applications/portfolio-backfill` (`x-ingest-secret` = `ROLE_INGEST_SECRET`,
-body `{role_id, statuses, limit<=10, offset, dry_run}`; refuses a role whose review is off, whichever
+body `{role_id, statuses, limit<=10, offset, dry_run, min_score?}` — `min_score` (0–10, optional, inclusive) is a floor on the ResumeIQ average `score_avg`, applied to both the page and the remaining count, a bad value is a 400 and the response echoes it only when given; the script flag is `--min-score N`; refuses a role whose review is off, whichever
 kind) queues existing applicants that
 were never reviewed, a few per call (designer: each re-reads a resume from Drive; marketing: a database
 read only — blank and text-only answers settle on the spot, without the queue); loop until
