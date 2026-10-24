@@ -127,6 +127,15 @@ router.post('/portfolio-backfill', async (req: Request, res: Response) => {
   const limit   = Math.min(Math.max(parseInt(String(req.body?.limit ?? '6'), 10) || 6, 1), 10);
   const offset  = Math.max(parseInt(String(req.body?.offset ?? '0'), 10) || 0, 0);
   const dryRun  = req.body?.dry_run === true;
+  // Optional: only applications whose ResumeIQ average (score_avg, 0-10) is at least this. A bad value is a 400, never a
+  // silently dropped filter (that would queue every candidate when the caller asked for the strong ones only).
+  const rawMin  = req.body?.min_score;
+  const hasMin  = rawMin !== undefined && rawMin !== null;
+  const parsedMin = typeof rawMin === 'number' || (typeof rawMin === 'string' && /^\s*(\d+(\.\d*)?|\.\d+)\s*$/.test(rawMin)) ? Number(rawMin) : NaN;
+  if (hasMin && !(parsedMin >= 0 && parsedMin <= 10)) {          // NaN, Infinity, a boolean, an array, '', '0x4', '1e1', '-1' all fail here
+    res.status(400).json({ error: 'min_score must be a number from 0 to 10' }); return;
+  }
+  const minScore: number | null = hasMin ? parsedMin : null;
   if (!roleId) { res.status(400).json({ error: 'role_id required' }); return; }
   const role = await queryOne<Role>('SELECT id, portfolio_analysis_enabled, portfolio_review_kind FROM roles WHERE id=$1', [roleId]);
   if (!role) { res.status(404).json({ error: 'Role not found' }); return; }
@@ -136,13 +145,15 @@ router.post('/portfolio-backfill', async (req: Request, res: Response) => {
   const rows = await query<{ id: string }>(
     `SELECT id FROM applications
      WHERE role_id=$1 AND status = ANY($2::text[]) AND score_avg IS NOT NULL AND portfolio_analysis_status IS NULL
+       AND ($5::numeric IS NULL OR score_avg >= $5::numeric)
      ORDER BY id LIMIT $3 OFFSET $4`,
-    [roleId, statuses, limit, offset],
+    [roleId, statuses, limit, offset, minScore],
   );
   const total = await queryOne<{ n: string }>(
     `SELECT count(*) AS n FROM applications
-     WHERE role_id=$1 AND status = ANY($2::text[]) AND score_avg IS NOT NULL AND portfolio_analysis_status IS NULL`,
-    [roleId, statuses],
+     WHERE role_id=$1 AND status = ANY($2::text[]) AND score_avg IS NOT NULL AND portfolio_analysis_status IS NULL
+       AND ($3::numeric IS NULL OR score_avg >= $3::numeric)`,
+    [roleId, statuses, minScore],
   );
 
   const results: Array<{ id: string; status: string; links?: number; queued?: boolean; error?: string }> = [];
@@ -166,6 +177,7 @@ router.post('/portfolio-backfill', async (req: Request, res: Response) => {
     processed: dryRun ? 0 : results.length - stayedEligible,
     left_unchanged: stayedEligible,
     dry_run: dryRun,
+    ...(minScore !== null ? { min_score: minScore } : {}),     // only when asked for: the response keeps its old shape otherwise
     results,
     next_offset: rows.length === limit ? offset + stayedEligible : null,
   });
