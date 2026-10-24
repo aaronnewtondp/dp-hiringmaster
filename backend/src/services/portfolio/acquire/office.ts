@@ -1,4 +1,5 @@
-// WORKER-ONLY (see ../browser.ts). Reads Word (.docx) and PowerPoint (.pptx) files for the marketing work-sample review.
+// WORKER-ONLY (see ../browser.ts). Reads Word (.docx) and PowerPoint (.pptx) files for the marketing work-sample review. The zip reader, the XML walk and the Word
+// text/picture/hyperlink readers it uses live in services/boundedFiles/ (shared with resume parsing on the main API); the names tests import from here are re-exported.
 // Both are ZIP archives built by the candidate, so nothing in them is trusted — not their sizes, not their markup:
 //   - the archive is opened by zip.ts, a bounded hand-written reader: entry count, names and offsets are checked up front,
 //     and every part is inflated under a hard cap (per XML part, per picture, and in total) that a lying archive cannot
@@ -10,6 +11,10 @@ import { createHash } from 'crypto';
 import { BUDGET } from './budget.js';
 import { sniffType } from './fetchCapped.js';
 import { BUDGET_REASON, cleanText, decodeEntities, injectionPrepared, reserveText, safeLabel, scanDocumentTextCooperatively, unread } from './pdf.js';
+import { walkTags } from '../../boundedFiles/xml.js';
+import { DOCX_MAX_TEXT_CHARS, extractDocxContent, imageRelationships } from '../../boundedFiles/docx.js';
+export { DOCX_MAX_TEXT_CHARS, extractDocxContent, imageRelationships };
+export type { DocxContent } from '../../boundedFiles/docx.js';
 import type { Prepared } from './pdf.js';
 import type { AcquireContext, MediaBlock } from './types.js';
 import { BAD_ZIP_REASON, ZipGuardError, ZipLimitError, openZip } from './zip.js';
@@ -32,14 +37,7 @@ export const PPTX_MAX_TOTAL_SLIDE_XML_BYTES = 8 * 1024 * 1024;
  * capped separately (DOCX_MAX_TEXT_CHARS), so a hostile body costs time, not memory.
  */
 export const DOCX_MAX_XML_BYTES = 16 * 1024 * 1024;
-/**
- * The most text of a document body that is collected. Nothing reads more: the injection scan looks at the first 400,000
- * characters and the review keeps 12,000. Without this, 16 MB of entities (&amp; &amp; …) made the decoder's intermediate
- * strings peak at 400 MB of heap; with it the peak stays under ~100 MB at any size. Pictures are still found past the cap.
- */
-export const DOCX_MAX_TEXT_CHARS = 2_000_000;
 const RELS_MAX_BYTES = 1024 * 1024;
-const MAX_PICTURE_REFS = 200;
 const KEPT_IMAGE_TYPES: ReadonlySet<string> = new Set(['png', 'jpeg', 'webp']);
 
 export const ARCHIVE_REASON = 'This is an archive or an unsupported file type (for example a zip or a spreadsheet), which is not opened automatically';
@@ -70,159 +68,6 @@ export function detectOfficeKind(bytes: Buffer): 'docx' | 'pptx' | 'archive' {
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
-// ─── a linear XML walk ───────────────────────────────────────────────────────
-
-/**
- * What the walk tells its visitor about one tag. `open`/`gt` are the offsets of its '<' and '>', `end` is where the text
- * that follows it stops (the next '<', or the end of the string): the text content is xml.slice(gt + 1, end).
- */
-type TagVisitor = (name: string, closing: boolean, selfClosing: boolean, open: number, gt: number, end: number) => void;
-
-/**
- * Visits every tag of an XML string once, left to right, in time linear in its length. A '<' always starts a new tag
- * (XML forbids a raw '<' inside an attribute value), so a '<' that is not closed by a '>' before the next '<' is not a tag
- * and is skipped — which is also why `<a:t <a:t <a:t …` repeated a hundred thousand times costs one pass, not a hundred
- * thousand scans to the end of the string. The search for '>' resumes where the last one was found, never from scratch.
- */
-function walkTags(xml: string, visit: TagVisitor): void {
-  const n = xml.length;
-  let open = xml.indexOf('<');
-  let gt = -1;
-  while (open >= 0) {
-    const next = xml.indexOf('<', open + 1);
-    const end = next < 0 ? n : next;
-    if (gt < open) {
-      gt = xml.indexOf('>', open + 1);
-      if (gt < 0) return;   // no '>' anywhere after this point: nothing else in the string is a tag
-    }
-    if (gt < end) {
-      const closing = xml.charCodeAt(open + 1) === 0x2f;
-      const nameStart = open + (closing ? 2 : 1);
-      let nameEnd = nameStart;
-      while (nameEnd < gt) {
-        const c = xml.charCodeAt(nameEnd);
-        if (c <= 0x20 || c === 0x2f) break;
-        nameEnd++;
-      }
-      visit(xml.slice(nameStart, nameEnd), closing, xml.charCodeAt(gt - 1) === 0x2f, open, gt, end);
-    }
-    open = next;
-  }
-}
-
-/** The attributes of one tag's text (`name="value"` or `name='value'` pairs), read in one pass. First occurrence wins. */
-function readAttributes(tag: string): Map<string, string> {
-  const out = new Map<string, string>();
-  const n = tag.length;
-  let i = 0;
-  while (i < n) {
-    const eq = tag.indexOf('=', i);
-    if (eq < 0) break;
-    let nameStart = eq;
-    while (nameStart > i && tag.charCodeAt(nameStart - 1) > 0x20) nameStart--;
-    let q = eq + 1;
-    while (q < n && tag.charCodeAt(q) <= 0x20) q++;
-    const quote = tag[q];
-    if (quote !== '"' && quote !== "'") { i = eq + 1; continue; }
-    const close = tag.indexOf(quote, q + 1);
-    if (close < 0) break;
-    const name = tag.slice(nameStart, eq);
-    if (name && !out.has(name)) out.set(name, tag.slice(q + 1, close));
-    i = close + 1;
-  }
-  return out;
-}
-
-const attributesOf = (xml: string, open: number, gt: number) => readAttributes(xml.slice(open, gt));
-
-// ─── Word ────────────────────────────────────────────────────────────────────
-
-export interface DocxContent {
-  /** The body text: a blank line between paragraphs, tabs and line breaks as written. */
-  text: string;
-  /** The relationship ids of the pictures the body points at, in document order (at most MAX_PICTURE_REFS). */
-  pictureIds: string[];
-}
-
-/**
- * The text and picture references of a word/document.xml. Text is every <w:t> run, a tab for <w:tab/> (not the tab-stop
- * definitions under <w:tabs>), a newline for <w:br/> and a blank line at the end of each paragraph. The Fallback half of a
- * mc:AlternateContent is skipped: Word writes text boxes and pictures twice (a modern copy and a legacy copy) and only the
- * first is shown. Pictures are <a:blip r:embed> and the legacy <v:imagedata r:id>.
- */
-export function extractDocxContent(xml: string, maxChars = DOCX_MAX_TEXT_CHARS): DocxContent {
-  const out: string[] = [];
-  const pictureIds: string[] = [];
-  let kept = 0;
-  const keep = (text: string) => { if (kept < maxChars) { out.push(text); kept += text.length; } };
-  let inTabStops = false;
-  let fallback = 0;
-  walkTags(xml, (name, closing, selfClosing, open, gt, end) => {
-    if (fallback > 0 || name === 'mc:Fallback') {
-      if (name === 'mc:Fallback') fallback = Math.max(0, fallback + (closing ? -1 : selfClosing ? 0 : 1));
-      return;
-    }
-    if (closing) {
-      if (name === 'w:p') keep('\n\n');
-      else if (name === 'w:tabs') inTabStops = false;
-      return;
-    }
-    switch (name) {
-      case 'w:t':
-        // Only as much of the run as there is room for: the rest is never read, and decoding 15 MB of entities in one piece is what costs memory.
-        if (!selfClosing && end > gt + 1 && kept < maxChars) keep(decodeEntities(xml.slice(gt + 1, Math.min(end, gt + 1 + (maxChars - kept) + 8))));
-        break;
-      case 'w:tab':
-        if (!inTabStops) keep('\t');
-        break;
-      case 'w:tabs':
-        if (!selfClosing) inTabStops = true;
-        break;
-      case 'w:br': case 'w:cr':
-        keep('\n');
-        break;
-      case 'a:blip': case 'v:imagedata': {
-        if (pictureIds.length >= MAX_PICTURE_REFS) break;
-        const id = attributesOf(xml, open, gt).get(name === 'a:blip' ? 'r:embed' : 'r:id');
-        if (id) pictureIds.push(id);
-        break;
-      }
-    }
-  });
-  return { text: out.join(''), pictureIds };
-}
-
-/** A relationship target resolved against its source part's folder, as a package part name; null when it leaves the package or is a link. */
-function resolvePartName(folder: string, target: string): string | null {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return null;   // http:, file: …: not a part of this package
-  const parts = (target.startsWith('/') ? target.slice(1) : `${folder}${target}`).split('/');
-  const resolved: string[] = [];
-  for (const part of parts) {
-    if (part === '' || part === '.') continue;
-    if (part === '..') {
-      if (!resolved.length) return null;
-      resolved.pop();
-    } else {
-      resolved.push(part);
-    }
-  }
-  return resolved.length ? resolved.join('/') : null;
-}
-
-/** Relationship id -> package part name, for the image relationships of one .rels file. */
-export function imageRelationships(relsXml: string, folder: string): Map<string, string> {
-  const out = new Map<string, string>();
-  walkTags(relsXml, (name, closing, _selfClosing, open, gt) => {
-    if (name !== 'Relationship' || closing) return;
-    const a = attributesOf(relsXml, open, gt);
-    const id = a.get('Id');
-    const target = a.get('Target');
-    if (!id || !target || !(a.get('Type') ?? '').endsWith('/image') || (a.get('TargetMode') ?? '').toLowerCase() === 'external') return;
-    const part = resolvePartName(folder, target);
-    if (part && !out.has(id)) out.set(id, part);
-  });
-  return out;
-}
 
 /** The pictures a .docx body points at, as archive entries, in document order, each once. */
 function docxPictures(zip: ZipArchive, pictureIds: string[]): ZipEntry[] {

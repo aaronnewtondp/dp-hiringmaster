@@ -10,7 +10,7 @@
   "functions": {
     "api/index.ts": {
       "maxDuration": 60,
-      "includeFiles": "node_modules/pdf-parse/dist/pdf-parse/cjs/pdf.worker.mjs"
+      "includeFiles": "node_modules/pdf-parse/dist/pdf-parse/cjs/*"
     },
     "api/portfolio-worker.ts": {
       "maxDuration": 300,
