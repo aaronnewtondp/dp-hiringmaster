@@ -555,6 +555,39 @@ test.describe('R019 work-sample review (local Postgres + API)', () => {
       expect((await reviewRow(appId)).score).toBeNull();
     });
 
+    test('Google Play + Looker Studio + Google Photos only: unreviewable (not "no work samples"), NULL score, the links listed in order with their own reasons, average untouched', async ({ request }) => {
+      const play = 'https://play.google.com/store/apps/details?id=com.acme.fitness';
+      const looker = 'https://lookerstudio.google.com/reporting/0B1c2D3e/page/p_abc';
+      const photos = 'https://photos.app.goo.gl/AbC123xYz';
+      const { appId } = await addApp(mktRole, 'google-products', { answer: `App: ${play}  Report: lookerstudio.google.com/reporting/0B1c2D3e/page/p_abc  Album: ${photos}` });
+      const before = await scoreState(appId);
+      const r = await rerun(request, appId);
+      expect(r.code).toBe(202);
+      expect(r.body).toEqual({ status: 'unreviewable', links: 0, queued: false });
+      const row = await reviewRow(appId);
+      expect(row.status).toBe('unreviewable');
+      expect(row.score).toBeNull();
+      expect(row.urls).toEqual([]);
+      expect(row.error).toMatch(/cannot be opened automatically/i);
+      expect(row.error).not.toMatch(/No work samples provided/);
+      const a = (await analysisOf(appId))!;
+      expect(a.unreviewed).toEqual([
+        { url: play, platform: 'custom', reason: 'Google Play listing - not opened automatically, open it by hand' },
+        { url: looker, platform: 'custom', reason: 'Looker Studio report - not opened automatically, open it by hand' },
+        { url: photos, platform: 'custom', reason: 'Google Photos album or photo - not opened automatically, open it by hand' },
+      ]);
+      expect(await scoreState(appId)).toEqual(before);
+    });
+
+    test('every other Google address (search, maps, calendar, meet, forms) still counts as no answer', async ({ request }) => {
+      const { appId } = await addApp(mktRole, 'google-boilerplate', {
+        answer: 'https://www.google.com/search?q=jane https://www.google.com/maps/place/Mumbai https://calendar.google.com/x https://meet.google.com/abc-defg-hij https://docs.google.com/forms/d/e/abc/viewform',
+      });
+      const r = await rerun(request, appId);
+      expect(r.body).toEqual({ status: 'no_portfolio', links: 0, queued: false });
+      expect((await reviewRow(appId)).error).toBe('No work samples provided; this dimension is not applied');
+    });
+
     test('an Instagram-only answer is NOT settled at enqueue (a caption snippet can be read): it is queued for the worker', async ({ request }) => {
       const { appId } = await addApp(mktRole, 'ig-only', { answer: 'instagram.com/jane.creates' });
       const before = await scoreState(appId);

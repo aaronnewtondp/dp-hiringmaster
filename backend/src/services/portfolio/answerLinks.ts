@@ -368,9 +368,32 @@ const LINK_HUB_HOSTS = ['linktr.ee', 'bio.link', 'beacons.ai', 'linkin.bio', 'ln
 const SHORTENER_HOSTS = ['bit.ly', 't.co', 'tinyurl.com', 'rb.gy', 'ow.ly', 'buff.ly', 'goo.gl', '1drv.ms', 'is.gd', 'cutt.ly', 'shorturl.at', 'tiny.cc', 't.ly'];
 const SOCIAL_OTHER_HOSTS = ['facebook.com', 'fb.com', 'fb.me', 'fb.watch', 'twitter.com', 'x.com', 'threads.net', 'threads.com', 'tiktok.com', 'pinterest.com', 'pin.it', 'snapchat.com'];
 const CLOUD_DOCUMENT_HOSTS = ['dropbox.com', 'dropboxusercontent.com', 'onedrive.live.com', 'sharepoint.com'];
-// Google hosts that can carry a work sample. Every other *.google.com address (search, maps, calendar, meet, forms)
-// is boilerplate that Google Forms answers are full of.
+// Google hosts that can carry a work sample and are opened. Every other *.google.com address (search, maps, calendar, meet,
+// forms) is boilerplate that Google Forms answers are full of, except the three products listed below.
 const GOOGLE_KEEP = new Set(['drive.google.com', 'docs.google.com', 'sites.google.com', 'drive.usercontent.google.com']);
+
+// Three Google products are plausible marketing work samples (an app the candidate marketed, a reporting dashboard, a campaign
+// photo album) but are not opened automatically: JS-rendered and login-prone, and no fetcher exists. They are NOT part of the
+// *.google.com boilerplate that is dropped: a dropped link vanishes, and an answer whose only link it was read as "no work
+// samples provided". They are classified as never-opened links (handler 'none', platform 'custom'), so HR sees the link with its
+// own reason. Exact hosts only (a look-alike such as play.google.com.evil.example is an ordinary site, and so is evilplay.google.com).
+type ListedGoogleProduct = 'play' | 'looker' | 'photos';
+
+function listedGoogleProduct(host: string, lowerPath: string): ListedGoogleProduct | null {
+  if (host === 'play.google.com') return 'play';
+  if (host === 'lookerstudio.google.com' || host === 'datastudio.google.com') return 'looker';
+  // photos.app.goo.gl is Google Photos' own short link (it used to be read as any other shortener and resolved: the worker then
+  // asked for it, and the page it leads to was not reviewable); goo.gl/photos/... is its older spelling.
+  if (host === 'photos.google.com' || host === 'photos.app.goo.gl') return 'photos';
+  if (host === 'goo.gl' && /^\/photos(\/|$)/.test(lowerPath)) return 'photos';
+  return null;
+}
+
+const LISTED_GOOGLE_REASON: Record<ListedGoogleProduct, string> = {
+  play: 'Google Play listing - not opened automatically, open it by hand',
+  looker: 'Looker Studio report - not opened automatically, open it by hand',
+  photos: 'Google Photos album or photo - not opened automatically, open it by hand',
+};
 
 /** Links that are never a work sample: the company's own, forms, scheduling, chat, maps, internal hosts, raw IPs. */
 function isDropped(host: string, lowerPath: string): boolean {
@@ -382,7 +405,8 @@ function isDropped(host: string, lowerPath: string): boolean {
   if (host === 'wa.me' || hostIs(host, 'whatsapp.com') || hostIs(host, 'whatsapp.net')) return true;
   if (host === 't.me' || host === 'telegram.dog' || hostIs(host, 'telegram.me') || hostIs(host, 'telegram.org')) return true;
   if (host === 'maps.app.goo.gl' || host === 'maps.apple.com') return true;
-  if (hostIs(host, 'google.com') && !GOOGLE_KEEP.has(host)) return true;       // includes maps.google.com and google.com/maps
+  // includes maps.google.com and google.com/maps; not the three listed products above
+  if (hostIs(host, 'google.com') && !GOOGLE_KEEP.has(host) && listedGoogleProduct(host, lowerPath) === null) return true;
   if (/(^|\.)localhost(\.|$)/.test(host) || /\.(localdomain|local|internal|lan|intranet|home\.arpa)$/.test(host)) return true;
   return false;
 }
@@ -484,6 +508,14 @@ export function classifyAnswerUrl(url: string): ClassifiedAnswerUrl | null {
   const key = dedupeKey(clean);
   const mk = (platform: PortfolioPlatform, handler: ReviewHandler, k = key, url = clean): ClassifiedAnswerUrl =>
     ({ url, host, platform, handler, key: k });
+
+  // Play / Looker Studio / Photos: never opened, listed for HR. Checked before the file-extension rules so that a path ending in
+  // ".pdf" on one of these hosts cannot turn it into a document that the worker would download. The identity keeps the case of the
+  // path and query (Photos short ids and Play package names are case-sensitive, and dedupeKey lower-cases everything, which would
+  // merge two different albums into one entry) and ignores the account prefix ("/u/0/") like Drive's does.
+  if (listedGoogleProduct(host, lower) !== null) {
+    return mk('custom', 'none', `${host}${path.replace(GOOGLE_ACCOUNT_PREFIX_RE, '').replace(/\/$/, '')}${u.search}`);
+  }
 
   // Google Drive / Docs. A malformed id is not trusted as a file: it is treated as a plain site link.
   if (host === 'drive.google.com' || host === 'docs.google.com' || host === 'drive.usercontent.google.com') {
@@ -610,6 +642,10 @@ function notOpenedReason(c: ClassifiedAnswerUrl, candidateName: string | undefin
   }
   if (c.platform === 'cloud_file') return 'expiring file-transfer link';
   if (c.platform === 'social_other') return 'social media link not opened automatically';
+  let lowerPath = '';
+  try { lowerPath = new URL(c.url).pathname.toLowerCase(); } catch { /* keep '' */ }
+  const product = listedGoogleProduct(c.host, lowerPath);
+  if (product) return LISTED_GOOGLE_REASON[product];
   return 'link not opened automatically';
 }
 

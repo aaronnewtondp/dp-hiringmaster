@@ -416,7 +416,9 @@ describe('classifyAnswerUrl', () => {
     'https://linktr.ee/janedoe', 'https://bio.link/janedoe', 'https://beacons.ai/janedoe', 'https://linkin.bio/janedoe',
     'https://lnk.bio/janedoe', 'https://campsite.bio/janedoe',
     'https://bit.ly/3xYzAb', 'https://t.co/AbCdEf', 'https://tinyurl.com/abc123', 'https://rb.gy/abc123', 'https://ow.ly/AbCd',
-    'https://buff.ly/3abc', 'https://goo.gl/AbCdEf', 'https://photos.app.goo.gl/AbCdEf', 'https://1drv.ms/b/s!AbCdEf',
+    'https://buff.ly/3abc', 'https://goo.gl/AbCdEf', 'https://1drv.ms/b/s!AbCdEf',
+    // photos.app.goo.gl is no longer here: it is Google Photos' own link and is listed, not resolved (see "Google Play, Looker Studio and Google Photos")
+    'https://abc.app.goo.gl/AbCdEf', 'https://evilphotos.app.goo.gl/AbCdEf', 'https://goo.gl/photoshoot/AbCdEf', 'https://goo.gl/photos-by-jane',
   ])('link hub or shortener %s is resolved by the worker', (url) => {
     expect(classifyAnswerUrl(url)).toMatchObject({ platform: 'link_hub', handler: 'resolve' });
   });
@@ -1159,6 +1161,300 @@ describe('claimText', () => {
     const { result, ms } = timed(() => claim(text));
     expect(ms).toBeLessThan(300);
     expect(result.length).toBeLessThanOrEqual(1500);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Google Play, Looker Studio (ex Data Studio) and Google Photos: listed for HR, never dropped, never opened
+// ═════════════════════════════════════════════════════════════════════════════
+// Before this, every *.google.com host outside Drive / Docs / Sites was dropped as boilerplate, so these three products vanished — and
+// an answer whose ONLY link was one of them read as "no work samples provided". photos.app.goo.gl was read as an ordinary shortener,
+// which the worker then requested. All of them are now never-opened links (handler 'none', platform 'custom') with their own reason.
+describe('Google Play, Looker Studio and Google Photos links are listed for HR, never dropped and never opened', () => {
+  type Product = 'play' | 'looker' | 'photos';
+  const REASON: Record<Product, string> = {
+    play: 'Google Play listing - not opened automatically, open it by hand',
+    looker: 'Looker Studio report - not opened automatically, open it by hand',
+    photos: 'Google Photos album or photo - not opened automatically, open it by hand',
+  };
+  const pick = (answer: string, ctx?: { candidateName?: string }) => pickAnswerLinks(answerOf(answer), ctx);
+  const NOT_ANSWERED = { answered: false, textOnly: false, claimText: '', links: [], listedNotReviewed: [] };
+
+  const PLAY = 'https://play.google.com/store/apps/details?id=com.acme.app';
+  const LOOKER = 'https://lookerstudio.google.com/reporting/0B1c2D3e-4f5a-6789/page/p_abc123';
+  const PHOTOS = 'https://photos.google.com/share/AF1QipNabc123?key=Zk5Vd';
+
+  // [as the candidate wrote it, the address HR is shown (normalised, tracking removed), the product]
+  const FORMS: Array<[string, string, Product]> = [
+    // Google Play
+    [PLAY, PLAY, 'play'],
+    ['play.google.com/store/apps/details?id=com.acme.app', PLAY, 'play'],
+    ['http://play.google.com/store/apps/details?id=com.acme.app', 'http://play.google.com/store/apps/details?id=com.acme.app', 'play'],
+    ['https://www.play.google.com/store/apps/details?id=com.acme.app', 'https://www.play.google.com/store/apps/details?id=com.acme.app', 'play'],
+    ['www.play.google.com/store/apps/details?id=com.acme.app', 'https://www.play.google.com/store/apps/details?id=com.acme.app', 'play'],
+    ['PLAY.GOOGLE.COM/store/apps/details?id=com.acme.app', PLAY, 'play'],
+    ['HTTPS://Play.Google.Com/Store/Apps/Details?id=com.Acme.App', 'https://play.google.com/Store/Apps/Details?id=com.Acme.App', 'play'],
+    ['https://play.google.com/store/apps/details?id=com.acme.app&hl=en_IN&gl=IN', 'https://play.google.com/store/apps/details?id=com.acme.app&hl=en_IN&gl=IN', 'play'],
+    ['https://play.google.com/store/apps/details?id=com.acme.app&utm_source=ig&utm_medium=bio&fbclid=x&gclid=y', PLAY, 'play'],
+    ['https://play.google.com/store/apps/details?id=com.acme.app#reviews', PLAY, 'play'],
+    ['https://play.google.com/store/apps/dev?id=5700313618786177705', 'https://play.google.com/store/apps/dev?id=5700313618786177705', 'play'],
+    ['https://play.google.com/store/apps/developer?id=Acme+Labs', 'https://play.google.com/store/apps/developer?id=Acme+Labs', 'play'],
+    ['https://play.google.com/store/apps/collection/cluster?clp=abc&gsr=def', 'https://play.google.com/store/apps/collection/cluster?clp=abc&gsr=def', 'play'],
+    ['https://play.google.com/store/search?q=acme&c=apps', 'https://play.google.com/store/search?q=acme&c=apps', 'play'],
+    ['https://play.google.com/', 'https://play.google.com', 'play'],
+    ['play.google.com', 'https://play.google.com', 'play'],
+    ['https://play.google.com/store/files/brief.pdf', 'https://play.google.com/store/files/brief.pdf', 'play'],   // a path ending in .pdf is not a document to download
+    // Looker Studio, and the Data Studio name it used to have
+    [LOOKER, LOOKER, 'looker'],
+    ['lookerstudio.google.com/reporting/0B1c2D3e-4f5a-6789/page/p_abc123', LOOKER, 'looker'],
+    ['https://lookerstudio.google.com/reporting/0B1c2D3e-4f5a-6789/page/p_abc123/edit', 'https://lookerstudio.google.com/reporting/0B1c2D3e-4f5a-6789/page/p_abc123/edit', 'looker'],
+    ['https://lookerstudio.google.com/u/0/reporting/0B1c2D3e-4f5a-6789/page/p_abc123', 'https://lookerstudio.google.com/u/0/reporting/0B1c2D3e-4f5a-6789/page/p_abc123', 'looker'],
+    ['https://lookerstudio.google.com/s/AbCdEf', 'https://lookerstudio.google.com/s/AbCdEf', 'looker'],
+    ['lookerstudio.google.com/reporting/0B1c2D3e/page/abc?s=xyz', 'https://lookerstudio.google.com/reporting/0B1c2D3e/page/abc?s=xyz', 'looker'],
+    ['https://lookerstudio.google.com/reporting/0B1c2D3e/page/abc?utm_source=ig&si=1', 'https://lookerstudio.google.com/reporting/0B1c2D3e/page/abc', 'looker'],
+    ['https://datastudio.google.com/reporting/0B1c2D3e-4f5a-6789', 'https://datastudio.google.com/reporting/0B1c2D3e-4f5a-6789', 'looker'],
+    ['https://datastudio.google.com/u/0/reporting/0B1c2D3e-4f5a-6789/page/1M', 'https://datastudio.google.com/u/0/reporting/0B1c2D3e-4f5a-6789/page/1M', 'looker'],
+    ['https://datastudio.google.com/embed/reporting/0B1c2D3e/page/1M', 'https://datastudio.google.com/embed/reporting/0B1c2D3e/page/1M', 'looker'],
+    ['DATASTUDIO.GOOGLE.COM/reporting/0B1c2D3e', 'https://datastudio.google.com/reporting/0B1c2D3e', 'looker'],
+    // Google Photos: the web app, and both spellings of its short link
+    [PHOTOS, PHOTOS, 'photos'],
+    ['photos.google.com/share/AF1QipNabc123', 'https://photos.google.com/share/AF1QipNabc123', 'photos'],
+    ['https://photos.google.com/u/0/share/AF1QipNabc123?key=Zk5Vd', 'https://photos.google.com/u/0/share/AF1QipNabc123?key=Zk5Vd', 'photos'],
+    ['https://photos.google.com/album/AF1QipNabc123', 'https://photos.google.com/album/AF1QipNabc123', 'photos'],
+    ['https://photos.google.com/photo/AF1QipNabc123', 'https://photos.google.com/photo/AF1QipNabc123', 'photos'],
+    ['https://photos.google.com/', 'https://photos.google.com', 'photos'],
+    ['https://photos.app.goo.gl/AbC123xYz', 'https://photos.app.goo.gl/AbC123xYz', 'photos'],
+    ['photos.app.goo.gl/AbC123xYz', 'https://photos.app.goo.gl/AbC123xYz', 'photos'],
+    ['PHOTOS.APP.GOO.GL/AbC123xYz', 'https://photos.app.goo.gl/AbC123xYz', 'photos'],
+    ['https://photos.app.goo.gl/AbC123xYz?utm_source=x', 'https://photos.app.goo.gl/AbC123xYz', 'photos'],
+    ['http://photos.app.goo.gl/AbC123xYz/', 'http://photos.app.goo.gl/AbC123xYz/', 'photos'],
+    ['https://goo.gl/photos/AbC123xYz', 'https://goo.gl/photos/AbC123xYz', 'photos'],
+    ['goo.gl/photos/AbC123xYz', 'https://goo.gl/photos/AbC123xYz', 'photos'],
+    ['https://goo.gl/PHOTOS/AbC123xYz', 'https://goo.gl/PHOTOS/AbC123xYz', 'photos'],
+    ['https://goo.gl/photos', 'https://goo.gl/photos', 'photos'],
+  ];
+
+  describe('classifyAnswerUrl', () => {
+    it.each(FORMS)('%s is a never-opened link (custom / none), shown as %s', (written, shown) => {
+      const c = classifyAnswerUrl(extractAnswerUrls(written)[0]);
+      expect(c).not.toBeNull();
+      expect(c).toMatchObject({ url: shown, platform: 'custom', handler: 'none' });
+      expect(c?.host).toBe(new URL(shown).hostname.replace(/^www\./, ''));
+    });
+    it('classifying the written form directly (not through extraction) gives the same answer', () => {
+      for (const [written, shown] of FORMS) {
+        if (!/^https?:\/\//i.test(written)) continue;
+        expect(classifyAnswerUrl(written)).toMatchObject({ url: shown, platform: 'custom', handler: 'none' });
+      }
+    });
+    it('www. is stripped from the host and the host is reported lower-case', () => {
+      expect(classifyAnswerUrl('https://WWW.Play.Google.com/store')?.host).toBe('play.google.com');
+      expect(classifyAnswerUrl('https://www.photos.google.com/share/x')?.host).toBe('photos.google.com');
+    });
+    it('uses an existing platform: the closed PortfolioPlatform union is not widened', () => {
+      expect(new Set(FORMS.map(([w]) => classifyAnswerUrl(extractAnswerUrls(w)[0])?.platform))).toEqual(new Set(['custom']));
+    });
+    it('an explicit default port, a non-default port and a query that merely mentions another host change nothing', () => {
+      expect(classifyAnswerUrl('https://play.google.com:443/store/apps/details?id=a.b')).toMatchObject({ handler: 'none', url: 'https://play.google.com/store/apps/details?id=a.b' });
+      expect(classifyAnswerUrl('https://play.google.com:8443/store')).toMatchObject({ handler: 'none', host: 'play.google.com' });
+      expect(classifyAnswerUrl('https://play.google.com/store/apps/details?id=a.b&referrer=https%3A%2F%2Fevil.example%2F')).toMatchObject({ handler: 'none' });
+    });
+
+    describe('identity (what counts as the same link)', () => {
+      const key = (u: string) => classifyAnswerUrl(u)?.key;
+      it('http / https / www / trailing slash / tracking parameters / fragment / host case are one link', () => {
+        expect(new Set([
+          'https://photos.app.goo.gl/AbC123xYz', 'http://photos.app.goo.gl/AbC123xYz', 'https://photos.app.goo.gl/AbC123xYz/',
+          'https://PHOTOS.app.goo.gl/AbC123xYz?utm_source=x&fbclid=y#top',
+        ].map(key)).size).toBe(1);
+        expect(new Set([PLAY, `${PLAY}&utm_campaign=z`, `${PLAY}#reviews`, PLAY.replace('https://', 'http://'), PLAY.replace('https://', 'https://www.')].map(key)).size).toBe(1);
+      });
+      it('the account prefix (/u/0/, /u/1/) does not make another link, like Drive', () => {
+        expect(new Set([
+          'https://photos.google.com/share/AF1QipNabc123?key=Zk5Vd', 'https://photos.google.com/u/0/share/AF1QipNabc123?key=Zk5Vd',
+          'https://photos.google.com/u/1/share/AF1QipNabc123?key=Zk5Vd',
+        ].map(key)).size).toBe(1);
+        expect(key('https://lookerstudio.google.com/reporting/AbC/page/1')).toBe(key('https://lookerstudio.google.com/u/2/reporting/AbC/page/1'));
+        expect(key('https://datastudio.google.com/reporting/AbC')).not.toBe(key('https://lookerstudio.google.com/reporting/AbC'));   // another host, another link
+      });
+      it('the case of the path and query is kept: Photos short ids and Play package names are case-sensitive, two albums are two links', () => {
+        expect(key('https://photos.app.goo.gl/AbC123xYz')).not.toBe(key('https://photos.app.goo.gl/abc123xyz'));
+        expect(key('https://photos.google.com/share/AF1QipAAA?key=Zk5Vd')).not.toBe(key('https://photos.google.com/share/AF1Qipaaa?key=Zk5Vd'));
+        expect(key('https://goo.gl/photos/AbC')).not.toBe(key('https://goo.gl/photos/aBc'));
+      });
+      it('different apps, reports and albums are different links', () => {
+        expect(key(PLAY)).not.toBe(key('https://play.google.com/store/apps/details?id=com.other.app'));
+        expect(key(LOOKER)).not.toBe(key('https://lookerstudio.google.com/reporting/0B1c2D3e-4f5a-6789/page/p_zzz'));
+        expect(key('https://photos.app.goo.gl/AbC')).not.toBe(key('https://photos.app.goo.gl/AbD'));
+      });
+      it('the three products never share a key with each other, nor with a site that looks similar', () => {
+        const keys = [PLAY, LOOKER, PHOTOS, 'https://photos.app.goo.gl/AbC', 'https://goo.gl/photos/AbC', 'https://play.google.com.evil.example/store'].map(key);
+        expect(new Set(keys).size).toBe(keys.length);
+      });
+    });
+  });
+
+  describe('everything else on google.com is still dropped, and look-alikes are not mistaken for these hosts', () => {
+    it.each([
+      ['https://www.google.com/search?q=jane'], ['https://google.com/'], ['https://www.google.com/maps/place/Mumbai'], ['https://maps.google.com/?q=Mumbai'],
+      ['https://calendar.google.com/calendar/u/0/r'], ['https://meet.google.com/abc-defg-hij'], ['https://forms.google.com/x'],
+      ['https://docs.google.com/forms/d/e/abc/viewform'], ['https://accounts.google.com/ServiceLogin'], ['https://mail.google.com/mail/u/0/'],
+      ['https://ads.google.com/home/'], ['https://analytics.google.com/analytics/web/'], ['https://search.google.com/search-console'],
+      ['https://scholar.google.com/citations?user=abc'], ['https://news.google.com/'], ['https://translate.google.com/'], ['https://support.google.com/x'],
+      ['https://myaccount.google.com/'], ['https://chat.google.com/'], ['https://contacts.google.com/'], ['https://keep.google.com/'],
+      ['https://classroom.google.com/'], ['https://earth.google.com/web/'], ['https://cloud.google.com/looker'], ['https://looker.google.com/'],
+      ['https://studio.google.com/'], ['https://playground.google.com/'], ['https://photospot.google.com/'], ['https://googlephotos.google.com/'],
+      ['https://www.google.com/photos/about/'], ['https://www.google.com/play/'], ['https://www.google.com/lookerstudio'],
+      ['https://goo.gl/maps/abc123'], ['https://goo.gl/forms/abc123'], ['https://maps.app.goo.gl/abc123'], ['https://forms.gle/abc123'],
+      // a subdomain of one of the three hosts is not one of them
+      ['https://evil.play.google.com/store'], ['https://evil.lookerstudio.google.com/reporting/x'], ['https://x.photos.google.com/share/y'],
+      ['https://evilplay.google.com/x'], ['https://evilphotos.google.com/x'], ['https://xdatastudio.google.com/reporting/x'],
+      // credentials in front of the host: the host is evil.example
+      ['https://photos.google.com@evil.example/x'], ['https://play.google.com:pass@evil.example/store'], ['https://user@play.google.com/store/apps/details?id=a.b'],
+    ])('%s is dropped (null)', (url) => { expect(classifyAnswerUrl(url)).toBeNull(); });
+
+    it.each([
+      ['https://play.google.com.evil.example/store/apps/details?id=a.b'], ['https://lookerstudio.google.com.evil.example/reporting/x'],
+      ['https://photos.google.com.evil.example/share/x'], ['https://photos.app.goo.gl.evil.example/AbC'],
+      ['https://notgoogle.com/play'], ['https://play.notgoogle.com/store'], ['https://google.com.attacker.example/play.google.com'],
+      ['https://play-google.com/store'], ['https://playgoogle.com/store'], ['https://play.google.co/store'], ['https://play.google.com.au/store'],
+      ['https://evil.example/?u=https://play.google.com/store'], ['https://evil.example/photos.google.com/share/x'], ['https://evil.example/#photos.app.goo.gl/x'],
+    ])('look-alike %s is an ordinary website (custom / site): not listed as a Google product, not dropped', (url) => {
+      expect(classifyAnswerUrl(url)).toMatchObject({ platform: 'custom', handler: 'site' });
+    });
+
+    it('goo.gl: only /photos and /photos/... are Google Photos; the other short links keep their old meaning', () => {
+      expect(classifyAnswerUrl('https://goo.gl/AbCdEf')).toMatchObject({ platform: 'link_hub', handler: 'resolve' });
+      expect(classifyAnswerUrl('https://goo.gl/photoshoot/AbC')).toMatchObject({ platform: 'link_hub', handler: 'resolve' });
+      expect(classifyAnswerUrl('https://goo.gl/photos-by-jane')).toMatchObject({ platform: 'link_hub', handler: 'resolve' });
+      expect(classifyAnswerUrl('https://goo.gl/?photos')).toMatchObject({ platform: 'link_hub', handler: 'resolve' });
+      expect(classifyAnswerUrl('https://goo.gl/forms/abc')).toBeNull();
+      expect(classifyAnswerUrl('https://goo.gl/maps/abc')).toBeNull();
+      expect(classifyAnswerUrl('https://abc.app.goo.gl/AbC')).toMatchObject({ platform: 'link_hub', handler: 'resolve' });
+      expect(classifyAnswerUrl('https://evilphotos.app.goo.gl/AbC')).toMatchObject({ platform: 'link_hub', handler: 'resolve' });
+      expect(classifyAnswerUrl('https://xphotos.app.goo.gl/AbC')).toMatchObject({ platform: 'link_hub', handler: 'resolve' });
+    });
+
+    it('Drive, Docs and Sites are exactly as they were', () => {
+      expect(classifyAnswerUrl(`https://drive.google.com/file/d/${DRIVE_ID}/view`)).toMatchObject({ platform: 'gdrive_file', handler: 'document' });
+      expect(classifyAnswerUrl(`https://docs.google.com/document/d/${DRIVE_ID}/edit`)).toMatchObject({ platform: 'google_doc', handler: 'document' });
+      expect(classifyAnswerUrl('https://sites.google.com/view/jane')).toMatchObject({ platform: 'custom', handler: 'site' });
+      expect(classifyAnswerUrl('https://docs.google.com/forms/d/e/abc/viewform')).toBeNull();
+    });
+  });
+
+  describe("a trailing-dot host is not read as a link for ANY host (unchanged: the address stays in the candidate's own words)", () => {
+    it.each([
+      ['https://play.google.com./store/apps/details?id=a.b'], ['play.google.com./store'], ['https://photos.app.goo.gl./AbC'], ['https://janedoe.design./work'],
+    ])('%s', (written) => {
+      expect(extractAnswerUrls(written)).toEqual([]);
+      expect(classifyAnswerUrl(written)).toBeNull();
+      const p = pick(`See ${written} for my apps and campaigns`);
+      expect(p).toMatchObject({ answered: true, textOnly: true, links: [], listedNotReviewed: [] });
+      expect(p.claimText).toContain(written);                          // HR still reads it, as the candidate wrote it
+    });
+  });
+
+  describe('pickAnswerLinks', () => {
+    it.each(FORMS)('%s alone: answered, not text-only, nothing to open, one listed entry with its reason', (written, shown, product) => {
+      const p = pick(written);
+      expect(p.answered).toBe(true);
+      expect(p.textOnly).toBe(false);
+      expect(p.links).toEqual([]);
+      expect(p.listedNotReviewed).toEqual([{ url: shown, platform: 'custom', reason: REASON[product] }]);
+      expect(p.claimText).toBe(written);
+    });
+    it('regression: an answer whose only link is one of these is no longer "not answered"', () => {
+      for (const only of [PLAY, LOOKER, PHOTOS, 'photos.app.goo.gl/AbC123xYz', 'goo.gl/photos/AbC123xYz', 'datastudio.google.com/reporting/AbC']) {
+        expect(pick(only)).not.toEqual(NOT_ANSWERED);
+        expect(pick(only).answered).toBe(true);
+      }
+    });
+    it('the reason names the product, plainly, and says what to do', () => {
+      expect(pick(PLAY).listedNotReviewed[0].reason).toBe('Google Play listing - not opened automatically, open it by hand');
+      expect(pick(LOOKER).listedNotReviewed[0].reason).toMatch(/^Looker Studio report - /);
+      expect(pick('https://datastudio.google.com/reporting/AbC').listedNotReviewed[0].reason).toMatch(/^Looker Studio report - /);
+      expect(pick(PHOTOS).listedNotReviewed[0].reason).toMatch(/^Google Photos album or photo - /);
+      expect(pick('https://photos.app.goo.gl/AbC').listedNotReviewed[0].reason).toMatch(/^Google Photos album or photo - /);
+      expect(pick('https://goo.gl/photos/AbC').listedNotReviewed[0].reason).toMatch(/^Google Photos album or photo - /);
+      // none of them is the generic fallback, and none says anything about a name
+      for (const u of [PLAY, LOOKER, PHOTOS]) expect(pick(u, { candidateName: 'Jane Doe' }).listedNotReviewed[0].reason).not.toBe('link not opened automatically');
+    });
+    it('the three together, in the order they were written, are three entries (and still not counted against any cap)', () => {
+      const p = pick(`${PHOTOS} ${PLAY} ${LOOKER}`);
+      expect(p.links).toEqual([]);
+      expect(p.listedNotReviewed.map(l => l.reason)).toEqual([REASON.photos, REASON.play, REASON.looker]);
+      const q = pick(`${LOOKER}\n${PHOTOS}\n${PLAY}`);
+      expect(q.listedNotReviewed.map(l => l.reason)).toEqual([REASON.looker, REASON.photos, REASON.play]);
+    });
+    it('beside other never-opened links, every entry keeps its place in the answer', () => {
+      const p = pick(`linkedin.com/in/jane-doe ${PLAY} we.tl/t-AbC123 ${PHOTOS} facebook.com/jane ${LOOKER}`);
+      expect(p.listedNotReviewed.map(l => l.platform)).toEqual(['linkedin', 'custom', 'cloud_file', 'custom', 'social_other', 'custom']);
+      expect(p.listedNotReviewed.map(l => l.url)).toEqual([
+        'https://linkedin.com/in/jane-doe', PLAY, 'https://we.tl/t-AbC123', PHOTOS, 'https://facebook.com/jane', LOOKER,
+      ]);
+    });
+    it('mixed with openable work: the work is picked (documents first), these are listed, the order of the rest is unchanged', () => {
+      const p = pick(`Site: janedoe.design  App: ${PLAY}  Deck: drive.google.com/file/d/${DRIVE_ID}/view  Report: ${LOOKER}  Reel: youtu.be/dQw4w9WgXcQ`);
+      expect(p.answered).toBe(true);
+      expect(p.textOnly).toBe(false);
+      expect(p.links.map(l => l.platform)).toEqual(['gdrive_file', 'custom', 'youtube']);
+      expect(p.links.map(l => l.handler)).toEqual(['document', 'site', 'video']);
+      expect(p.listedNotReviewed).toEqual([
+        { url: PLAY, platform: 'custom', reason: REASON.play },
+        { url: LOOKER, platform: 'custom', reason: REASON.looker },
+      ]);
+    });
+    it('does not take a slot from the website cap: three sites, one of them cut by the cap, plus a Play listing — the cap line is only for the site', () => {
+      const p = pick(`abc.design xyz.studio qrs.agency ${PLAY}`);
+      expect(p.links.map(l => l.host)).toEqual(['abc.design', 'xyz.studio']);
+      expect(p.listedNotReviewed.map(l => l.reason)).toEqual(['only the top 2 links of each kind are opened', REASON.play]);
+    });
+    it('the same link written several ways is listed once', () => {
+      const p = pick(`${PHOTOS} photos.google.com/share/AF1QipNabc123?key=Zk5Vd&utm_source=ig https://photos.google.com/u/0/share/AF1QipNabc123?key=Zk5Vd`);
+      expect(p.listedNotReviewed).toHaveLength(1);
+      expect(pick('photos.app.goo.gl/AbC123xYz https://photos.app.goo.gl/AbC123xYz/ http://PHOTOS.app.goo.gl/AbC123xYz').listedNotReviewed).toHaveLength(1);
+    });
+    it('two different albums whose ids differ only in case are two entries (nothing is silently merged away)', () => {
+      const p = pick('photos.app.goo.gl/AbC123xYz photos.app.goo.gl/abc123xyz');
+      expect(p.listedNotReviewed.map(l => l.url)).toEqual(['https://photos.app.goo.gl/AbC123xYz', 'https://photos.app.goo.gl/abc123xyz']);
+    });
+    it('separators between links do not matter: commas, pipes, brackets, markdown and emoji', () => {
+      const p = pick(`App: ${PLAY}, report (${LOOKER}) | album: **${PHOTOS}** 🎉`);
+      expect(p.listedNotReviewed.map(l => l.reason)).toEqual([REASON.play, REASON.looker, REASON.photos]);
+    });
+    it('a listed link beside words is not "text only", and words about the same products with no link still are', () => {
+      expect(pick(`I ran the launch campaign for our fitness app, see ${PLAY}`).textOnly).toBe(false);
+      expect(pick('I ran the launch campaign for our fitness app on the Play Store and Photos').textOnly).toBe(true);
+    });
+    it("the company's own, forms and maps links next to one of these are still dropped, and say nothing", () => {
+      const p = pick(`${PLAY} https://forms.gle/abc123 https://www.google.com/maps/place/Mumbai https://digitalpaani.com/careers https://wa.me/919999999999`);
+      expect(p.listedNotReviewed).toEqual([{ url: PLAY, platform: 'custom', reason: REASON.play }]);
+      expect(p.links).toEqual([]);
+    });
+    it('only dropped links (no Play / Looker / Photos): still "not answered", exactly as before', () => {
+      expect(pick('https://www.google.com/maps/place/Mumbai https://calendar.google.com/x https://forms.gle/abc123')).toEqual(NOT_ANSWERED);
+      expect(pick('https://evil.play.google.com/store https://photos.google.com@evil.example/x')).toEqual(NOT_ANSWERED);
+    });
+    it('a look-alike on its own is an ordinary website to open, not a listed link', () => {
+      const p = pick('https://play.google.com.evil.example/store');
+      expect(p.links).toEqual([{ url: 'https://play.google.com.evil.example/store', host: 'play.google.com.evil.example', platform: 'custom', handler: 'site' }]);
+      expect(p.listedNotReviewed).toEqual([]);
+    });
+    it('forty of them in one answer: all listed, in order, quickly', () => {
+      const urls = Array.from({ length: 40 }, (_, i) => `https://play.google.com/store/apps/details?id=com.acme.app${i}`);
+      const { result, ms } = timed(() => pick(urls.join(' ')));
+      expect(result.listedNotReviewed.map(l => l.url)).toEqual(urls);
+      expect(result.links).toEqual([]);
+      expect(ms).toBeLessThan(300);
+    });
+    it('a hostile address on one of these hosts is quick and never throws', () => {
+      for (const u of [`https://play.google.com/${'a'.repeat(100_000)}`, `photos.app.goo.gl/${'%'.repeat(5000)}`, `https://goo.gl/photos/${'/'.repeat(5000)}`]) {
+        const { ms } = timed(() => pick(u));
+        expect(ms).toBeLessThan(300);
+      }
+      expect(classifyAnswerUrl(`https://play.google.com/${'a'.repeat(100_000)}`)).toBeNull();
+    });
   });
 });
 

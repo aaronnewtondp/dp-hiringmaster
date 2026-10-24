@@ -660,6 +660,39 @@ describe('PortfolioReviewCard — marketing work samples: nothing to score', () 
     expect(screen.queryByText(/private/i)).not.toBeInTheDocument();
   });
 
+  // Google Play, Looker Studio and Google Photos links are stored by the backend as never-opened entries with platform "custom" (the
+  // closed platform list is not widened) and their own reason; the card needs no change to show them under "Not reviewed".
+  it('a Google Play, Looker Studio or Google Photos link that was never opened: listed once under "Not reviewed — open these by hand", linked, with its own reason', async () => {
+    const play = 'https://play.google.com/store/apps/details?id=com.acme.app';
+    const looker = 'https://lookerstudio.google.com/reporting/0B1c2D3e/page/p_abc';
+    const photos = 'https://photos.app.goo.gl/AbC123xYz';
+    text('unreviewable', {
+      message: 'The links are on platforms that cannot be opened automatically - open them by hand',
+      analysis: analysis({
+        model: 'none', criteria: [], highlights: [], summary: '', portfolios: [],
+        unreviewed: [
+          { url: play, platform: 'custom', reason: 'Google Play listing - not opened automatically, open it by hand' },
+          { url: looker, platform: 'custom', reason: 'Looker Studio report - not opened automatically, open it by hand' },
+          { url: photos, platform: 'custom', reason: 'Google Photos album or photo - not opened automatically, open it by hand' },
+        ],
+      }),
+    });
+    renderCard('unreviewable');
+    const list = within(await screen.findByTestId('unreviewed-list'));
+    expect(list.getByText('Not reviewed — open these by hand')).toBeInTheDocument();
+    expect(list.getAllByTestId('unreviewed-item')).toHaveLength(3);
+    expect(list.getByRole('link', { name: /play\.google\.com\/store\/apps\/details\?id=com\.acme\.app/ })).toHaveAttribute('href', play);
+    expect(list.getByRole('link', { name: /lookerstudio\.google\.com/ })).toHaveAttribute('href', looker);
+    expect(list.getByRole('link', { name: /photos\.app\.goo\.gl\/AbC123xYz/ })).toHaveAttribute('href', photos);
+    expect(list.getByText('Google Play listing - not opened automatically, open it by hand')).toBeInTheDocument();
+    expect(list.getByText('Looker Studio report - not opened automatically, open it by hand')).toBeInTheDocument();
+    expect(list.getByText('Google Photos album or photo - not opened automatically, open it by hand')).toBeInTheDocument();
+    expect(list.getAllByText('Website')).toHaveLength(3);                       // the "custom" platform's own label
+    expect(screen.getByText('Not scored')).toBeInTheDocument();
+    expect(screen.queryByText(/No work samples/i)).not.toBeInTheDocument();      // the old, untrue outcome for such an answer
+    expect(screen.queryByText(/private/i)).not.toBeInTheDocument();             // nothing here is held against the candidate
+  });
+
   it('shows the links that were provided when no review detail was stored', async () => {
     text('unreviewable', { urls: [{ url: 'https://www.instagram.com/someone/', host: 'www.instagram.com', platform: 'instagram' }] });
     renderCard('unreviewable');
