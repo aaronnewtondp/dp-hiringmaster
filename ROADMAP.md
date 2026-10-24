@@ -160,8 +160,9 @@ live.
       byte-for-byte unchanged, for any role without generated content — no
       behavior change for roles not yet through the Approved+JD-generation
       flow. Verified both code paths directly against real data (R008).
-- [x] **Head of Marketing work-sample review — the 9th ResumeIQ dimension for R019 (built 2026-10-22; NOT live
-      yet).** Generalises the designer (R007) portfolio review: `roles.portfolio_review_kind`
+- [x] **Head of Marketing work-sample review — the 9th ResumeIQ dimension for R019 (built 2026-10-22; merged and
+      deployed 2026-10-23, PR #18; LIVE since 2026-10-24; backfilled 2026-10-25).** Generalises the designer
+      (R007) portfolio review: `roles.portfolio_review_kind`
       (`design_portfolio` default | `marketing_work`) picks the review, `portfolio_analysis_enabled` stays the
       switch, both set by SQL. For R019 the links in the screening answer "Links to public resources/portfolio…"
       are fetched anonymously (never with the service account) — Drive/Docs/Slides/PDF/Word/PowerPoint/images,
@@ -181,25 +182,39 @@ live.
       name signal, personal-statement redaction at about 85-90% recall on unseen wording) and an ownership concern
       that needs a quoted credit; the findings were fixed, or documented as open.
       Design record: CLAUDE.md "Marketing work-sample review (2026-10-22, R019)"; runbook with the tested
-      rollback SQL: `docs/MarketingWorkSampleReview_Runbook.md`. Backend 84 files / 6,983 tests and
-      frontend 35 / 950 pass; local Playwright spec 15 has 65 tests (all pass; 3 of the designer spec 07's 15
-      fail locally only because the local Anthropic key is over its usage limit until 2026-11-01); one real-model
-      canary run (not Chromium, and it pre-dates fix rounds 3 and 4).
-- [ ] **Go-live of the work-sample review (Aaron-run).** Schema block to Supabase first → deploy → R007 re-run
-      on the deployed worker (the worker's `includeFiles` is now one brace-glob string carrying pdf-parse's
-      `index.cjs` and `pdf.worker.mjs` AND the Chromium binaries: confirmed locally and by an nft trace, NOT on
-      Vercel, and a bad glob would break designer reviews too) → flag R019 → canary (the first Chromium capture of
-      R019 anywhere, plus a real PDF: the only check of the PDF sandbox on Vercel — it must prove the worker can
-      `spawn` `process.execPath` with `-e` and `--max-old-space-size` and read `/proc/<pid>/status`) → backfill
-      (~90 answers with links, ~18 text-only, ~17 blank; no concurrency throttle, so go in waves) → Mansi's
-      spot-check. To settle first: the form's privacy-notice check and the optional dedicated Anthropic key; after
-      touching any browser launch argument, the teardown guard or the PDF sandbox, repeat the Lambda-image check
-      (runbook step 0: popups, teardown vectors, the partial crawl, the PDF reader). Follow-ups, not built:
-      **reuse the PDF sandbox in the main API so resume parsing (`driveService.ts`, every role) stops running
-      pdfjs on the API function's main thread** (recommended, pre-existing; a separate session was started for it),
-      cap `candidates.full_name` at ingest, and network-level egress filtering or a validating proxy for the
-      browser (socket/popup/teardown SSRF is only mitigated for R019 and not at all for R007's capture) — see the
-      runbook and the "Known gaps" in CLAUDE.md.
+      rollback SQL: `docs/MarketingWorkSampleReview_Runbook.md`. Backend 84 files / 6,983 tests (plus the 27
+      `min_score` cases PR #22 added to `routes/portfolio.requeue.test.ts`) and frontend 35 / 950 pass; local
+      Playwright spec 15 has 65 tests, all passing when last counted, plus the one PR #22 added (3 of the designer
+      spec 07's 15 fail locally only because the local Anthropic key was over its usage limit when they ran — the
+      workspace limit production uses was lifted 2026-10-24 and they were not re-run); one local real-model canary
+      run (not Chromium, and it pre-dates fix rounds 3 and 4) and, since 2026-10-24/25, 37 model calls on real R019
+      applications in production.
+- [x] **Go-live of the work-sample review (Aaron-run, 2026-10-23 to 2026-10-25).** Done in this order: schema block
+      to Supabase (2026-10-23, `20261023111710`) → deploy (2026-10-23) → R007 re-run on the deployed worker
+      (2026-10-24, A0625: same score and average — the worker's queue, Chromium, model call and the brace-glob
+      `includeFiles` all work on Vercel) → R019 flagged by one SQL statement (2026-10-24 ~15:00 IST, after the
+      Anthropic workspace spend limit that had broken scoring since 2026-10-22 was lifted) → canary on the four
+      unscored applications (the first real Chromium capture of an R019 site; no PDF in it) → backfill 2026-10-25
+      ~03:15–03:30 IST with `--min-score 4` (PR #22): 87 eligible, 56 queued, 31 settled at enqueue, 0 errors; the
+      first backfill reviews were also the PDF proof (the child process read 14 PDFs on Vercel). R019 afterwards,
+      125 applications: completed 33, failed 1 (a site fetch timeout), inaccessible 2, no_portfolio 25,
+      unreviewable 30, no review 34 (the 23 Active below 4.0 and the 11 Rejected, deliberately not backfilled; no
+      backfill of them is planned). **Fold measured on the 33 completed reviews:** 26 averages down, 4 up, 3
+      unchanged, mean −0.18; 10 candidates down a priority bucket, none up; one lost Strong Fit and the 24h SLA
+      tier; three are now below 4.0. **Decision (Aaron, 2026-10-25): keep the fold policy as it is** (`'always'`;
+      the `upside_only` knob stays in code, unused). No spot-check by the hiring manager is scheduled. Numbers,
+      outcomes and what the real worker showed: CLAUDE.md "Production state"; steps and queries: the runbook.
+- [ ] **Work-sample review — follow-ups, not built.** **Reuse the PDF sandbox in the main API so resume parsing
+      (`driveService.ts`, every role) stops running pdfjs on the API function's main thread** (recommended,
+      pre-existing; PR #21 is open and NOT merged); cap `candidates.full_name` at ingest; network-level egress
+      filtering or a validating proxy for the browser (socket/popup/teardown SSRF is only mitigated for R019 and not
+      at all for R007's capture); the form's privacy-notice check and the optional dedicated Anthropic key
+      (`PORTFOLIO_ANTHROPIC_API_KEY`) are not recorded as settled before the backfill; whether the quote matcher is
+      too strict or the model quotes loosely (7 of the 33 reviews carry an invented-quote downgrade) has not been
+      analysed; after touching any browser launch argument, the teardown guard or the PDF sandbox, repeat the
+      Lambda-image check (runbook step 0: popups, teardown vectors, the partial crawl, the PDF reader) — it is also
+      the only test of the `/proc` resident-size reading, which Vercel's results cannot show. See the runbook and
+      the "Known gaps" in CLAUDE.md.
 - [ ] **Drive auto-folder creation** on Role and Candidate creation — every
       role/candidate should get a Drive folder automatically; currently none
       do. (`driveService.ts` already has working Drive API access via the
