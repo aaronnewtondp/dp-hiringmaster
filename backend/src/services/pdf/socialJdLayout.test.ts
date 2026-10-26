@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   Measure, stripTags, smartQuotes, cleanText, ellipsize, fitSingleLine, wrapLines, fitTitle,
-  formatExperience, planMeta, MetaItem, packChips, chipsBlockHeight, parseBullet, layoutColumns,
+  formatExperience, planMeta, fitWrapped, MetaItem, packChips, chipsBlockHeight, parseBullet, layoutColumns,
   CONTENT_W, MARGIN, GEO, COLS, HERO_MAX_BOTTOM, PAGE_H,
 } from './socialJdLayout.js';
 
@@ -204,6 +204,118 @@ describe('planMeta', () => {
   it('one item spans; none is empty', () => {
     expect(shape(planMeta(it3.slice(0, 1), widths({}), W))).toEqual([['LOCATION', 0, 0, true]]);
     expect(planMeta([], widths({}), W).placements).toEqual([]);
+  });
+
+  describe('with a wrapping item (WORK SETUP) last', () => {
+    const work: MetaItem = { key: 'WORK SETUP', value: { text: 'WORK SETUP' }, wrap: true };
+    const it4 = [...it3, work];
+    const w4 = (o: Record<string, number> = {}) => widths({ 'WORK SETUP': 560, ...o });
+
+    it('four items: Location | Experience on row 0 exactly as in the reference, Team | the sentence on row 1', () => {
+      const p = planMeta(it4, w4(), W);
+      expect(shape(p)).toEqual([['LOCATION', 0, 0, false], ['EXPERIENCE', 1, 0, false], ['TEAM', 0, 1, false], ['WORK SETUP', 1, 1, false]]);
+      expect(p.col1X).toBe(300);
+      expect(p.dropped).toBeUndefined();
+    });
+
+    it('the first three keep the reference positions they have without the fourth', () => {
+      const three = planMeta(it3, w4(), W);
+      const four = planMeta(it4, w4(), W);
+      expect(four.placements.slice(0, 2)).toEqual(three.placements.slice(0, 2));
+      expect(four.col1X).toBe(three.col1X);
+    });
+
+    it('a wide Location widens the first column for four items too', () => {
+      const p = planMeta(it4, w4({ LOCATION: 330 }), W);
+      expect(p.col1X).toBe(358);
+      expect(shape(p).map(x => x[0])).toEqual(['LOCATION', 'EXPERIENCE', 'TEAM', 'WORK SETUP']);
+    });
+
+    it('when the sentence would be cut in its column, Team is left out and the sentence spans row 1', () => {
+      const p = planMeta(it4, w4(), W, 28, 0.87, () => false);
+      expect(shape(p)).toEqual([['LOCATION', 0, 0, false], ['EXPERIENCE', 1, 0, false], ['WORK SETUP', 0, 1, true]]);
+      expect(p.dropped).toEqual(['TEAM']);
+    });
+
+    it('wrapFits is asked about the second column (what is left of the row after the boundary)', () => {
+      const asked: number[] = [];
+      planMeta(it4, w4(), W, 28, 0.87, (_it, width) => { asked.push(width); return true; });
+      expect(asked).toEqual([300]);                       // metaW 600 - boundary 300
+      const wide: number[] = [];
+      planMeta(it4, w4({ LOCATION: 330 }), W, 28, 0.87, (_it, width) => { wide.push(width); return true; });
+      expect(wide).toEqual([242]);                        // 600 - 358
+    });
+
+    it('a Location that cannot take its half drops Team and plans the other three as usual', () => {
+      const p = planMeta(it4, w4({ LOCATION: 600 }), W);
+      expect(p.dropped).toEqual(['TEAM']);
+      expect(p.placements.map(x => x.key)).toEqual(['LOCATION', 'EXPERIENCE', 'WORK SETUP']);
+      expect(p.placements.every(x => x.row <= 1)).toBe(true);
+    });
+
+    it('three items without Team: the sentence spans row 1 (it is not a short value, so it is never squeezed beside another)', () => {
+      const p = planMeta([it3[0], it3[1], work], w4(), W);
+      expect(shape(p)).toEqual([['LOCATION', 0, 0, false], ['EXPERIENCE', 1, 0, false], ['WORK SETUP', 0, 1, true]]);
+      expect(p.dropped).toBeUndefined();
+    });
+
+    it('the wrap flag survives into the placement; other items never carry it', () => {
+      const p = planMeta(it4, w4(), W);
+      expect(p.placements.map(x => !!x.wrap)).toEqual([false, false, false, true]);
+    });
+
+    it('never more than two rows, whatever the widths', () => {
+      for (const l of [10, 200, 330, 450, 600, 900]) for (const t of [10, 300, 600]) {
+        const p = planMeta(it4, w4({ LOCATION: l, TEAM: t }), W);
+        expect(Math.max(...p.placements.map(x => x.row))).toBeLessThanOrEqual(1);
+      }
+    });
+  });
+});
+
+describe('fitWrapped', () => {
+  const mf = (text: string, size: number) => measure(text, 'figBold', size, -0.01 * size);
+
+  it('keeps full size when the sentence fits on its lines at that size', () => {
+    const r = fitWrapped('Remote possible', 'figBold', 400, 2, 23, 15, -0.01, measure);
+    expect(r.size).toBe(23);
+    expect(r.lines).toEqual(['Remote possible']);
+  });
+
+  it('wraps onto two lines at the largest size that fits without cutting a word', () => {
+    const text = 'Remote working possible for exceptional candidates';
+    const r = fitWrapped(text, 'figBold', 205, 2, 23, 15, -0.01, measure);
+    expect(r.lines.join(' ')).toBe(text);
+    expect(r.lines.length).toBe(2);
+    for (const l of r.lines) expect(mf(l, r.size)).toBeLessThanOrEqual(205);
+    // largest: half a point bigger would not have fit
+    const bigger = fitWrapped(text, 'figBold', 205, 2, r.size + 0.5, r.size + 0.5, -0.01, measure);
+    expect(bigger.lines.join(' ') === text).toBe(false);
+  });
+
+  it('at the minimum size what still does not fit ends in an ellipsis; never more lines than allowed', () => {
+    const r = fitWrapped('word '.repeat(40).trim(), 'figBold', 160, 2, 23, 15, -0.01, measure);
+    expect(r.size).toBe(15);
+    expect(r.lines).toHaveLength(2);
+    expect(r.lines[1].endsWith('…')).toBe(true);
+    for (const l of r.lines) expect(mf(l, 15)).toBeLessThanOrEqual(160);
+  });
+
+  it('one very long word is cut with an ellipsis rather than overflowing', () => {
+    const r = fitWrapped('x'.repeat(80), 'figBold', 150, 2, 23, 15, -0.01, measure);
+    expect(r.lines.every(l => mf(l, r.size) <= 150)).toBe(true);
+    expect(r.lines[r.lines.length - 1].endsWith('…')).toBe(true);
+  });
+
+  it('ignores extra whitespace in the input', () => {
+    expect(fitWrapped('  a   b  ', 'figBold', 400, 2, 23, 15, -0.01, measure).lines).toEqual(['a b']);
+  });
+
+  it('is deterministic and never returns an empty list for text', () => {
+    const a = fitWrapped('some words to wrap around a column', 'figBold', 120, 2, 23, 15, -0.01, measure);
+    const b = fitWrapped('some words to wrap around a column', 'figBold', 120, 2, 23, 15, -0.01, measure);
+    expect(a).toEqual(b);
+    expect(a.lines.length).toBeGreaterThan(0);
   });
 });
 

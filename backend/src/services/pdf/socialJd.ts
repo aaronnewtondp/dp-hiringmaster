@@ -23,7 +23,7 @@ import PDFDocument from 'pdfkit';
 import fs from 'fs';
 import path from 'path';
 import { Role } from '../../types/index.js';
-import { JdContent } from '../jdContent.js';
+import { JdContent, SOCIAL_WORK_SETUP_MAX_CHARS } from '../jdContent.js';
 import {
   SOCIAL_COLORS as C,
   SOCIAL_HOOK_MUTED, SOCIAL_HOOK_PUNCH, SOCIAL_INTRO_FACT, SOCIAL_INTRO_ASK,
@@ -36,7 +36,7 @@ import {
   fitSingleLine, fitTitle, formatExperience, planMeta, packChips, chipsBlockHeight,
   HOOK_MAX_RIGHT, HOOK_CLEARANCE, RIPPLE,
   parseBullet, layoutColumns, stripTags, cleanText,
-  MetaItem, ExperienceParts, RowLayout,
+  MetaItem, MetaPlacement, ExperienceParts, RowLayout, WrappedFit, fitWrapped,
 } from './socialJdLayout.js';
 
 // ─── Ripple graphic (the brand's "See" layer: blueprint linework) ───────────
@@ -71,6 +71,15 @@ function loadAssets() {
 
 const HERO_LEFT = MARGIN;
 const LOGO = { x: MARGIN - 12, y: 28, w: 122 }; // -12: the PNG has built-in left padding; this aligns the "D" with the headline edge
+
+// The hand-authored WORK SETUP line is capped like the generated bullets are: cut with an ellipsis, never silently.
+export function capWorkSetup(t: string): string {
+  if (t.length <= SOCIAL_WORK_SETUP_MAX_CHARS) return t;
+  const cut = t.slice(0, SOCIAL_WORK_SETUP_MAX_CHARS - 1);
+  const atWord = cut.lastIndexOf(' ');
+  // end on a whole word when that loses less than a third of the line, else cut where the limit falls
+  return (atWord >= SOCIAL_WORK_SETUP_MAX_CHARS * 0.67 ? cut.slice(0, atWord) : cut).trimEnd().replace(/[,;:\-–—]+$/, '') + '…';
+}
 
 export async function renderSocialJd(role: Role, content: JdContent): Promise<Buffer> {
   const doc = new PDFDocument({
@@ -189,7 +198,7 @@ export async function renderSocialJd(role: Role, content: JdContent): Promise<Bu
       .stop(0, C.tealLt, 0.17).stop(1, C.tealLt, 0.07);
     doc.roundedRect(cardX, cardY, cardW, cardH, 6).fill(g);
     doc.lineWidth(1).strokeColor(C.tealLt, 0.34).roundedRect(cardX + 0.5, cardY + 0.5, cardW - 1, cardH - 1, 5.5).stroke();
-    // right-hand meta: location / experience / team (any of them may be missing)
+    // right-hand meta: location / experience / team / work setup (any of them may be missing; work setup is hand-authored)
     const items: MetaItem[] = [];
     const loc = cleanText(role.location ?? '');
     if (loc) items.push({ key: 'LOCATION', value: { text: loc } });
@@ -197,11 +206,20 @@ export async function renderSocialJd(role: Role, content: JdContent): Promise<Bu
     if (exp) items.push({ key: 'EXPERIENCE', value: exp });
     const team = cleanText(role.department ?? '');
     if (team) items.push({ key: 'TEAM', value: { text: team } });
+    const workSetup = capWorkSetup(cleanText(content.socialWorkSetup ?? ''));
+    if (workSetup) items.push({ key: 'WORK SETUP', value: { text: workSetup }, wrap: true });
     const metaX = GEO.col2X, metaW = cardX + cardW - 1 - 28 - metaX;
     const naturalW = (it: MetaItem) => it.value.num
       ? measure(it.value.num, 'monoSemi', 22, -0.02 * 22) + measure(' ' + (it.value.unit ?? ''), 'figBold', 23, -0.01 * 23)
       : measure(it.value.text ?? '', 'figBold', 23, -0.01 * 23);
-    const { placements: placed, col1X } = planMeta(items, naturalW, metaW);
+    // the WORK SETUP sentence, set on two lines, must fit a column without being cut — otherwise it is given the full width
+    const wrapFits = (it: MetaItem, w: number) => {
+      if (!it.value.text) return true;
+      const f = fitWrapped(it.value.text, 'figBold', w, 2, 23, 15, -0.01, measure);
+      return f.lines.join(' ') === it.value.text;
+    };
+    const { placements: placed, col1X, dropped } = planMeta(items, naturalW, metaW, undefined, undefined, wrapFits);
+    if (dropped?.length) console.warn(`[SocialJD] ${role.id}: left out ${dropped.join(', ')} from the role block (no room for four items)`);
 
     // The divider sits at x=541.5 so the meta text lands exactly on the second column's gridline (x=570).
     // With no meta at all there is nothing to divide: drop the rule and give the title the whole block.
@@ -222,17 +240,29 @@ export async function renderSocialJd(role: Role, content: JdContent): Promise<Bu
     t.lines.forEach((line, i) =>
       text(line, titleX, t0 + i * tLH + baselineInLine('figXBold', t.size, tLH), 'figXBold', t.size, C.white, { spacing: -0.03 * t.size }));
 
-    // right: the meta items on a two-column grid
+    // right: the meta items on a two-column grid. A `wrap` item (WORK SETUP) is a sentence: it takes up to two lines at the
+    // largest size that fits its column, and the row it sits in grows by the extra line; every other value is one line.
     const itemH = 11.5 + 5 + 1.1 * 23;
+    const colW = (p: MetaPlacement) => p.span2 ? metaW : p.col === 0 ? col1X - 28 : metaW - col1X;
+    const wrapped = new Map<MetaPlacement, WrappedFit>();
+    for (const p of placed) if (p.wrap && p.value.text) wrapped.set(p, fitWrapped(p.value.text, 'figBold', colW(p), 2, 23, 15, -0.01, measure));
+    const heightOf = (p: MetaPlacement) => { const f = wrapped.get(p); return f && f.lines.length > 1 ? 16.5 + f.lines.length * f.size * 1.12 : itemH; };
     const rowsN = placed.length ? Math.max(...placed.map(p => p.row)) + 1 : 0;
-    const gridH = rowsN * itemH + Math.max(0, rowsN - 1) * 16;
+    const rowH = Array.from({ length: rowsN }, (_, r) => Math.max(...placed.filter(p => p.row === r).map(heightOf)));
+    const rowTop = rowH.map((_, r) => rowH.slice(0, r).reduce((a, h) => a + h + 16, 0));
+    const gridH = rowsN ? rowTop[rowsN - 1] + rowH[rowsN - 1] : 0;
     const gridTop = innerTop + (innerH - gridH) / 2;
     for (const p of placed) {
       const x = metaX + (p.col === 1 ? col1X : 0);
-      const w = p.span2 ? metaW : p.col === 0 ? col1X - 28 : metaW - col1X;
-      const y = gridTop + p.row * (itemH + 16);
+      const y = gridTop + rowTop[p.row];
       text(p.key, x, y + baselineInLine('monoMed', 11.5, 11.5), 'monoMed', 11.5, C.tealLt, { opacity: 0.9, spacing: 11.5 * 0.14 });
-      drawMetaValue(p.value, x, y + 16.5 + baselineInLine('figBold', 23, 1.1 * 23), w);
+      const f = wrapped.get(p);
+      if (f && f.lines.length > 1) {
+        const lh = f.size * 1.12;
+        f.lines.forEach((ln, i) => text(ln, x, y + 16.5 + i * lh + baselineInLine('figBold', f.size, lh), 'figBold', f.size, C.white, { spacing: -0.01 * f.size }));
+      } else {
+        drawMetaValue(p.value, x, y + 16.5 + baselineInLine('figBold', 23, 1.1 * 23), colW(p));
+      }
     }
   }
   const heroBottom = cardY + cardH;
