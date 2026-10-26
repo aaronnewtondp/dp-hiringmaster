@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { renderSocialJd, capWorkSetup } from './socialJd.js';
+import { renderSocialJd } from './socialJd.js';
 import { SOCIAL_FIXTURES } from './socialJd.fixtures.js';
 import { extractPdfText } from '../driveService.js';
-import { SOCIAL_LEAD_MAX_CHARS, SOCIAL_DETAIL_MAX_CHARS, SOCIAL_WORK_SETUP_MAX_CHARS } from '../jdContent.js';
+import { SOCIAL_LEAD_MAX_CHARS, SOCIAL_DETAIL_MAX_CHARS } from '../jdContent.js';
 import {
   SOCIAL_HOOK_MUTED, SOCIAL_HOOK_PUNCH, SOCIAL_INTRO_FACT, SOCIAL_INTRO_ASK, SOCIAL_CTA_TEXT,
   SOCIAL_ROLE_EYEBROW, SOCIAL_APPLY_URL, SOCIAL_COL_HEADINGS,
 } from './theme.js';
-import { GEO, COLS, MARGIN, HOOK_MAX_RIGHT, HOOK_CLEARANCE, RIPPLE, HERO_MAX_BOTTOM } from './socialJdLayout.js';
+import { GEO, COLS, MARGIN, HOOK_MAX_RIGHT, HOOK_CLEARANCE, RIPPLE, HERO_MAX_BOTTOM, capWorkSetup, SOCIAL_WORK_SETUP_MAX_CHARS } from './socialJdLayout.js';
 import { Role } from '../../types/index.js';
 import { JdContent } from '../jdContent.js';
 
@@ -194,22 +194,33 @@ describe('renderSocialJd — WORK SETUP (hand-authored, optional)', () => {
     expect(t).not.toContain('partnerships at scale');
   });
 
-  describe('capWorkSetup', () => {
-    it('leaves a sentence at or under the cap alone', () => {
-      expect(capWorkSetup(SENTENCE)).toBe(SENTENCE);
-      expect(capWorkSetup('x'.repeat(SOCIAL_WORK_SETUP_MAX_CHARS))).toBe('x'.repeat(SOCIAL_WORK_SETUP_MAX_CHARS));
-    });
-    it('never exceeds the cap, and always ends in an ellipsis when it cut', () => {
-      for (const n of [61, 80, 200, 5000]) {
-        const c = capWorkSetup('word '.repeat(n).trim());
-        expect(c.length).toBeLessThanOrEqual(SOCIAL_WORK_SETUP_MAX_CHARS);
-        expect(c.endsWith('…')).toBe(true);
-      }
-    });
-    it('cuts where the limit falls when there is no word break worth keeping, and drops a dangling comma', () => {
-      expect(capWorkSetup('x'.repeat(100))).toBe('x'.repeat(SOCIAL_WORK_SETUP_MAX_CHARS - 1) + '…');
-      expect(capWorkSetup('Remote working is possible for exceptional candidates, who have led partnerships')).not.toMatch(/,…$/);
-    });
+  it('warns when it cuts the sentence at the cap (the ellipsis is not the only sign)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await render('WORK_SETUP_TOO_LONG');
+    expect(warn.mock.calls.some(c => /work setup is \d+ characters, cut to/.test(String(c[0])))).toBe(true);
+    warn.mockClear();
+    await render('R019');
+    expect(warn.mock.calls.filter(c => /work setup is/.test(String(c[0])))).toHaveLength(0);
+  });
+
+  it('never draws a word past its column: a word too wide at full size is set smaller, whole, and Team stays', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const t = await textOfName('WORK_SETUP_LONG_WORD');
+    expect(warn.mock.calls.filter(c => String(c[0]).includes('left out'))).toHaveLength(0);
+    expect(t).toContain('Work-from-anywhere');
+    expect(t).toContain('possible');
+    expect(t).not.toContain('…');
+    expect(squash(t)).toContain('TEAM');
+    expect(t).toContain('Sales & Growth');
+  });
+
+  it('leaves Team out (logged) rather than cutting a long one', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const t = await textOfName('WORK_SETUP_LONG_TEAM');
+    expect(warn.mock.calls.some(c => String(c[0]).includes('left out TEAM'))).toBe(true);
+    expect(squash(t)).not.toContain('TEAM');
+    expect(t).not.toContain('Corporate Functions');
+    expect(t).toContain('Remote working possible');
   });
 
   it('cleans markup and typographic quotes like every other string in the template', async () => {
@@ -219,7 +230,7 @@ describe('renderSocialJd — WORK SETUP (hand-authored, optional)', () => {
     expect(t).toContain('“exceptional”');
   });
 
-  it('survives hostile input without throwing, on any role shape', async () => {
+  it('survives hostile input without throwing, on any role shape', { timeout: 60_000 }, async () => {
     for (const v of ['\u0000\u202e<script>alert(1)</script>', 'a'.repeat(5000), '🙂'.repeat(200), 'Ünïcödé — 日本語 — Привет', ' '.repeat(10) + 'x'.repeat(61)]) {
       for (const name of ['R019', 'SPARSE', 'LONG_TITLE', 'WORK_SETUP_LONG_LOCATION']) {
         const buf = await renderSocialJd(SOCIAL_FIXTURES[name].role, { ...SOCIAL_FIXTURES[name].content, socialWorkSetup: v } as JdContent);
@@ -270,7 +281,7 @@ describe('renderSocialJd — robustness', () => {
     expect(warn.mock.calls.some(c => String(c[0]).includes('dropped'))).toBe(true);
   });
 
-  it('does not report column overflow for any fixture — including legacy-format bullets', async () => {
+  it('does not report column overflow for any fixture — including legacy-format bullets', { timeout: 30_000 }, async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     for (const name of Object.keys(SOCIAL_FIXTURES)) await render(name);
     expect(warn.mock.calls.filter(c => String(c[0]).includes('columns exceed'))).toHaveLength(0);

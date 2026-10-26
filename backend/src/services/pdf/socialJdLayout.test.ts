@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   Measure, stripTags, smartQuotes, cleanText, ellipsize, fitSingleLine, wrapLines, fitTitle,
-  formatExperience, planMeta, fitWrapped, MetaItem, packChips, chipsBlockHeight, parseBullet, layoutColumns,
+  formatExperience, planMeta, fitWrapped, layoutMetaRows, capWorkSetup, SOCIAL_WORK_SETUP_MAX_CHARS, WORK_SETUP_FIT, MetaItem, MetaPlacement,
+  packChips, chipsBlockHeight, parseBullet, layoutColumns,
   CONTENT_W, MARGIN, GEO, COLS, HERO_MAX_BOTTOM, PAGE_H,
 } from './socialJdLayout.js';
 
@@ -259,6 +260,34 @@ describe('planMeta', () => {
       expect(p.dropped).toBeUndefined();
     });
 
+    it('four items: Team is kept when it fits its half at the smallest single-line size (16 of 23pt), dropped (never cut) when it does not', () => {
+      // avail for Team = boundary 300 - gap 28 = 272; it may shrink to 16/23 of its natural width
+      expect(planMeta(it4, w4({ TEAM: 390 }), W).dropped).toBeUndefined();          // 390 * 16/23 = 271.3
+      const p = planMeta(it4, w4({ TEAM: 400 }), W);                                // 400 * 16/23 = 278 > 272
+      expect(p.dropped).toEqual(['TEAM']);
+      expect(p.placements.map(x => x.key)).toEqual(['LOCATION', 'EXPERIENCE', 'WORK SETUP']);
+    });
+
+    it('a Location that cannot fit its half: Location spans row 0 and Experience | the sentence share row 1 when the sentence fits that half', () => {
+      const p = planMeta([it3[0], it3[1], work], w4({ LOCATION: 600 }), W);
+      expect(shape(p)).toEqual([['LOCATION', 0, 0, true], ['EXPERIENCE', 0, 1, false], ['WORK SETUP', 1, 1, false]]);
+      expect(p.col1X).toBe(300);
+    });
+
+    it('...and the sentence keeps spanning row 1 (Location squeezed as before) when it would be cut in that half', () => {
+      const asked: number[] = [];
+      const p = planMeta([it3[0], it3[1], work], w4({ LOCATION: 600 }), W, 28, 0.87, (_i, width) => { asked.push(width); return false; });
+      expect(shape(p)).toEqual([['LOCATION', 0, 0, false], ['EXPERIENCE', 1, 0, false], ['WORK SETUP', 0, 1, true]]);
+      expect(asked).toEqual([300]);
+    });
+
+    it('a short value in the same position is still judged by its width, not by wrapFits (nothing changes without a wrap item)', () => {
+      let called = 0;
+      const p = planMeta(it3, widths({ LOCATION: 600 }), W, 28, 0.87, () => { called++; return false; });
+      expect(shape(p)).toEqual([['LOCATION', 0, 0, true], ['EXPERIENCE', 0, 1, false], ['TEAM', 1, 1, false]]);
+      expect(called).toBe(0);
+    });
+
     it('the wrap flag survives into the placement; other items never carry it', () => {
       const p = planMeta(it4, w4(), W);
       expect(p.placements.map(x => !!x.wrap)).toEqual([false, false, false, true]);
@@ -453,5 +482,87 @@ describe('layoutColumns', () => {
 describe('the 40/60 contract', () => {
   it('defines the hero limit as 40% of the page height', () => {
     expect(HERO_MAX_BOTTOM).toBe(PAGE_H * 0.4);
+  });
+});
+
+describe('fitWrapped — a word wider than the column', () => {
+  const mf = (text: string, size: number) => measure(text, 'figBold', size, -0.01 * size);
+
+  it('a first word wider than the column is never accepted as "fits" (wrapLines only trims the LAST line)', () => {
+    const r = fitWrapped('x'.repeat(30) + ' ok', 'figBold', 205, 2, 23, 15, -0.01, measure);   // 30 chars = 225pt even at 15pt
+    expect(r.size).toBe(15);
+    expect(r.lines.join(' ')).not.toBe('x'.repeat(30) + ' ok');
+    expect(r.lines[0].endsWith('…')).toBe(true);
+    for (const l of r.lines) expect(mf(l, r.size)).toBeLessThanOrEqual(205);
+  });
+
+  it('...but a word that fits at a smaller size is shrunk to, not cut', () => {
+    const r = fitWrapped('x'.repeat(22) + ' ok', 'figBold', 205, 2, 23, 15, -0.01, measure);   // 22 chars: 253pt at 23, 165pt at 15
+    expect(r.lines.join(' ')).toBe('x'.repeat(22) + ' ok');
+    expect(mf(r.lines[0], r.size)).toBeLessThanOrEqual(205);
+  });
+
+  it('WORK_SETUP_FIT is what the template documents: two lines, 23pt down to 15pt', () => {
+    expect(WORK_SETUP_FIT).toMatchObject({ lines: 2, size: 23, min: 15 });
+  });
+});
+
+describe('capWorkSetup', () => {
+  const SENTENCE = 'Remote working possible for exceptional candidates';
+  it('leaves a sentence at or under the cap alone', () => {
+    expect(capWorkSetup(SENTENCE)).toBe(SENTENCE);
+    expect(capWorkSetup('x'.repeat(SOCIAL_WORK_SETUP_MAX_CHARS))).toBe('x'.repeat(SOCIAL_WORK_SETUP_MAX_CHARS));
+  });
+  it('never exceeds the cap and always ends in an ellipsis when it cut', () => {
+    for (const n of [61, 80, 200, 5000]) {
+      const c = capWorkSetup('word '.repeat(n).trim());
+      expect(Array.from(c).length).toBeLessThanOrEqual(SOCIAL_WORK_SETUP_MAX_CHARS);
+      expect(c.endsWith('…')).toBe(true);
+    }
+  });
+  it('cuts on a word when that loses less than a third of the line, else where the limit falls; no dangling punctuation', () => {
+    expect(capWorkSetup('Remote working is possible for exceptional candidates who have led partnerships at scale before')).toBe('Remote working is possible for exceptional candidates who…');
+    expect(capWorkSetup('x'.repeat(100))).toBe('x'.repeat(SOCIAL_WORK_SETUP_MAX_CHARS - 1) + '…');
+    expect(capWorkSetup('Remote working is possible for exceptional candidates, who have led partnerships')).not.toMatch(/,…$/);
+  });
+  it('counts code points, so an emoji is never split', () => {
+    const c = capWorkSetup('🌍'.repeat(70));
+    expect(Array.from(c).length).toBeLessThanOrEqual(SOCIAL_WORK_SETUP_MAX_CHARS);
+    expect(c).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);            // no lone high surrogate
+    expect(Array.from(c.slice(0, -1)).every(ch => ch === '🌍')).toBe(true);
+  });
+});
+
+describe('layoutMetaRows', () => {
+  const pl = (row: number, col: 0 | 1 = 0): MetaPlacement => ({ key: 'K' + row + col, value: { text: 'x' }, col, row, span2: false });
+  const ITEM_H = 11.5 + 5 + 1.1 * 23;                        // 41.8: what the renderer gives every one-line value
+  const h = (map: Record<string, number> = {}) => (p: MetaPlacement) => map[p.key] ?? ITEM_H;
+
+  it('keeps the reference arithmetic exactly for zero, one and two one-line rows', () => {
+    expect(layoutMetaRows([], h())).toEqual({ rowTop: [], gridH: 0 });
+    expect(layoutMetaRows([pl(0)], h())).toEqual({ rowTop: [0], gridH: ITEM_H });
+    const two = layoutMetaRows([pl(0), pl(0, 1), pl(1)], h());
+    expect(two.rowTop).toEqual([0, ITEM_H + 16]);
+    expect(two.gridH).toBe(2 * ITEM_H + 16);
+    expect(two.gridH).toBeCloseTo(99.6, 5);
+  });
+
+  it('a row is as tall as its tallest item and the next row starts after it plus the gap', () => {
+    const tall = 16.5 + 2 * 17 * 1.12;
+    const r = layoutMetaRows([pl(0), pl(0, 1), pl(1), pl(1, 1)], h({ K11: tall }));
+    expect(r.rowTop).toEqual([0, ITEM_H + 16]);
+    expect(r.gridH).toBeCloseTo(ITEM_H + 16 + tall, 9);
+  });
+
+  it('the worst case the template allows (a two-line sentence at 23pt in row 1) still fits inside the 138pt card', () => {
+    const worst = 16.5 + 2 * 23 * 1.12;
+    const r = layoutMetaRows([pl(0), pl(0, 1), pl(1)], h({ K10: worst }));
+    expect(r.gridH).toBeCloseTo(125.82, 2);
+    expect(r.gridH).toBeLessThan(GEO.cardH - 2);
+  });
+
+  it('is independent of the order the items are listed in', () => {
+    const items = [pl(1, 1), pl(0), pl(1), pl(0, 1)];
+    expect(layoutMetaRows(items, h({ K11: 60 }))).toEqual(layoutMetaRows([...items].reverse(), h({ K11: 60 })));
   });
 });

@@ -60,8 +60,6 @@ const MAX_SOCIAL_BULLET_CHARS = 90;
 export const SOCIAL_LEAD_MAX_CHARS = 24;
 export const SOCIAL_DETAIL_MAX_CHARS = 36;
 export const SOCIAL_TAG_MAX_CHARS = 24;
-// The hand-authored WORK SETUP line is set on at most two lines in the role block's right-hand column (~200pt wide).
-export const SOCIAL_WORK_SETUP_MAX_CHARS = 60;
 
 // Shared by the generation prompt and the extraction prompt (hand-written JDs) so they cannot diverge.
 const TAGS_RULE = `- tags: 4-8 short chips (1-3 words, at most ${SOCIAL_TAG_MAX_CHARS} characters each, e.g. "Node.js", "PLC / HMI / SCADA"). isGreen=true for nice-to-have-derived tags, false for must-have-derived tags. The social graphic shows them as two colour groups on two rows, so lead with the core craft/skills.`;

@@ -164,6 +164,29 @@ export const SOCIAL_FIXTURES: Record<string, SocialFixture> = {
     }),
   },
 
+  // A hyphenated word that is 227pt wide at full size, in a 204pt column: it must never be drawn past the card. The sentence is
+  // set at the smaller size at which every line fits (Team stays). R019's own wording is not affected.
+  WORK_SETUP_LONG_WORD: {
+    role: role({ title: 'Head of Marketing & Creative Direction', location: 'Gurgaon', department: 'Sales & Growth', yoe_required: '5-10 years' }),
+    content: content({
+      socialWorkSetup: 'Work-from-anywhere possible',
+      tags: [...blue('Brand Building', 'Copywriting'), ...green('B2B Marketing')],
+      socialAboutRole: ['<b>Write the story:</b> From zero', '<b>Own every surface:</b> Brand and campaigns', '<b>Build the team:</b> Hire and lead'],
+      socialAboutYou: ['<b>Built a brand:</b> From scratch', '<b>Led campaigns:</b> 5+ launched', '<b>Write, design, lead:</b> All three'],
+    }),
+  },
+
+  // A long Team beside the sentence: it cannot be set in its half even at the smallest size, so it is left out (logged), not cut.
+  WORK_SETUP_LONG_TEAM: {
+    role: role({ title: 'Business Operations Lead', location: 'Gurgaon', department: 'Corporate Functions/Business Operations', yoe_required: '6-9 years' }),
+    content: content({
+      socialWorkSetup: 'Remote working possible for exceptional candidates',
+      tags: [...blue('Operations', 'Process Design'), ...green('Utilities')],
+      socialAboutRole: ['<b>Run the machine:</b> Finance to field', '<b>Fix the process:</b> Where it hurts', '<b>Report clearly:</b> To leadership'],
+      socialAboutYou: ['<b>Ran operations:</b> At a growing company', '<b>Process minded:</b> Simple beats clever', '<b>Calm under load:</b> Always'],
+    }),
+  },
+
   // Nothing else in the block but a title and the sentence.
   WORK_SETUP_ONLY: {
     role: role({ title: 'Field Engineer' }),
