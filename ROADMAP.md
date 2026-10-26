@@ -182,9 +182,9 @@ live.
       name signal, personal-statement redaction at about 85-90% recall on unseen wording) and an ownership concern
       that needs a quoted credit; the findings were fixed, or documented as open.
       Design record: CLAUDE.md "Marketing work-sample review (2026-10-22, R019)"; runbook with the tested
-      rollback SQL: `docs/MarketingWorkSampleReview_Runbook.md`. Backend 84 files / 6,983 tests (plus the 27
-      `min_score` cases PR #22 added to `routes/portfolio.requeue.test.ts`) and frontend 35 / 950 pass; local
-      Playwright spec 15 has 65 tests, all passing when last counted, plus the one PR #22 added (3 of the designer
+      rollback SQL: `docs/MarketingWorkSampleReview_Runbook.md`. Backend 84 files / 7,496 tests (14 skipped;
+      run 2026-10-26, after PRs #22 and #23) and frontend 35 / 951 pass; local
+      Playwright spec 15 has 68 tests, all passing on 2026-10-26 against PR #23's branch (3 of the designer
       spec 07's 15 fail locally only because the local Anthropic key was over its usage limit when they ran — the
       workspace limit production uses was lifted 2026-10-24 and they were not re-run); one local real-model canary
       run (not Chromium, and it pre-dates fix rounds 3 and 4) and, since 2026-10-24/25, 37 stored model calls on real R019
