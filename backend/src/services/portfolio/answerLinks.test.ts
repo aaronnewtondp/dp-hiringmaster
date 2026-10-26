@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  WORK_SAMPLE_QUESTION_RE, findWorkSampleAnswer, isBlankAnswer, extractAnswerUrls, classifyAnswerUrl, pickAnswerLinks,
+  WORK_SAMPLE_QUESTION_RE, findWorkSampleAnswer, isBlankAnswer, extractAnswerUrls, classifyAnswerUrl, pickAnswerLinks, listedProductReason,
 } from './answerLinks.js';
 
 // Two wordings of the question exist on the Job Application Form; the first carries the form's own typo "intitiatives".
@@ -419,6 +419,8 @@ describe('classifyAnswerUrl', () => {
     'https://buff.ly/3abc', 'https://goo.gl/AbCdEf', 'https://1drv.ms/b/s!AbCdEf',
     // photos.app.goo.gl is no longer here: it is Google Photos' own link and is listed, not resolved (see "Google Play, Looker Studio and Google Photos")
     'https://abc.app.goo.gl/AbCdEf', 'https://evilphotos.app.goo.gl/AbCdEf', 'https://goo.gl/photoshoot/AbCdEf', 'https://goo.gl/photos-by-jane',
+    // goo.gl is matched as an exact host: a subdomain's /photos/<id> is still a short link (hostIs(host, 'goo.gl') would list it)
+    'https://abc.app.goo.gl/photos/AbC', 'https://x.goo.gl/photos/Abc', 'https://evil.goo.gl/photos/AbC123xYz',
   ])('link hub or shortener %s is resolved by the worker', (url) => {
     expect(classifyAnswerUrl(url)).toMatchObject({ platform: 'link_hub', handler: 'resolve' });
   });
@@ -1201,28 +1203,30 @@ describe('Google Play, Looker Studio and Google Photos links are listed for HR, 
     ['https://play.google.com/store/apps/developer?id=Acme+Labs', 'https://play.google.com/store/apps/developer?id=Acme+Labs', 'play'],
     ['https://play.google.com/store/apps/collection/cluster?clp=abc&gsr=def', 'https://play.google.com/store/apps/collection/cluster?clp=abc&gsr=def', 'play'],
     ['https://play.google.com/store/search?q=acme&c=apps', 'https://play.google.com/store/search?q=acme&c=apps', 'play'],
-    ['https://play.google.com/', 'https://play.google.com', 'play'],
-    ['play.google.com', 'https://play.google.com', 'play'],
     ['https://play.google.com/store/files/brief.pdf', 'https://play.google.com/store/files/brief.pdf', 'play'],   // a path ending in .pdf is not a document to download
     // Looker Studio, and the Data Studio name it used to have
     [LOOKER, LOOKER, 'looker'],
     ['lookerstudio.google.com/reporting/0B1c2D3e-4f5a-6789/page/p_abc123', LOOKER, 'looker'],
     ['https://lookerstudio.google.com/reporting/0B1c2D3e-4f5a-6789/page/p_abc123/edit', 'https://lookerstudio.google.com/reporting/0B1c2D3e-4f5a-6789/page/p_abc123/edit', 'looker'],
-    ['https://lookerstudio.google.com/u/0/reporting/0B1c2D3e-4f5a-6789/page/p_abc123', 'https://lookerstudio.google.com/u/0/reporting/0B1c2D3e-4f5a-6789/page/p_abc123', 'looker'],
+    ['https://lookerstudio.google.com/u/0/reporting/0B1c2D3e-4f5a-6789/page/p_abc123', LOOKER, 'looker'],   // the account prefix is not kept in the address HR is shown
     ['https://lookerstudio.google.com/s/AbCdEf', 'https://lookerstudio.google.com/s/AbCdEf', 'looker'],
     ['lookerstudio.google.com/reporting/0B1c2D3e/page/abc?s=xyz', 'https://lookerstudio.google.com/reporting/0B1c2D3e/page/abc?s=xyz', 'looker'],
     ['https://lookerstudio.google.com/reporting/0B1c2D3e/page/abc?utm_source=ig&si=1', 'https://lookerstudio.google.com/reporting/0B1c2D3e/page/abc', 'looker'],
     ['https://datastudio.google.com/reporting/0B1c2D3e-4f5a-6789', 'https://datastudio.google.com/reporting/0B1c2D3e-4f5a-6789', 'looker'],
-    ['https://datastudio.google.com/u/0/reporting/0B1c2D3e-4f5a-6789/page/1M', 'https://datastudio.google.com/u/0/reporting/0B1c2D3e-4f5a-6789/page/1M', 'looker'],
+    ['https://datastudio.google.com/u/0/reporting/0B1c2D3e-4f5a-6789/page/1M', 'https://datastudio.google.com/reporting/0B1c2D3e-4f5a-6789/page/1M', 'looker'],
     ['https://datastudio.google.com/embed/reporting/0B1c2D3e/page/1M', 'https://datastudio.google.com/embed/reporting/0B1c2D3e/page/1M', 'looker'],
     ['DATASTUDIO.GOOGLE.COM/reporting/0B1c2D3e', 'https://datastudio.google.com/reporting/0B1c2D3e', 'looker'],
     // Google Photos: the web app, and both spellings of its short link
     [PHOTOS, PHOTOS, 'photos'],
     ['photos.google.com/share/AF1QipNabc123', 'https://photos.google.com/share/AF1QipNabc123', 'photos'],
-    ['https://photos.google.com/u/0/share/AF1QipNabc123?key=Zk5Vd', 'https://photos.google.com/u/0/share/AF1QipNabc123?key=Zk5Vd', 'photos'],
+    ['https://photos.google.com/u/0/share/AF1QipNabc123?key=Zk5Vd', PHOTOS, 'photos'],
+    ['https://photos.google.com/u/1/share/AF1QipNabc123?key=Zk5Vd', PHOTOS, 'photos'],
+    ['https://photos.google.com/a/example.com/share/AF1QipNabc123?key=Zk5Vd', PHOTOS, 'photos'],
+    ['https://photos.google.com/a/example.com/u/2/share/AF1QipNabc123?key=Zk5Vd', PHOTOS, 'photos'],
+    ['https://photos.google.com/u/0/a/example.com/share/AF1QipNabc123?key=Zk5Vd', PHOTOS, 'photos'],
+    ['https://play.google.com/u/0/store/apps/details?id=com.acme.app', PLAY, 'play'],
     ['https://photos.google.com/album/AF1QipNabc123', 'https://photos.google.com/album/AF1QipNabc123', 'photos'],
     ['https://photos.google.com/photo/AF1QipNabc123', 'https://photos.google.com/photo/AF1QipNabc123', 'photos'],
-    ['https://photos.google.com/', 'https://photos.google.com', 'photos'],
     ['https://photos.app.goo.gl/AbC123xYz', 'https://photos.app.goo.gl/AbC123xYz', 'photos'],
     ['photos.app.goo.gl/AbC123xYz', 'https://photos.app.goo.gl/AbC123xYz', 'photos'],
     ['PHOTOS.APP.GOO.GL/AbC123xYz', 'https://photos.app.goo.gl/AbC123xYz', 'photos'],
@@ -1231,7 +1235,8 @@ describe('Google Play, Looker Studio and Google Photos links are listed for HR, 
     ['https://goo.gl/photos/AbC123xYz', 'https://goo.gl/photos/AbC123xYz', 'photos'],
     ['goo.gl/photos/AbC123xYz', 'https://goo.gl/photos/AbC123xYz', 'photos'],
     ['https://goo.gl/PHOTOS/AbC123xYz', 'https://goo.gl/PHOTOS/AbC123xYz', 'photos'],
-    ['https://goo.gl/photos', 'https://goo.gl/photos', 'photos'],
+    ['https://goo.gl/photos/a', 'https://goo.gl/photos/a', 'photos'],
+    ['https://goo.gl/photos/AbC123xYz/', 'https://goo.gl/photos/AbC123xYz/', 'photos'],
   ];
 
   describe('classifyAnswerUrl', () => {
@@ -1261,7 +1266,13 @@ describe('Google Play, Looker Studio and Google Photos links are listed for HR, 
     });
 
     describe('identity (what counts as the same link)', () => {
-      const key = (u: string) => classifyAnswerUrl(u)?.key;
+      // A dropped link has no key, and a Set of undefined keys is one element whatever was put in it: so a null classification is an error here,
+      // never a quiet "same link" (before the Play / Looker / Photos change the Play half of the first test below passed vacuously).
+      const key = (u: string): string => {
+        const c = classifyAnswerUrl(u);
+        if (!c) throw new Error(`${u} was dropped (null): an identity check over it proves nothing`);
+        return c.key;
+      };
       it('http / https / www / trailing slash / tracking parameters / fragment / host case are one link', () => {
         expect(new Set([
           'https://photos.app.goo.gl/AbC123xYz', 'http://photos.app.goo.gl/AbC123xYz', 'https://photos.app.goo.gl/AbC123xYz/',
@@ -1275,6 +1286,10 @@ describe('Google Play, Looker Studio and Google Photos links are listed for HR, 
           'https://photos.google.com/u/1/share/AF1QipNabc123?key=Zk5Vd',
         ].map(key)).size).toBe(1);
         expect(key('https://lookerstudio.google.com/reporting/AbC/page/1')).toBe(key('https://lookerstudio.google.com/u/2/reporting/AbC/page/1'));
+        expect(new Set([
+          'https://photos.google.com/share/AF1QipAbC', 'https://photos.google.com/a/example.com/share/AF1QipAbC',
+          'https://photos.google.com/a/example.com/u/2/share/AF1QipAbC', 'https://photos.google.com/u/0/a/example.com/share/AF1QipAbC',
+        ].map(key)).size).toBe(1);
         expect(key('https://datastudio.google.com/reporting/AbC')).not.toBe(key('https://lookerstudio.google.com/reporting/AbC'));   // another host, another link
       });
       it('the case of the path and query is kept: Photos short ids and Play package names are case-sensitive, two albums are two links', () => {
@@ -1340,6 +1355,154 @@ describe('Google Play, Looker Studio and Google Photos links are listed for HR, 
       expect(classifyAnswerUrl(`https://docs.google.com/document/d/${DRIVE_ID}/edit`)).toMatchObject({ platform: 'google_doc', handler: 'document' });
       expect(classifyAnswerUrl('https://sites.google.com/view/jane')).toMatchObject({ platform: 'custom', handler: 'site' });
       expect(classifyAnswerUrl('https://docs.google.com/forms/d/e/abc/viewform')).toBeNull();
+    });
+  });
+
+  describe('the stored address and the product travel on the classification', () => {
+    it('the account prefix (/u/0/, /u/1/, /a/<domain>/, either order) is dropped from the stored address like Drive; the case of the id and the query stay', () => {
+      for (const [written, stored] of [
+        ['https://photos.google.com/u/0/share/AF1QipAbCd?key=Zk5Vd', 'https://photos.google.com/share/AF1QipAbCd?key=Zk5Vd'],
+        ['https://photos.google.com/u/12/share/AF1QipAbCd', 'https://photos.google.com/share/AF1QipAbCd'],
+        ['https://photos.google.com/a/example.com/u/1/album/AF1QipAbCd', 'https://photos.google.com/album/AF1QipAbCd'],
+        ['https://photos.google.com/u/0/a/example.com/album/AF1QipAbCd', 'https://photos.google.com/album/AF1QipAbCd'],
+        ['https://photos.google.com/u/0/u/1/album/AF1QipAbCd', 'https://photos.google.com/album/AF1QipAbCd'],
+        ['https://lookerstudio.google.com/u/0/reporting/0B1c2D3e/page/P_Abc', 'https://lookerstudio.google.com/reporting/0B1c2D3e/page/P_Abc'],
+        ['https://datastudio.google.com/u/3/reporting/0B1c2D3e', 'https://datastudio.google.com/reporting/0B1c2D3e'],
+        ['https://play.google.com/u/0/store/apps/details?id=com.Acme.App', 'https://play.google.com/store/apps/details?id=com.Acme.App'],
+        ['https://photos.google.com/u/0/share/AF1QipAbCd?key=Zk5Vd&utm_source=ig&fbclid=x#top', 'https://photos.google.com/share/AF1QipAbCd?key=Zk5Vd'],
+        ['HTTP://WWW.Photos.Google.Com/U/0/Share/AbC', 'http://www.photos.google.com/U/0/Share/AbC'],   // an upper-case /U/0/ is not Google's prefix: left alone
+      ]) {
+        expect(classifyAnswerUrl(written)?.url).toBe(stored);
+      }
+    });
+    it('an address with no prefix is stored exactly as it always was (nothing rewritten, a trailing slash kept)', () => {
+      expect(classifyAnswerUrl('http://photos.app.goo.gl/AbC123xYz/')?.url).toBe('http://photos.app.goo.gl/AbC123xYz/');
+      expect(classifyAnswerUrl('https://photos.google.com/share/AF1QipAbCd?key=Zk5Vd')?.url).toBe('https://photos.google.com/share/AF1QipAbCd?key=Zk5Vd');
+    });
+    it('classifying the stored address again gives the same link (the address survives a second classification, e.g. by the worker)', () => {
+      for (const [written] of FORMS) {
+        const first = classifyAnswerUrl(extractAnswerUrls(written)[0]);
+        const again = classifyAnswerUrl(first!.url);
+        expect(again).toEqual(first);
+      }
+    });
+    it.each(FORMS)('%s: classifyAnswerUrl says which product it is (listedAs), and nothing else carries the field', (written, _shown, product) => {
+      expect(classifyAnswerUrl(extractAnswerUrls(written)[0])?.listedAs).toBe(product);
+    });
+    it('listedAs is absent (not just undefined) from every other classification, so it cannot reach a stored link by a spread', () => {
+      for (const u of [
+        'https://janedoe.design', 'https://www.linkedin.com/in/jane', 'https://facebook.com/jane', 'https://we.tl/t-AbC', 'https://bit.ly/3x', 'https://goo.gl/AbC',
+        'https://photos.app.goo.gl', 'https://goo.gl/photos', 'https://play.google.com.evil.example/store', `https://drive.google.com/file/d/${DRIVE_ID}/view`,
+        'https://www.instagram.com/jane/', 'https://youtu.be/dQw4w9WgXcQ', 'https://abc.app.goo.gl/photos/AbC',
+      ]) {
+        const c = classifyAnswerUrl(u);
+        expect(c, u).not.toBeNull();
+        expect(c, u).not.toHaveProperty('listedAs');
+      }
+    });
+    it('what is stored is unchanged: a picked link and a listed entry carry exactly the old fields', () => {
+      const p = pick(`janedoe.design ${PLAY} ${PHOTOS}`);
+      expect(p.links.map(l => Object.keys(l).sort())).toEqual([['handler', 'host', 'platform', 'url']]);
+      expect(p.listedNotReviewed.map(l => Object.keys(l).sort())).toEqual([['platform', 'reason', 'url'], ['platform', 'reason', 'url']]);
+    });
+    it.each(FORMS)('%s: listedProductReason gives the product reason', (written, _shown, product) => {
+      expect(listedProductReason(extractAnswerUrls(written)[0])).toBe(REASON[product]);
+    });
+    it('listedProductReason is null for anything else (the generic reasons are not its business)', () => {
+      for (const u of [
+        'https://www.linkedin.com/in/jane', 'https://facebook.com/jane', 'https://we.tl/t-AbC', 'https://bit.ly/3x', 'https://janedoe.design',
+        'https://play.google.com.evil.example/store', 'https://play.google.com/', 'https://photos.app.goo.gl', 'https://goo.gl/photos', 'https://www.google.com/maps',
+        'not a url', '', 'https://photos.google.com@evil.example/x',
+      ]) expect(listedProductReason(u), u).toBeNull();
+      expect(listedProductReason(undefined as unknown as string)).toBeNull();
+      expect(listedProductReason(42 as unknown as string)).toBeNull();
+    });
+  });
+
+  // A bare host is a store or home page, not a work sample. It must mean what it meant before the three products were listed:
+  // dropped for the *.google.com hosts, an ordinary short link (resolved by the worker) for photos.app.goo.gl and goo.gl/photos.
+  // (The old-vs-new differential against main, over these shapes and ~90 hosts x ~20 path/query shapes, found no other difference.)
+  describe('a bare product host keeps its old meaning, byte for byte', () => {
+    const GOOGLE_HOSTS = ['play.google.com', 'lookerstudio.google.com', 'datastudio.google.com', 'photos.google.com'];
+    const bareForms = (h: string): string[] => [
+      `https://${h}`, `https://${h}/`, `http://${h}`, h, `${h}/`, `www.${h}`, `https://www.${h}/`, `HTTPS://${h.toUpperCase()}/`,
+      `https://${h}:443/`, `https://${h}//`,
+      `https://${h}/?hl=en`, `https://${h}?hl=en`, `${h}/?hl=en`, `https://${h}/?utm_source=ig`,
+      `https://${h}/#top`, `https://${h}#top`, `https://${h}/?hl=en#top`,
+      // an account prefix with nothing behind it is still the home page
+      `https://${h}/u/0/`, `https://${h}/u/0`, `https://${h}/u/1/`, `https://${h}/a/example.com/`, `https://${h}/a/example.com`,
+      `https://${h}/u/0/u/1/`, `https://${h}/u/0/?hl=en`, `https://${h}/u/0#top`,
+    ];
+
+    describe.each(GOOGLE_HOSTS)('%s', (h) => {
+      it.each(bareForms(h))('%s is dropped (null), as it was', (u) => {
+        expect(classifyAnswerUrl(u)).toBeNull();
+      });
+      it('on its own an answer made of these is "not answered", as it was', () => {
+        expect(pick(bareForms(h).join(' '))).toEqual(NOT_ANSWERED);
+      });
+      it('beside a real link it adds nothing to the list', () => {
+        const p = pick(`${bareForms(h).join(' ')} ${PLAY}`);
+        expect(p.listedNotReviewed).toEqual([{ url: PLAY, platform: 'custom', reason: REASON.play }]);
+        expect(p.links).toEqual([]);
+      });
+      it('and a real path on the same host is listed', () => {
+        const p = pick(`https://${h}/share/AbC123`);
+        expect(p.listedNotReviewed).toHaveLength(1);
+        expect(p.listedNotReviewed[0].url).toBe(`https://${h}/share/AbC123`);
+      });
+    });
+
+    describe('photos.app.goo.gl stays an ordinary short link', () => {
+      it.each(bareForms('photos.app.goo.gl'))('%s is a short link to resolve (link_hub / resolve), not a listed link', (u) => {
+        const c = classifyAnswerUrl(u);
+        expect(c).toMatchObject({ host: 'photos.app.goo.gl', platform: 'link_hub', handler: 'resolve' });
+        expect(c).not.toHaveProperty('listedAs');
+      });
+      it('shown as the address was written, normalised: no trailing slash on a bare host, the query kept', () => {
+        expect(classifyAnswerUrl('photos.app.goo.gl')?.url).toBe('https://photos.app.goo.gl');
+        expect(classifyAnswerUrl('https://photos.app.goo.gl/')?.url).toBe('https://photos.app.goo.gl');
+        expect(classifyAnswerUrl('https://photos.app.goo.gl/?hl=en')?.url).toBe('https://photos.app.goo.gl/?hl=en');
+        expect(classifyAnswerUrl('https://photos.app.goo.gl/#top')?.url).toBe('https://photos.app.goo.gl');
+      });
+      it('as a whole answer it is one link for the worker to resolve, and nothing is listed', () => {
+        const p = pick('photos.app.goo.gl');
+        expect(p).toMatchObject({ answered: true, textOnly: false, listedNotReviewed: [] });
+        expect(p.links).toEqual([{ url: 'https://photos.app.goo.gl', host: 'photos.app.goo.gl', platform: 'link_hub', handler: 'resolve' }]);
+      });
+    });
+
+    describe('goo.gl/photos needs something after it to be Google Photos', () => {
+      it.each([
+        'https://goo.gl/photos', 'goo.gl/photos', 'https://goo.gl/photos/', 'https://goo.gl/photos//', 'https://goo.gl/photos?x=1', 'https://goo.gl/photos/?x=1',
+        'https://goo.gl/photos#top', 'https://goo.gl/photos/#top', 'https://goo.gl/Photos', 'https://goo.gl/PHOTOS/', 'https://goo.gl/photos//AbC',
+        'https://www.goo.gl/photos/',
+      ])('%s is a short link (link_hub / resolve), as it was', (u) => {
+        const c = classifyAnswerUrl(u);
+        expect(c).toMatchObject({ host: 'goo.gl', platform: 'link_hub', handler: 'resolve' });
+        expect(c).not.toHaveProperty('listedAs');
+      });
+      it.each([
+        ['https://goo.gl/photos/a', 'https://goo.gl/photos/a'], ['https://goo.gl/photos/AbC123xYz', 'https://goo.gl/photos/AbC123xYz'],
+        ['https://goo.gl/Photos/AbC', 'https://goo.gl/Photos/AbC'], ['https://goo.gl/photos/AbC/', 'https://goo.gl/photos/AbC/'],
+        ['https://goo.gl/photos/%41', 'https://goo.gl/photos/%41'],
+      ])('%s is Google Photos (listed)', (u, shown) => {
+        expect(classifyAnswerUrl(u)).toMatchObject({ url: shown, platform: 'custom', handler: 'none', listedAs: 'photos' });
+      });
+    });
+
+    it('a path that is a real path stays listed even when it starts like an account prefix', () => {
+      expect(classifyAnswerUrl('https://photos.google.com/u/0/share/x')).toMatchObject({ handler: 'none', listedAs: 'photos' });
+      expect(classifyAnswerUrl('https://photos.google.com/u/x')).toMatchObject({ handler: 'none', url: 'https://photos.google.com/u/x' });       // "/u/x" is not "/u/<digits>"
+      expect(classifyAnswerUrl('https://photos.google.com/u/0x/')).toMatchObject({ handler: 'none' });
+      expect(classifyAnswerUrl('https://play.google.com/a/')).toMatchObject({ handler: 'none' });                                                 // "/a/" has no domain: not a prefix
+    });
+    it('a hostile run of account prefixes is quick', () => {
+      const long = `https://photos.google.com/${'u/0/'.repeat(400)}`;
+      const { result, ms } = timed(() => [classifyAnswerUrl(long), classifyAnswerUrl(`${long}x`)]);
+      expect(result[0]).toBeNull();
+      expect(result[1]).toMatchObject({ handler: 'none', url: 'https://photos.google.com/x' });
+      expect(ms).toBeLessThan(300);
     });
   });
 

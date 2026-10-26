@@ -33,6 +33,8 @@ export interface ClassifiedAnswerUrl {
   handler: ReviewHandler;
   /** Canonical identity for de-duplication (drive:<id>, yt:<id>, ig:<path>, else a scheme/www/tracking-insensitive form). */
   key: string;
+  /** Set only on a Google Play / Looker Studio / Google Photos link (never opened, listed for HR): which one, so the reason is a lookup. Not part of a stored PortfolioLink. */
+  listedAs?: ListedGoogleProduct;
 }
 
 // ─── Limits ──────────────────────────────────────────────────────────────────
@@ -376,17 +378,27 @@ const GOOGLE_KEEP = new Set(['drive.google.com', 'docs.google.com', 'sites.googl
 // photo album) but are not opened automatically: JS-rendered and login-prone, and no fetcher exists. They are NOT part of the
 // *.google.com boilerplate that is dropped: a dropped link vanishes, and an answer whose only link it was read as "no work
 // samples provided". They are classified as never-opened links (handler 'none', platform 'custom'), so HR sees the link with its
-// own reason. Exact hosts only (a look-alike such as play.google.com.evil.example is an ordinary site, and so is evilplay.google.com).
-type ListedGoogleProduct = 'play' | 'looker' | 'photos';
+// own reason. Exact hosts only: play.google.com.evil.example is an ordinary site, and evilplay.google.com (a subdomain of
+// google.com, not one of these hosts) stays dropped like every other *.google.com host.
+// A BARE host (no path, a lone "/", or only an account prefix such as "/u/0/") is a store or home page, not a work sample: it keeps
+// its old meaning (dropped for the *.google.com hosts, an ordinary short link for photos.app.goo.gl). goo.gl is a shortener first:
+// only /photos/<something> is Google Photos there.
+export type ListedGoogleProduct = 'play' | 'looker' | 'photos';
+
+// "/u/0/", "/u/0" and "/a/example.com/" say which account a link was copied from, not which work it points at (linear: each
+// alternative starts with its own literal).
+const ACCOUNT_ONLY_PATH_RE = /^(?:\/(?:a\/[^/]+|u\/\d+))*\/*$/;
 
 function listedGoogleProduct(host: string, lowerPath: string): ListedGoogleProduct | null {
-  if (host === 'play.google.com') return 'play';
-  if (host === 'lookerstudio.google.com' || host === 'datastudio.google.com') return 'looker';
+  let product: ListedGoogleProduct;
+  if (host === 'play.google.com') product = 'play';
+  else if (host === 'lookerstudio.google.com' || host === 'datastudio.google.com') product = 'looker';
   // photos.app.goo.gl is Google Photos' own short link (it used to be read as any other shortener and resolved: the worker then
   // asked for it, and the page it leads to was not reviewable); goo.gl/photos/... is its older spelling.
-  if (host === 'photos.google.com' || host === 'photos.app.goo.gl') return 'photos';
-  if (host === 'goo.gl' && /^\/photos(\/|$)/.test(lowerPath)) return 'photos';
-  return null;
+  else if (host === 'photos.google.com' || host === 'photos.app.goo.gl') product = 'photos';
+  else if (host === 'goo.gl') return /^\/photos\/[^/]/.test(lowerPath) ? 'photos' : null;
+  else return null;
+  return ACCOUNT_ONLY_PATH_RE.test(lowerPath) ? null : product;
 }
 
 const LISTED_GOOGLE_REASON: Record<ListedGoogleProduct, string> = {
@@ -510,11 +522,19 @@ export function classifyAnswerUrl(url: string): ClassifiedAnswerUrl | null {
     ({ url, host, platform, handler, key: k });
 
   // Play / Looker Studio / Photos: never opened, listed for HR. Checked before the file-extension rules so that a path ending in
-  // ".pdf" on one of these hosts cannot turn it into a document that the worker would download. The identity keeps the case of the
-  // path and query (Photos short ids and Play package names are case-sensitive, and dedupeKey lower-cases everything, which would
-  // merge two different albums into one entry) and ignores the account prefix ("/u/0/") like Drive's does.
-  if (listedGoogleProduct(host, lower) !== null) {
-    return mk('custom', 'none', `${host}${path.replace(GOOGLE_ACCOUNT_PREFIX_RE, '').replace(/\/$/, '')}${u.search}`);
+  // ".pdf" on one of these hosts cannot turn it into a document that the worker would download. The account prefix ("/u/0/") is
+  // dropped from the stored address and from the identity, like Drive's: a click from HMS would otherwise open the viewer's own
+  // account index. The path and query keep their case (Photos short ids and Play package names are case-sensitive, and dedupeKey
+  // lower-cases everything, which would merge two different albums into one entry).
+  const listedAs = listedGoogleProduct(host, lower);
+  if (listedAs) {
+    const stripped = path.replace(GOOGLE_ACCOUNT_PREFIX_RE, '');
+    let url = clean;
+    if (stripped !== path) {
+      u.pathname = stripped;
+      url = u.toString();
+    }
+    return { ...mk('custom', 'none', `${host}${stripped.replace(/\/$/, '')}${u.search}`, url), listedAs };
   }
 
   // Google Drive / Docs. A malformed id is not trusted as a file: it is treated as a plain site link.
@@ -558,6 +578,16 @@ export function classifyAnswerUrl(url: string): ClassifiedAnswerUrl | null {
   // else is the candidate's own site.
   const known = classifyUrl(clean);
   return mk(known ? known.platform : 'custom', 'site');
+}
+
+/**
+ * The reason a Google Play / Looker Studio / Google Photos link is listed for HR, or null for any other address. Read by the
+ * worker for such a link that came out of a short link (the walk stopped in front of it): it gets the same reason as one
+ * pasted directly.
+ */
+export function listedProductReason(url: string): string | null {
+  const c = classifyAnswerUrl(url);
+  return c?.listedAs ? LISTED_GOOGLE_REASON[c.listedAs] : null;
 }
 
 // ─── Picking the links worth opening ─────────────────────────────────────────
@@ -642,10 +672,7 @@ function notOpenedReason(c: ClassifiedAnswerUrl, candidateName: string | undefin
   }
   if (c.platform === 'cloud_file') return 'expiring file-transfer link';
   if (c.platform === 'social_other') return 'social media link not opened automatically';
-  let lowerPath = '';
-  try { lowerPath = new URL(c.url).pathname.toLowerCase(); } catch { /* keep '' */ }
-  const product = listedGoogleProduct(c.host, lowerPath);
-  if (product) return LISTED_GOOGLE_REASON[product];
+  if (c.listedAs) return LISTED_GOOGLE_REASON[c.listedAs];
   return 'link not opened automatically';
 }
 

@@ -789,7 +789,9 @@ const REASON_BAD_REDIRECT = 'The short link redirects to an address that cannot 
  * SSRF-checked (assertSafePublicUrl) and requested with `redirect: 'manual'`, so we, not fetch, decide whether the next
  * address may be asked for: every Location is classified BEFORE it is requested, and one that is never opened (LinkedIn,
  * lnkd.in, other social, WeTransfer, Google Play, Looker Studio, Google Photos) ends the walk right there — no request, not even a HEAD, ever reaches it — and is
- * handed back as the destination (to be listed for HR, not fetched). A Location that is a sign-in page is not requested
+ * handed back as the destination (to be listed for HR, not fetched). That holds for the canonical spelling of the host: a Location
+ * written with a trailing dot ("www.linkedin.com.", "play.google.com.") is not recognised by validHost for ANY host and is requested
+ * after the SSRF check (a known gap, not specific to these hosts). A Location that is a sign-in page is not requested
  * either: the file it asks for is in its `continue` parameter, which is all that is read from it.
  */
 async function probe(url: string, method: 'HEAD' | 'GET', until: number): Promise<Probed> {
