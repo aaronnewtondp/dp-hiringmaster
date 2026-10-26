@@ -227,13 +227,16 @@ live.
       unchanged at 73.6 MB. Run from exactly that file set in the Lambda Node 22 image: ordinary, locked and hostile
       resumes all behave, event loop gap <= 143 ms. Backend 88 files / 7,130 tests pass (baseline `main`: 85 / 7,000; 130 new: `resume`, `boundary`,
       `driveService.resume`, plus link and argv tests in the sandbox's own and a packaging check). Details: CLAUDE.md "ResumeIQ".
-- [ ] **Deploy canary for the resume sandbox (run right after the 2026-10-26 merge).** The child process has run on Vercel in the
+- [x] **Deploy canary for the resume sandbox (passed 2026-10-26).** The child process has run on Vercel in the
       R019 worker (14 PDFs, 2026-10-25), but not in the MAIN function: that function must be able to `spawn` `process.execPath` with `-e` and `--max-old-space-size` and read `/proc/<pid>/status`. After the
       deploy, score or re-run one real application of ANY role and check `score_resume_read` is true; watch the logs for
       "[Drive] The resume reader could not read resume". If it cannot start there, every role is scored on profile fields
       only until it is fixed or rolled back (no fallback to the in-process parse, on purpose). The same canary covers
       the work-sample review's PDF check above (both use the one sandbox). A Word resume needs no process (it is a bounded read in the
       function itself), so the canary only has to confirm one real `.docx` resume scores with `score_resume_read` true.
+      **Result:** Aaron pressed Re-run on R007 A0621 (a 44 KB PDF resume) at about 17:03 UTC: the main function read it through the sandbox, the review completed with the identical result of 2026-10-01 (portfolio 2/10, overall 1.2/10),
+      no "could not read resume" line in the log, production smoke 34/34. Not covered: a real `.docx` resume, a hostile PDF in the main function, the `/proc` reading and a brand-new application's
+      `score_resume_read` (the next real applicant is the check). Details: CLAUDE.md "Production state".
 - [x] **Resume Word files moved to the bounded zip reader; `mammoth` removed (written 2026-10-23, merged 2026-10-26 as PR #21).** `mammoth`
       aborted node on a 123 KB hostile `.docx` (heap out of memory in 4.2 s; 641 MB for a 25 KB one). `driveService.ts` now reads a
       resume `.docx` with `services/boundedFiles/resumeDocx.ts`: the bounded zip reader (the one the marketing review has, moved to a shared
