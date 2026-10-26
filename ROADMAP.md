@@ -187,19 +187,19 @@ live.
       Playwright spec 15 has 65 tests, all passing when last counted, plus the one PR #22 added (3 of the designer
       spec 07's 15 fail locally only because the local Anthropic key was over its usage limit when they ran — the
       workspace limit production uses was lifted 2026-10-24 and they were not re-run); one local real-model canary
-      run (not Chromium, and it pre-dates fix rounds 3 and 4) and, since 2026-10-24/25, 37 model calls on real R019
-      applications in production.
+      run (not Chromium, and it pre-dates fix rounds 3 and 4) and, since 2026-10-24/25, 37 stored model calls on real R019
+      applications in production (counted at the 2026-10-25 drain; 43 by 2026-10-26).
 - [x] **Go-live of the work-sample review (Aaron-run, 2026-10-23 to 2026-10-25).** Done in this order: schema block
       to Supabase (2026-10-23, `20261023111710`) → deploy (2026-10-23) → R007 re-run on the deployed worker
       (2026-10-24, A0625: same score and average — the worker's queue, Chromium, model call and the brace-glob
       `includeFiles` all work on Vercel) → R019 flagged by one SQL statement (2026-10-24 ~15:00 IST, after the
-      Anthropic workspace spend limit that had broken scoring since 2026-10-22 was lifted) → canary on the four
+      Anthropic workspace spend limit that had stopped scoring (first application left unscored: 2026-10-23) was lifted) → canary on the four
       unscored applications (the first real Chromium capture of an R019 site; no PDF in it) → backfill 2026-10-25
       ~03:15–03:30 IST with `--min-score 4` (PR #22): 87 eligible, 56 queued, 31 settled at enqueue, 0 errors; the
       first backfill reviews were also the PDF proof (the child process read 14 PDFs on Vercel). R019 afterwards,
-      125 applications: completed 33, failed 1 (a site fetch timeout), inaccessible 2, no_portfolio 25,
+      125 applications: completed 33, failed 1 (a Google Slides export fetch timeout), inaccessible 2, no_portfolio 25,
       unreviewable 30, no review 34 (the 23 Active below 4.0 and the 11 Rejected, deliberately not backfilled; no
-      backfill of them is planned). **Fold measured on the 33 completed reviews:** 26 averages down, 4 up, 3
+      backfill of them is planned). By 2026-10-26 R019 had 133 applications: the 8 created since the flag were each reviewed at creation (6 completed, 1 no_portfolio, 1 unreviewable), so the new-applicant path is observed. **Fold measured on the 33 completed reviews:** 26 averages down, 4 up, 3
       unchanged, mean −0.18; 10 candidates down a priority bucket, none up; one lost Strong Fit and the 24h SLA
       tier; three are now below 4.0. **Decision (Aaron, 2026-10-25): keep the fold policy as it is** (`'always'`;
       the `upside_only` knob stays in code, unused). No spot-check by the hiring manager is scheduled. Numbers,
