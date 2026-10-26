@@ -2309,4 +2309,109 @@ describe('with the real classifyAnswerUrl', () => {
     expect(r.links.map(l => l.handler)).toEqual(['document', 'site', 'video', 'social']);
     expect(r.links.map(l => l.platform)).toEqual(['google_doc', 'custom', 'youtube', 'instagram']);
   });
+
+  // Google Play, Looker Studio and Google Photos are never opened (handler 'none', platform 'custom'), like LinkedIn: a short link
+  // that leads to one stops in front of it, the destination is handed back to be listed for HR, and nothing is requested from it.
+  describe('Google Play, Looker Studio and Google Photos are never requested', () => {
+    const SHORT = 'https://bit.ly/3abcDEF';
+    const short = (url = SHORT) => item(url, 'link_hub', 'resolve');
+    const PLAY = 'https://play.google.com/store/apps/details?id=com.acme.app';
+    const LOOKER = 'https://lookerstudio.google.com/reporting/0B1c2D3e-4f5a-6789/page/p_abc123';
+    const PHOTOS = 'https://photos.google.com/share/AF1QipNabc123?key=Zk5Vd';
+    const never = (url: string) => ({ url, host: new URL(url).hostname, platform: 'custom', handler: 'none' });
+    const TARGETS: Array<[string, string]> = [
+      ['a Google Play listing', PLAY],
+      ['a Looker Studio report', LOOKER],
+      ['a Data Studio report (its old name)', 'https://datastudio.google.com/reporting/0B1c2D3e'],
+      ['a Google Photos album', PHOTOS],
+      ['a Google Photos short link', 'https://photos.app.goo.gl/AbC123xYz'],
+      ['an old goo.gl Photos link', 'https://goo.gl/photos/AbC123xYz'],
+    ];
+
+    it.each(TARGETS)('a short link that points at %s: the walk stops in front of it — one request in all, to the short link — and it is returned to be listed', async (_n, target) => {
+      hops({ [SHORT]: { location: target } });
+      const r = await resolveLink(short(), ctx());
+      expect(askedUrls()).toEqual([SHORT]);                                  // no HEAD, no GET fallback, nothing to the target
+      expect(assertSafeMock.mock.calls.map(c => c[0])).toEqual([SHORT]);    // not even looked up
+      expect(r.links).toEqual([never(target)]);
+      expect(r.reason).toBeUndefined();
+    });
+
+    it('also when it is reached through another short link first: the shortener hop is followed, the Play hop is not', async () => {
+      hops({ [SHORT]: { location: 'https://tinyurl.com/x' }, 'https://tinyurl.com/x': { location: PLAY } });
+      const r = await resolveLink(short(), ctx());
+      expect(askedUrls()).toEqual([SHORT, 'https://tinyurl.com/x']);
+      expect(r.links).toEqual([never(PLAY)]);
+    });
+
+    it('the GET fallback never reaches it either (HEAD was refused, GET walks the same chain)', async () => {
+      hops({ [SHORT]: m => (m === 'HEAD' ? { status: 405 } : { location: PHOTOS }) });
+      const r = await resolveLink(short(), ctx());
+      expect(asked()).toEqual([`HEAD ${SHORT}`, `GET ${SHORT}`]);
+      expect(r.links).toEqual([never(PHOTOS)]);
+    });
+
+    it('tracking parameters are removed from the address that is listed', async () => {
+      hops({ [SHORT]: { location: `${PLAY}&utm_source=ig&fbclid=x` } });
+      expect((await resolveLink(short(), ctx())).links).toEqual([never(PLAY)]);
+    });
+
+    it.each([
+      ['photos.app.goo.gl', 'https://photos.app.goo.gl/AbC123xYz'],
+      ['goo.gl/photos', 'https://goo.gl/photos/AbC123xYz'],
+    ])('%s handed over as a short link (a link stored before it was listed) is not requested even as the first hop', async (_n, url) => {
+      hops({});
+      const r = await resolveLink(item(url, 'link_hub', 'resolve'), ctx());
+      expectNothingFetched();
+      expect(r.links).toEqual([never(url)]);
+    });
+
+    it('other goo.gl links are still short links: walked, hop by hop', async () => {
+      hops({ 'https://goo.gl/AbCdEf': { location: 'https://acme.example/work' } });
+      const r = await resolveLink(item('https://goo.gl/AbCdEf', 'link_hub', 'resolve'), ctx());
+      expect(askedUrls()).toEqual(['https://goo.gl/AbCdEf', 'https://acme.example/work']);
+      expect(r.links[0]).toMatchObject({ platform: 'custom', handler: 'site' });
+    });
+
+    it('a look-alike host is an ordinary destination: it is requested and returned as a site', async () => {
+      hops({ [SHORT]: { location: 'https://play.google.com.evil.example/store' } });
+      const r = await resolveLink(short(), ctx());
+      expect(askedUrls()).toEqual([SHORT, 'https://play.google.com.evil.example/store']);
+      expect(r.links[0]).toMatchObject({ host: 'play.google.com.evil.example', handler: 'site' });
+    });
+
+    it('every other Google host is as it was: not "never opened", so it is requested, and a page that is not a work sample is said so', async () => {
+      hops({ [SHORT]: { location: 'https://www.google.com/search?q=jane' } });
+      const r = await resolveLink(short(), ctx());
+      expect(askedUrls()).toEqual([SHORT, 'https://www.google.com/search?q=jane']);
+      expect(r.links).toEqual([]);
+      expect(r.reason).toBe('The short link leads to a page that cannot be reviewed');
+    });
+
+    it('a sign-in wall whose continue= is one of these: nothing is requested from either, and the reason says it cannot be opened automatically', async () => {
+      hops({ [SHORT]: { location: `https://accounts.google.com/ServiceLogin?service=wise&continue=${encodeURIComponent(PHOTOS)}` } });
+      const r = await resolveLink(short(), ctx());
+      expect(askedUrls()).toEqual([SHORT]);
+      expect(r.links).toEqual([]);
+      expect(r.reason).toBe('The short link leads to a page that cannot be opened automatically');
+    });
+
+    it('a link-in-bio page that carries one is read, the Play / Photos / Looker links are left out (never requested), the work links are kept', async () => {
+      const page = [PLAY, LOOKER, PHOTOS, 'https://photos.app.goo.gl/AbC123xYz', 'https://acme.example/work', 'https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrSt/edit']
+        .map(h => `<a href="${h}">x</a>`).join('');
+      route({ 'https://linktr.ee/acme': html(page) });
+      const r = await resolveLink(item('https://linktr.ee/acme', 'link_hub', 'resolve'), ctx());
+      expect(requested()).toEqual(['https://linktr.ee/acme']);
+      expect(r.links.map(l => l.platform)).toEqual(['google_doc', 'custom']);
+      expect(r.links.map(l => l.handler)).toEqual(['document', 'site']);
+      expect(r.links.map(l => l.host)).toEqual(['docs.google.com', 'acme.example']);
+    });
+
+    it('a link-in-bio page with nothing but these says there is no reviewable work behind it', async () => {
+      route({ 'https://linktr.ee/acme': html(`<a href="${PLAY}">x</a><a href="${PHOTOS}">y</a>`) });
+      const r = await resolveLink(item('https://linktr.ee/acme', 'link_hub', 'resolve'), ctx());
+      expect(r.links).toEqual([]);
+      expect(r.reason).toBe('No links to reviewable work were found on the link-in-bio page');
+    });
+  });
 });
