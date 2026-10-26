@@ -5,6 +5,7 @@
 // Short links and link-in-bio pages can lead to a website, and websites are Chromium's, not this module's: so the caller
 // runs expandResolveItems() FIRST, then splits what comes back into sites (Chromium) and the rest (acquireFetchItems).
 import type { CapturedPortfolio } from '../capture.js';
+import { listedProductReason } from '../answerLinks.js';
 import { wellFormed } from '../text.js';
 import type { PortfolioLink, ReviewHandler } from '../types.js';
 import { BUDGET } from './budget.js';
@@ -202,7 +203,8 @@ export async function acquireFetchItems(items: FetchItem[], ctx: AcquireContext,
 
   const dispatch = async (item: FetchItem, depth: 0 | 1): Promise<Acquired[]> => {
     const handler = item.link.handler;
-    if (handler === 'none') return [unread(item, 'unreviewable', REASON_NONE)];
+    // A never-opened link that came out of a short link: the Google Play / Looker Studio / Photos ones keep the reason a pasted link gets.
+    if (handler === 'none') return [unread(item, 'unreviewable', listedProductReason(item.link.url) ?? REASON_NONE)];
     if (handler === 'resolve') return depth === 0 ? resolveThenFetch(item) : [unread(item, 'unreviewable', REASON_NESTED)];
     const fetcher = handler ? fetchers[handler] : undefined;
     if (!fetcher) return [unread(item, 'unreviewable', handler === 'site' && depth === 1 ? REASON_SITE_BEHIND_SHORT_LINK : REASON_NOT_OPENED_KIND)];

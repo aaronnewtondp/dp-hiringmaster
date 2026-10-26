@@ -4,7 +4,7 @@
  *
  * Structure (identical on every role):
  *   TOP 40%  — logo · "Now hiring" · the three-line hook · the intro · the role
- *              block (title + location / experience / team). The hook and intro
+ *              block (title + location / experience / team, and a work setup when one is hand-authored). The hook and intro
  *              are fixed constants in theme.ts — they never change per role.
  *   BOTTOM 60% — skill chips · "The Job" / "Who You Are" columns · apply bar. These adapt
  *              to the role: its tags, its five+five bullets, its title length.
@@ -36,7 +36,7 @@ import {
   fitSingleLine, fitTitle, formatExperience, planMeta, packChips, chipsBlockHeight,
   HOOK_MAX_RIGHT, HOOK_CLEARANCE, RIPPLE,
   parseBullet, layoutColumns, stripTags, cleanText,
-  MetaItem, ExperienceParts, RowLayout,
+  MetaItem, MetaPlacement, ExperienceParts, RowLayout, WrappedFit, fitWrapped, capWorkSetup, layoutMetaRows, WORK_SETUP_FIT,
 } from './socialJdLayout.js';
 
 // ─── Ripple graphic (the brand's "See" layer: blueprint linework) ───────────
@@ -189,7 +189,7 @@ export async function renderSocialJd(role: Role, content: JdContent): Promise<Bu
       .stop(0, C.tealLt, 0.17).stop(1, C.tealLt, 0.07);
     doc.roundedRect(cardX, cardY, cardW, cardH, 6).fill(g);
     doc.lineWidth(1).strokeColor(C.tealLt, 0.34).roundedRect(cardX + 0.5, cardY + 0.5, cardW - 1, cardH - 1, 5.5).stroke();
-    // right-hand meta: location / experience / team (any of them may be missing)
+    // right-hand meta: location / experience / team / work setup (any of them may be missing; work setup is hand-authored)
     const items: MetaItem[] = [];
     const loc = cleanText(role.location ?? '');
     if (loc) items.push({ key: 'LOCATION', value: { text: loc } });
@@ -197,11 +197,22 @@ export async function renderSocialJd(role: Role, content: JdContent): Promise<Bu
     if (exp) items.push({ key: 'EXPERIENCE', value: exp });
     const team = cleanText(role.department ?? '');
     if (team) items.push({ key: 'TEAM', value: { text: team } });
+    const workSetupFull = cleanText(content.socialWorkSetup ?? '');
+    const workSetup = capWorkSetup(workSetupFull);
+    if (workSetup !== workSetupFull) console.warn(`[SocialJD] ${role.id}: the work setup is ${Array.from(workSetupFull).length} characters, cut to ${Array.from(workSetup).length}`);
+    if (workSetup) items.push({ key: 'WORK SETUP', value: { text: workSetup }, wrap: true });
     const metaX = GEO.col2X, metaW = cardX + cardW - 1 - 28 - metaX;
     const naturalW = (it: MetaItem) => it.value.num
       ? measure(it.value.num, 'monoSemi', 22, -0.02 * 22) + measure(' ' + (it.value.unit ?? ''), 'figBold', 23, -0.01 * 23)
       : measure(it.value.text ?? '', 'figBold', 23, -0.01 * 23);
-    const { placements: placed, col1X } = planMeta(items, naturalW, metaW);
+    // the WORK SETUP sentence, set on two lines, must fit a column without being cut — otherwise it is given the full width
+    const wrapFits = (it: MetaItem, w: number) => {
+      if (!it.value.text) return true;
+      const f = fitWrapped(it.value.text, 'figBold', w, WORK_SETUP_FIT.lines, WORK_SETUP_FIT.size, WORK_SETUP_FIT.min, WORK_SETUP_FIT.spacing, measure);
+      return f.lines.join(' ') === it.value.text;      // anything cut (a word wider than the column included) does not fit
+    };
+    const { placements: placed, col1X, dropped } = planMeta(items, naturalW, metaW, undefined, undefined, wrapFits);
+    if (dropped?.length) console.warn(`[SocialJD] ${role.id}: left out ${dropped.join(', ')} from the role block (no room for four items)`);
 
     // The divider sits at x=541.5 so the meta text lands exactly on the second column's gridline (x=570).
     // With no meta at all there is nothing to divide: drop the rule and give the title the whole block.
@@ -222,17 +233,29 @@ export async function renderSocialJd(role: Role, content: JdContent): Promise<Bu
     t.lines.forEach((line, i) =>
       text(line, titleX, t0 + i * tLH + baselineInLine('figXBold', t.size, tLH), 'figXBold', t.size, C.white, { spacing: -0.03 * t.size }));
 
-    // right: the meta items on a two-column grid
+    // right: the meta items on a two-column grid. A `wrap` item (WORK SETUP) is a sentence: it takes up to two lines at the
+    // largest size that fits its column, and the row it sits in grows by the extra line; every other value is one line.
     const itemH = 11.5 + 5 + 1.1 * 23;
-    const rowsN = placed.length ? Math.max(...placed.map(p => p.row)) + 1 : 0;
-    const gridH = rowsN * itemH + Math.max(0, rowsN - 1) * 16;
+    const colW = (p: MetaPlacement) => p.span2 ? metaW : p.col === 0 ? col1X - 28 : metaW - col1X;
+    const wrapped = new Map<MetaPlacement, WrappedFit>();
+    for (const p of placed) {
+      if (p.wrap && p.value.text) wrapped.set(p, fitWrapped(p.value.text, 'figBold', colW(p), WORK_SETUP_FIT.lines, WORK_SETUP_FIT.size, WORK_SETUP_FIT.min, WORK_SETUP_FIT.spacing, measure));
+    }
+    const heightOf = (p: MetaPlacement) => { const f = wrapped.get(p); return f && f.lines.length > 1 ? 16.5 + f.lines.length * f.size * 1.12 : itemH; };
+    const { rowTop, gridH } = layoutMetaRows(placed, heightOf);
     const gridTop = innerTop + (innerH - gridH) / 2;
     for (const p of placed) {
       const x = metaX + (p.col === 1 ? col1X : 0);
-      const w = p.span2 ? metaW : p.col === 0 ? col1X - 28 : metaW - col1X;
-      const y = gridTop + p.row * (itemH + 16);
+      const y = gridTop + rowTop[p.row];
       text(p.key, x, y + baselineInLine('monoMed', 11.5, 11.5), 'monoMed', 11.5, C.tealLt, { opacity: 0.9, spacing: 11.5 * 0.14 });
-      drawMetaValue(p.value, x, y + 16.5 + baselineInLine('figBold', 23, 1.1 * 23), w);
+      const f = wrapped.get(p);
+      if (f) {
+        // two lines: their own line box; one line: the same line box as the other values, so the baselines match
+        const lh = f.lines.length > 1 ? f.size * 1.12 : 1.1 * 23;
+        f.lines.forEach((ln, i) => text(ln, x, y + 16.5 + i * lh + baselineInLine('figBold', f.size, lh), 'figBold', f.size, C.white, { spacing: -0.01 * f.size }));
+      } else {
+        drawMetaValue(p.value, x, y + 16.5 + baselineInLine('figBold', 23, 1.1 * 23), colW(p));
+      }
     }
   }
   const heroBottom = cardY + cardH;

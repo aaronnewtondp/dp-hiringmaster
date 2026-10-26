@@ -788,8 +788,10 @@ const REASON_BAD_REDIRECT = 'The short link redirects to an address that cannot 
  * Follows a short link's redirects ONE HOP AT A TIME and reads where it ended up. Never reads a body. Each hop is
  * SSRF-checked (assertSafePublicUrl) and requested with `redirect: 'manual'`, so we, not fetch, decide whether the next
  * address may be asked for: every Location is classified BEFORE it is requested, and one that is never opened (LinkedIn,
- * lnkd.in, other social, WeTransfer) ends the walk right there — no request, not even a HEAD, ever reaches it — and is
- * handed back as the destination (to be listed for HR, not fetched). A Location that is a sign-in page is not requested
+ * lnkd.in, other social, WeTransfer, Google Play, Looker Studio, Google Photos) ends the walk right there — no request, not even a HEAD, ever reaches it — and is
+ * handed back as the destination (to be listed for HR, not fetched). That holds for the canonical spelling of the host: a Location
+ * written with a trailing dot ("www.linkedin.com.", "play.google.com.") is not recognised by validHost for ANY host and is requested
+ * after the SSRF check (a known gap, not specific to these hosts). A Location that is a sign-in page is not requested
  * either: the file it asks for is in its `continue` parameter, which is all that is read from it.
  */
 async function probe(url: string, method: 'HEAD' | 'GET', until: number): Promise<Probed> {
@@ -884,7 +886,7 @@ async function resolveHub(item: FetchItem, ctx: AcquireContext, hubHost: string)
  * the result is re-classified, and anything that is still a short link or a hub, or is never opened, is dropped.
  * Returns {links: [], reason} when nothing reviewable is behind it (including a link that is dead or private); throws
  * ResolveFailedError when our side failed. LinkedIn (and lnkd.in) are never requested. A short link that LEADS to a
- * never-opened destination (LinkedIn, other social, WeTransfer) is answered with that destination as the one link, handler
+ * never-opened destination (LinkedIn, other social, WeTransfer, Google Play, Looker Studio, Google Photos) is answered with that destination as the one link, handler
  * 'none': the walk stopped in front of it, so it is listed for HR and nothing was asked of it.
  */
 export async function resolveLink(item: FetchItem, ctx: AcquireContext): Promise<ResolveResult> {

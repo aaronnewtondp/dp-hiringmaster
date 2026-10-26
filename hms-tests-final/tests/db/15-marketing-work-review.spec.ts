@@ -555,6 +555,39 @@ test.describe('R019 work-sample review (local Postgres + API)', () => {
       expect((await reviewRow(appId)).score).toBeNull();
     });
 
+    test('Google Play + Looker Studio + Google Photos only: unreviewable (not "no work samples"), NULL score, the links listed in order with their own reasons, average untouched', async ({ request }) => {
+      const play = 'https://play.google.com/store/apps/details?id=com.acme.fitness';
+      const looker = 'https://lookerstudio.google.com/reporting/0B1c2D3e/page/p_abc';
+      const photos = 'https://photos.app.goo.gl/AbC123xYz';
+      const { appId } = await addApp(mktRole, 'google-products', { answer: `App: ${play}  Report: lookerstudio.google.com/reporting/0B1c2D3e/page/p_abc  Album: ${photos}` });
+      const before = await scoreState(appId);
+      const r = await rerun(request, appId);
+      expect(r.code).toBe(202);
+      expect(r.body).toEqual({ status: 'unreviewable', links: 0, queued: false });
+      const row = await reviewRow(appId);
+      expect(row.status).toBe('unreviewable');
+      expect(row.score).toBeNull();
+      expect(row.urls).toEqual([]);
+      expect(row.error).toMatch(/cannot be opened automatically/i);
+      expect(row.error).not.toMatch(/No work samples provided/);
+      const a = (await analysisOf(appId))!;
+      expect(a.unreviewed).toEqual([
+        { url: play, platform: 'custom', reason: 'Google Play listing - not opened automatically, open it by hand' },
+        { url: looker, platform: 'custom', reason: 'Looker Studio report - not opened automatically, open it by hand' },
+        { url: photos, platform: 'custom', reason: 'Google Photos album or photo - not opened automatically, open it by hand' },
+      ]);
+      expect(await scoreState(appId)).toEqual(before);
+    });
+
+    test('every other Google address (search, maps, calendar, meet, forms) still counts as no answer', async ({ request }) => {
+      const { appId } = await addApp(mktRole, 'google-boilerplate', {
+        answer: 'https://www.google.com/search?q=jane https://www.google.com/maps/place/Mumbai https://calendar.google.com/x https://meet.google.com/abc-defg-hij https://docs.google.com/forms/d/e/abc/viewform',
+      });
+      const r = await rerun(request, appId);
+      expect(r.body).toEqual({ status: 'no_portfolio', links: 0, queued: false });
+      expect((await reviewRow(appId)).error).toBe('No work samples provided; this dimension is not applied');
+    });
+
     test('an Instagram-only answer is NOT settled at enqueue (a caption snippet can be read): it is queued for the worker', async ({ request }) => {
       const { appId } = await addApp(mktRole, 'ig-only', { answer: 'instagram.com/jane.creates' });
       const before = await scoreState(appId);
@@ -1177,6 +1210,51 @@ test.describe('R019 work-sample review (local Postgres + API)', () => {
       expect(rej.body.results).toHaveLength(1);
       expect(rej.body.results[0]).toMatchObject({ id: ids.rejected, status: 'no_portfolio' });
       expect((await reviewRow(ids.unscored)).status).toBeNull();
+    });
+
+    test('min_score is a floor on the ResumeIQ average (inclusive), shared by the page and the remaining count, and a bad value is a 400', async ({ request }) => {
+      const floorRole = await newRoleViaSql('backfill floor', true, 'marketing_work');
+      const f: Record<string, string> = {};
+      for (const [label, score] of [['low', 3.9], ['edge', 4.0], ['above', 4.1], ['high', 9.9]] as const) {
+        f[label] = (await addApp(floorRole, `bf-floor-${label}`, { answer: 'N/A' })).appId;
+        await db.query(`UPDATE applications SET score_avg=$1 WHERE id=$2`, [score, f[label]]);
+      }
+      f.rejected = (await addApp(floorRole, 'bf-floor-rej', { answer: 'N/A', status: 'Rejected' })).appId;
+      await db.query(`UPDATE applications SET score_avg=8.0 WHERE id=$1`, [f.rejected]);
+
+      const remaining = async (data: Record<string, unknown>) => (await backfill(request, { role_id: floorRole, dry_run: true, ...data })).body.remaining_before;
+      expect(await remaining({})).toBe(4);                                  // no floor: every Active, scored, never-reviewed row
+      expect(await remaining({ min_score: 0 })).toBe(4);
+      expect(await remaining({ min_score: 4 })).toBe(3);                    // 4.0 itself is IN (equal to and above), 3.9 is out
+      expect(await remaining({ min_score: '4.0' })).toBe(3);                // a numeric string is the same number
+      expect(await remaining({ min_score: 4.05 })).toBe(2);
+      expect(await remaining({ min_score: 9.9 })).toBe(1);
+      expect(await remaining({ min_score: 10 })).toBe(0);
+      const echoed = await backfill(request, { role_id: floorRole, dry_run: true, min_score: 4 });
+      expect(echoed.body.min_score).toBe(4);
+      expect((await backfill(request, { role_id: floorRole, dry_run: true })).body).not.toHaveProperty('min_score');   // the old response shape when no floor is given
+
+      for (const bad of [-1, 10.5, 'abc', '', true, [4], {}]) {
+        const r = await backfill(request, { role_id: floorRole, dry_run: true, min_score: bad });
+        expect(r.code, JSON.stringify(bad)).toBe(400);
+        expect(r.body.error).toMatch(/min_score/);
+      }
+      for (const id of Object.values(f)) expect((await reviewRow(id)).status).toBeNull();   // dry runs and refusals change nothing
+
+      // paging with a floor: two rows per page, the page and next_offset follow the FILTERED set
+      const p1 = await backfill(request, { role_id: floorRole, dry_run: true, min_score: 4, limit: 2 });
+      expect(p1.body.next_offset).toBe(2);
+      const p2 = await backfill(request, { role_id: floorRole, dry_run: true, min_score: 4, limit: 2, offset: 2 });
+      expect(p2.body.next_offset).toBeNull();
+
+      // a real pass with the floor touches only the rows at or above it
+      const real = await backfill(request, { role_id: floorRole, min_score: 4 });
+      expect(real.code).toBe(200);
+      expect(new Set((real.body.results as Array<{ id: string }>).map(x => x.id))).toEqual(new Set([f.edge, f.above, f.high]));
+      expect((await reviewRow(f.low)).status).toBeNull();                   // below the floor: untouched, still eligible later
+      expect((await reviewRow(f.rejected)).status).toBeNull();              // not Active: untouched
+      for (const id of [f.edge, f.above, f.high]) expect((await reviewRow(id)).status).toBe('no_portfolio');
+      expect(await remaining({})).toBe(1);                                  // only the 3.9 row is left to do
     });
 
     test('refuses a role with the review off (default kind or kind marketing_work) and an unknown role; the secret is still required', async ({ request }) => {

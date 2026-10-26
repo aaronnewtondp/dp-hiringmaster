@@ -34,6 +34,10 @@ export interface JdContent {
   // where that context matters enough to spell out. Left undefined for
   // every other role, which renders identically to before this field existed.
   roleContinuityNote?: string;
+  // Optional, never AI-generated — a hand-authored work-setup line ("Remote working possible for exceptional candidates")
+  // shown as WORK SETUP in the Social JD's role block, for a role that states one. Left undefined for every other role,
+  // which renders identically to before this field existed. The template wraps it onto two lines.
+  socialWorkSetup?: string;
 }
 
 const MAX_KEY_RESPONSIBILITIES = 7;

@@ -7,7 +7,7 @@ import {
   SOCIAL_HOOK_MUTED, SOCIAL_HOOK_PUNCH, SOCIAL_INTRO_FACT, SOCIAL_INTRO_ASK, SOCIAL_CTA_TEXT,
   SOCIAL_ROLE_EYEBROW, SOCIAL_APPLY_URL, SOCIAL_COL_HEADINGS,
 } from './theme.js';
-import { GEO, COLS, MARGIN, HOOK_MAX_RIGHT, HOOK_CLEARANCE, RIPPLE, HERO_MAX_BOTTOM } from './socialJdLayout.js';
+import { GEO, COLS, MARGIN, HOOK_MAX_RIGHT, HOOK_CLEARANCE, RIPPLE, HERO_MAX_BOTTOM, capWorkSetup, SOCIAL_WORK_SETUP_MAX_CHARS } from './socialJdLayout.js';
 import { Role } from '../../types/index.js';
 import { JdContent } from '../jdContent.js';
 
@@ -119,6 +119,144 @@ describe('renderSocialJd — the fixed top half vs the adaptive bottom half', ()
   });
 });
 
+describe('renderSocialJd — WORK SETUP (hand-authored, optional)', () => {
+  const textOfName = async (name: string) => norm(await extractPdfText(await render(name)));
+  const textOfContent = async (name: string, over: Partial<JdContent>) =>
+    norm(await extractPdfText(await renderSocialJd(SOCIAL_FIXTURES[name].role, { ...SOCIAL_FIXTURES[name].content, ...over } as JdContent)));
+  const SENTENCE = 'Remote working possible for exceptional candidates';
+
+  it('R019 (the shipped reference) prints the label and the whole sentence, with the other three labels still there', async () => {
+    const t = await textOfName('R019');
+    expect(squash(t)).toContain('WORKSETUP');
+    expect(t).toContain('Remote working possible');
+    expect(t).toContain('for exceptional candidates');
+    for (const label of ['LOCATION', 'EXPERIENCE', 'TEAM']) expect(squash(t)).toContain(label);
+    expect(t).toContain('Gurgaon');
+    expect(t).toContain('Sales & Growth');
+    expect(t).toContain('5–10 yrs');
+  });
+
+  it('no other role prints it unless its content carries the field (positive control above)', async () => {
+    for (const name of Object.keys(SOCIAL_FIXTURES)) {
+      const has = !!SOCIAL_FIXTURES[name].content.socialWorkSetup;
+      expect(squash(await textOfName(name)).includes('WORKSETUP'), name).toBe(has);
+    }
+  });
+
+  it('removing the field from R019 removes exactly the label and the sentence from the page text', async () => {
+    const withIt = await textOfName('R019');
+    const without = await textOfContent('R019', { socialWorkSetup: undefined });
+    expect(squash(without)).not.toContain('WORKSETUP');
+    expect(squash(without)).not.toContain('exceptionalcandidates');
+    expect(squash(withIt).replace('WORKSETUP', '').replace(squash(SENTENCE), '')).toBe(squash(without));
+  });
+
+  it.each(['', '   ', '\n\t', '<b></b>', null, undefined] as unknown[])('a blank value (%j) is the same as none', async (v) => {
+    const t = await textOfContent('R019', { socialWorkSetup: v as string });
+    expect(squash(t)).not.toContain('WORKSETUP');
+  });
+
+  it('leaves the role block\'s Team out, with a warning, when the sentence cannot be set uncut beside a long Location', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const t = await textOfName('WORK_SETUP_LONG_LOCATION');
+    expect(warn.mock.calls.some(c => String(c[0]).includes('left out TEAM'))).toBe(true);
+    expect(squash(t)).toContain('WORKSETUP');
+    expect(t).toContain('Remote working possible for');
+    expect(t).toContain('exceptional candidates');
+    expect(squash(t)).not.toContain('TEAM');
+    expect(t).toContain('Hyderabad, Bangalore');
+  });
+
+  it('does NOT warn or drop anything for R019 (all four items fit)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await render('R019');
+    expect(warn.mock.calls.filter(c => String(c[0]).includes('left out'))).toHaveLength(0);
+  });
+
+  it('three items (no Team) and a lone sentence both render the sentence in full', async () => {
+    expect(await textOfName('WORK_SETUP_NO_TEAM')).toContain('Gurgaon office');
+    const only = await textOfName('WORK_SETUP_ONLY');
+    expect(only).toContain('Remote working possible for');
+    expect(only).toContain('exceptional candidates');
+    expect(squash(only)).not.toContain('LOCATION');
+  });
+
+  it('an over-long sentence is cut with an ellipsis at the cap, on a word, never silently', async () => {
+    const long = SOCIAL_FIXTURES.WORK_SETUP_TOO_LONG.content.socialWorkSetup!;
+    expect(long.length).toBeGreaterThan(SOCIAL_WORK_SETUP_MAX_CHARS);
+    const capped = capWorkSetup(long);
+    expect(capped.length).toBeLessThanOrEqual(SOCIAL_WORK_SETUP_MAX_CHARS);
+    expect(capped.endsWith('…')).toBe(true);
+    expect(long.startsWith(capped.slice(0, -1))).toBe(true);
+    expect(capped).toBe('Remote working is possible for exceptional candidates who…');
+    const t = await textOfName('WORK_SETUP_TOO_LONG');
+    expect(t).toContain('candidates who…');
+    expect(t).not.toContain('partnerships at scale');
+  });
+
+  it('warns when it cuts the sentence at the cap (the ellipsis is not the only sign)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await render('WORK_SETUP_TOO_LONG');
+    expect(warn.mock.calls.some(c => /work setup is \d+ characters, cut to/.test(String(c[0])))).toBe(true);
+    warn.mockClear();
+    await render('R019');
+    expect(warn.mock.calls.filter(c => /work setup is/.test(String(c[0])))).toHaveLength(0);
+  });
+
+  it('never draws a word past its column: a word too wide at full size is set smaller, whole, and Team stays', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const t = await textOfName('WORK_SETUP_LONG_WORD');
+    expect(warn.mock.calls.filter(c => String(c[0]).includes('left out'))).toHaveLength(0);
+    expect(t).toContain('Work-from-anywhere');
+    expect(t).toContain('possible');
+    expect(t).not.toContain('…');
+    expect(squash(t)).toContain('TEAM');
+    expect(t).toContain('Sales & Growth');
+  });
+
+  it('leaves Team out (logged) rather than cutting a long one', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const t = await textOfName('WORK_SETUP_LONG_TEAM');
+    expect(warn.mock.calls.some(c => String(c[0]).includes('left out TEAM'))).toBe(true);
+    expect(squash(t)).not.toContain('TEAM');
+    expect(t).not.toContain('Corporate Functions');
+    expect(t).toContain('Remote working possible');
+  });
+
+  it('cleans markup and typographic quotes like every other string in the template', async () => {
+    const t = await textOfContent('R019', { socialWorkSetup: "<b>Remote</b> is possible — \"exceptional\" people & Aaron's team" });
+    expect(t).toContain('Remote is possible');
+    expect(t).not.toContain('<b>');
+    expect(t).toContain('“exceptional”');
+  });
+
+  it('survives hostile input without throwing, on any role shape', { timeout: 60_000 }, async () => {
+    for (const v of ['\u0000\u202e<script>alert(1)</script>', 'a'.repeat(5000), '🙂'.repeat(200), 'Ünïcödé — 日本語 — Привет', ' '.repeat(10) + 'x'.repeat(61)]) {
+      for (const name of ['R019', 'SPARSE', 'LONG_TITLE', 'WORK_SETUP_LONG_LOCATION']) {
+        const buf = await renderSocialJd(SOCIAL_FIXTURES[name].role, { ...SOCIAL_FIXTURES[name].content, socialWorkSetup: v } as JdContent);
+        expect(buf.subarray(0, 5).toString()).toBe('%PDF-');
+      }
+    }
+  });
+
+  it('is never AI-generated: a model reply that includes it does not put it in the content', async () => {
+    const { finalizeJdContent } = await import('../jdContent.js');
+    const { WHY_ICON_KEYS } = await import('./theme.js');
+    const reply = (extra: Record<string, unknown>) => ({ content: [{ type: 'text', text: JSON.stringify({
+      tags: [], aboutRoleParagraph: 'x', keyResponsibilities: [], mustHaves: [], goodToHaves: [], goodToHaveLabel: 'Good to Have',
+      whyJoinUs: WHY_ICON_KEYS.slice(0, 4).map(k => ({ iconKey: k, title: 'T', description: 'd' })),
+      socialAboutRole: [], socialAboutYou: [], ...extra,
+    }) }] }) as never;
+    const role = { id: 'R1', title: 'T' } as Role;
+    const control = finalizeJdContent(reply({}), role);
+    expect(control).not.toBeNull();                          // the reply shape is valid, so the check below proves something
+    const out = finalizeJdContent(reply({ socialWorkSetup: 'Fully remote for everyone' }), role);
+    expect(out).not.toBeNull();
+    expect(out!.socialWorkSetup).toBeUndefined();            // only a hand-authored value ever reaches the template
+    expect(Object.keys(out!)).not.toContain('socialWorkSetup');
+  });
+});
+
 describe('renderSocialJd — robustness', () => {
   it('renders from a completely empty content object', async () => {
     const buf = await renderSocialJd({ id: 'R1', title: 'Anything' } as Role, {} as JdContent);
@@ -143,7 +281,7 @@ describe('renderSocialJd — robustness', () => {
     expect(warn.mock.calls.some(c => String(c[0]).includes('dropped'))).toBe(true);
   });
 
-  it('does not report column overflow for any fixture — including legacy-format bullets', async () => {
+  it('does not report column overflow for any fixture — including legacy-format bullets', { timeout: 30_000 }, async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     for (const name of Object.keys(SOCIAL_FIXTURES)) await render(name);
     expect(warn.mock.calls.filter(c => String(c[0]).includes('columns exceed'))).toHaveLength(0);
