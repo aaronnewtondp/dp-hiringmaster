@@ -514,6 +514,104 @@ describe('prepareMarketingReview — with picks made by the real answer-link pic
     expect(send).not.toHaveBeenCalled();
   });
 
+  // Google Play / Looker Studio / Google Photos links used to be dropped with the rest of *.google.com, so an answer made of
+  // nothing else settled as "No work samples provided" — untrue — and HR never saw the link.
+  describe('a Google Play, Looker Studio or Google Photos link', () => {
+    const PLAY = 'https://play.google.com/store/apps/details?id=com.acme.fitness';
+    const LOOKER = 'https://lookerstudio.google.com/reporting/0B1c2D3e-4f5a-6789/page/p_abc123';
+    const PHOTOS = 'https://photos.app.goo.gl/AbC123xYz';
+    const REASON = {
+      play: 'Google Play listing - not opened automatically, open it by hand',
+      looker: 'Looker Studio report - not opened automatically, open it by hand',
+      photos: 'Google Photos album or photo - not opened automatically, open it by hand',
+    };
+
+    it('alone is unreviewable, not "no work samples": score NULL, no job, the link listed with its reason', async () => {
+      const r = await prepareMarketingReview({ applicationId: ID, pick: pickFor(`Our app: ${PLAY}`) });
+
+      expect(r).toStrictEqual({ status: 'unreviewable', links: [], queued: false });
+      expect(paramsOf(0)).toEqual(['[]', ID, STALE, true]);          // nothing for the worker to open: no links stored
+      expect(applyPortfolioOutcome).toHaveBeenCalledTimes(1);
+      expect(applyPortfolioOutcome.mock.calls[0][1]).toStrictEqual({
+        status: 'unreviewable', score: null, note: '', redFlags: [], message: MSG_UNOPENABLE,
+        analysis: analysisOf({
+          summary: 'Every link is on a platform that cannot be opened automatically. Open them by hand.',
+          unreviewed: [{ url: PLAY, platform: 'custom', reason: REASON.play }],
+        }),
+      });
+      expect(applyPortfolioOutcome.mock.calls[0][1].message).not.toBe(MSG_NONE);
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a Looker Studio report', LOOKER, 'custom', REASON.looker],
+      ['a Data Studio report (its old name)', 'datastudio.google.com/reporting/0B1c2D3e', 'custom', REASON.looker],
+      ['a Google Photos short link', PHOTOS, 'custom', REASON.photos],
+      ['a Google Photos album', 'https://photos.google.com/share/AF1QipNabc123?key=Zk5Vd', 'custom', REASON.photos],
+      ['an old goo.gl Photos link', 'goo.gl/photos/AbC123xYz', 'custom', REASON.photos],
+    ])('%s alone: unreviewable and listed, nothing queued', async (_n, answer, platform, reason) => {
+      const r = await prepareMarketingReview({ applicationId: ID, pick: pickFor(answer) });
+      expect(r).toStrictEqual({ status: 'unreviewable', links: [], queued: false });
+      const unreviewed = applyPortfolioOutcome.mock.calls[0][1].analysis.unreviewed;
+      expect(unreviewed).toHaveLength(1);
+      expect(unreviewed[0]).toMatchObject({ platform, reason });
+      expect(unreviewed[0].url).toMatch(/^https?:\/\//);
+      expect(applyPortfolioOutcome.mock.calls[0][1].score).toBeNull();
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('all three together, with LinkedIn between them: one unreviewable outcome, four entries in the order written', async () => {
+      const r = await prepareMarketingReview({ applicationId: ID, pick: pickFor(`${PHOTOS} https://www.linkedin.com/in/jane-doe ${PLAY} ${LOOKER}`) });
+      expect(r.status).toBe('unreviewable');
+      const unreviewed = applyPortfolioOutcome.mock.calls[0][1].analysis.unreviewed;
+      expect(unreviewed.map((u: { platform: string }) => u.platform)).toEqual(['custom', 'linkedin', 'custom', 'custom']);
+      expect(unreviewed.map((u: { reason: string }) => u.reason)).toEqual([REASON.photos, expect.stringMatching(/^LinkedIn blocks/), REASON.play, REASON.looker]);
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('next to a Drive PDF is queued; only the PDF is stored (the listing is not a job) and the rest is still reviewed', async () => {
+      const r = await prepareMarketingReview({
+        applicationId: ID,
+        pick: pickFor(`Deck: https://drive.google.com/file/d/1AbCdEfGhIjKlMnOp/view?usp=sharing  App: ${PLAY}  Photos: ${PHOTOS}`),
+      });
+      expect(r.status).toBe('pending');
+      expect(r.queued).toBe(true);
+      expect(r.links).toHaveLength(1);
+      expect(r.links[0]).toMatchObject({ platform: 'gdrive_file', handler: 'document' });
+      expect(JSON.parse(paramsOf(0)[0] as string)).toEqual(r.links);
+      expect(paramsOf(0)[0]).not.toMatch(/play\.google|photos/);
+      expect(paramsOf(0)[3]).toBe(false);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(applyPortfolioOutcome).not.toHaveBeenCalled();
+    });
+
+    it('a re-run that now finds only such a link keeps an earlier review (no "nothing to review" overwrite), and its stored links', async () => {
+      query.mockResolvedValue([{ id: ID, score_portfolio: 7 }]);
+      const r = await prepareMarketingReview({ applicationId: ID, pick: pickFor(PLAY) });
+      expect(r).toStrictEqual({ status: 'failed', links: [], queued: false });
+      expect(paramsOf(0)[3]).toBe(true);                             // settles without a job while a review exists: the stored links are kept
+      expect(applyPortfolioOutcome).not.toHaveBeenCalled();
+      expect(sqlOf(1)).toBe(MARK_FAILED_SQL);
+      expect(paramsOf(1)).toEqual([
+        'The links could not be opened this time (their platforms cannot be opened automatically) — the earlier review (7/10) still applies. Use Re-run to retry.', ID,
+      ]);
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('a look-alike host is an ordinary website: it is queued, not listed', async () => {
+      const r = await prepareMarketingReview({ applicationId: ID, pick: pickFor('https://play.google.com.evil.example/store') });
+      expect(r.status).toBe('pending');
+      expect(r.links).toHaveLength(1);
+      expect(r.links[0]).toMatchObject({ host: 'play.google.com.evil.example', handler: 'site' });
+    });
+
+    it('every other Google host is still no answer at all', async () => {
+      const r = await prepareMarketingReview({ applicationId: ID, pick: pickFor('https://www.google.com/maps/place/Mumbai https://calendar.google.com/x https://meet.google.com/abc-defg-hij') });
+      expect(r).toStrictEqual({ status: 'no_portfolio', links: [], queued: false });
+      expect(applyPortfolioOutcome.mock.calls[0][1].message).toBe(MSG_NONE);
+    });
+  });
+
   it('a Drive PDF next to a LinkedIn profile is queued; only the Drive file is stored', async () => {
     const r = await prepareMarketingReview({
       applicationId: ID,

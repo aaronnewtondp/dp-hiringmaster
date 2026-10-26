@@ -118,6 +118,31 @@ describe('acquireFetchItems — links that are not opened', () => {
     for (const f of Object.values(all)) expect(f).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['https://play.google.com/store/apps/details?id=com.acme.app', 'Google Play listing - not opened automatically, open it by hand'],
+    ['https://lookerstudio.google.com/reporting/0B1c2D3e/page/abc', 'Looker Studio report - not opened automatically, open it by hand'],
+    ['https://datastudio.google.com/reporting/0B1c2D3e', 'Looker Studio report - not opened automatically, open it by hand'],
+    ['https://photos.google.com/share/AF1QipAbCd', 'Google Photos album or photo - not opened automatically, open it by hand'],
+    ['https://photos.app.goo.gl/AbC123xYz', 'Google Photos album or photo - not opened automatically, open it by hand'],
+    ['https://goo.gl/photos/AbC123xYz', 'Google Photos album or photo - not opened automatically, open it by hand'],
+  ])('a never-opened Google product link that came out of a short link keeps its product reason (%s)', async (url, reason) => {
+    // media.ts hands such a destination over as handler none; it must read the same as a link pasted directly into the answer.
+    const it: FetchItem = { link: { url, host: new URL(url).host, platform: 'custom', handler: 'none' }, ref: 'L1.1' };
+    const all = { document: vi.fn(), image: vi.fn(), video: vi.fn(), social: vi.fn(), resolve: vi.fn() };
+    const [a] = await acquireFetchItems([it], mkCtx(), all);
+    expect(a).toMatchObject({ ref: 'L1.1', outcome: 'unreviewable', reason, media: [], text: '', facts: [], injectionHit: false });
+    for (const f of Object.values(all)) expect(f).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['https://www.linkedin.com/in/jane', 'linkedin'], ['https://facebook.com/jane', 'social_other'], ['https://we.tl/t-AbC', 'cloud_file'],
+    ['https://janedoe.design/work', 'custom'], ['https://www.google.com/maps', 'custom'], ['https://play.google.com/', 'custom'],
+  ] as const)('every other handler-none link keeps the generic reason (%s)', async (url, platform) => {
+    const it: FetchItem = { link: { url, host: new URL(url).host, platform, handler: 'none' }, ref: 'L1.1' };
+    const [a] = await acquireFetchItems([it], mkCtx(), {});
+    expect(a).toMatchObject({ outcome: 'unreviewable', reason: 'Not opened automatically' });
+  });
+
   it('an unregistered or unreviewable link does not stop its neighbours', async () => {
     const document = async (it: FetchItem) => okFor(it);
     const out = await acquireFetchItems([item('document', 1), item('none', 2), item('video', 3), item('document', 4)], mkCtx(), { document });
