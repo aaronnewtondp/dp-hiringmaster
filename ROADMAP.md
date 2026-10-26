@@ -204,9 +204,7 @@ live.
       tier; three are now below 4.0. **Decision (Aaron, 2026-10-25): keep the fold policy as it is** (`'always'`;
       the `upside_only` knob stays in code, unused). No spot-check by the hiring manager is scheduled. Numbers,
       outcomes and what the real worker showed: CLAUDE.md "Production state"; steps and queries: the runbook.
-- [ ] **Work-sample review — follow-ups, not built.** **Reuse the PDF sandbox in the main API so resume parsing
-      (`driveService.ts`, every role) stops running pdfjs on the API function's main thread** (recommended,
-      pre-existing; PR #21 is open and NOT merged); cap `candidates.full_name` at ingest; network-level egress
+- [ ] **Work-sample review — follow-ups, not built.** cap `candidates.full_name` at ingest; network-level egress
       filtering or a validating proxy for the browser (socket/popup/teardown SSRF is only mitigated for R019 and not
       at all for R007's capture); the form's privacy-notice check and the optional dedicated Anthropic key
       (`PORTFOLIO_ANTHROPIC_API_KEY`) are not recorded as settled before the backfill; whether the quote matcher is
@@ -215,6 +213,39 @@ live.
       Lambda-image check (runbook step 0: popups, teardown vectors, the partial crawl, the PDF reader) — it is also
       the only test of the `/proc` resident-size reading, which Vercel's results cannot show. See the runbook and
       the "Known gaps" in CLAUDE.md.
+- [x] **Resume PDF parsing, for EVERY role, moved off the API function's main thread (written 2026-10-23, merged 2026-10-26 as PR #21).**
+      `driveService.ts` ran pdfjs on the main thread of `api/index.ts`, so a hostile resume (a few KB: 15-40+ s of
+      starved event loop, or an uncatchable out-of-memory) could wedge every request on the instance. The PDF sandbox
+      and its pre-flight moved out of `portfolio/acquire/` to `services/pdfSandbox/` (shared by the worker and the main
+      API; `acquire/pdf.ts` and `acquire/pdfSandbox.ts` re-export, so no old import changed) and every resume PDF is now
+      read through them: Drive's declared size is checked before downloading (20 MB), the bounded pre-flight refuses
+      bombs, a killable child process (512 MB heap, 12 s, 700 MB resident) parses the rest, first 40 pages, text
+      byte-identical to the old parse and links from the same child. A hostile or unreadable resume scores on the
+      profile fields (neutral; no portfolio dimension, never a 0); OUR failure to read (child could not start) is a
+      visible, retryable `failed` for portfolio roles. Main API `includeFiles` is now `…/pdf-parse/dist/pdf-parse/cjs/*`
+      (a plain star glob). Real nft trace: `api/index` 2,394 -> 2,399 files, 62.5 -> 64.4 MB, no Chromium; worker
+      unchanged at 73.6 MB. Run from exactly that file set in the Lambda Node 22 image: ordinary, locked and hostile
+      resumes all behave, event loop gap <= 143 ms. Backend 88 files / 7,130 tests pass (baseline `main`: 85 / 7,000; 130 new: `resume`, `boundary`,
+      `driveService.resume`, plus link and argv tests in the sandbox's own and a packaging check). Details: CLAUDE.md "ResumeIQ".
+- [ ] **Deploy canary for the resume sandbox (run right after the 2026-10-26 merge).** The child process has run on Vercel in the
+      R019 worker (14 PDFs, 2026-10-25), but not in the MAIN function: that function must be able to `spawn` `process.execPath` with `-e` and `--max-old-space-size` and read `/proc/<pid>/status`. After the
+      deploy, score or re-run one real application of ANY role and check `score_resume_read` is true; watch the logs for
+      "[Drive] The resume reader could not read resume". If it cannot start there, every role is scored on profile fields
+      only until it is fixed or rolled back (no fallback to the in-process parse, on purpose). The same canary covers
+      the work-sample review's PDF check above (both use the one sandbox). A Word resume needs no process (it is a bounded read in the
+      function itself), so the canary only has to confirm one real `.docx` resume scores with `score_resume_read` true.
+- [x] **Resume Word files moved to the bounded zip reader; `mammoth` removed (written 2026-10-23, merged 2026-10-26 as PR #21).** `mammoth`
+      aborted node on a 123 KB hostile `.docx` (heap out of memory in 4.2 s; 641 MB for a 25 KB one). `driveService.ts` now reads a
+      resume `.docx` with `services/boundedFiles/resumeDocx.ts`: the bounded zip reader (the one the marketing review has, moved to a shared
+      folder with its XML walk and Word text reader; old paths re-export), an 8 MB body cap, text cut at 200,000 characters, and a new
+      hyperlink reader (relationship targets plus Word's `HYPERLINK` fields). Same contract as a PDF: hostile or unreadable is neutral, OUR
+      failure is a retryable `failed`, text without links is `linksError`. Against `mammoth` on the 113 real `.docx` on the dev machine: same
+      text (F1 median 1.00; the four lower ones are 70-110k-word tender documents at the new cap), **identical hyperlinks on all 113**. Hostile
+      files refused in under 1 ms at 177 MB resident in the Lambda image. `mammoth` and 15 dependencies removed from `package.json` and the
+      lockfile; real nft trace: `api/index` 2,190 files / 63.1 MB (was 2,394 / 62.5 MB before both resume changes), no jszip or mammoth.
+      Backend 90 files / 7,207 tests pass (baseline `main` 85 / 7,000; 77 of the 207 new tests are the Word change). Details: CLAUDE.md "ResumeIQ".
+- [ ] `pdf.scanCharge.test.ts` "scanPdfContentStreamsAsync and the cooperative text scan the same" is timing-sensitive and already flaky on
+      untouched `main` (5 of 8 runs failed): it expects a 6,000-stream scan to outlast one 20 ms slice, which a fast machine does not.
 - [ ] **Drive auto-folder creation** on Role and Candidate creation — every
       role/candidate should get a Drive folder automatically; currently none
       do. (`driveService.ts` already has working Drive API access via the
