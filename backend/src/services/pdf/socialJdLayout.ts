@@ -157,6 +157,40 @@ export function wrapLines(
   return lines;
 }
 
+/** The hand-authored WORK SETUP sentence: at most two lines, largest size first, never smaller than 15pt. */
+export const WORK_SETUP_FIT = { lines: 2, size: 23, min: 15, spacing: -0.01 } as const;
+/** Longest WORK SETUP sentence, in characters; a longer one is cut on a word with an ellipsis (capWorkSetup). */
+export const SOCIAL_WORK_SETUP_MAX_CHARS = 60;
+
+/** Cap a sentence at `max` characters (code points, never splitting an emoji): whole words when that loses less than a
+ *  third of the line, an ellipsis, and no dangling punctuation before it. */
+export function capWorkSetup(t: string, max = SOCIAL_WORK_SETUP_MAX_CHARS): string {
+  const chars = Array.from(t);
+  if (chars.length <= max) return t;
+  const cut = chars.slice(0, max - 1).join('');
+  const atWord = cut.lastIndexOf(' ');
+  return (atWord >= max * 0.67 ? cut.slice(0, atWord) : cut).trimEnd().replace(/[,;:\-–—]+$/, '') + '…';
+}
+
+/** A sentence set in at most `maxLines` lines at the largest size (from `size` down to `minSize`) at which EVERY line fits
+ *  `maxW` and no word is cut; at `minSize` whatever still does not fit ends in "…" (a word wider than the column too, on
+ *  any line: wrapLines itself only trims the last one). */
+export interface WrappedFit { lines: string[]; size: number }
+export function fitWrapped(
+  text: string, font: FontKey, maxW: number, maxLines: number, size: number, minSize: number,
+  spacingEm: number, measure: Measure,
+): WrappedFit {
+  const clean = text.split(' ').filter(Boolean).join(' ');
+  const widthAt = (s: number) => (t: string) => measure(t, font, s, spacingEm * s);
+  const wrapAt = (s: number) => wrapLines(clean, maxW, maxLines, widthAt(s));
+  let s = size;
+  for (; s > minSize; s = Math.max(minSize, Math.round((s - 0.5) * 100) / 100)) {
+    const lines = wrapAt(s);
+    if (lines.join(' ') === clean && lines.every(l => widthAt(s)(l) <= maxW)) return { lines, size: s };
+  }
+  return { lines: wrapAt(minSize).map(l => ellipsize(l, maxW, widthAt(minSize))), size: minSize };
+}
+
 // ─── Title block ────────────────────────────────────────────────────────────
 const NO_LINE_START = new Set(['&', '/', '-', '–', '—', '+', ')']);
 
@@ -238,16 +272,19 @@ export function formatExperience(raw?: string | null): ExperienceParts | null {
   return { num, unit: 'yrs' };
 }
 
-export interface MetaItem { key: string; value: ExperienceParts }
+/** `wrap`: a sentence rather than a short value (WORK SETUP) — it may be set on two lines. */
+export interface MetaItem { key: string; value: ExperienceParts; wrap?: boolean }
 export interface MetaPlacement extends MetaItem { col: 0 | 1; row: number; span2: boolean }
 
 export interface MetaPlan {
   placements: MetaPlacement[];
   /** x offset (from the meta grid's left edge) of the second column. */
   col1X: number;
+  /** keys of items that did not fit the two-row grid and were left out (only ever TEAM, in the four-item case). */
+  dropped?: string[];
 }
 
-/** Plan the role block's meta grid (Location, Experience, Team). The two columns are NOT
+/** Plan the role block's meta grid (Location, Experience, Team and, when hand-authored, Work Setup). The two columns are NOT
  *  equal: "5–10 yrs" needs far less room than "Hyderabad, Bangalore", so the boundary moves
  *  to give the wider value room instead of shrinking it next to its short neighbour — but it
  *  never moves left of the half-way gridline, so a normal role keeps the reference layout.
@@ -255,14 +292,23 @@ export interface MetaPlan {
  *  may still be scaled down (13%) before we pick a different arrangement.
  *   3 items, default  — Location | Experience on row 0, Team spanning row 1 (the R019 reference);
  *   3 items, Location can't fit even widened — Location spans row 0, Experience | Team share row 1;
+ *   4 items (a `wrap` item last: WORK SETUP) — Location | Experience on row 0 as in the reference, Team | the wrapping
+ *     item on row 1; if Location can't take its half, Team can't be set in its half even at the smallest size, or the
+ *     wrapping item would be cut in its column, Team is left out (`dropped`, never cut silently) and the other three are
+ *     planned as above (the wrapping item then fits its half beside Experience, or spans row 1);
  *   2 items — side by side if both fit, otherwise stacked full-width;  1 item — full width.
  *  Never more than two rows: the block is a fixed height. */
 export function planMeta(
   items: MetaItem[], widthOf: (item: MetaItem) => number, metaW: number, gap = 28, minShrink = 0.87,
+  // Does a `wrap` item fit in a column this wide, on its allowed lines, without being cut? (Needs the real font, so the
+  // renderer supplies it; without one every wrap item is assumed to fit.)
+  wrapFits: (item: MetaItem, width: number) => boolean = () => true,
 ): MetaPlan {
   const half = metaW / 2;
   const at = (it: MetaItem, col: 0 | 1, row: number, span2: boolean): MetaPlacement => ({ ...it, col, row, span2 });
   const fits = (it: MetaItem, avail: number) => widthOf(it) * minShrink <= avail;
+  // Team shares row 1 with the sentence, in the first column: it may shrink as far as the renderer lets a single line (16pt of 23).
+  const teamFits = (it: MetaItem, avail: number) => widthOf(it) * (16 / 23) <= avail;
   const boundary = (a: MetaItem, b: MetaItem) => {
     if (widthOf(a) + gap <= half) return half;
     return Math.max(half, Math.min(widthOf(a) + gap, metaW - widthOf(b) * minShrink - 8));
@@ -276,15 +322,32 @@ export function planMeta(
       ? { placements: [at(items[0], 0, 0, false), at(items[1], 1, 0, false)], col1X: b }
       : { placements: [at(items[0], 0, 0, true), at(items[1], 0, 1, true)], col1X: half };
   }
+  if (items.length >= 4) {
+    const [a, b, c, d] = items;
+    const b1 = boundary(a, b);
+    if (fits(a, b1 - gap) && teamFits(c, b1 - gap) && wrapFits(d, metaW - b1)) {
+      return { placements: [at(a, 0, 0, false), at(b, 1, 0, false), at(c, 0, 1, false), at(d, 1, 1, false)], col1X: b1 };
+    }
+    return { ...planMeta([a, b, d], widthOf, metaW, gap, minShrink, wrapFits), dropped: [c.key] };
+  }
   const [a, b, c] = items;
   const b1 = boundary(a, b);
   if (!fits(a, b1 - gap)) {
     const b2 = boundary(b, c);
-    if (fits(b, b2 - gap) && fits(c, metaW - b2)) {
+    if (fits(b, b2 - gap) && (c.wrap ? wrapFits(c, metaW - b2) : fits(c, metaW - b2))) {
       return { placements: [at(a, 0, 0, true), at(b, 0, 1, false), at(c, 1, 1, false)], col1X: b2 };
     }
   }
   return { placements: [at(a, 0, 0, false), at(b, 1, 0, false), at(c, 0, 1, true)], col1X: b1 };
+}
+
+/** Where the role block's meta rows sit: each row is as tall as its tallest item (`heightOf`), rows `gap` apart. Pure, so the
+ *  grid's height can be tested against the card (a role without a wrapped item keeps the reference 41.8 / 99.6pt). */
+export function layoutMetaRows(placed: MetaPlacement[], heightOf: (p: MetaPlacement) => number, gap = 16): { rowTop: number[]; gridH: number } {
+  const rowsN = placed.length ? Math.max(...placed.map(p => p.row)) + 1 : 0;
+  const rowH = Array.from({ length: rowsN }, (_, r) => Math.max(...placed.filter(p => p.row === r).map(heightOf)));
+  const rowTop = rowH.map((_, r) => rowH.slice(0, r).reduce((a, h) => a + h + gap, 0));
+  return { rowTop, gridH: rowsN ? rowTop[rowsN - 1] + rowH[rowsN - 1] : 0 };
 }
 
 // ─── Skill chips ────────────────────────────────────────────────────────────
