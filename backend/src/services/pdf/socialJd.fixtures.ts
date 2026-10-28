@@ -18,9 +18,10 @@ const blue = (...t: string[]) => t.map(text => ({ text, isGreen: false }));
 const green = (...t: string[]) => t.map(text => ({ text, isGreen: true }));
 
 export const SOCIAL_FIXTURES: Record<string, SocialFixture> = {
-  // The reference design (Head of Marketing & Creative Direction, as shipped 2026-10-22; the work-setup line was added 2026-10-26).
+  // The reference design (as shipped 2026-10-22 as "Head of Marketing & Creative Direction"; the work-setup line was added 2026-10-26; the title was renamed
+  // to "Head of Brand Marketing" on 2026-10-28 - for the social JD only, the role's own title in HMS is unchanged).
   R019: {
-    role: role({ id: 'R019', title: 'Head of Marketing & Creative Direction', location: 'Gurgaon', department: 'Sales & Growth', yoe_required: '5-10 years' }),
+    role: role({ id: 'R019', title: 'Head of Brand Marketing', location: 'Gurgaon', department: 'Sales & Growth', yoe_required: '5-10 years' }),
     content: content({
       socialWorkSetup: 'Remote working possible for exceptional candidates',
       tags: [

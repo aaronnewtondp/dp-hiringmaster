@@ -90,8 +90,8 @@ describe('renderSocialJd — the fixed top half vs the adaptive bottom half', ()
 
   it("adapts to the role: its title, meta, tags and bullets are what's printed", async () => {
     const t = await textOf('R019');
-    expect(t).toContain('Head of Marketing &');
-    expect(t).toContain('Creative Direction');
+    expect(t).toContain('Head of Brand Marketing');
+    expect(t).not.toContain('Head of Marketing');
     expect(t).toContain('Gurgaon');
     expect(t).toContain('5–10');
     expect(t).toContain('Sales & Growth');
