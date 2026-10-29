@@ -88,7 +88,7 @@ describe('scoreCandidate: reading the model reply', () => {
     createMock.mockResolvedValue({ content: [] });
     const out = await scoreCandidate(candidate, role, 'resume text');
     expect(out).toEqual({ resumeRead: true });
-    expect((out as Record<string, unknown>).technical).toBeUndefined();
+    expect((out as unknown as Record<string, unknown>).technical).toBeUndefined();
   });
 
   it('CURRENT BEHAVIOUR: the reply is trusted as-is: no clamp to 0-10, avgScore is not recomputed, a string score is passed through', async () => {
