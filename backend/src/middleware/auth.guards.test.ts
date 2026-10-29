@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import jwt from 'jsonwebtoken';
 import type { NextFunction, Request, Response } from 'express';
-import { authenticate, requireAuth, requireHR, requireLeadership, requireSuperAdmin } from './auth.js';
+import { authenticate, requireAuth, requireHR, requireLeadership, requireSuperAdmin, stripRestrictedFields } from './auth.js';
 import type { JwtPayload, Persona } from '../types/index.js';
 
 // The four guards every router mounts (requireHR, requireLeadership, requireSuperAdmin, requireAuth) and authenticate's
@@ -224,5 +226,53 @@ describe('the guards in the order the routers mount them (authenticate, then a p
   it('without a token the FIRST guard answers (401), so a persona guard never runs on an anonymous request', () => {
     const r = chain([authenticate, requireHR], {});
     expect([r.status, r.body]).toEqual([401, { error: 'No token provided' }]);
+  });
+});
+
+// ─── the list of compensation fields that stripRestrictedFields removes ──────────────────────────────────────────────
+// middleware/auth.test.ts checks stripRestrictedFields against a copy of the list written inside that test, so a field added
+// to (or dropped from) the source list never fails it. RESTRICTED_FIELDS is a constant local to the function and not exported,
+// so the list is read back out of the source text here and compared with the pinned one: changing it now needs this file edited
+// on purpose, which is the moment to ask whether the frontend, the API specs and the User Access Guide need the same change.
+describe('stripRestrictedFields — which fields count as compensation', () => {
+  const PINNED = [
+    'ctc_band', 'role_ctc_band', 'internal_risk_notes', 'agency_fee_estimate', 'offer_ctc_fixed', 'offer_ctc_variable', 'hr_comp_alignment',
+    'current_ctc_fixed', 'current_ctc_variable', 'current_esops', 'expected_ctc', 'ectc',
+    'candidate_ctc_fixed', 'candidate_ctc_variable', 'candidate_expected_ctc',
+  ];
+  const OTHER = ['id', 'title', 'stage', 'candidate_name', 'status', 'is_severely_over_budget'];
+  const row = () => Object.fromEntries([...PINNED, ...OTHER].map(k => [k, `value of ${k}`]));
+
+  it('the list in auth.ts is exactly the pinned one (same fields, same order)', () => {
+    const source = readFileSync(join(__dirname, 'auth.ts'), 'utf8');
+    const literal = /const RESTRICTED_FIELDS = \[([\s\S]*?)\];/.exec(source);
+    expect(literal, 'RESTRICTED_FIELDS literal not found in auth.ts').not.toBeNull();
+    const withoutComments = literal![1].replace(/\/\/.*$/gm, '');       // the comments inside the array quote some of the names too
+    expect([...withoutComments.matchAll(/'([^']+)'/g)].map(m => m[1])).toEqual(PINNED);
+  });
+
+  it('for a hiring_manager who is not cleared for the role, every pinned field is removed and every other field is kept', () => {
+    const out = stripRestrictedFields(row(), 'hiring_manager', false);
+    expect(Object.keys(out).sort()).toEqual([...OTHER].sort());
+  });
+
+  it('with no explicit clearance the persona decides: a hiring_manager loses them all, every HR-tier persona keeps the row exactly as it is', () => {
+    expect(Object.keys(stripRestrictedFields(row(), 'hiring_manager')).sort()).toEqual([...OTHER].sort());
+    for (const persona of ['hr_recruiter', 'leadership', 'super_admin'] as Persona[]) {
+      const input = row();
+      expect(stripRestrictedFields(input, persona)).toBe(input);
+    }
+  });
+
+  it('a hiring_manager cleared for this particular role (canSeeComp true) keeps everything; clearance is the caller\'s decision, the persona does not matter once it is given', () => {
+    const input = row();
+    expect(stripRestrictedFields(input, 'hiring_manager', true)).toBe(input);
+    expect(Object.keys(stripRestrictedFields(row(), 'super_admin', false)).sort()).toEqual([...OTHER].sort());   // an explicit false is honoured even for HR-tier
+  });
+
+  it('the input object is not modified (the stripped copy is a new object)', () => {
+    const input = row();
+    stripRestrictedFields(input, 'hiring_manager', false);
+    expect(Object.keys(input)).toHaveLength(PINNED.length + OTHER.length);
   });
 });
