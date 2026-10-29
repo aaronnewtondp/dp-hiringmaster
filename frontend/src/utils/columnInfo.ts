@@ -42,8 +42,14 @@ export const DIMENSION_INFO =
 export const PORTFOLIO_COLUMN_INFO =
   "A ninth rating, only for roles that have a portfolio or work-sample review. It is included in the Average Score " +
   "whenever the review gives it a score. “…” means the review is running, “!” means it failed or could not be queued, a " +
-  "red dot means a later re-run failed and the earlier score is kept, and a dash means nothing could be scored (hover " +
-  "over the dash for the reason).";
+  "red dot means a later re-run failed and the earlier score is kept, and a dash means there is no score: either nothing " +
+  "could be scored (hover over the dash for the reason) or no review has been run for this candidate.";
+
+// ─── Profile columns the three candidate tables share ────────────────────────
+// candidates.notice_period_days and candidates.current_company / current_industry: profile fields, one value per candidate
+// (the same on each of their rows). Notice period is a number of days (the cell shows "30d").
+export const NOTICE_PERIOD_INFO = "Notice period in days, from the candidate's profile (one figure per candidate, the same on each of their rows).";
+export const COMPANY_INDUSTRY_INFO = "Current company and industry from the candidate's own profile, shown as one field.";
 
 // ─── CTC ─────────────────────────────────────────────────────────────────────
 // candidates.current_ctc_fixed is filled from the application form's "Current CTC (Fixed and Variable breakup) in LPA"

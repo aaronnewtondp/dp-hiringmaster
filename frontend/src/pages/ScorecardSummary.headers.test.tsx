@@ -103,6 +103,8 @@ describe('Ready for Review — column headers', () => {
     expect(hover('Actions')).toContain('Only for candidates at Applied and Screened');
     expect(hover('Actions')).toContain('Interview Round 1');
     expect(hover('#')).toContain('not a saved rank');
+    expect(hover('Notice Period')).toContain('Notice period in days');          // same words as the marker on the other two lists
+    expect(hover('Company / Industry')).toContain("Current company and industry from the candidate's own profile");
     expect(hover('Candidate')).toBe('Candidate');                               // no explanation: just the label, as before
   });
 
@@ -112,7 +114,8 @@ describe('Ready for Review — column headers', () => {
     await screen.findByText('Candidate A2');
     const th = screen.getAllByRole('columnheader').find(h => h.querySelector('span')?.textContent === 'Portfolio')!;
     expect(th.getAttribute('title')).toContain('only for roles that have a portfolio or work-sample review');
-    expect(th.getAttribute('title')).toContain('a dash means nothing could be scored');
+    expect(th.getAttribute('title')).toContain('a dash means there is no score');
+    expect(th.getAttribute('title')).toContain('no review has been run for this candidate');
   });
 });
 

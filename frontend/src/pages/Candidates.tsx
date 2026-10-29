@@ -19,7 +19,7 @@ import { formatDistanceToNow } from 'date-fns';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 import {
   GENDER_COLUMN_INFO, FIT_COLUMN_INFO, CTC_COLUMN_INFO, OVER_BUDGET_INFO, IN_BUDGET_FILTER_INFO, APPLICATION_AGE_INFO,
-  lastUpdatedInfo, SLA_FLAG_INFO,
+  lastUpdatedInfo, SLA_FLAG_INFO, NOTICE_PERIOD_INFO, COMPANY_INDUSTRY_INFO,
 } from '../utils/columnInfo.ts';
 
 const UNMATCHED_PAGE_SIZE = 50;
@@ -30,7 +30,14 @@ const COLUMN_INFO: Record<string, string> = {
   'Current CTC → Expected CTC': `${CTC_COLUMN_INFO} ${OVER_BUDGET_INFO}`,
   // Last Updated has no marker of its own (a marker would change that column's width), so its meaning is given here.
   'Application Date': `${APPLICATION_AGE_INFO} Last Updated is a separate column: ${lastUpdatedInfo(true)}`,
-  'Company / Industry': "Current company and industry from the candidate's own profile, shown as one field.",
+  'Company / Industry': COMPANY_INDUSTRY_INFO,
+};
+
+// What the headers without an info marker mean, shown when hovering over the header. A marker icon would change the
+// column's width (see the note above the header row), so these are plain hover text; the label stays as it is.
+const HEADER_HOVER: Record<string, string> = {
+  'Notice Period': NOTICE_PERIOD_INFO,
+  'Last Updated': lastUpdatedInfo(true),
 };
 
 type SortKey = 'fit' | 'application_date' | 'last_updated';
@@ -525,7 +532,7 @@ export default function Candidates() {
                   // header — except on a header that carries an info marker, whose popover hangs
                   // below the cell and was being clipped to a sliver by it. whitespace-normal
                   // overrides .table-th's nowrap so the label wraps instead of truncating.
-                  <th key={col.label} title={col.label} className={`table-th px-2 tracking-normal whitespace-normal align-bottom leading-tight ${COLUMN_INFO[col.label] ? '' : 'overflow-hidden'} ${col.width}`}>
+                  <th key={col.label} title={HEADER_HOVER[col.label] ? `${col.label}: ${HEADER_HOVER[col.label]}` : col.label} className={`table-th px-2 tracking-normal whitespace-normal align-bottom leading-tight ${COLUMN_INFO[col.label] ? '' : 'overflow-hidden'} ${col.width}`}>
                     <div className="flex items-center gap-1 min-w-0">
                       {col.sortKey ? (
                         // InfoTooltip renders its own <button> internally, so it

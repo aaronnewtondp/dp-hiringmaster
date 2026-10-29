@@ -61,11 +61,13 @@ export function StatusBadge({ status }: { status: string }) {
 
 // ─── Aging indicator ─────────────────────────────────────────────────────────
 // "Nd over" is days past the Close Target. A flagged role with 0 days over has no Close Target (utils/aging.ts flags it
-// on days open instead), so its hover says that rather than "since the role opened" alone.
+// on days open instead and reports 0 days over), so it reads "no target" instead of a misleading "0d over", and its hover
+// says why it is flagged.
 export function AgingBadge({ alert, daysOpen, daysOverdue }: { alert: AgingAlert; daysOpen: number; daysOverdue: number }) {
   const hover = daysOverdue > 0 ? `${daysOpen}d since the role opened; ${daysOverdue}d past its Close Target` : `${daysOpen}d since the role opened. ${AGING_NO_TARGET_INFO}`;
-  if (alert === 'red')    return <span className="text-xs font-medium font-mono text-red-600" title={hover}>🔴 {daysOverdue}d over · {daysOpen}d open</span>;
-  if (alert === 'yellow') return <span className="text-xs font-medium font-mono text-amber-600" title={hover}>🟡 {daysOverdue}d over · {daysOpen}d open</span>;
+  const text = daysOverdue > 0 ? `${daysOverdue}d over · ${daysOpen}d open` : `${daysOpen}d open · no target`;
+  if (alert === 'red')    return <span className="text-xs font-medium font-mono text-red-600" title={hover}>🔴 {text}</span>;
+  if (alert === 'yellow') return <span className="text-xs font-medium font-mono text-amber-600" title={hover}>🟡 {text}</span>;
   return <span className="text-xs font-mono text-gray-500">{daysOpen}d open</span>;
 }
 

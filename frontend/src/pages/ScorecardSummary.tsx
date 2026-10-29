@@ -20,7 +20,7 @@ import { usePersistedState } from '../hooks/usePersistedState.ts';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 import {
   GENDER_COLUMN_INFO, CTC_COLUMN_INFO, OVER_BUDGET_INFO, IN_BUDGET_FILTER_INFO, AVERAGE_SCORE_INFO, VERDICT_INFO,
-  DIMENSION_INFO, PORTFOLIO_COLUMN_INFO, APPLICATION_AGE_INFO,
+  DIMENSION_INFO, PORTFOLIO_COLUMN_INFO, APPLICATION_AGE_INFO, NOTICE_PERIOD_INFO, COMPANY_INDUSTRY_INFO,
 } from '../utils/columnInfo.ts';
 
 // Same chunked-batching constant as Candidates.tsx / MyTasks.tsx's bulk actions.
@@ -43,11 +43,13 @@ const COLUMN_INFO: Record<string, string> = {
 // column's width (see the note above the header row), so these are plain hover text; the label stays as it is.
 const HEADER_HOVER: Record<string, string> = {
   '#': "Position in the list as it is currently sorted and filtered. It is not a saved rank.",
+  'Notice Period': NOTICE_PERIOD_INFO,
+  'Company / Industry': COMPANY_INDUSTRY_INFO,
   'Average Score': AVERAGE_SCORE_INFO,
   'Verdict': VERDICT_INFO,
   'Portfolio': PORTFOLIO_COLUMN_INFO,
   'Application Age': APPLICATION_AGE_INFO,
-  'Actions': "Only for candidates at Applied and Screened. Shortlist moves the candidate straight to Interview Round 1 (a reason is asked first when the expected CTC is 15% or more over the role's CTC band). Hold for Future puts the application on hold for future roles. Reject asks for one or more reasons.",
+  'Actions': "Only for candidates at Applied and Screened. Shortlist moves the candidate straight to Interview Round 1 (a reason is asked first when the expected CTC is 15% or more over the role's CTC band). Hold for Future puts the application on hold; it is then listed in Archived Pipeline. Reject asks for one or more reasons.",
 };
 
 // Compact 0-10 dimension cell — mirrors ResumeIQPanel.tsx's private

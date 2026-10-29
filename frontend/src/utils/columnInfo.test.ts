@@ -61,7 +61,9 @@ describe('Fit, Average Score and Verdict', () => {
     expect(PORTFOLIO_COLUMN_INFO).toContain('“…” means the review is running');
     expect(PORTFOLIO_COLUMN_INFO).toContain('“!” means it failed or could not be queued');
     expect(PORTFOLIO_COLUMN_INFO).toContain('a later re-run failed and the earlier score is kept');
-    expect(PORTFOLIO_COLUMN_INFO).toContain('a dash means nothing could be scored');
+    expect(PORTFOLIO_COLUMN_INFO).toContain('a dash means there is no score');
+    expect(PORTFOLIO_COLUMN_INFO).toContain('nothing could be scored (hover over the dash for the reason)');
+    expect(PORTFOLIO_COLUMN_INFO).toContain('no review has been run for this candidate');   // a never-reviewed row is a dash with no hover
   });
 });
 

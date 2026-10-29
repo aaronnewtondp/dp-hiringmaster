@@ -116,6 +116,19 @@ describe('Active Candidates — what the markers and hovers say', () => {
     expect(lastUpdated.querySelector('[aria-label="More info"]')).toBeNull();   // no new icon: it would change the column width
   });
 
+  it('Notice Period and Last Updated explain themselves in a hover on the header (no marker icon: it would change the width)', async () => {
+    mount();
+    await screen.findByText('Candidate A1');
+    const th = (label: string) => screen.getAllByRole('columnheader').find(h => h.querySelector('span')?.textContent === label)!;
+    expect(th('Notice Period').getAttribute('title')).toContain('Notice period in days');
+    const updated = th('Last Updated').getAttribute('title')!;
+    expect(updated).toMatch(/^Last Updated: When this application's stage, status, screening status, notes/);
+    expect(updated).toContain('Scheduling an interview, submitting feedback and ResumeIQ scoring do not change it on their own');
+    expect(updated).toContain('The grey line under it is the latest logged event');
+    expect(th('Notice Period').querySelector('[aria-label="More info"]')).toBeNull();
+    expect(th('Candidate').getAttribute('title')).toBe('Candidate');           // no explanation: just the label, as before
+  });
+
   it('the page marker says the list also holds Hold for Future, Joined and Closed, and how to see only live ones', async () => {
     mount();
     await screen.findByText('Candidate A1');

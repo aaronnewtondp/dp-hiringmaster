@@ -240,7 +240,7 @@ export default function MyTasks() {
       <div className="flex gap-3 flex-wrap">
         <SectionBox
           label="Ready for Review"
-          hint="Candidates waiting for a shortlist decision at Applied and Screened. The table also lists scored candidates at later stages for comparison (no actions there). HR/Admin see every role, a Hiring Manager their own roles, Leadership Founder-flagged candidates plus roles they are Hiring Manager of. The number follows the filters set in the table, which are remembered for the rest of your browser session."
+          hint="Candidates waiting for a shortlist decision at Applied and Screened. The table also lists scored candidates at later stages for comparison (no actions there). HR/Admin see every role, a Hiring Manager their own roles, Leadership Founder-flagged candidates plus roles they are Hiring Manager of. The number follows the filters set in the table, which this browser tab remembers until it is closed."
           count={readyCount}
           active={activeSection === 'ready'}
           onClick={() => setSection('ready')}

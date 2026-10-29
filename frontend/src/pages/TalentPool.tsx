@@ -11,7 +11,7 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { formatDistanceToNow } from 'date-fns';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
-import { GENDER_COLUMN_INFO, FIT_COLUMN_INFO, CTC_COLUMN_INFO, lastUpdatedInfo } from '../utils/columnInfo.ts';
+import { GENDER_COLUMN_INFO, FIT_COLUMN_INFO, CTC_COLUMN_INFO, lastUpdatedInfo, NOTICE_PERIOD_INFO, COMPANY_INDUSTRY_INFO } from '../utils/columnInfo.ts';
 
 type Mode = 'hold_for_future' | 'archived';
 const LIMIT = 50;
@@ -21,8 +21,8 @@ const COLUMN_INFO: Record<string, string> = {
   'Stage': "The stage this application had reached. Putting it on hold, rejecting or withdrawing it changes its status, not its stage, so this is where it was left.",
   'Fit': FIT_COLUMN_INFO,
   'Current CTC → Expected CTC': `${CTC_COLUMN_INFO} There is no Over Budget flag here. A dash means not recorded or, for a Hiring Manager, a candidate on none of their roles.`,
-  'Notice Period': "Notice period in days, from the candidate's profile.",
-  'Company / Industry': "Current company and industry from the candidate's own profile, shown as one field.",
+  'Notice Period': NOTICE_PERIOD_INFO,
+  'Company / Industry': COMPANY_INDUSTRY_INFO,
   'Actions': "Reactivate (HR/Admin, Leadership and Super Admin only) links the candidate to a role that is Live – Sourcing and that they haven't applied to yet. It creates a new application at Applied and Screened, scored by ResumeIQ, with the source “Talent Pool Reactivation”; the archived application stays as it is.",
   'Status': "The application's status. A candidate is listed when at least one application is Hold for Future (or, under Archived, Rejected or Withdrawn); all of their applications are shown, each with its own status.",
   'Application Date': 'Days since the candidate applied to this specific role. It shows a number of days, not a date.',

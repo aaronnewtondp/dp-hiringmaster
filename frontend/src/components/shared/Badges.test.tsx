@@ -109,9 +109,10 @@ describe('badge hovers say what the badge means', () => {
     expect(tip).toContain('30d past its Close Target');
   });
 
-  it('a flagged role with 0 days over has no Close Target: the hover says it is flagged on days open', () => {
+  it('a flagged role with 0 days over has no Close Target: it reads "no target" (never "0d over") and the hover says it is flagged on days open', () => {
     render(<AgingBadge alert="yellow" daysOpen={20} daysOverdue={0} />);
-    const tip = screen.getByText(/0d over/).getAttribute('title')!;
+    expect(screen.queryByText(/0d over/)).not.toBeInTheDocument();
+    const tip = screen.getByText(/20d open · no target/).getAttribute('title')!;
     expect(tip).toContain('No Close Target is set');
     expect(tip).toContain('flagged on the days it has been open');
     expect(tip).not.toContain('past its Close Target');

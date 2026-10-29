@@ -106,7 +106,11 @@ describe('Dashboard — what the markers say', () => {
     const tip = markerText('Aging roles');
     expect(tip).toContain('10 and 23 days (P0), 15 and 45 days (P1), 30 and 68 days (P2) or 30 and 90 days (P3)');   // types/index.ts AGING_THRESHOLDS
     expect(tip).toContain('a role just past its target is not highlighted yet');
-    expect(tip).toContain("its badge then reads '0d over'");
+    expect(tip).toContain("its badge then reads 'no target'");
+    expect(tip).not.toContain("'0d over'");
+    // the badge itself, for the flagged role in the fixture (days_overdue 0, no Close Target): no misleading "0d over"
+    expect(screen.getByText(/40d open · no target/)).toBeInTheDocument();
+    expect(screen.queryByText(/0d over/)).not.toBeInTheDocument();
     expect(tip).toContain('more than 3 days');                                  // NO_MOVEMENT_DAYS = 3, strictly greater
     expect(tip).not.toContain('actually passed its own Close Target gets highlighted');
   });
