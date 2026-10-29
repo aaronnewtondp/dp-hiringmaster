@@ -115,7 +115,7 @@ const h = vi.hoisted(() => {
     sourcingApi: {
       status: rec('sourcing.status', () => ({ data: { enabled: state.sourcingOn } })),
       workspace: rec('sourcing.workspace', () => ({ data: state.sourcingOn ? workspace() : { enabled: false } })),
-      queue: rec('sourcing.queue', () => ({ data: { plans_waiting: [], tasks: [], exceptions: [], exception_count: 0 } })),
+      queue: rec('sourcing.queue', () => ({ data: { enabled: true, today: '2026-10-21', plans_to_activate: [], due: [], exceptions: [], exception_count: 0, snoozed_count: 0, blocked_count: 0, active_plans: 0, volume: [], volume_ok: 0 } })),
       dashboard: rec('sourcing.dashboard', () => ({ data: { enabled: false } })),
       plan: rec('sourcing.plan', () => ({ data: { enabled: false } })),
       people: rec('sourcing.people', () => ({ data: { people: [] } })),
@@ -295,5 +295,160 @@ describe.each(PERSONAS)('as %s', persona => {
     await screen.findByText('Synthetic Archived');
     expect(screen.getByRole('heading', { level: 1, name: 'Archived Pipeline' })).toBeInTheDocument();
     expect(present(screen.queryByRole('button', { name: 'Reactivate' }))).toBe(who.hr);
+  });
+});
+
+describe.each(PERSONAS)('as %s — detail pages, review and dashboards', persona => {
+  const who = WHO[persona];
+
+  // ── CandidateDetail ────────────────────────────────────────────────────────────────────────────
+  it('CandidateDetail: Stage, Status, Add Application, Schedule round, the Founder flag and the HR screening notes only for HR-tier; the agency list only requested for HR-tier', async () => {
+    mountAs(persona, <CandidateDetail />, { path: '/candidates/C9001', route: '/candidates/:id' });
+    expect(await screen.findByRole('heading', { level: 1, name: 'Synthetic Candidate One' })).toBeInTheDocument();
+    await waitFor(() => expect(asked('interviews.list')).toHaveLength(1));
+    await screen.findByText('Interview rounds');                                       // the application is expanded, as it is on load
+    expect(present(screen.queryByRole('button', { name: 'Stage' }))).toBe(who.hr);
+    expect(present(screen.queryByRole('button', { name: 'Status' }))).toBe(who.hr);
+    expect(present(screen.queryByRole('button', { name: /Add Application/ }))).toBe(who.hr);
+    expect(present(screen.queryByRole('button', { name: /Schedule round/ }))).toBe(who.hr);          // the application is at Interview Round 1
+    expect(present(screen.queryByTitle('Flag for Founder Review'))).toBe(who.hr);
+    // Internal risk notes: an editable section for HR-tier; not in the page at all for anyone else, whatever the server sent.
+    expect(present(screen.queryByText('SYNTH-RISK-NOTE'))).toBe(who.hr);
+    expect(present(screen.queryByText('Screening & Risk Notes'))).toBe(who.hr);
+    // ...while everyone reads the recruiter's own summary, as a quotation.
+    if (!who.hr) expect(screen.getByText('"SYNTH-RECRUITER-SUMMARY"')).toBeInTheDocument();
+    await drain();
+    expect(asked('agencies.list')).toHaveLength(who.hr ? 1 : 0);
+  });
+
+  // ── RoleDetail ─────────────────────────────────────────────────────────────────────────────────
+  it('RoleDetail (Draft): Approve Role, Discard role, Change status, the CTC Band field and the comp benchmark only for HR-tier; approving sends status Approved', async () => {
+    h.state.roleStatus = 'Draft';
+    mountAs(persona, <RoleDetail />, { path: '/roles/R001', route: '/roles/:id' });
+    expect(await screen.findByRole('heading', { level: 1, name: ROLE_TITLE })).toBeInTheDocument();
+    await waitFor(() => expect(asked('sourcing.plan')).toHaveLength(1));                // the page's own queries have run
+    expect(present(screen.queryByRole('button', { name: 'Approve Role' }))).toBe(who.hr);
+    expect(present(screen.queryByRole('button', { name: 'Discard role' }))).toBe(who.hr);
+    expect(present(screen.queryByRole('button', { name: 'Change status' }))).toBe(who.hr);
+    expect(present(screen.queryByText('CTC Band'))).toBe(who.hr);
+    expect(present(screen.queryByText(CTC_BAND))).toBe(who.hr);
+    expect(present(screen.queryByTestId('comp-benchmark'))).toBe(who.hr);
+    expect(screen.getByRole('heading', { name: 'Approval' })).toBeInTheDocument();
+    if (who.hr) {
+      fireEvent.click(screen.getByRole('button', { name: 'Approve Role' }));
+      await waitFor(() => expect(asked('roles.update')).toEqual([['R001', { status: 'Approved' }]]));
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Role approved'));
+    } else {
+      await drain();
+      expect(asked('roles.update')).toHaveLength(0);
+    }
+  });
+
+  it('RoleDetail (Under Review): Approve Role for HR-tier only, and Discard role for nobody (only a Draft can be discarded)', async () => {
+    h.state.roleStatus = 'Under Review';
+    mountAs(persona, <RoleDetail />, { path: '/roles/R001', route: '/roles/:id' });
+    await screen.findByRole('heading', { level: 1, name: ROLE_TITLE });
+    expect(present(screen.queryByRole('button', { name: 'Approve Role' }))).toBe(who.hr);
+    expect(screen.queryByRole('button', { name: 'Discard role' })).toBeNull();
+  });
+
+  it('RoleDetail (Approved, JD generated): no one is offered Approve or Discard again; Regenerate JD only for HR-tier', async () => {
+    h.state.roleStatus = 'Approved';
+    mountAs(persona, <RoleDetail />, { path: '/roles/R001', route: '/roles/:id' });
+    await screen.findByRole('heading', { level: 1, name: ROLE_TITLE });
+    expect(screen.queryByRole('button', { name: 'Approve Role' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Discard role' })).toBeNull();
+    expect(present(screen.queryByRole('button', { name: 'Regenerate JD' }))).toBe(who.hr);
+  });
+
+  it('RoleDetail (Closed – Filled): Download Closure Summary only for HR-tier', async () => {
+    h.state.roleStatus = 'Closed – Filled';
+    mountAs(persona, <RoleDetail />, { path: '/roles/R001', route: '/roles/:id' });
+    await screen.findByRole('heading', { level: 1, name: ROLE_TITLE });
+    expect(present(screen.queryByRole('button', { name: 'Download Closure Summary' }))).toBe(who.hr);
+  });
+
+  // ── Ready for Review (ScorecardSummary) ────────────────────────────────────────────────────────
+  it('Ready for Review: everyone can shortlist (straight to Interview Round 1); Retry scoring only for HR-tier; the stage editor only for Leadership and Super Admin — not HR/Admin', async () => {
+    mountAs(persona, <ScorecardSummary />);
+    await screen.findByText('Synthetic Candidate Two');
+    // A9002 is the only row at Applied and Screened, so it is the only one with row actions.
+    const shortlist = screen.getAllByRole('button', { name: /Shortlist/ });
+    expect(shortlist).toHaveLength(1);
+    expect(screen.getAllByTitle('Reject')).toHaveLength(1);
+    expect(screen.getAllByTitle('Hold for future roles')).toHaveLength(1);
+    expect(present(screen.queryByRole('button', { name: 'Retry scoring' }))).toBe(who.hr);          // A9002 has no ResumeIQ score
+    // The stage badge of A9001 (Interview Round 1) is a button only where the stage can be edited inline.
+    expect(present(screen.getByText('Interview Round 1').closest('button'))).toBe(who.lead);
+    fireEvent.click(shortlist[0]);
+    await waitFor(() => expect(asked('applications.advanceStage')).toHaveLength(1));
+    expect(asked('applications.advanceStage')[0].slice(0, 2)).toEqual(['A9002', 'Interview Round 1']);
+  });
+
+  // ── My Tasks ───────────────────────────────────────────────────────────────────────────────────
+  it('My Tasks: the right boxes, the Sourcing box only for HR/Admin and Super Admin, and Ready for Review scoped to the persona', async () => {
+    h.state.sourcingOn = true;
+    mountAs(persona, <MyTasks />, { name: 'Hm Alpha' });                               // a Hiring Manager is the named manager of the one role
+    expect(await screen.findByRole('heading', { level: 1, name: 'My Tasks' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Ready for Review/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Feedback Due/ })).toBeInTheDocument();
+    // Leadership with no role of their own keeps the alerts-only box (their queue is visibility, not tasks).
+    expect(present(screen.queryByRole('button', { name: /^Leadership Alerts/ }))).toBe(persona === 'leadership');
+    expect(present(screen.queryByRole('button', { name: /^Other Pending Actions/ }))).toBe(persona !== 'leadership');
+    await waitFor(() => expect(asked('applications.list')).not.toHaveLength(0));       // Ready for Review has asked for its rows
+    const wantsSourcing = persona === 'hr_recruiter' || persona === 'super_admin';
+    if (wantsSourcing) expect(await screen.findByRole('button', { name: /^Sourcing/ })).toBeInTheDocument();
+    await drain();
+    expect(present(screen.queryByRole('button', { name: /^Sourcing/ }))).toBe(wantsSourcing);
+    expect(asked('sourcing.status')).toHaveLength(wantsSourcing ? 1 : 0);              // nobody else is even asked
+    expect(asked('roles.list')).toHaveLength(persona === 'hiring_manager' ? 1 : 0);    // only a Hiring Manager needs to know which roles are theirs
+    const request = lastParams('applications.list');
+    if (persona === 'hiring_manager') {
+      expect(request.role_id).toEqual(['R001']);
+      expect(request.founder_flag).toBeUndefined();
+    } else if (persona === 'leadership') {
+      expect(request.founder_flag).toBe('true');
+      expect(request.role_id).toBeUndefined();
+    } else {
+      expect(request.founder_flag).toBeUndefined();
+      expect(request.role_id).toBeUndefined();
+    }
+  });
+
+  // ── Dashboard ──────────────────────────────────────────────────────────────────────────────────
+  it('Dashboard: a Hiring Manager is locked to their own role (no Role filter, never sends one, never loads the role options); everyone else can filter by role', async () => {
+    sessionStorage.setItem('hms:dashboard.roleIds', JSON.stringify(['R001']));          // a role filter left over in this tab
+    mountAs(persona, <Dashboard />);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument();
+    await waitFor(() => expect(asked('dashboard.get')).not.toHaveLength(0));
+    await drain();
+    const locked = persona === 'hiring_manager';
+    expect(present(screen.queryByText('Locked to your role'))).toBe(locked);
+    expect(present(screen.queryByRole('button', { name: /^Role/ }))).toBe(!locked);
+    expect(asked('roles.filterOptions')).toHaveLength(locked ? 0 : 1);
+    if (locked) expect(lastParams('dashboard.get').role_id).toBeUndefined();
+    else expect(lastParams('dashboard.get').role_id).toEqual(['R001']);
+  });
+
+  // ── Sourcing ───────────────────────────────────────────────────────────────────────────────────
+  it('Sourcing (on): the same page for every persona — the plans come from the server, which decides what each persona may see', async () => {
+    h.state.sourcingOn = true;
+    mountAs(persona, <Sourcing />);
+    expect(screen.getByRole('heading', { level: 1, name: 'Sourcing' })).toBeInTheDocument();
+    expect(await screen.findByTestId('role-pill-R1')).toBeInTheDocument();
+    expect(await screen.findByTestId('plan-panel')).toHaveTextContent('Plan of R1');
+  });
+
+  it('Sourcing (off): says it is switched off, for every persona', async () => {
+    mountAs(persona, <Sourcing />);
+    expect(await screen.findByText('Sourcing is switched off')).toBeInTheDocument();
+    expect(screen.queryByTestId('role-pill-R1')).toBeNull();
+  });
+
+  // ── Help ───────────────────────────────────────────────────────────────────────────────────────
+  it('Help: renders for every persona (no assertion on its wording)', async () => {
+    mountAs(persona, <Help />);
+    expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
+    await waitFor(() => expect(asked('sourcing.status')).toHaveLength(1));
   });
 });
