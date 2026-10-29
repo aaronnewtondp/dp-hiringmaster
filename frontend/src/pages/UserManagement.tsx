@@ -20,7 +20,7 @@ type AssignableRole = typeof ASSIGNABLE_ROLES[number];
 // deactivated.
 const NAME_HELP = "Write the name exactly as it appears in a role's Hiring Manager field: HMS matches Hiring Managers to roles by name (capitals and spacing are ignored), so a different spelling means the role is not theirs.";
 const EMAIL_HELP = "People sign in with their @digitalpaani.com Google account, and only people added here can sign in.";
-const ROLE_HELP = "HR/Admin and Leadership have the same rights. A Hiring Manager sees compensation, and the numbers on the Dashboard, only for roles that name them as Hiring Manager.";
+const ROLE_HELP = "HR/Admin and Leadership have the same access to roles, candidates and compensation. A Hiring Manager sees compensation, and the numbers on the Dashboard, only for roles that name them as Hiring Manager.";
 const STATUS_HELP = "Active people can sign in. Deactivating stops them signing in again; their history stays on candidates and roles.";
 const HEADER_HOVER: Record<string, string> = { Name: NAME_HELP, Role: ROLE_HELP, Status: STATUS_HELP };
 
