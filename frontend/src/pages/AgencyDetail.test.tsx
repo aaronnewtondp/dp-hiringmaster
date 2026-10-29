@@ -1,0 +1,242 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+
+// One agency's page: its six editable sections, and the rule every save follows (only what changed is sent, a cleared field
+// becomes null, the record is re-read afterwards). The sections are the real EditableSection; only the API and the toast are mocked.
+const get = vi.fn();
+const update = vi.fn();
+vi.mock('../services/api.ts', () => ({ agenciesApi: { get: (id: string) => get(id), update: (id: string, d: unknown) => update(id, d) } }));
+vi.mock('react-hot-toast', () => ({ default: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
+
+import AgencyDetail from './AgencyDetail.tsx';
+
+const toastError = vi.mocked(toast.error);
+const toastSuccess = vi.mocked(toast.success);
+
+const agency = (over: Record<string, unknown> = {}) => ({
+  id: 'AGN901', name: 'Test Agency One', contract_status: 'Active', contact_name: 'Test Contact', contact_email: 'contact@example.test',
+  contact_phone: '+91 0000000000', replacement_guarantee_days: 90, tier1_band: '5-10 LPA', tier1_rate: '8.33%', market_positioning: 'Mid-market specialist',
+  replacement_triggers: 'Leaves within the window', billing_effective_window: '45 days', specialisations: 'Process engineers',
+  agreement_drive_link: 'https://drive.example/agreement', notes: 'Prefers e-mail', total_submitted: 5, total_hired: 3, ...over,
+});
+
+function mount() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={['/agencies/AGN901']}>
+        <Routes><Route path="/agencies/:id" element={<AgencyDetail />} /></Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+const ready = () => screen.findByRole('heading', { level: 1 });
+const section = (title: string) => screen.getByRole('heading', { level: 2, name: title }).closest('.card') as HTMLElement;
+const edit = (title: string) => fireEvent.click(screen.getByTitle(`Edit ${title}`));
+const inputOf = (title: string, label: string) =>
+  (within(section(title)).getByText(label).parentElement as HTMLElement).querySelector('input, select, textarea') as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+const change = (title: string, label: string, value: string) => fireEvent.change(inputOf(title, label), { target: { value } });
+const save = (title: string) => fireEvent.click(within(section(title)).getByRole('button', { name: 'Save' }));
+
+beforeEach(() => {
+  get.mockReset(); update.mockReset(); toastError.mockClear(); toastSuccess.mockClear();
+  get.mockResolvedValue({ data: { agency: agency() } });
+  update.mockResolvedValue({ data: {} });
+});
+
+describe('AgencyDetail — the page', () => {
+  it('loads the agency named in the address and shows its name, status and counts', async () => {
+    mount();
+    const heading = await ready();
+    expect(heading).toHaveTextContent('Test Agency One');
+    expect(get).toHaveBeenCalledWith('AGN901');
+    expect(heading.nextElementSibling).toHaveTextContent('Active');          // the badge beside the name (the Contract section also shows the status)
+    expect(screen.getByText('5 submitted')).toBeInTheDocument();
+    expect(screen.getByText('3 hired')).toBeInTheDocument();
+  });
+
+  it('has exactly the six sections, each with its own edit button', async () => {
+    mount();
+    await ready();
+    const titles = ['Contact', 'Contract', 'Commission Tiers', 'Replacement Policy', 'Billing and Payment Terms', 'Notes & Links'];
+    for (const t of titles) expect(screen.getByRole('heading', { level: 2, name: t })).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(6);
+    expect(document.querySelectorAll('button[title^="Edit "]')).toHaveLength(6);
+  });
+
+  it('shows what is on file, and a dash for what is not', async () => {
+    get.mockResolvedValue({ data: { agency: agency({ contact_phone: undefined }) } });
+    mount();
+    await ready();
+    const contact = within(section('Contact'));
+    expect(contact.getByText('Test Contact')).toBeInTheDocument();
+    expect(contact.getByText('contact@example.test')).toBeInTheDocument();
+    expect(contact.getByText('Contact Phone').nextElementSibling?.textContent).toBe('—');
+  });
+
+  it('opens the agreement link in a new tab without handing the page over to it', async () => {
+    mount();
+    await ready();
+    const link = within(section('Notes & Links')).getByRole('link');
+    expect(link).toHaveAttribute('href', 'https://drive.example/agreement');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+  });
+
+  it('shows no counts line when the agency carries neither count, and a 0 for the one that is missing', async () => {
+    get.mockResolvedValue({ data: { agency: agency({ total_submitted: undefined, total_hired: undefined }) } });
+    const first = mount();
+    await ready();
+    expect(screen.queryByText(/submitted/)).toBeNull();
+    expect(screen.queryByText(/ hired$/)).toBeNull();
+    first.unmount();
+
+    get.mockResolvedValue({ data: { agency: agency({ total_submitted: undefined, total_hired: 2 }) } });
+    mount();
+    await ready();
+    expect(screen.getByText('0 submitted')).toBeInTheDocument();
+    expect(screen.getByText('2 hired')).toBeInTheDocument();
+  });
+
+  const tones: Array<[string, RegExp]> = [['Active', /bg-green-100/], ['On Hold', /bg-amber-100/], ['Inactive', /bg-gray-100/]];
+  for (const [status, tone] of tones) {
+    it(`${status}: the status badge is in its own colour`, async () => {
+      get.mockResolvedValue({ data: { agency: agency({ contract_status: status }) } });
+      mount();
+      const heading = await ready();
+      expect((heading.nextElementSibling as HTMLElement).textContent).toBe(status);
+      expect((heading.nextElementSibling as HTMLElement).className).toMatch(tone);
+    });
+  }
+
+  it('says "Agency not found" when it cannot be loaded, and shows nothing else', async () => {
+    get.mockImplementation(async () => { throw new Error('404'); });
+    mount();
+    expect(await screen.findByText('Agency not found')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
+    expect(screen.queryByTitle('Edit Contact')).toBeNull();
+  });
+
+  it('shows a spinner, not "not found", while it loads', async () => {
+    let resolve!: (v: unknown) => void;
+    get.mockReturnValue(new Promise(r => { resolve = r; }));
+    const { container } = mount();
+    await waitFor(() => expect(get).toHaveBeenCalled());
+    expect(container.querySelector('.animate-spin')).not.toBeNull();
+    expect(screen.queryByText('Agency not found')).toBeNull();
+    resolve({ data: { agency: agency() } });
+    expect(await ready()).toBeInTheDocument();
+  });
+});
+
+describe('AgencyDetail — saving a section', () => {
+  it('sends only the fields that changed, says the section was updated and re-reads the agency', async () => {
+    mount();
+    await ready();
+    edit('Contact');
+    change('Contact', 'Agency Name', 'Renamed Agency');
+    save('Contact');
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    expect(update).toHaveBeenCalledWith('AGN901', { name: 'Renamed Agency' });
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('Contact updated'));
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows the new value once the re-read answers, and leaves edit mode', async () => {
+    mount();
+    await ready();
+    edit('Contact');
+    change('Contact', 'Agency Name', 'Renamed Agency');
+    get.mockResolvedValue({ data: { agency: agency({ name: 'Renamed Agency' }) } });
+    save('Contact');
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Renamed Agency'));
+    expect(within(section('Contact')).queryByRole('button', { name: 'Save' })).toBeNull();
+  });
+
+  it('several changes in one section go out together: a select as text, a number as a number', async () => {
+    mount();
+    await ready();
+    edit('Contract');
+    change('Contract', 'Status', 'On Hold');
+    change('Contract', 'Replacement Guarantee (days)', '45');
+    save('Contract');
+    await waitFor(() => expect(update).toHaveBeenCalledWith('AGN901', { contract_status: 'On Hold', replacement_guarantee_days: 45 }));
+  });
+
+  it('the Status choices are Active, Inactive and On Hold', async () => {
+    mount();
+    await ready();
+    edit('Contract');
+    const select = inputOf('Contract', 'Status') as HTMLSelectElement;
+    expect(Array.from(select.options).map(o => o.value)).toEqual(['Active', 'Inactive', 'On Hold']);
+    expect(select.value).toBe('Active');
+  });
+
+  it('a field that is emptied is sent as null, not as an empty string', async () => {
+    mount();
+    await ready();
+    edit('Contact');
+    change('Contact', 'Contact Phone', '');
+    save('Contact');
+    await waitFor(() => expect(update).toHaveBeenCalledWith('AGN901', { contact_phone: null }));
+  });
+
+  it('a long-text field is edited in a text area and saved like any other', async () => {
+    mount();
+    await ready();
+    edit('Commission Tiers');
+    expect(inputOf('Commission Tiers', 'Market Positioning').tagName).toBe('TEXTAREA');
+    change('Commission Tiers', 'Market Positioning', 'Premium specialist');
+    save('Commission Tiers');
+    await waitFor(() => expect(update).toHaveBeenCalledWith('AGN901', { market_positioning: 'Premium specialist' }));
+  });
+
+  it('saving without changing anything sends nothing and just leaves edit mode', async () => {
+    mount();
+    await ready();
+    edit('Contact');
+    save('Contact');
+    await waitFor(() => expect(within(section('Contact')).queryByRole('button', { name: 'Save' })).toBeNull());
+    expect(update).not.toHaveBeenCalled();
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it('Cancel puts the old value back and sends nothing', async () => {
+    mount();
+    await ready();
+    edit('Contact');
+    change('Contact', 'Agency Name', 'Typed Then Abandoned');
+    fireEvent.click(within(section('Contact')).getByRole('button', { name: 'Cancel' }));
+    expect(within(section('Contact')).getByText('Test Agency One')).toBeInTheDocument();
+    expect(within(section('Contact')).queryByText('Typed Then Abandoned')).toBeNull();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('a section is edited on its own: opening one leaves the others in read mode', async () => {
+    mount();
+    await ready();
+    edit('Contact');
+    expect(within(section('Contact')).getByRole('button', { name: 'Save' })).toBeInTheDocument();
+    for (const other of ['Contract', 'Commission Tiers', 'Replacement Policy', 'Billing and Payment Terms', 'Notes & Links']) {
+      expect(within(section(other)).queryByRole('button', { name: 'Save' })).toBeNull();
+    }
+  });
+
+  it('a failed save says so, keeps the section open with what was typed, and does not re-read', async () => {
+    update.mockImplementation(async () => { throw new Error('boom'); });
+    mount();
+    await ready();
+    edit('Contact');
+    change('Contact', 'Agency Name', 'Renamed Agency');
+    save('Contact');
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('Failed to update Contact'));
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(inputOf('Contact', 'Agency Name')).toHaveValue('Renamed Agency');
+    expect(within(section('Contact')).getByRole('button', { name: 'Save' })).toBeEnabled();
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+});
