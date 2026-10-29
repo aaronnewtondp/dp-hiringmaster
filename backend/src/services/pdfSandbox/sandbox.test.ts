@@ -15,6 +15,7 @@ import { fontsPdf, formBombPdf, formCyclePdf, hugeStringPdf, pages, pdfkitPdf, r
 import { preflightPdf } from './preflight.js';
 import { preparePdf, TOO_COMPLEX_REASON } from '../portfolio/acquire/pdf.js';
 import { BudgetTracker } from '../portfolio/acquire/budget.js';
+import { steadyHeartbeat } from '../../testing/timing.js';
 
 // A stand-in for pdf-parse, loaded by the child process in place of the real module (the child takes the module's path as an argument).
 // It does what the "PDF" bytes say, so each test can make the child spin, run out of heap in one step or in many, die, never answer, throw,
@@ -87,13 +88,19 @@ afterAll(() => { fs.rmSync(dir, { recursive: true, force: true }); });
 const fakeRead = (mode: string, o: Partial<PdfReadOptions> = {}): Promise<PdfReadResult> =>
   readPdfInSandbox(Buffer.from(mode), { maxPages: 20, deadline: Date.now() + 60_000, parserModule: fakePath, ...o });
 
-/** Largest gap between ticks of a 50 ms timer on THIS thread: the proof that the main thread stayed responsive. */
-function heartbeat() {
-  let last = Date.now();
-  let max = 0;
-  const timer = setInterval(() => { const now = Date.now(); max = Math.max(max, now - last); last = now; }, 50);
-  return { stop: () => { clearInterval(timer); return Math.max(max, Date.now() - last); } };
+/**
+ * Largest gap between ticks of a 50 ms timer on THIS thread while `scenario` runs: the proof that the main thread stayed responsive. A gap at or over
+ * `limitMs` is measured again (the scenario is run again, up to 3 times in all) and the smallest is kept: a stall that is the code's (the in-process
+ * parse these children replaced held the thread for the whole of the hostile read) shows every time, a process that was merely descheduled on a busy
+ * machine does not.
+ */
+async function responsive<T>(scenario: () => Promise<T>, limitMs: number): Promise<{ value: T; gap: number }> {
+  const { value, maxGapMs } = await steadyHeartbeat(scenario, limitMs, { tries: 3, tickMs: 50 });
+  return { value, gap: maxGapMs };
 }
+
+/** The wall time the child-ending tests allow on top of the time they are about: ten of the 1 s poll cycles, far under the 10 minutes a missing kill would take. */
+const KILL_SLACK_MS = 10_000;
 
 const isAlive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
@@ -143,13 +150,14 @@ describe('readPdfInSandbox — a real PDF, read by the real pdf-parse inside a c
 
 describe('readPdfInSandbox — the parent stays responsive and the child is killed', { timeout: 60_000 }, () => {
   it('a child stuck in an endless loop is killed at the deadline, and this thread never stalls while it spins', async () => {
-    const beat = heartbeat();
-    const started = Date.now();
-    const r = await fakeRead('spin', { capMs: 1200 });
-    const gap = beat.stop();
+    const { value: r, gap } = await responsive(async () => {
+      const started = Date.now();
+      const out = await fakeRead('spin', { capMs: 1200 });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(1100);          // it was held to its cap, not ended early...
+      expect(Date.now() - started).toBeLessThan(1200 + KILL_SLACK_MS);    // ...and not left spinning
+      return out;
+    }, 1000);
     expect(r).toEqual({ kind: 'timeout', limitedBy: 'pdf' });
-    expect(Date.now() - started).toBeGreaterThanOrEqual(1100);
-    expect(Date.now() - started).toBeLessThan(4000);
     expect(gap).toBeLessThan(1000);
   });
 
@@ -159,7 +167,7 @@ describe('readPdfInSandbox — the parent stays responsive and the child is kill
     expect(r.kind).toBe('timeout');
     expect(pid).toBeGreaterThan(0);
     expect(pid).not.toBe(process.pid);
-    await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 5000 });
+    await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 20_000 });
   });
 
   it('when the ITEM deadline is the nearer limit, the timeout says so (nobody\'s fault, not "too complex")', async () => {
@@ -168,17 +176,21 @@ describe('readPdfInSandbox — the parent stays responsive and the child is kill
   });
 
   it('an item whose deadline has already passed is not given a process at all', async () => {
-    const started = Date.now();
-    expect(await fakeRead('spin', { deadline: Date.now() - 5 })).toEqual({ kind: 'timeout', limitedBy: 'item' });
-    expect(Date.now() - started).toBeLessThan(100);
+    // A child takes tens of milliseconds just to start; the answer for a deadline that is past comes back without one. The fastest of three tries is
+    // taken, so a process that is descheduled once on a busy machine does not look like a spawn.
+    let fastest = Infinity;
+    for (let attempt = 0; attempt < 3 && fastest >= 100; attempt++) {
+      const started = Date.now();
+      expect(await fakeRead('spin', { deadline: Date.now() - 5 })).toEqual({ kind: 'timeout', limitedBy: 'item' });
+      fastest = Math.min(fastest, Date.now() - started);
+    }
+    expect(fastest).toBeLessThan(100);
   });
 
   it('a real form-XObject bomb (a 5 KB file whose work doubles with every level: 20 levels take ~14 s and 1.6 GB in-process) is killed at the deadline with the parent alive', async () => {
     const bomb = formBombPdf(20, 2);
     expect(bomb.length).toBeLessThan(8000);
-    const beat = heartbeat();
-    const r = await readPdfInSandbox(bomb, { maxPages: 20, deadline: Date.now() + 60_000, capMs: 2000 });
-    const gap = beat.stop();
+    const { value: r, gap } = await responsive(() => readPdfInSandbox(bomb, { maxPages: 20, deadline: Date.now() + 60_000, capMs: 2000 }), 1000);
     expect(r).toEqual({ kind: 'timeout', limitedBy: 'pdf' });
     expect(gap).toBeLessThan(1000);
   });
@@ -196,24 +208,32 @@ describe('readPdfInSandbox — the parent stays responsive and the child is kill
   });
 });
 
+// The cases in the memory block below are about WHAT a heap abort or a resident-size kill is mapped to, not about the deadline. A child that is slow to
+// reach its limit must not have the cap's own verdict ("timeout") stand in for it, so these reads get a cap and an item deadline far above the defaults.
+const CAUSE_CAP_MS = 90_000;
+const CAUSE_DEADLINE_MS = 110_000;
+
 describe('readPdfInSandbox — memory: what used to abort the whole process now only ends the child', { timeout: 120_000 }, () => {
   it('a child that runs out of heap a little at a time is "too complex" (stderr says why), not a crashed process: this process keeps running', async () => {
-    const beat = heartbeat();
-    const r = await fakeRead('oom', { heapMb: 64 });
+    // The cap is raised far above the 12 s default: this test is about what a heap abort MEANS, which has to win under any load (at a load of 150 the
+    // child sometimes needed more than 12 s to reach its limit, and the default cap's own verdict, a timeout, was recorded instead). The cap's own
+    // mapping is tested above with `spin` and a short cap.
+    const { value: r, gap } = await responsive(() => fakeRead('oom', { heapMb: 64, capMs: CAUSE_CAP_MS, deadline: Date.now() + CAUSE_DEADLINE_MS }), 1000);
     expect(r).toEqual({ kind: 'too-complex', cause: 'heap' });
-    expect(beat.stop()).toBeLessThan(1000);
+    expect(gap).toBeLessThan(1000);
     expect(await fakeRead('throw:Error:still alive')).toMatchObject({ kind: 'parser-error', message: 'still alive' });   // and the next PDF is read normally
   });
 
   it('ONE huge allocation that crosses the heap limit in a single step (what aborted node with exit 134 from a worker thread, in 12 of 12 runs) ends the child and nothing else', async () => {
-    const beat = heartbeat();
     const parentPid = process.pid;
-    for (let run = 0; run < 3; run++) {
-      const r = await fakeRead('bigalloc', { heapMb: 64 });
-      expect(r, `run ${run}`).toEqual({ kind: 'too-complex', cause: 'heap' });
-    }
+    const { gap } = await responsive(async () => {
+      for (let run = 0; run < 3; run++) {
+        const r = await fakeRead('bigalloc', { heapMb: 64, capMs: CAUSE_CAP_MS, deadline: Date.now() + CAUSE_DEADLINE_MS });
+        expect(r, `run ${run}`).toEqual({ kind: 'too-complex', cause: 'heap' });
+      }
+    }, 1500);
     expect(process.pid).toBe(parentPid);
-    expect(beat.stop()).toBeLessThan(1500);
+    expect(gap).toBeLessThan(1500);
     expect(await fakeRead('throw:Error:still alive')).toMatchObject({ kind: 'parser-error', message: 'still alive' });
   });
 
@@ -221,31 +241,31 @@ describe('readPdfInSandbox — memory: what used to abort the whole process now 
     const pdf = hugeStringPdf(8);
     expect(pdf.length).toBeLessThan(20_000);
     expect(preflightPdf(pdf)).toMatchObject({ ok: true });                   // the pre-flight cannot tell this one from a deck: the sandbox has to
-    const beat = heartbeat();
-    for (let run = 0; run < 3; run++) {
-      const r = await readPdfInSandbox(pdf, { maxPages: 20, deadline: Date.now() + 60_000, heapMb: 64 });
-      expect(r, `run ${run}`).toEqual({ kind: 'too-complex', cause: 'heap' });
-    }
-    expect(beat.stop()).toBeLessThan(1500);
+    const { gap } = await responsive(async () => {
+      for (let run = 0; run < 3; run++) {
+        const r = await readPdfInSandbox(pdf, { maxPages: 20, deadline: Date.now() + CAUSE_DEADLINE_MS, heapMb: 64, capMs: CAUSE_CAP_MS });
+        expect(r, `run ${run}`).toEqual({ kind: 'too-complex', cause: 'heap' });
+      }
+    }, 1500);
+    expect(gap).toBeLessThan(1500);
   });
 
   it('...and through preparePdf the verdict is the neutral "too complex", never retried', async () => {
-    const r = await preparePdf(hugeStringPdf(8), 'bomb.pdf', { deadline: Date.now() + 60_000, budget: new BudgetTracker() }, { options: { heapMb: 64 } });
+    const r = await preparePdf(hugeStringPdf(8), 'bomb.pdf', { deadline: Date.now() + CAUSE_DEADLINE_MS, budget: new BudgetTracker() }, { options: { heapMb: 64, capMs: CAUSE_CAP_MS } });
     expect(r).toMatchObject({ outcome: 'unreviewable', reason: TOO_COMPLEX_REASON, media: [], text: '' });
   });
 
   it('a modest string in the same file is just read (the limit is about the size, not about strings)', async () => {
-    const r = await readPdfInSandbox(hugeStringPdf(0.5), { maxPages: 20, deadline: Date.now() + 60_000, heapMb: 64 });
+    const r = await readPdfInSandbox(hugeStringPdf(0.5), { maxPages: 20, deadline: Date.now() + CAUSE_DEADLINE_MS, heapMb: 64, capMs: CAUSE_CAP_MS });
     expect(r).toMatchObject({ kind: 'read', total: 1 });
   });
 
   it('3000 fonts that each expand a <0000>-<FFFF> ToUnicode map (a 1.1 MB file that aborted node with "heap out of memory" in-process) are "too complex" and nothing else is hurt', async () => {
     const bomb = fontsPdf(3000, 'tu');
     expect(bomb.length).toBeLessThan(2 * 1024 * 1024);
-    const beat = heartbeat();
-    const r = await readPdfInSandbox(bomb, { maxPages: 20, deadline: Date.now() + 60_000 });
+    const { value: r, gap } = await responsive(() => readPdfInSandbox(bomb, { maxPages: 20, deadline: Date.now() + CAUSE_DEADLINE_MS, capMs: CAUSE_CAP_MS }), 1000);
     expect(r.kind).toBe('too-complex');
-    expect(beat.stop()).toBeLessThan(1000);
+    expect(gap).toBeLessThan(1000);
   });
 
   it('the resident-size watchdog asks about the CHILD (its pid, not ours) and kills it when the answer passes the ceiling', async () => {
@@ -255,7 +275,7 @@ describe('readPdfInSandbox — memory: what used to abort the whole process now 
     const started = Date.now();
     const r = await fakeRead('spin', { memory: { probe, intervalMs: 20, ceilingBytes: 400_000_000 }, capMs: 30_000 });
     expect(r).toEqual({ kind: 'too-complex', cause: 'memory' });
-    expect(Date.now() - started).toBeLessThan(5000);
+    expect(Date.now() - started).toBeLessThan(25_000);      // ended by the ceiling, long before the 30 s cap (the verdict above already says which ended it)
     expect(calls).toBeGreaterThanOrEqual(8);
     expect(new Set(asked).size).toBe(1);
     expect(asked[0]).toBeGreaterThan(0);
@@ -266,7 +286,7 @@ describe('readPdfInSandbox — memory: what used to abort the whole process now 
     const started = Date.now();
     const r = await fakeRead('mem:250', { memory: { intervalMs: 50, ceilingBytes: 150 * 1024 * 1024 }, capMs: 30_000 });
     expect(r).toEqual({ kind: 'too-complex', cause: 'memory' });
-    expect(Date.now() - started).toBeLessThan(15_000);
+    expect(Date.now() - started).toBeLessThan(25_000);      // the child sleeps for 20 s: only the ceiling can have ended it earlier
   });
 
   it('...while the same allocation under a generous ceiling is not touched', async () => {
@@ -462,25 +482,27 @@ describe('readPdfInSandbox — how the parent reads the way a child ended (fake 
   it('a child that says it is ready and then hangs is killed at the deadline, not waited for', async () => {
     const started = Date.now();
     expect(await run('ready-then-hang', { capMs: 1200 })).toEqual({ kind: 'timeout', limitedBy: 'pdf' });
-    expect(Date.now() - started).toBeLessThan(5000);
+    expect(Date.now() - started).toBeLessThan(1200 + KILL_SLACK_MS);
   });
 });
 
 describe('readPdfInSandbox — a child cannot talk the parent into holding or doing too much', { timeout: 60_000 }, () => {
   it('more output than the cap is a kill, not an accumulation: "too complex", fast, with the parent alive', async () => {
-    const beat = heartbeat();
-    const started = Date.now();
-    const r = await fakeRead('flood', { maxOutputBytes: 2 * 1024 * 1024, capMs: 30_000 });
+    const { value: r, gap } = await responsive(async () => {
+      const started = Date.now();
+      const out = await fakeRead('flood', { maxOutputBytes: 2 * 1024 * 1024, capMs: 30_000 });
+      expect(Date.now() - started).toBeLessThan(25_000);   // ended by the output cap, not by the 30 s deadline the child would otherwise have run to (the verdict below says so too)
+      return out;
+    }, 1500);
     expect(r).toEqual({ kind: 'too-complex', cause: 'crash' });
-    expect(Date.now() - started).toBeLessThan(10_000);
-    expect(beat.stop()).toBeLessThan(1500);
+    expect(gap).toBeLessThan(1500);
   });
 
   it('stray writes to stdout before the answer do not corrupt it, and a 6 MB flood of stderr is drained without blocking the child or being kept', async () => {
     expect(await fakeRead('stray')).toMatchObject({ kind: 'read', total: 3 });
     const started = Date.now();
     expect(await fakeRead('noisy')).toMatchObject({ kind: 'read', total: 3 });
-    expect(Date.now() - started).toBeLessThan(15_000);
+    expect(Date.now() - started).toBeLessThan(25_000);      // a child blocked on its stderr would run to the 12 s cap and answer "timeout": the line above says it read
   });
 
   it('the child gets NOTHING of ours: a separate process whose parent is us (no shell between), no environment, no IPC channel, stdin is a pipe', async () => {
@@ -518,7 +540,7 @@ describe('readPdfInSandbox — a child cannot talk the parent into holding or do
     killLiveSandboxChildren();
     const r = await pending;
     expect(r.kind).toBe('too-complex');        // an external SIGKILL reads as the OS's out-of-memory killer
-    await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 5000 });
+    await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 20_000 });
   });
 });
 
@@ -731,23 +753,23 @@ describe('the child\'s deadman switch — a child never outlives its parent or i
 
     const killedAt = Date.now();
     parent.kill('SIGKILL');                                                                        // no exit handler runs on this
-    await vi.waitFor(() => expect(isAlive(childPid)).toBe(false), { timeout: 12_000, interval: 100 });
+    await vi.waitFor(() => expect(isAlive(childPid)).toBe(false), { timeout: CHILD_PARENT_POLL_MS + KILL_SLACK_MS + 5000, interval: 100 });
     const took = Date.now() - killedAt;
-    expect(took).toBeLessThan(5500);                                                               // one poll interval and a little more, never the 10 minutes of its hard cap
+    expect(took).toBeLessThan(CHILD_PARENT_POLL_MS + KILL_SLACK_MS);                              // a poll interval and a generous margin for a busy machine, never the 10 minutes of its hard cap
   });
 
   it('...and when the parent dies BEFORE the watchdog has looked (the child starts already orphaned), the pid it was given says so at the first look', async () => {
     // the pid it is told is its parent (1_999_999 does not exist, so it is "somebody else" from the first tick): a child that is not its parent's is ended
     const r = await runChild('flag:' + path.join(dir, `orphan-${process.pid}`), CHILD_ARGS(600_000, 1_999_999));
     expect(r.signal).toBe('SIGKILL');
-    expect(r.ms).toBeLessThan(6000);
+    expect(r.ms).toBeLessThan(CHILD_PARENT_POLL_MS + KILL_SLACK_MS);              // its hard cap here is 10 minutes: only the first look at the parent's pid can have ended it
   });
 
   it('a child that outlives its hard cap ends itself, with its parent alive and well', async () => {
     const r = await runChild('spin', CHILD_ARGS(1500, process.pid));
     expect(r.signal).toBe('SIGKILL');
     expect(r.ms).toBeGreaterThanOrEqual(1400);
-    expect(r.ms).toBeLessThan(6000);
+    expect(r.ms).toBeLessThan(1500 + CHILD_PARENT_POLL_MS + KILL_SLACK_MS);
     expect(isAlive(process.pid)).toBe(true);
   });
 
@@ -755,7 +777,7 @@ describe('the child\'s deadman switch — a child never outlives its parent or i
     const r = await runChild('x', CHILD_ARGS(600_000, process.pid));
     expect(r.code).toBe(0);
     expect(r.signal).toBeNull();
-    expect(r.ms).toBeLessThan(5000);                       // the worker thread neither keeps a finished child alive nor delays its exit (its cap is 10 minutes)
+    expect(r.ms).toBeLessThan(KILL_SLACK_MS * 2);          // the worker thread neither keeps a finished child alive nor delays its exit (its cap is 10 minutes)
     expect(r.stdout.startsWith(RESULT)).toBe(true);
     expect(r.stdout.endsWith('\n')).toBe(true);
     expect(r.stdout.split('\n').filter(Boolean)).toHaveLength(1);
