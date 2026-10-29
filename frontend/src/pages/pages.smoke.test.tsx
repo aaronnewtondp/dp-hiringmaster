@@ -28,6 +28,7 @@ const h = vi.hoisted(() => {
     appStage: 'Interview Round 1',
     appHm: 'Hm Alpha',          // hiring_manager_name on the application and on the role
     selfEditable: false,        // User Management: the signed-in user's own row carries a persona that has buttons
+    google: 'ok',               // how POST /auth/google answers: 'ok' | 'invalid' | 'down'
   };
   // A plain function that records its arguments and answers asynchronously — a failing answer throws (never a vi.fn() rejection, which vitest reports as unhandled).
   const rec = (name: string, answer: (...a: Call) => unknown) => (...a: Call) => { (calls[name] ||= []).push(a); return Promise.resolve().then(() => answer(...a)); };
@@ -74,7 +75,11 @@ const h = vi.hoisted(() => {
   const api = {
     authApi: {
       login: rec('auth.login', () => { throw new Error('login not stubbed'); }),
-      loginWithGoogle: rec('auth.google', () => { throw new Error('loginWithGoogle not stubbed'); }),
+      loginWithGoogle: rec('auth.google', () => {
+        if (state.google === 'invalid') throw Object.assign(new Error('401'), { response: { status: 401, data: { error: 'Invalid Google credential' } } });
+        if (state.google === 'down') throw new Error('Network Error');
+        return { data: { token: 'tok-google', user: { id: 'u-google', name: 'Smoke Google', email: 'google@example.test', persona: 'hiring_manager' } } };
+      }),
     },
     rolesApi: {
       list: rec('roles.list', () => ({ data: { roles: [role()] } })),
@@ -150,6 +155,8 @@ import Dashboard from './Dashboard.tsx';
 import Sourcing from './Sourcing.tsx';
 import Help from './Help.tsx';
 import UserManagement from './UserManagement.tsx';
+import App from '../App.tsx';
+import { VACANCY_REASONS, RECRUITMENT_CHANNELS } from '../types/index.ts';
 
 // ── the spec: what each persona is, written out (NOT derived from AuthContext) ──────────────────────
 const PERSONAS: Persona[] = ['hr_recruiter', 'hiring_manager', 'leadership', 'super_admin'];
@@ -192,13 +199,17 @@ const present = (el: HTMLElement | null) => el !== null;
 
 beforeEach(() => {
   for (const k of Object.keys(h.calls)) delete h.calls[k];
-  Object.assign(h.state, { persona: 'hr_recruiter', sourcingOn: false, roleStatus: 'Draft', appStage: 'Interview Round 1', appHm: 'Hm Alpha', selfEditable: false });
+  Object.assign(h.state, { persona: 'hr_recruiter', sourcingOn: false, roleStatus: 'Draft', appStage: 'Interview Round 1', appHm: 'Hm Alpha', selfEditable: false, google: 'ok' });
   localStorage.clear(); sessionStorage.clear();
   vi.mocked(toast.error).mockClear(); vi.mocked(toast.success).mockClear();
   vi.useFakeTimers({ toFake: ['Date'] });                                   // "today" is fixed; timers stay real
   vi.setSystemTime(new Date(2026, 9, 21, 12, 0, 0));
 });
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => {
+  vi.useRealTimers(); vi.unstubAllEnvs();
+  document.head.querySelectorAll('script[src*="accounts.google.com"]').forEach(el => el.remove());     // appended by Login when a client id is configured
+  delete (window as { google?: unknown }).google;
+});
 
 const ROLE_TITLE = 'Smoke Test Engineer';
 const CTC_BAND = '18-24 SYNTH-LPA';
@@ -450,5 +461,279 @@ describe.each(PERSONAS)('as %s — detail pages, review and dashboards', persona
     mountAs(persona, <Help />);
     expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
     await waitFor(() => expect(asked('sourcing.status')).toHaveLength(1));
+  });
+});
+
+// ═══ Who sees the Compensation fields on a candidate ═════════════════════════════════════════════════
+// HR-tier always; a Hiring Manager only when they are named on one of the candidate's roles (a role can name several, "A, B"). The rule is spelled out
+// here from the spec, not by calling the util the page uses.
+describe('CandidateDetail — who sees the Compensation fields', () => {
+  const LABELS = ['Current CTC (Fixed and Variable breakup) in LPA', 'Expected CTC'];
+  const open = async (persona: Persona, name: string, namedOnRole: string) => {
+    h.state.appHm = namedOnRole;
+    mountAs(persona, <CandidateDetail />, { path: '/candidates/C9001', route: '/candidates/:id', name });
+    await screen.findByRole('heading', { level: 1, name: 'Synthetic Candidate One' });
+    await screen.findByText('Notice Period (days)');                                    // the Compensation card is on screen; its CTC fields come and go
+  };
+  const sees = () => LABELS.map(l => present(screen.queryByText(l)));
+
+  it.each<[string, Persona, string, string, boolean]>([
+    ['the named manager',                              'hiring_manager', 'Hm Alpha',    'Hm Alpha',                  true],
+    ['the named manager, in different case and spacing', 'hiring_manager', ' hm   ALPHA ', 'Hm Alpha',                  true],
+    ['one of two managers named with a comma',         'hiring_manager', 'Hm Beta',     'Hm Alpha, Hm Beta',         true],
+    ['one of two managers named with an ampersand',    'hiring_manager', 'Hm Beta',     'Hm Alpha & Hm Beta',        true],
+    ['one of two managers named with "and"',           'hiring_manager', 'Hm Alpha',    'Hm Alpha and Hm Beta',      true],
+    ['a manager whose name is only a prefix of the named one', 'hiring_manager', 'Hm Alpha', 'Hm Alphabet',          false],
+    ['a manager whose name is only the start of the named one', 'hiring_manager', 'Hm',    'Hm Alpha',               false],
+    ['a manager who is not named',                     'hiring_manager', 'Hm Gamma',    'Hm Alpha',                  false],
+    ['a manager when the role names several others',   'hiring_manager', 'Hm Gamma',    'Hm Alpha, Hm Beta',         false],
+    ['HR/Admin, named or not',                         'hr_recruiter',   'Hm Gamma',    'Hm Alpha',                  true],
+    ['Leadership, named or not',                       'leadership',     'Hm Gamma',    'Hm Alpha',                  true],
+    ['Super Admin, named or not',                      'super_admin',    'Hm Gamma',    'Hm Alpha',                  true],
+  ])('%s', async (_label, persona, name, namedOnRole, expected) => {
+    await open(persona, name, namedOnRole);
+    expect(sees()).toEqual([expected, expected]);
+  });
+});
+
+// ═══ A Hiring Manager on no role gets nothing, not everything ════════════════════════════════════════
+describe('My Tasks — a Hiring Manager who is the manager of no role', () => {
+  it('asks Ready for Review for a role list that matches nothing, instead of dropping the filter (which would show every candidate)', async () => {
+    mountAs('hiring_manager', <MyTasks />, { name: 'Hm Omega' });
+    await screen.findByRole('heading', { level: 1, name: 'My Tasks' });
+    await waitFor(() => expect(asked('applications.list')).not.toHaveLength(0));
+    const request = lastParams('applications.list');
+    expect(Array.isArray(request.role_id)).toBe(true);
+    expect(request.role_id).toHaveLength(1);
+    expect(request.role_id).not.toContain('R001');
+  });
+});
+
+// ═══ User Management (Super Admin) and the /users route guard ════════════════════════════════════════
+describe('User Management', () => {
+  it('lists everyone; the own row (Super Admin) has no actions; the others can be edited and deactivated or reactivated', async () => {
+    mountAs('super_admin', <UserManagement />);
+    expect(await screen.findByRole('heading', { level: 1, name: 'User Management' })).toBeInTheDocument();
+    const own = (await screen.findByText('Smoke Self')).closest('tr')!;
+    expect(within(own).queryByRole('button')).toBeNull();
+    const recruiter = screen.getByText('Synthetic Recruiter').closest('tr')!;
+    expect(within(recruiter).getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    expect(within(recruiter).getByRole('button', { name: 'Deactivate' })).toBeEnabled();
+    const manager = screen.getByText('Synthetic Manager').closest('tr')!;
+    expect(within(manager).getByRole('button', { name: 'Reactivate' })).toBeEnabled();
+  });
+
+  it('can never deactivate its own account, even if its own row carries an editable persona', async () => {
+    h.state.selfEditable = true;
+    mountAs('super_admin', <UserManagement />);
+    const own = (await screen.findByText('Smoke Self')).closest('tr')!;
+    expect(within(own).getByRole('button', { name: 'Deactivate' })).toBeDisabled();
+    fireEvent.click(within(own).getByRole('button', { name: 'Deactivate' }));
+    await drain();
+    expect(asked('users.update')).toHaveLength(0);
+  });
+
+  it('deactivating another user sends is_active false', async () => {
+    mountAs('super_admin', <UserManagement />);
+    const row = (await screen.findByText('Synthetic Recruiter')).closest('tr')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Deactivate' }));
+    await waitFor(() => expect(asked('users.update')).toEqual([['u-1', { is_active: false }]]));
+  });
+
+  it('the role dropdown offers exactly HR/Admin, Hiring Manager and Leadership — Super Admin is never selectable', async () => {
+    mountAs('super_admin', <UserManagement />);
+    await screen.findByText('Synthetic Recruiter');
+    fireEvent.click(screen.getByRole('button', { name: /Add user/ }));
+    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    expect([...select.options].map(o => o.value)).toEqual(['hr_recruiter', 'hiring_manager', 'leadership']);
+  });
+
+  it('adding a user needs a name and an email, then sends them with the chosen role', async () => {
+    mountAs('super_admin', <UserManagement />);
+    await screen.findByText('Synthetic Recruiter');
+    fireEvent.click(screen.getByRole('button', { name: /Add user/ }));
+    const submit = () => fireEvent.click(screen.getAllByRole('button', { name: 'Add user' }).pop()!);   // [0] is the page's button, the last is the form's
+    submit();
+    expect(toast.error).toHaveBeenLastCalledWith('Name is required');
+    const [name, email] = screen.getAllByRole('textbox');
+    fireEvent.change(name, { target: { value: '  Synth Person ' } });
+    submit();
+    expect(toast.error).toHaveBeenLastCalledWith('Email is required');
+    expect(asked('users.create')).toHaveLength(0);
+    fireEvent.change(email, { target: { value: 'synth@example.test' } });
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'leadership' } });
+    submit();
+    await waitFor(() => expect(asked('users.create')).toHaveLength(1));
+    expect(asked('users.create')[0][0]).toEqual({ name: 'Synth Person', email: 'synth@example.test', persona: 'leadership', department: undefined });
+  });
+});
+
+// The REAL route table (App.tsx), the real Layout and Sidebar, the real AuthProvider: the only test that visits /users.
+describe('/users in the real route table', () => {
+  function mountApp(persona: Persona | null, path: string) {
+    if (persona) signIn(persona);
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(<QueryClientProvider client={qc}><MemoryRouter initialEntries={[path]}><App /></MemoryRouter></QueryClientProvider>);
+  }
+
+  it.each(PERSONAS)('%s', async persona => {
+    mountApp(persona, '/users');
+    if (WHO[persona].admin) {
+      expect(await screen.findByRole('heading', { level: 1, name: 'User Management' })).toBeInTheDocument();
+      await waitFor(() => expect(asked('users.list')).toHaveLength(1));
+    } else {
+      expect(await screen.findByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument();    // redirected to /dashboard
+      await waitFor(() => expect(asked('dashboard.get')).not.toHaveLength(0));
+      await drain();
+      expect(screen.queryByRole('heading', { name: 'User Management' })).toBeNull();
+      expect(asked('users.list')).toHaveLength(0);                                      // the page never mounted: its data was never requested
+    }
+    // The menu agrees with the route table, for the persona the real provider derived.
+    expect(present(screen.queryByRole('link', { name: 'User Management' }))).toBe(WHO[persona].admin);
+    expect(present(screen.queryByRole('link', { name: 'Agencies' }))).toBe(WHO[persona].hr);
+    expect(screen.getByRole('link', { name: 'Roles' })).toBeInTheDocument();
+  });
+
+  it('nobody signed in: any page, /users included, goes to the sign-in page and requests nothing', async () => {
+    mountApp(null, '/users');
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+    await drain();
+    expect(asked('users.list')).toHaveLength(0);
+    expect(asked('dashboard.get')).toHaveLength(0);
+  });
+});
+
+// ═══ Sign-in page ════════════════════════════════════════════════════════════════════════════════════
+// Login reads VITE_GOOGLE_CLIENT_ID when its module loads, and frontend/.env exists on a developer machine and not on a clean checkout — so the value is
+// stubbed explicitly and the page (with the provider it talks to) is imported afresh for each case.
+describe('Login', () => {
+  type GsiConfig = { client_id: string; callback: (r: { credential: string }) => void };
+  let gsi: GsiConfig | undefined;
+  const renderButton = vi.fn();
+  async function mountLogin(clientId: string) {
+    vi.resetModules();
+    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', clientId);
+    const { default: Login } = await import('./Login.tsx');
+    const { AuthProvider: Provider } = await import('../contexts/AuthContext.tsx');
+    const { default: freshToast } = await import('react-hot-toast');
+    (window as { google?: unknown }).google = { accounts: { id: { initialize: (c: GsiConfig) => { gsi = c; }, renderButton } } };
+    const view = render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Provider><MemoryRouter initialEntries={['/login']}><Routes>
+          <Route path="/login" element={<Login />} /><Route path="*" element={<div data-testid="elsewhere" />} />
+        </Routes></MemoryRouter></Provider>
+      </QueryClientProvider>,
+    );
+    return { view, freshToast };
+  }
+  /** Google's script has "loaded": the page's own onload hook runs and initialises the button. */
+  const gsiLoaded = () => {
+    const script = document.head.querySelector('script[src*="accounts.google.com/gsi"]') as HTMLScriptElement;
+    script.onload!(new Event('load'));
+  };
+  beforeEach(() => { gsi = undefined; renderButton.mockReset(); });
+
+  it('without a client id it says so and loads nothing from Google', async () => {
+    await mountLogin('');
+    expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+    expect(screen.getByText(/VITE_GOOGLE_CLIENT_ID is not set/)).toBeInTheDocument();
+    expect(document.head.querySelector('script[src*="accounts.google.com"]')).toBeNull();
+  });
+
+  it('with a client id it loads Google\'s script, then initialises and renders the button for that client', async () => {
+    await mountLogin('client-id-for-tests');
+    expect(screen.queryByText(/VITE_GOOGLE_CLIENT_ID is not set/)).toBeNull();
+    expect(document.head.querySelector('script[src="https://accounts.google.com/gsi/client"]')).not.toBeNull();
+    gsiLoaded();
+    expect(gsi?.client_id).toBe('client-id-for-tests');
+    expect(renderButton).toHaveBeenCalledTimes(1);
+    expect(renderButton.mock.calls[0][0]).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('a good Google credential signs in (stores the session) and goes to /dashboard', async () => {
+    await mountLogin('client-id-for-tests');
+    gsiLoaded();
+    await waitFor(() => expect(gsi).toBeDefined());
+    gsi!.callback({ credential: 'google-id-token' });
+    expect(await screen.findByTestId('elsewhere')).toBeInTheDocument();
+    expect(asked('auth.google')).toEqual([['google-id-token']]);
+    expect(localStorage.getItem('hms_token')).toBe('tok-google');
+    expect(JSON.parse(localStorage.getItem('hms_user')!)).toMatchObject({ persona: 'hiring_manager' });
+  });
+
+  it('a refused credential shows the server\'s own message, stores nothing and stays on the page', async () => {
+    h.state.google = 'invalid';
+    const { freshToast } = await mountLogin('client-id-for-tests');
+    gsiLoaded();
+    gsi!.callback({ credential: 'bad' });
+    await waitFor(() => expect(freshToast.error).toHaveBeenCalledWith('Invalid Google credential'));
+    expect(localStorage.getItem('hms_token')).toBeNull();
+    expect(screen.queryByTestId('elsewhere')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+  });
+
+  it('an error with no server message falls back to a generic one', async () => {
+    h.state.google = 'down';
+    const { freshToast } = await mountLogin('client-id-for-tests');
+    gsiLoaded();
+    gsi!.callback({ credential: 'x' });
+    await waitFor(() => expect(freshToast.error).toHaveBeenCalledWith('Sign-in failed. Try again.'));
+    expect(localStorage.getItem('hms_token')).toBeNull();
+  });
+});
+
+// ═══ Forms ═══════════════════════════════════════════════════════════════════════════════════════════
+describe('NewRole — submitting without a CTC band', () => {
+  /** Fills every required field except the CTC band (which a Hiring Manager is never shown) and submits the form. */
+  const submitAllButCtcBand = (container: HTMLElement) => {
+    const type = (el: Element, value: string) => fireEvent.change(el, { target: { value } });
+    type(screen.getByPlaceholderText('e.g. Senior Backend Developer'), 'Synthetic Role');
+    const [department, , , location] = Array.from(container.querySelectorAll('select'));       // Department, Priority, New/Replacement, Location, Employment Type
+    type(department, (department as HTMLSelectElement).options[1].value);
+    type(location, (location as HTMLSelectElement).options[1].value);
+    if (!(screen.getByPlaceholderText('Full name') as HTMLInputElement).value) type(screen.getByPlaceholderText('Full name'), 'Hm Alpha');
+    type(screen.getByPlaceholderText(/^e\.g\. 3.5 years$/), '3-5 years');
+    type(screen.getByPlaceholderText(/^e\.g\. B\.Tech/), 'B.E.');
+    type(container.querySelector('input[type="date"]')!, '2026-12-01');
+    type(screen.getByPlaceholderText('Key responsibilities and expectations'), 'Synthetic description');
+    type(screen.getByPlaceholderText(/^Node\.js; TypeScript/), 'Skill A; Skill B');
+    type(screen.getByPlaceholderText(/^GraphQL; AWS/), 'Skill C');
+    fireEvent.click(screen.getByRole('button', { name: VACANCY_REASONS[0] }));
+    fireEvent.click(screen.getByRole('button', { name: RECRUITMENT_CHANNELS[0] }));
+    fireEvent.submit(container.querySelector('form')!);
+  };
+
+  it.each(PERSONAS)('%s', async persona => {
+    const { container } = mountAs(persona, <NewRole />);
+    submitAllButCtcBand(container);
+    if (persona === 'hiring_manager') {
+      // Never asked for it, so never refused for lacking it: the request goes through.
+      await waitFor(() => expect(asked('roles.create')).toHaveLength(1));
+      expect(toast.error).not.toHaveBeenCalled();
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Role requested — HR will review it shortly'));
+    } else {
+      expect(toast.error).toHaveBeenCalledWith('CTC Band is required');
+      await drain();
+      expect(asked('roles.create')).toHaveLength(0);
+    }
+  });
+});
+
+// ═══ A known defect, pinned ══════════════════════════════════════════════════════════════════════════
+// Agencies.tsx renders an "Add agency" button with no handler: it is shown to everyone who can open the page, does nothing when pressed, and there is no
+// agenciesApi.create call behind it on this page. Reported, not fixed here. When it is wired up this test fails: replace it with a test of the real flow.
+describe('Agencies — "Add agency"', () => {
+  it('TODAY: the button is there and pressing it opens nothing, asks for nothing and says nothing', async () => {
+    mountAs('hr_recruiter', <Agencies />);
+    await screen.findByText('Synthetic Search Partners');
+    const inputsBefore = document.querySelectorAll('input, textarea, select').length;
+    const callsBefore = Object.values(h.calls).flat().length;
+    fireEvent.click(screen.getByRole('button', { name: /Add agency/ }));
+    await drain();
+    expect(document.querySelectorAll('input, textarea, select')).toHaveLength(inputsBefore);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(Object.values(h.calls).flat()).toHaveLength(callsBefore);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });

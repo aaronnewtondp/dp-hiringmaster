@@ -1,6 +1,10 @@
 import { expect } from 'vitest';
 import { act } from '@testing-library/react';
 
+// The frontend has no @types/node (the tests run in Node, the app in a browser), so the two Node globals used below are typed here, by hand.
+const nodeProcess = (globalThis as unknown as { process: { cpuUsage(previous?: { user: number; system: number }): { user: number; system: number } } }).process;
+const nodeSetImmediate = (globalThis as unknown as { setImmediate: (callback: () => void) => unknown }).setImmediate;
+
 /**
  * Lets everything that is ALREADY in flight run to completion: promise reactions, React's scheduler (passive effects, deferred
  * renders), react-query's `setTimeout(0)` notification batching, and anything those queue in turn.
@@ -21,7 +25,7 @@ export async function drain(turns = 8): Promise<void> {
   for (let i = 0; i < turns; i++) {
     await act(async () => {
       await new Promise<void>(resolve => setTimeout(resolve, 0));
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>(resolve => nodeSetImmediate(resolve));
     });
   }
 }
@@ -32,9 +36,9 @@ export async function drain(turns = 8): Promise<void> {
  * ("expected 2052 to be less than 2000") although the code was no slower.
  */
 export function cpuMs(fn: () => void): number {
-  const before = process.cpuUsage();
+  const before = nodeProcess.cpuUsage();
   fn();
-  const spent = process.cpuUsage(before);
+  const spent = nodeProcess.cpuUsage(before);
   return (spent.user + spent.system) / 1000;
 }
 
