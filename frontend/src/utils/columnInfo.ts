@@ -49,6 +49,11 @@ export const PORTFOLIO_COLUMN_INFO =
 // candidates.notice_period_days and candidates.current_company / current_industry: profile fields, one value per candidate
 // (the same on each of their rows). Notice period is a number of days (the cell shows "30d").
 export const NOTICE_PERIOD_INFO = "Notice period in days, from the candidate's profile (one figure per candidate, the same on each of their rows).";
+// applications.stage is changed by a stage move only: the status route (routes/applications.ts) touches status, so an
+// application put on hold, rejected or withdrawn keeps the stage it was left at. (Archived Pipeline words the same fact in the
+// past tense, because every row there has already been put aside.)
+export const STAGE_COLUMN_INFO =
+  "The pipeline stage this application is at. Putting it on hold, rejecting or withdrawing it changes its status, not its stage, so it stays where it was left.";
 export const COMPANY_INDUSTRY_INFO = "Current company and industry from the candidate's own profile, shown as one field.";
 
 // ─── CTC ─────────────────────────────────────────────────────────────────────

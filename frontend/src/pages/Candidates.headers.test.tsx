@@ -121,6 +121,7 @@ describe('Active Candidates — what the markers and hovers say', () => {
     await screen.findByText('Candidate A1');
     const th = (label: string) => screen.getAllByRole('columnheader').find(h => h.querySelector('span')?.textContent === label)!;
     expect(th('Notice Period').getAttribute('title')).toContain('Notice period in days');
+    expect(th('Stage').getAttribute('title')).toContain('changes its status, not its stage');                  // routes/applications.ts: the status route leaves stage alone
     const updated = th('Last Updated').getAttribute('title')!;
     expect(updated).toMatch(/^Last Updated: When this application's stage, status, screening status, notes/);
     expect(updated).toContain('Scheduling an interview, submitting feedback and ResumeIQ scoring do not change it on their own');

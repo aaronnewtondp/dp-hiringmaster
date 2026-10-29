@@ -19,7 +19,7 @@ import { formatDistanceToNow } from 'date-fns';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 import {
   GENDER_COLUMN_INFO, FIT_COLUMN_INFO, CTC_COLUMN_INFO, OVER_BUDGET_INFO, IN_BUDGET_FILTER_INFO, APPLICATION_AGE_INFO,
-  lastUpdatedInfo, SLA_FLAG_INFO, NOTICE_PERIOD_INFO, COMPANY_INDUSTRY_INFO,
+  lastUpdatedInfo, SLA_FLAG_INFO, NOTICE_PERIOD_INFO, COMPANY_INDUSTRY_INFO, STAGE_COLUMN_INFO,
 } from '../utils/columnInfo.ts';
 
 const UNMATCHED_PAGE_SIZE = 50;
@@ -36,6 +36,7 @@ const COLUMN_INFO: Record<string, string> = {
 // What the headers without an info marker mean, shown when hovering over the header. A marker icon would change the
 // column's width (see the note above the header row), so these are plain hover text; the label stays as it is.
 const HEADER_HOVER: Record<string, string> = {
+  'Stage': STAGE_COLUMN_INFO,
   'Notice Period': NOTICE_PERIOD_INFO,
   'Last Updated': lastUpdatedInfo(true),
 };

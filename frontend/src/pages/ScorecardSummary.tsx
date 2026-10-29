@@ -20,7 +20,7 @@ import { usePersistedState } from '../hooks/usePersistedState.ts';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 import {
   GENDER_COLUMN_INFO, CTC_COLUMN_INFO, OVER_BUDGET_INFO, IN_BUDGET_FILTER_INFO, AVERAGE_SCORE_INFO, VERDICT_INFO,
-  DIMENSION_INFO, PORTFOLIO_COLUMN_INFO, APPLICATION_AGE_INFO, NOTICE_PERIOD_INFO, COMPANY_INDUSTRY_INFO,
+  DIMENSION_INFO, PORTFOLIO_COLUMN_INFO, APPLICATION_AGE_INFO, NOTICE_PERIOD_INFO, COMPANY_INDUSTRY_INFO, STAGE_COLUMN_INFO,
 } from '../utils/columnInfo.ts';
 
 // Same chunked-batching constant as Candidates.tsx / MyTasks.tsx's bulk actions.
@@ -43,6 +43,7 @@ const COLUMN_INFO: Record<string, string> = {
 // column's width (see the note above the header row), so these are plain hover text; the label stays as it is.
 const HEADER_HOVER: Record<string, string> = {
   '#': "Position in the list as it is currently sorted and filtered. It is not a saved rank.",
+  'Stage': STAGE_COLUMN_INFO,
   'Notice Period': NOTICE_PERIOD_INFO,
   'Company / Industry': COMPANY_INDUSTRY_INFO,
   'Average Score': AVERAGE_SCORE_INFO,

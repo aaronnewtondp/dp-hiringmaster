@@ -103,6 +103,7 @@ describe('Ready for Review — column headers', () => {
     expect(hover('Actions')).toContain('Only for candidates at Applied and Screened');
     expect(hover('Actions')).toContain('Interview Round 1');
     expect(hover('#')).toContain('not a saved rank');
+    expect(hover('Stage')).toContain('changes its status, not its stage');
     expect(hover('Notice Period')).toContain('Notice period in days');          // same words as the marker on the other two lists
     expect(hover('Company / Industry')).toContain("Current company and industry from the candidate's own profile");
     expect(hover('Candidate')).toBe('Candidate');                               // no explanation: just the label, as before
