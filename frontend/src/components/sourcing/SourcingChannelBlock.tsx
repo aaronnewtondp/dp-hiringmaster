@@ -23,7 +23,7 @@ function WeeksTable({ weeks, label }: { weeks: TrackerWeek[]; label: string }) {
         <thead>
           <tr className="text-left text-gray-400">
             <th className="font-medium py-1">Week</th>
-            <th className="font-medium py-1 text-right">Applicants</th>
+            <th className="font-medium py-1 text-right" title="Applicants who chose this channel on the application form (“How did you hear about this opening?”). Applicants who skipped that question count toward no channel. The role's target of qualified candidates is a separate measure.">Applicants</th>
             <th className="font-medium py-1 text-right">Target</th>
             <th className="font-medium py-1 text-right">Result</th>
           </tr>

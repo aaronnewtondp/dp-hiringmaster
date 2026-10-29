@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -71,5 +71,77 @@ describe('Active Candidates — column headers', () => {
       }
     }
     expect(withMarker).toBeGreaterThan(0);                     // the branch above was exercised
+  });
+});
+
+// The text a header's info marker shows.
+const markerOf = (label: string): string => {
+  const th = screen.getAllByRole('columnheader').find(h => h.querySelector('span')?.textContent === label)!;
+  fireEvent.mouseEnter(th.querySelector('[aria-label="More info"]')!);
+  return th.querySelector('div.absolute')!.textContent!;
+};
+
+describe('Active Candidates — what the markers and hovers say', () => {
+  it('Fit: a 0-100 score (the Average Score x 10), its colours, the portfolio rating, and the 75 line for SLA', async () => {
+    mount();
+    await screen.findByText('Candidate A1');
+    const tip = markerOf('Fit');
+    expect(tip).toContain('from 0 to 100');
+    expect(tip).toContain('× 10');
+    expect(tip).toContain('Green is 75 and above, amber 50 to 74, red below 50');
+    expect(tip).toContain('shortens the 48 hour SLA windows to 24 hours');
+    expect(tip).toContain('Roles that have a portfolio or work-sample review add a ninth rating');
+    expect(tip).not.toMatch(/Senior UX|Head of Marketing/);          // the rating is switched on per role by a flag, not by a title
+  });
+
+  it('Current CTC: the current figure is the fixed-and-variable breakup (may include variable pay); Over Budget is anything above the band top', async () => {
+    mount();
+    await screen.findByText('Candidate A1');
+    const tip = markerOf('Current CTC → Expected CTC');
+    expect(tip).toContain('Current CTC (Fixed and Variable breakup) in LPA');
+    expect(tip).toContain('can include variable pay');
+    expect(tip).not.toContain('Current fixed CTC');
+    expect(tip).toContain("“Over Budget” means the expected CTC is above the top of the role's CTC band");
+  });
+
+  it('Application Date says it is a number of days, and carries the explanation of Last Updated (a header with no marker of its own)', async () => {
+    mount();
+    await screen.findByText('Candidate A1');
+    const tip = markerOf('Application Date');
+    expect(tip).toContain('number of days, not a date');
+    expect(tip).toContain('Last Updated is a separate column');
+    expect(tip).toContain('stage, status, screening status, notes, Founder flag or assignment submission');
+    expect(tip).toContain('The grey line under it is the latest logged event');
+    const lastUpdated = screen.getAllByRole('columnheader').find(h => h.querySelector('span')?.textContent === 'Last Updated')!;
+    expect(lastUpdated.querySelector('[aria-label="More info"]')).toBeNull();   // no new icon: it would change the column width
+  });
+
+  it('the page marker says the list also holds Hold for Future, Joined and Closed, and how to see only live ones', async () => {
+    mount();
+    await screen.findByText('Candidate A1');
+    const title = screen.getByText('Active Candidates');
+    fireEvent.mouseEnter(title.parentElement!.querySelector('[aria-label="More info"]')!);
+    const tip = title.parentElement!.querySelector('div.absolute')!.textContent!;
+    expect(tip).toContain('Rejected and Withdrawn applications are not here');
+    expect(tip).toContain('Hold for Future, Joined or Closed are listed too');
+    expect(tip).toContain('choose Active in the Status filter');
+    expect(tip).toContain("the Dashboard's Active candidates counts Active only");
+  });
+
+  it('the "In-budget only" button says it is more lenient than the Over Budget tag (up to 15% over still shows)', async () => {
+    mount();
+    await screen.findByText('Candidate A1');
+    const tip = screen.getByRole('button', { name: 'In-budget only' }).getAttribute('title')!;
+    expect(tip).toContain('more than 15% above the top of the role\'s CTC band');
+    expect(tip).toContain('still show, with the red Over Budget tag');
+    expect(tip).toContain('band or expected CTC is missing');
+  });
+
+  it('the "SLA breached only" button says what the SLA tag is, including that putting an application on hold does not clear it', async () => {
+    mount();
+    await screen.findByText('Candidate A1');
+    const tip = screen.getByRole('button', { name: 'SLA breached only' }).getAttribute('title')!;
+    expect(tip).toContain('Only applications with the red SLA tag');
+    expect(tip).toContain('putting it on hold does not clear it');
   });
 });

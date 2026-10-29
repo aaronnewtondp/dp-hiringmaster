@@ -84,3 +84,36 @@ describe('SlaBadge / OverBudgetBadge', () => {
     expect(screen.getByText('Over Budget')).toBeInTheDocument();
   });
 });
+
+describe('badge hovers say what the badge means', () => {
+  it('a priority tag explains P0 to P3 and what priority sets', () => {
+    render(<PriorityBadge priority="P1" />);
+    const tip = screen.getByText('P1').getAttribute('title')!;
+    expect(tip).toContain('Priority P1');
+    expect(tip).toContain('P0 is the most urgent, P3 the least');
+    expect(tip).toContain('how far past its Close Target an open role can run before it is flagged');
+  });
+
+  it('the SLA tag says it stays until the application is actioned, and that putting it on hold does not clear it', () => {
+    render(<SlaBadge breached={true} />);
+    const tip = screen.getByText('SLA').getAttribute('title')!;
+    expect(tip).toContain('past one of its time limits');
+    expect(tip).toContain('putting it on hold does not clear it');
+    expect(tip).toContain("The Dashboard's SLA breaches counts open overdue tasks instead");
+  });
+
+  it('a flagged role with a Close Target says how far past it the role is', () => {
+    render(<AgingBadge alert="red" daysOpen={80} daysOverdue={30} />);
+    const tip = screen.getByText(/30d over/).getAttribute('title')!;
+    expect(tip).toContain('80d since the role opened');
+    expect(tip).toContain('30d past its Close Target');
+  });
+
+  it('a flagged role with 0 days over has no Close Target: the hover says it is flagged on days open', () => {
+    render(<AgingBadge alert="yellow" daysOpen={20} daysOverdue={0} />);
+    const tip = screen.getByText(/0d over/).getAttribute('title')!;
+    expect(tip).toContain('No Close Target is set');
+    expect(tip).toContain('flagged on the days it has been open');
+    expect(tip).not.toContain('past its Close Target');
+  });
+});

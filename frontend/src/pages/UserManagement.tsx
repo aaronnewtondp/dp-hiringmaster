@@ -14,6 +14,16 @@ import { Spinner, EmptyState } from '../components/shared/Badges.tsx';
 const ASSIGNABLE_ROLES = ['hr_recruiter', 'hiring_manager', 'leadership'] as const;
 type AssignableRole = typeof ASSIGNABLE_ROLES[number];
 
+// Plain-words help for the form and the table. Facts: roles.hiring_manager_name is matched against users.name (whole name,
+// capitals and spacing ignored; utils/hiringManagers.ts); HR/Admin and Leadership pass the same HR-tier checks
+// (middleware/auth.ts isHRTier); sign-in needs an active row here (routes/auth.ts), and nothing is deleted when someone is
+// deactivated.
+const NAME_HELP = "Write the name exactly as it appears in a role's Hiring Manager field: HMS matches Hiring Managers to roles by name (capitals and spacing are ignored), so a different spelling means the role is not theirs.";
+const EMAIL_HELP = "People sign in with their @digitalpaani.com Google account, and only people added here can sign in.";
+const ROLE_HELP = "HR/Admin and Leadership have the same rights. A Hiring Manager sees compensation, and the numbers on the Dashboard, only for roles that name them as Hiring Manager.";
+const STATUS_HELP = "Active people can sign in. Deactivating stops them signing in again; their history stays on candidates and roles.";
+const HEADER_HOVER: Record<string, string> = { Name: NAME_HELP, Role: ROLE_HELP, Status: STATUS_HELP };
+
 function UserModal({ user, onClose, onSuccess }: {
   user: ManagedUser | 'new';
   onClose: () => void;
@@ -66,16 +76,19 @@ function UserModal({ user, onClose, onSuccess }: {
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1.5">Name <span className="text-red-500">*</span></label>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Priya Sharma" className="input text-sm" />
+            <p className="text-xs text-gray-400 mt-1">{NAME_HELP}</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1.5">Email <span className="text-red-500">*</span></label>
             <input value={email} onChange={e => setEmail(e.target.value)} placeholder="name@digitalpaani.com" className="input text-sm" />
+            <p className="text-xs text-gray-400 mt-1">{EMAIL_HELP}</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1.5">Role <span className="text-red-500">*</span></label>
             <select value={persona} onChange={e => setPersona(e.target.value as AssignableRole)} className="select text-sm">
               {ASSIGNABLE_ROLES.map(p => <option key={p} value={p}>{PERSONAS[p]}</option>)}
             </select>
+            <p className="text-xs text-gray-400 mt-1">{ROLE_HELP}</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1.5">Department <span className="text-gray-400">(optional)</span></label>
@@ -141,7 +154,7 @@ export default function UserManagement() {
             <thead className="border-b border-gray-100 bg-gray-50">
               <tr>
                 {['Name', 'Email', 'Role', 'Department', 'Status', 'Last Login', ''].map(h => (
-                  <th key={h} className="table-th">{h}</th>
+                  <th key={h} title={HEADER_HOVER[h]} className="table-th">{h}</th>
                 ))}
               </tr>
             </thead>

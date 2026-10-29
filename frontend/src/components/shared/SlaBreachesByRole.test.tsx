@@ -95,7 +95,9 @@ describe('SlaBreachesByRole', () => {
     expect(within(panel).getByText('Founders Round')).toBeInTheDocument();
     expect(within(panel).getByText('Resume Shortlist Pending')).toBeInTheDocument();
     expect(within(panel).getByText('Interview 1 Not Scheduled')).toBeInTheDocument();
-    expect(within(panel).getAllByText('HR / Recruiter').length).toBeGreaterThan(0);
+    // the stored owner value is 'HR / Recruiter'; people read it as the persona's name, HR/Admin
+    expect(within(panel).getAllByText('HR/Admin').length).toBeGreaterThan(0);
+    expect(within(panel).queryByText('HR / Recruiter')).not.toBeInTheDocument();
     expect(within(panel).getByText(/Hiring Manager: Alex/)).toBeInTheDocument();
     expect(bars()[0]).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(bars()[0]);
