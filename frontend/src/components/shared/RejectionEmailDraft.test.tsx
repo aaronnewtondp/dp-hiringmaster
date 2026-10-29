@@ -1,3 +1,4 @@
+import '../../test/loadTolerance.ts';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { REJECTION_REASONS } from '../../types/index.ts';

@@ -1,3 +1,4 @@
+import '../../test/loadTolerance.ts';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { STAGES, OVER_BUDGET_SHORTLIST_REASONS } from '../../types/index.ts';

@@ -1,3 +1,4 @@
+import '../test/loadTolerance.ts';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -55,7 +56,16 @@ function mount(opts: { scope?: Scope; path?: string; onCountChange?: (n: number)
     </QueryClientProvider>,
   );
 }
-const showRows = async (opts: Parameters<typeof mount>[0] = {}) => { mount(opts); await screen.findByText('Test Candidate A9001'); };
+// The page's search-debounce effect also runs once on mount (350 ms later it sets the unchanged search). Left on the real clock it
+// can fire in the middle of a later test and put the search back to empty, so the rows are shown with that timer already run:
+// mounted on a fake setTimeout that is stepped past it, then the real clock back.
+const showRows = async (opts: Parameters<typeof mount>[0] = {}) => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  mount(opts);
+  act(() => { vi.advanceTimersByTime(350); });
+  vi.useRealTimers();
+  await screen.findByText('Test Candidate A9001');
+};
 const lastRequest = () => h.list.mock.calls[h.list.mock.calls.length - 1][0] as Record<string, unknown>;
 const BASE = { limit: '500', scored_only: 'true', scored_only_exempt_stage: 'Applied and Screened', status: ['Active'] };
 const rowOf = (name: string) => screen.getByText(name).closest('tr') as HTMLTableRowElement;

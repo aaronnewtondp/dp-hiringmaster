@@ -1,3 +1,4 @@
+import '../test/loadTolerance.ts';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within, act, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -49,7 +50,16 @@ function mount() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={qc}><MemoryRouter><Candidates /></MemoryRouter></QueryClientProvider>);
 }
-const showList = async () => { mount(); await screen.findByText('Test Candidate A9001'); };
+// The page's search-debounce effect also runs once on mount (350 ms later it sets the unchanged search). Left on the real clock it
+// can fire in the middle of a later test and put the search back to empty, so the list is shown with that timer already run:
+// mounted on a fake setTimeout that is stepped past it, then the real clock back.
+const showList = async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  mount();
+  act(() => { vi.advanceTimersByTime(350); });
+  vi.useRealTimers();
+  await screen.findByText('Test Candidate A9001');
+};
 const rowOf = (name: string) => screen.getByText(name).closest('tr') as HTMLTableRowElement;
 const names = () => Array.from(document.querySelectorAll('tbody tr')).map(tr => tr.querySelector('a')?.textContent);
 const lastRequest = () => h.list.mock.calls[h.list.mock.calls.length - 1][0] as Record<string, unknown>;

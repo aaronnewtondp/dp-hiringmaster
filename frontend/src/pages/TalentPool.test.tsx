@@ -1,3 +1,4 @@
+import '../test/loadTolerance.ts';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within, act, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -56,7 +57,16 @@ const pick = async (filter: RegExp, option: string) => {
   fireEvent.click(await screen.findByLabelText(option));
 };
 const sortBy = (label: string) => fireEvent.click(screen.getByRole('button', { name: label }));
-const showFirstPage = async () => { mount(); await screen.findByText('Test Person P0'); };
+// The page's search-debounce effect also runs once on mount: 350 ms later it sets the (unchanged) search and offset 0. On a real
+// clock a test that pressed "Load more" before that moment was put back on page one (a slow machine made that happen), so the first
+// page is always shown with that timer already run: mounted on a fake setTimeout that is stepped past it, then the real clock back.
+const showFirstPage = async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  mount();
+  act(() => { vi.advanceTimersByTime(350); });
+  vi.useRealTimers();
+  await screen.findByText('Test Person P0');
+};
 
 beforeEach(() => {
   h.persona = 'hr_recruiter';
@@ -95,8 +105,7 @@ describe('Archived Pipeline — the two modes', () => {
 
   it('switching mode after "Load more" starts again from offset 0', async () => {
     paged();
-    mount();
-    await screen.findByText('Test Person P0');
+    await showFirstPage();
     fireEvent.click(loadMore());
     await screen.findByText('Test Person P50');
     fireEvent.click(screen.getByRole('button', { name: 'Archived' }));

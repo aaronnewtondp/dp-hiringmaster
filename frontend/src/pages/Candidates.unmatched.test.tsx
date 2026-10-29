@@ -1,3 +1,4 @@
+import '../test/loadTolerance.ts';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within, act, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';

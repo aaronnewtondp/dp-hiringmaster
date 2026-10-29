@@ -1,5 +1,6 @@
+import '../test/loadTolerance.ts';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -95,36 +96,23 @@ beforeEach(() => {
 });
 
 describe('Candidate page — Schedule round and Send Assignment', () => {
-  it('HR gets "Schedule round" only while the application is at Interview Round 1, Interview Round 2 or Founders Round', async () => {
+  // One test per stage (not a loop inside one test): each has its own time limit and a failure names the stage.
+  it.each(STAGES)('HR gets "Schedule round" only at Interview Round 1, Interview Round 2 or Founders Round: stage %s', async stage => {
+    await show(application('A9001', { stage }));
     const allowed = ['Interview Round 1', 'Interview Round 2', 'Founders Round'];
-    for (const stage of STAGES) {
-      await show(application('A9001', { stage }));
-      const has = screen.queryByRole('button', { name: 'Schedule round' }) !== null;
-      expect({ stage, has }).toEqual({ stage, has: allowed.includes(stage) });
-      cleanup();
-      h.roundsList.mockClear();
-    }
+    expect(screen.queryByRole('button', { name: 'Schedule round' }) !== null).toBe(allowed.includes(stage));
   });
 
-  it('"Send Assignment" appears only at the Assignment Round', async () => {
-    for (const stage of STAGES) {
-      await show(application('A9001', { stage }));
-      const has = screen.queryByRole('button', { name: 'Send Assignment' }) !== null;
-      expect({ stage, has }).toEqual({ stage, has: stage === 'Assignment Round' });
-      cleanup();
-      h.roundsList.mockClear();
-    }
+  it.each(STAGES)('"Send Assignment" appears only at the Assignment Round: stage %s', async stage => {
+    await show(application('A9001', { stage }));
+    expect(screen.queryByRole('button', { name: 'Send Assignment' }) !== null).toBe(stage === 'Assignment Round');
   });
 
-  it('a Hiring Manager gets neither, at any stage', async () => {
+  it.each(['Interview Round 1', 'Assignment Round', 'Founders Round'])('a Hiring Manager gets neither, at %s', async stage => {
     h.persona = 'hiring_manager';
-    for (const stage of ['Interview Round 1', 'Assignment Round', 'Founders Round']) {
-      await show(application('A9001', { stage }));
-      expect(screen.queryByRole('button', { name: 'Schedule round' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Send Assignment' })).not.toBeInTheDocument();
-      cleanup();
-      h.roundsList.mockClear();
-    }
+    await show(application('A9001', { stage }));
+    expect(screen.queryByRole('button', { name: 'Schedule round' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send Assignment' })).not.toBeInTheDocument();
   });
 
   it('Schedule round hands the application, the next round number and the stage name to the scheduling dialog', async () => {
@@ -347,14 +335,9 @@ describe('Candidate page — assignment rounds', () => {
 });
 
 describe('Candidate page — reference checks', () => {
-  it('HR gets "Add Reference Check" only at the Reference Check stage, for that application', async () => {
-    for (const stage of STAGES) {
-      await show(application('A9001', { stage }));
-      const has = screen.queryByRole('button', { name: 'Add Reference Check' }) !== null;
-      expect({ stage, has }).toEqual({ stage, has: stage === 'Reference Check' });
-      cleanup();
-      h.roundsList.mockClear();
-    }
+  it.each(STAGES)('HR gets "Add Reference Check" only at the Reference Check stage: stage %s', async stage => {
+    await show(application('A9001', { stage }));
+    expect(screen.queryByRole('button', { name: 'Add Reference Check' }) !== null).toBe(stage === 'Reference Check');
   });
 
   it('a Hiring Manager never gets it', async () => {
