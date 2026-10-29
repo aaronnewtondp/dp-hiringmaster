@@ -11,6 +11,11 @@
 //   const res = await api.post('/api/roles', { as: 'hiring_manager', body: { title: 'x', priority: 'P1' } });
 //
 // Everything a test sees about a person is synthetic (example.test addresses, ids like U9001).
+//
+// One trap: express-async-errors (imported below, and by server.ts) turns a rejected async handler into a 500 by wrapping
+// Express's Layer at the moment a route is CREATED. A test file that imports a router must therefore load it AFTER that
+// patch — put `import 'express-async-errors';` first in the test file (or import this module before the router). Otherwise a
+// handler that throws leaves an unhandled rejection and a request that never answers.
 
 import 'express-async-errors';
 import http from 'node:http';
