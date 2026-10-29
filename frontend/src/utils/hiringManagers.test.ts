@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { isNamedHiringManager, splitHiringManagerNames } from './hiringManagers.ts';
+import { CPU_BACKSTOP_MS, cpuMs } from '../test/helpers.ts';
 
 const NBSP = String.fromCharCode(0xa0);      // no-break space — what Slack/Docs/web pages paste
 const ZWSP = String.fromCharCode(0x200b);     // zero-width space
@@ -35,11 +36,23 @@ describe('splitHiringManagerNames (frontend mirror)', () => {
     expect(splitHiringManagerNames(undefined)).toEqual([]);
   });
 
-  it('is linear on a huge run of blanks (this runs in the browser on every role)', () => {
-    const t0 = Date.now();
-    splitHiringManagerNames(' '.repeat(2_000_000));
-    isNamedHiringManager('Piyush Negi', ' '.repeat(2_000_000));
-    expect(Date.now() - t0).toBeLessThan(250);
+  // The field is free text any Hiring Manager can write and this runs in the browser on every role. What keeps it cheap is the cap: nothing
+  // past MAX_EXAMINED_LENGTH (1000) characters is looked at, and whitespace is collapsed before any pattern runs. The cap is asserted by
+  // what it DOES — the names beyond it are invisible — which a slow machine cannot change; the old 250 ms wall-clock bound could.
+  it('examines nothing past 1000 characters, so a huge run of blanks costs nothing (this runs in the browser on every role)', () => {
+    const blanks = ' '.repeat(2_000_000);
+    expect(splitHiringManagerNames(`${blanks}Piyush Negi`)).toEqual([]);                      // the only name sits beyond the cap
+    expect(isNamedHiringManager('Piyush Negi', `${blanks}Piyush Negi`)).toBe(false);
+    expect(splitHiringManagerNames(`Mandeep Dagar, ${' '.repeat(2_000_000)}, Piyush Negi`)).toEqual(['Mandeep Dagar']);
+    const inside = `Mandeep Dagar,${' '.repeat(900)}Piyush Negi`;                              // the same shape under the cap is read in full
+    expect(splitHiringManagerNames(inside)).toEqual(['Mandeep Dagar', 'Piyush Negi']);
+    expect(isNamedHiringManager('Piyush Negi', inside)).toBe(true);
+  });
+
+  it('a huge run of blanks takes a bounded amount of CPU time (not a wall-clock limit)', () => {
+    const blanks = ' '.repeat(2_000_000);
+    const spent = cpuMs(() => { splitHiringManagerNames(blanks); isNamedHiringManager('Piyush Negi', blanks); });
+    expect(spent).toBeLessThan(CPU_BACKSTOP_MS);                                              // ~1 ms when quiet; the quadratic version took ~10 s on 100k blanks
   });
 });
 
