@@ -67,7 +67,7 @@ function programRole(role: Record<string, unknown> = {}) {
     set.split(', ').forEach(pair => { const m = /^(\w+) = \$(\d+)$/.exec(pair)!; changed[m[1]] = params[Number(m[2]) - 1]; });
     return [{ ...current, ...changed }];
   });
-  fakeDb.when(SQL.activeUsers, [{ name: 'Test Hiring Manager' }, { name: 'Mandeep Dagar' }, { name: 'Piyush Negi' }, { name: 'Test Recruiter' }]);
+  fakeDb.when(SQL.activeUsers, [{ name: 'Test Hiring Manager' }, { name: 'Alex Sample' }, { name: 'Blake Sample' }, { name: 'Test Recruiter' }]);
   return current;
 }
 const roleUpdate = () => fakeDb.one(SQL.update);
@@ -347,11 +347,11 @@ describe('PATCH /:id — the Hiring Manager field (one text column that may name
   const hmField = (value: unknown) => patch('hr_recruiter', { hiring_manager_name: value });
 
   it.each([
-    ['semicolon and ampersand', 'Mandeep Dagar;Piyush Negi & Third Person', 'Mandeep Dagar, Piyush Negi, Third Person'],
-    ['the word "and" and an Oxford comma', 'Mandeep Dagar, Piyush Negi, and Third Person', 'Mandeep Dagar, Piyush Negi, Third Person'],
-    ['untidy spacing and an invisible no-break space', 'Mandeep   Dagar ,  Piyush Negi', 'Mandeep Dagar, Piyush Negi'],
-    ['a surname-first spelling, which a comma always splits into two people', 'Gosain,  Amit', 'Gosain, Amit'],
-    ['a name containing "and" (not a separator)', 'Sandeep Anand', 'Sandeep Anand'],
+    ['semicolon and ampersand', 'Alex Sample;Blake Sample & Third Person', 'Alex Sample, Blake Sample, Third Person'],
+    ['the word "and" and an Oxford comma', 'Alex Sample, Blake Sample, and Third Person', 'Alex Sample, Blake Sample, Third Person'],
+    ['untidy spacing and an invisible no-break space', 'Alex   Sample ,  Blake Sample', 'Alex Sample, Blake Sample'],
+    ['a surname-first spelling, which a comma always splits into two people', 'Sample,  Casey', 'Sample, Casey'],
+    ['a name containing "and" (not a separator)', 'Randall Anderson', 'Randall Anderson'],
   ])('is stored in the canonical "A, B" form (%s)', async (_what, typed, stored) => {
     programRole({ hiring_manager_name: 'Somebody Else' });
     const res = await hmField(typed);
@@ -386,35 +386,35 @@ describe('PATCH /:id — the Hiring Manager field (one text column that may name
   });
 
   it('re-saving the same people in a different spelling is no change: nothing is written and no edit-log row is made; a different ORDER is a change', async () => {
-    programRole({ hiring_manager_name: 'Mandeep Dagar, Piyush Negi' });
-    const same = await hmField('Mandeep Dagar;  Piyush Negi');
+    programRole({ hiring_manager_name: 'Alex Sample, Blake Sample' });
+    const same = await hmField('Alex Sample;  Blake Sample');
     expect(same.body.message).toBe('No changes detected');
     nothingWritten();
-    fakeDb.reset(); programRole({ hiring_manager_name: 'Mandeep Dagar, Piyush Negi' });
-    const reordered = await hmField('Piyush Negi, Mandeep Dagar');
+    fakeDb.reset(); programRole({ hiring_manager_name: 'Alex Sample, Blake Sample' });
+    const reordered = await hmField('Blake Sample, Alex Sample');
     expect(reordered.status).toBe(200);
-    expect(written()).toEqual({ hiring_manager_name: 'Piyush Negi, Mandeep Dagar' });
-    expect(fakeDb.find(SQL.editLog).map(c => c.params)).toEqual([[ROLE_ID, 'hiring_manager_name', 'Mandeep Dagar, Piyush Negi', 'Piyush Negi, Mandeep Dagar', 'U9001']]);
+    expect(written()).toEqual({ hiring_manager_name: 'Blake Sample, Alex Sample' });
+    expect(fakeDb.find(SQL.editLog).map(c => c.params)).toEqual([[ROLE_ID, 'hiring_manager_name', 'Alex Sample, Blake Sample', 'Blake Sample, Alex Sample', 'U9001']]);
   });
 
   it('changing it rewrites responsible_person on this role\'s OPEN "HM shortlist review" rows (adding a person gives them the waiting work, removing one takes it away), inside the transaction, before the edit log', async () => {
-    programRole({ hiring_manager_name: 'Mandeep Dagar' });
-    await hmField('Mandeep Dagar, Piyush Negi');
+    programRole({ hiring_manager_name: 'Alex Sample' });
+    await hmField('Alex Sample, Blake Sample');
     const rewrite = fakeDb.one(SQL.rewriteHmReviews);
-    expect(rewrite.params).toEqual(['Mandeep Dagar, Piyush Negi', ROLE_ID]);
+    expect(rewrite.params).toEqual(['Alex Sample, Blake Sample', ROLE_ID]);
     expect(rewrite.inTransaction).toBe(true);
     const order = fakeDb.statements();
     expect(order.findIndex(s => SQL.rewriteHmReviews.test(s))).toBeLessThan(order.findIndex(s => SQL.editLog.test(s)));
   });
 
   it('clearing the field rewrites those rows\' responsible_person to NULL, not to an empty string', async () => {
-    programRole({ hiring_manager_name: 'Mandeep Dagar' });
+    programRole({ hiring_manager_name: 'Alex Sample' });
     await hmField('');
     expect(fakeDb.one(SQL.rewriteHmReviews).params).toEqual([null, ROLE_ID]);
   });
 
   it('an edit that does not change the field leaves those rows alone', async () => {
-    programRole({ hiring_manager_name: 'Mandeep Dagar' });
+    programRole({ hiring_manager_name: 'Alex Sample' });
     await patch('hr_recruiter', { title: 'Retitled' });
     expect(fakeDb.find(SQL.rewriteHmReviews)).toEqual([]);
     expect(fakeDb.find(SQL.activeUsers)).toEqual([]);
@@ -422,11 +422,11 @@ describe('PATCH /:id — the Hiring Manager field (one text column that may name
 
   it('the response lists the names that match no active user (matching is against users.name, so a typo is otherwise invisible)', async () => {
     programRole({ hiring_manager_name: 'Somebody Else' });
-    const res = await hmField('Mandeep Dagar, Piyush Nagi, mandeep  dagar');
+    const res = await hmField('Alex Sample, Blake Sampel, alex  sample');
     expect(res.status).toBe(200);
-    expect(res.body.unmatched_hiring_managers).toEqual(['Piyush Nagi']);
+    expect(res.body.unmatched_hiring_managers).toEqual(['Blake Sampel']);
     fakeDb.reset(); programRole({ hiring_manager_name: 'Somebody Else' });
-    expect((await hmField('Mandeep Dagar, Piyush Negi')).body.unmatched_hiring_managers).toEqual([]);
+    expect((await hmField('Alex Sample, Blake Sample')).body.unmatched_hiring_managers).toEqual([]);
   });
 
   it('is only computed when the field changed, and a failure of that lookup is logged but never fails the save that already happened', async () => {
@@ -434,9 +434,9 @@ describe('PATCH /:id — the Hiring Manager field (one text column that may name
     expect((await patch('hr_recruiter', { title: 'Retitled' })).body.unmatched_hiring_managers).toBeUndefined();
     fakeDb.reset(); programRole({ hiring_manager_name: 'Somebody Else' });
     fakeDb.failing(SQL.activeUsers);
-    const res = await hmField('Mandeep Dagar');
+    const res = await hmField('Alex Sample');
     expect(res.status).toBe(200);
-    expect(res.body.role.hiring_manager_name).toBe('Mandeep Dagar');
+    expect(res.body.role.hiring_manager_name).toBe('Alex Sample');
     expect(res.body.unmatched_hiring_managers).toBeUndefined();
   });
 });
@@ -444,7 +444,7 @@ describe('PATCH /:id — the Hiring Manager field (one text column that may name
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('POST / — who may create or request a role', () => {
   const create = (as: Actor, body: Record<string, unknown>) => api.post('/api/roles', { as, body });
-  const BODY = { title: 'Sr. Backend Developer', priority: 'P1', department: 'Engineering', hiring_manager_name: 'Mandeep Dagar & Piyush Negi', ctc_band: '30-40 LPA', start_date: '2001-01-01' };
+  const BODY = { title: 'Sr. Backend Developer', priority: 'P1', department: 'Engineering', hiring_manager_name: 'Alex Sample & Blake Sample', ctc_band: '30-40 LPA', start_date: '2001-01-01' };
   const programInsert = () => {
     fakeDb.when(SQL.insertRole, (params) => [{ ...ROLE, id: 'R9002', title: params[0], priority: params[3], hiring_manager_name: params[2], ctc_band: params[9], status: 'Draft' }]);
   };
@@ -488,7 +488,7 @@ describe('POST / — who may create or request a role', () => {
   it('a hiring_manager may name several Hiring Managers (the role is a Draft HR approves); the field is stored canonically, and a bad one is 400 before any write', async () => {
     programInsert();
     await create('hiring_manager', BODY);
-    expect(insertParams()[2]).toBe('Mandeep Dagar, Piyush Negi');
+    expect(insertParams()[2]).toBe('Alex Sample, Blake Sample');
     fakeDb.reset(); programInsert();
     const bad = await create('hiring_manager', { ...BODY, hiring_manager_name: ',;' });
     expect([bad.status, bad.body.error]).toEqual([400, 'Hiring Manager must name at least one person']);
