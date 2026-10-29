@@ -33,7 +33,7 @@ vi.mock('./jobs/sourcingChecker.js', async (orig) => ({ ...(await orig<typeof im
 import app from './server.js';
 import { fakeDb } from './test/fakeDb.js';
 import {
-  ALL_PERSONAS, ApiClient, SMOKE_USER, TEST_JWT_SECRET, TEST_USERS, concretePath, listRoutes, setEnv, signToken,
+  ALL_PERSONAS, ApiClient, SMOKE_USER, TEST_JWT_SECRET, TEST_USERS, concretePath, listMiddleware, listRoutes, setEnv, signToken,
 } from './test/routeHarness.js';
 
 // ─── the documented outcome of every route ──────────────────────────────────────────────────────────────────────
@@ -201,6 +201,18 @@ describe('the route table is exactly the documented one', () => {
     // A new route lands in `undocumented`: decide who may call it, add it to GATES, and (unless it is public) give it authenticate.
     expect({ undocumented, stale }).toEqual({ undocumented: [], stale: [] });
     expect(actual).toHaveLength(90);
+  });
+
+  it('apart from routes and routers the app holds only the documented middleware, in this order — a plain app.use(path, handler) would answer outside the table above', () => {
+    // body parsers / helmet / cors, then the two rate limiters (the second pair of '<anonymous>' at the end are the 404 and the error
+    // handler). A new entry here means someone mounted a handler that listRoutes cannot enumerate: give it authenticate and a row in
+    // GATES by making it a router, or write it down here on purpose.
+    expect(listMiddleware(app)).toEqual([
+      { path: '*', name: 'query' }, { path: '*', name: 'expressInit' }, { path: '*', name: 'helmetMiddleware' },
+      { path: '*', name: 'corsMiddleware' }, { path: '*', name: 'jsonParser' },
+      { path: '/api/auth', name: '<anonymous>' }, { path: '/api', name: '<anonymous>' },
+      { path: '*', name: '<anonymous>' }, { path: '*', name: '<anonymous>' },
+    ]);
   });
 
   it('no route is registered twice (a duplicate path would let a later, ungated handler shadow a gated one)', () => {

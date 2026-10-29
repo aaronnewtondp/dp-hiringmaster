@@ -182,6 +182,30 @@ export function listRoutes(app: Express): RouteEntry[] {
   return out;
 }
 
+export interface MiddlewareEntry {
+  /** The path the handler was mounted at, or '*' for one added with no path (it sees every request). */
+  path: string;
+  /** The function's name as Express recorded it ('<anonymous>' for an arrow function). */
+  name: string;
+}
+
+/**
+ * Every layer of the app that is NEITHER a route NOR a router: body parsers, helmet, cors, the rate limiters, the 404 and the
+ * error handler — and any `app.use('/some/path', (req, res) => …)` somebody adds. `listRoutes` cannot say what such a layer
+ * answers, so a table of routes alone would let a plain handler serve a path outside it; the authentication matrix pins this
+ * list as well, in order, so any new one has to be written down on purpose.
+ */
+export function listMiddleware(app: Express): MiddlewareEntry[] {
+  const stack = ((app as unknown as { _router?: { stack: ExpressLayer[] } })._router?.stack) ?? [];
+  const out: MiddlewareEntry[] = [];
+  for (const layer of stack) {
+    if (layer.route || layer.name === 'router') continue;
+    const fastSlash = (layer.regexp as unknown as { fast_slash?: boolean } | undefined)?.fast_slash === true;
+    out.push({ path: fastSlash ? '*' : mountPathOf(layer), name: layer.name ?? '' });
+  }
+  return out;
+}
+
 /** Replace `:param` segments with a concrete value so a pattern can be requested. */
 export function concretePath(pattern: string, value = '9001'): string {
   return pattern.replace(/:[A-Za-z]+/g, value);
