@@ -443,6 +443,13 @@ describe('Help — workflow and section answers that were wrong, stale or mislea
     expect(t).toMatch(/Hiring Managers can't open this panel, but the Recruiter Summary text is shown to them on the application/);
   });
 
+  it('User Management: the roles on offer exclude Super Admin, you cannot change your own role, and sign-in needs an account added here', () => {
+    mount();
+    const t = answerTo(/What is User Management/);
+    expect(t).toMatch(/the roles on offer are HR\/Admin, Hiring Manager and Leadership, and you can't change your own role or deactivate yourself/);
+    expect(t).toMatch(/A person can sign in only with a company Google account that has been added here and is active/);
+  });
+
   it('scheduling: who can, what is required, India time and the candidate invited only with an email on file', () => {
     mount();
     const t = answerTo('What happens when I schedule an interview round?');
