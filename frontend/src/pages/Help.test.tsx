@@ -364,6 +364,8 @@ describe('Help — workflow and section answers that were wrong, stale or mislea
     expect(t).toMatch(/all filled from one shared list of the 100 highest-priority, oldest open items/);
     expect(t).toMatch(/Ready for review is separate and shows up to 500 candidates/);
     expect(t).toMatch(/every other open item company-wide, whoever it is assigned to/);
+    // a round that lists no interviewer is owed by the role's Hiring Manager, so it is in their Feedback Due too
+    expect(t).toMatch(/a Hiring Manager only the rounds they're listed as an interviewer on, or the rounds on their own roles that list no interviewer/);
     expect(t).not.toMatch(/Each list shows the 100/);
   });
 
@@ -415,7 +417,7 @@ describe('Help — workflow and section answers that were wrong, stale or mislea
     mount();
     const t = answerTo('What am I looking at on the Dashboard?');
     expect(t).not.toMatch(/in three parts/);
-    expect(t).toMatch(/hires are not counted in it, so the Joined bar always stays at 0/);
+    expect(t).toMatch(/hires are not counted in it, so the Joined bar stays at 0/);
     expect(t).toMatch(/everyone who applied through the Job Application Form is recorded as LinkedIn/);
   });
 
@@ -474,7 +476,7 @@ describe('Help — AI automation answers that were wrong or incomplete', () => {
     const t = answerTo('What is ResumeIQ, and when does it run?');
     expect(t).toMatch(/PDF, Word \.docx or Google Docs, up to 20 MB, and the first 40 pages of a PDF/);
     expect(t).toMatch(/the candidate's page shows a "No resume read" tag/);
-    expect(t).toMatch(/0 in every dimension together with the red flag "AI scoring returned invalid output - retry needed"/);
+    expect(t).toMatch(/0 in every dimension together with the red flag "AI scoring returned invalid output — retry needed"/);
     expect(t).toMatch(/Retry scoring doesn't list these, so tell whoever maintains HMS/);
   });
 
@@ -522,9 +524,12 @@ describe('Help — access answers that were wrong, stale or misleading', () => {
     mount();
     const personas = answerTo('What can each role/persona do?');
     expect(personas).toMatch(/also see the compensation of that role's candidates and applications \(current and expected CTC\)/);
-    expect(personas).toMatch(/The role's own CTC band, Salary Range and Run benchmark stay HR\/Admin, Leadership and Super Admin only/);
+    expect(personas).toMatch(/The role's own CTC band field, Salary Range column and Run benchmark panel stay HR\/Admin, Leadership and Super Admin only/);
     const comp = answerTo('Who can see compensation details, exactly?');
     expect(comp).toMatch(/a Hiring Manager doesn't see them even on their own role/);
+    // the one place the band still reaches a role's own Hiring Manager is that role's activity timeline: the answer says so
+    expect(comp).toMatch(/one exception: when a role's band is edited, that role's activity timeline lists the edit with its old and new values, and the role's own Hiring Manager can read them there/);
+    expect(comp).not.toMatch(/Nobody else sees any of it, anywhere in the system/);
     // the first version listed fields no screen shows, and said a Hiring Manager saw the band "the same as HR"
     expect(comp).not.toMatch(/agency fee estimates/);
   });
@@ -553,8 +558,9 @@ describe('Help — questions added after the October 2026 audit', () => {
   it('Add candidate: what is required, that a duplicate email is refused, and that only Live – Sourcing roles are offered', () => {
     mount();
     const t = answerTo('How do I add a candidate myself, or put an existing candidate on another role?');
-    expect(t).toMatch(/Everything on the form is required except Source/);
-    expect(t).toMatch(/An email that is already in HMS is refused/);
+    // the form really leaves three fields optional: LinkedIn URL, designation and Source (the first rewrite said only Source)
+    expect(t).toMatch(/Everything on the form is required except LinkedIn URL, designation and Source/);
+    expect(t).toMatch(/An email that is already in HMS is refused, and the message names the existing candidate/);
     expect(t).toMatch(/offer only Live – Sourcing roles/);
     expect(t).toMatch(/an Approved role isn't offered until then/);
   });
