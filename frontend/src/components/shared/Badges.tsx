@@ -1,9 +1,10 @@
 import { PRIORITY_COLORS, Priority, AgingAlert } from '../../types/index.ts';
+import { priorityInfo, SLA_FLAG_INFO, AGING_NO_TARGET_INFO } from '../../utils/columnInfo.ts';
 
 // ─── Priority badge ───────────────────────────────────────────────────────────
 export function PriorityBadge({ priority }: { priority: Priority }) {
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[priority]}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[priority]}`} title={priorityInfo(priority)}>
       {priority}
     </span>
   );
@@ -59,9 +60,12 @@ export function StatusBadge({ status }: { status: string }) {
 }
 
 // ─── Aging indicator ─────────────────────────────────────────────────────────
+// "Nd over" is days past the Close Target. A flagged role with 0 days over has no Close Target (utils/aging.ts flags it
+// on days open instead), so its hover says that rather than "since the role opened" alone.
 export function AgingBadge({ alert, daysOpen, daysOverdue }: { alert: AgingAlert; daysOpen: number; daysOverdue: number }) {
-  if (alert === 'red')    return <span className="text-xs font-medium font-mono text-red-600" title={`${daysOpen}d since the role opened`}>🔴 {daysOverdue}d over · {daysOpen}d open</span>;
-  if (alert === 'yellow') return <span className="text-xs font-medium font-mono text-amber-600" title={`${daysOpen}d since the role opened`}>🟡 {daysOverdue}d over · {daysOpen}d open</span>;
+  const hover = daysOverdue > 0 ? `${daysOpen}d since the role opened; ${daysOverdue}d past its Close Target` : `${daysOpen}d since the role opened. ${AGING_NO_TARGET_INFO}`;
+  if (alert === 'red')    return <span className="text-xs font-medium font-mono text-red-600" title={hover}>🔴 {daysOverdue}d over · {daysOpen}d open</span>;
+  if (alert === 'yellow') return <span className="text-xs font-medium font-mono text-amber-600" title={hover}>🟡 {daysOverdue}d over · {daysOpen}d open</span>;
   return <span className="text-xs font-mono text-gray-500">{daysOpen}d open</span>;
 }
 
@@ -83,7 +87,7 @@ export function FitScore({ score }: { score?: number | null }) {
 export function SlaBadge({ breached }: { breached: boolean }) {
   if (!breached) return null;
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700" title={SLA_FLAG_INFO}>
       SLA
     </span>
   );

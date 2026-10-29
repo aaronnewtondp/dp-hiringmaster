@@ -12,6 +12,7 @@ import KpiCard from '../components/shared/KpiCard.tsx';
 import SourcingExecution from '../components/sourcing/SourcingExecution.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { AGING_THRESHOLDS_TEXT, AGE_COLUMN_INFO } from '../utils/columnInfo.ts';
 
 // SLA breach types, per slaChecker.ts's stage/breach-type engine — kept here
 // (not generated from the backend) since these are fixed, named categories
@@ -25,16 +26,16 @@ const SLA_BREACH_TYPES_INFO = (
   <div className="space-y-1.5">
     <div className="font-medium text-white">SLA breach types</div>
     <ul className="space-y-1">
-      <li><b>Idle Candidate</b> (HR) — no stage change in 48h+ (Reference Check, Pre-Joining Docs, Offer Discussion, Offer Released)</li>
+      <li><b>Idle Candidate</b> (HR/Admin) — no stage change in 48h+ (Reference Check, Pre-Joining Docs, Offer Discussion, Offer Released)</li>
       <li><b>Resume Shortlist Pending</b> (Hiring Manager) — not shortlisted within 48h of Applied and Screened (24h if fit score ≥75)</li>
-      <li><b>Interview/Founders Round Not Scheduled</b> (HR) — no round with a date booked within 48h of entering that stage (24h if fit score ≥75)</li>
-      <li><b>Assignment Not Sent</b> (HR) — assignment not sent within 48h of entering Assignment Round (24h if fit score ≥75)</li>
-      <li><b>Interview/Founders Feedback Due</b> (Hiring Manager) — feedback not submitted within 48h of the interview (24h if fit score ≥75); still open 96h later also raises a Leadership-owned "Feedback Overdue — Leadership Escalation" alert alongside it</li>
+      <li><b>Interview/Founders Round Not Scheduled</b> (HR/Admin) — no round with a date booked within 48h of entering that stage (24h if fit score ≥75)</li>
+      <li><b>Assignment Not Sent</b> (HR/Admin) — assignment not sent within 48h of entering Assignment Round (24h if fit score ≥75)</li>
+      <li><b>Interview/Founders Feedback Due</b> (Hiring Manager) — feedback not submitted within 48h of the interview (24h if fit score ≥75); feedback still outstanding 96h after the interview also raises a Leadership-owned "Feedback Overdue — Leadership Escalation" alert alongside it</li>
       <li><b>Assignment Feedback Due</b> (Hiring Manager) — feedback not submitted within 96h of the assignment being sent (untouched by the score-tiering above)</li>
-      <li><b>Assignment deadline breached</b> (HR) — the candidate hasn't submitted within 60h of the assignment being sent</li>
-      <li><b>Joining risk — no contact</b> (HR) — no HR contact logged in the 5 days after Offer Accepted (flagged at the next check if none was ever logged)</li>
+      <li><b>Assignment deadline breached</b> (HR/Admin) — the candidate hasn't submitted within 60h of the assignment being sent</li>
+      <li><b>Joining risk — no contact</b> (HR/Admin) — a candidate at Offer Accepted whose last logged HR contact is more than 5 days old, or who has none logged (flagged at the next check, not after 5 days). There is no screen for logging HR contact yet, so it clears when the candidate joins or leaves Active.</li>
     </ul>
-    <p>HR / Hiring Manager = who owns the overdue step. Top type / Top stage = the breach type and stage with the most open breaches. For a Hiring Manager this card counts only breaches assigned to them; the sections below show every breach on their roles.</p>
+    <p>HR/Admin and Hiring Manager show who owns the overdue step. Top type / Top stage = the breach type and stage with the most open breaches. For a Hiring Manager this card counts only breaches assigned to them; the sections below show every breach on their roles.</p>
   </div>
 );
 
@@ -114,7 +115,7 @@ export default function Dashboard() {
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Dashboard</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Hiring health overview — updated live</p>
+          <p className="text-sm text-gray-500 mt-0.5">Hiring health overview — refreshes every 5 minutes; SLA breaches are re-checked when the page loads, at most every 3 minutes</p>
         </div>
       </div>
 
@@ -144,7 +145,7 @@ export default function Dashboard() {
       {/* KPI row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <KpiCard icon={Briefcase} label="Roles Snapshot" value={metrics.open_roles_count} accent="text-dp-600"
-          info="Open roles = Live – Sourcing, Approved or Under Review. Draft, On Hold and Closed roles don't count here (On Hold roles still appear in Aging roles and Low pipeline roles, which use a wider 'open' set). P0+P1 roles = how many of those are priority P0 or P1. Avg. active role age = mean days since each open role's Open Date (set when it is approved). Avg. time to fill = mean days from a role's Open Date to each accepted offer, across all-time history — a role with several hires counts once per accepted offer. Filled (30D) counts roles moved to Closed – Filled in the last 30 days; it shows N/A whenever any filter is on, because closed roles can't be filtered coherently."
+          info="Open roles = Live – Sourcing, Approved or Under Review. Draft, On Hold and Closed roles don't count here. On Hold roles do still appear in Aging roles and Low pipeline roles. P0+P1 roles = how many of those are priority P0 or P1. Avg. active role age = mean days since each open role's Open Date (set when it is approved). Avg. time to fill = mean days from a role's Open Date to each accepted offer, across all-time history — a role with several hires counts once per accepted offer. Filled (30D) counts roles moved to Closed – Filled in the last 30 days; it shows N/A while any filter is on, so clear the filters to see it."
           infoWidth="w-80"
           sub={[
             ['P0+P1 roles', metrics.open_roles_by_priority.P0 + metrics.open_roles_by_priority.P1],
@@ -154,10 +155,10 @@ export default function Dashboard() {
           ]} />
         <KpiCard icon={Users} label="Active candidates" value={metrics.active_candidates} accent="text-green-600"
           infoWidth="w-80"
-          info="Every application with status = Active (i.e. not Rejected, Withdrawn, Hold for Future, Joined or Closed). A candidate with two applications counts twice. Score ≥75/≤45 are ResumeIQ fit-score bands; ≥Interview 1 counts candidates currently sitting at Interview Round 1 or later; Unmatched is Job Application Form submissions that never matched an open role, plus any candidate never linked to a role at all — since these have no role_id, this shows N/A whenever any master filter is active."
+          info="Every application with status = Active (i.e. not Rejected, Withdrawn, Hold for Future, Joined or Closed); the Active Candidates page lists more than this, because it also shows Hold for Future, Joined and Closed applications. A candidate with two applications counts twice. Fit score ≥75 / ≤45 count Active applications whose ResumeIQ Fit score (0-100, the Average Score × 10) is at or above 75 or at or below 45; ≥Interview 1 counts candidates currently sitting at Interview Round 1 or later; Unmatched is Job Application Form submissions that never matched an open role, plus any candidate never linked to a role at all — since these have no role_id, this shows N/A whenever any master filter is active."
           sub={[
-            ['Score ≥75', metrics.candidates_score_ge_75],
-            ['Score ≤45', metrics.candidates_score_le_45],
+            ['Fit score ≥75', metrics.candidates_score_ge_75],
+            ['Fit score ≤45', metrics.candidates_score_le_45],
             ['≥Interview 1', metrics.candidates_at_interview1_plus],
             ['Unmatched', hasActiveFilters ? 'N/A' : metrics.candidates_unmatched],
           ]} />
@@ -185,7 +186,7 @@ export default function Dashboard() {
         <div className="card overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
             <h2 className="text-sm font-semibold text-gray-900">Aging roles</h2>
-            <InfoTooltip align="left" text="Every role currently Approved, Live – Sourcing, or On Hold, with how long it's been open. Only an Approved or Live – Sourcing role that's actually passed its own Close Target gets highlighted — yellow then red, thresholds set per priority — a role with no Close Target set falls back to flagging on days-since-opened instead. On Hold roles are shown for reference (how long they've been open) but never get an aging alert, since the clock isn't really running while a role is paused. A red ! next to a role's name means no candidate on that role has had any real movement (a stage or status change, feedback, etc.) in 3+ days — new applications arriving and automatic scoring don't count, so a role can't look 'active' just because people are still applying to it." width="w-96" />
+            <InfoTooltip align="left" text={`Every role currently Approved, Live – Sourcing, or On Hold, with how long it's been open. Only an Approved or Live – Sourcing role is ever highlighted: it turns yellow, then red, once it is past its own Close Target by ${AGING_THRESHOLDS_TEXT}, so a role just past its target is not highlighted yet. A role with no Close Target set is flagged on days since opened instead, with the same numbers, and its badge then reads '0d over' because there is no target to be over. On Hold roles are shown for reference (how long they've been open) but never get an aging alert, since the clock isn't really running while a role is paused. A red ! next to a role's name means no candidate on that role has had any real movement (a stage or status change, feedback, etc.) in more than 3 days — new applications arriving and automatic scoring don't count, so a role can't look 'active' just because people are still applying to it.`} width="w-96" />
           </div>
           {aging_roles.length === 0 ? (
             <div className="p-5"><EmptyState title="No open roles" /></div>
@@ -196,9 +197,9 @@ export default function Dashboard() {
                   <tr className="border-b border-gray-100">
                     <th className="table-th">Role</th>
                     <th className="table-th w-8"></th>
-                    <th className="table-th">P</th>
-                    <th className="table-th">HM</th>
-                    <th className="table-th">Age</th>
+                    <th className="table-th" title="Priority: P0 is the most urgent, P3 the least">P</th>
+                    <th className="table-th" title="Hiring Manager (a role can have several)">HM</th>
+                    <th className="table-th" title={AGE_COLUMN_INFO}>Age</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -287,7 +288,7 @@ export default function Dashboard() {
             <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
               <Radio className="w-4 h-4 text-gray-400" />
               <h2 className="text-sm font-semibold text-gray-900">Source quality</h2>
-              <InfoTooltip align="left" width="w-80" text="Per source, using each candidate's own Source field (Naukri/IIMjobs, LinkedIn, Internal Referral, Agency, Direct Outreach). Candidates who arrived through the Job Application Form are recorded as LinkedIn, so that bar includes every form applicant. Computed over all applications, not just Active. Pass rate = % that reached Interview Round 1 or later. Hire rate = % that reached Offer Accepted or later. Contribution = the source's share of all applications that have a source." />
+              <InfoTooltip align="left" width="w-80" text="Per source, using each candidate's own Source field (Naukri/IIMjobs, LinkedIn, Internal Referral, Agency, Direct Outreach). Candidates who arrived through the Job Application Form are recorded as LinkedIn, so that bar includes every form applicant. Computed over all applications, not just Active. Pass rate = % that reached Interview Round 1 or later. Hire rate = % that reached Offer Accepted or later. Contribution = the source's share of all applications that have a source. This is the candidate's Source field, not what applicants say on the application form: where the Sourcing page is switched on, that answer is shown there under Applications by source." />
             </div>
             <div className="px-5 py-4 space-y-4">
               {source_quality.length === 0 ? (
@@ -297,7 +298,7 @@ export default function Dashboard() {
                   <div key={s.source_channel}>
                     <div className="flex items-center gap-2 mb-1.5">
                       <span className="text-xs font-medium text-gray-700 truncate">{s.source_channel}</span>
-                      <span className="text-xs font-mono text-gray-400 shrink-0">n={s.n}</span>
+                      <span className="text-xs font-mono text-gray-400 shrink-0">{s.n} {s.n === 1 ? 'application' : 'applications'}</span>
                     </div>
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
@@ -335,9 +336,9 @@ export default function Dashboard() {
             <div className="px-5 py-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-semibold text-gray-900">Low pipeline roles</h2>
-                <InfoTooltip align="left" width="w-96" text={`Open roles (Approved, Live – Sourcing, Under Review, or On Hold) with fewer than ${LOW_PIPELINE_MAX_SHORTLISTED} shortlisted candidates (past Applied and Screened) AND fewer than ${LOW_PIPELINE_MAX_ACTIVE} Active candidates in the pipeline — thinly stocked on both counts, a signal that sourcing, not just process, may be the bottleneck, regardless of whether the role is also past its Close Target. A big pool of applicants who simply haven't been shortlisted yet does not count as thin. The two bold columns decide membership. The columns walk the funnel: Pipeline = every Active candidate; Scored >60 = of those, ResumeIQ fit score above 60; Shortlisted = past Applied and Screened; Shortlisted >60 = shortlisted and scored above 60 (shown for information).`} />
+                <InfoTooltip align="left" width="w-96" text={`Roles that are Approved, Live – Sourcing, Under Review or On Hold with fewer than ${LOW_PIPELINE_MAX_SHORTLISTED} shortlisted candidates (Active, past Applied and Screened) AND fewer than ${LOW_PIPELINE_MAX_ACTIVE} Active candidates in the pipeline — thinly stocked on both counts, a signal that sourcing, not just process, may be the bottleneck, regardless of whether the role is also past its Close Target. A big pool of applicants who simply haven't been shortlisted yet does not count as thin. The two bold columns decide membership. The columns walk the funnel: Pipeline = every Active candidate; Scored >60 = of those, ResumeIQ fit score above 60; Shortlisted = Active candidates past Applied and Screened, including Reference Check onwards (not the same as Active Shortlist on the Roles page, which stops at Founders Round); Shortlisted >60 = shortlisted and scored above 60 (shown for information).`} />
               </div>
-              <p className="text-xs text-gray-400 mt-0.5">Open roles with fewer than {LOW_PIPELINE_MAX_SHORTLISTED} shortlisted candidates and fewer than {LOW_PIPELINE_MAX_ACTIVE} active candidates in the pipeline</p>
+              <p className="text-xs text-gray-400 mt-0.5">Approved, Live – Sourcing, Under Review or On Hold roles with fewer than {LOW_PIPELINE_MAX_SHORTLISTED} shortlisted candidates and fewer than {LOW_PIPELINE_MAX_ACTIVE} active candidates in the pipeline</p>
             </div>
             {low_pipeline.length === 0 ? (
               <div className="p-5"><EmptyState title="No low-pipeline roles ✓" /></div>
@@ -347,8 +348,8 @@ export default function Dashboard() {
                 <thead>
                   <tr className="border-b border-gray-100">
                     <th className="table-th !px-3">Role</th>
-                    <th className="table-th !px-2">P</th>
-                    <th className="table-th !px-2">HM</th>
+                    <th className="table-th !px-2" title="Priority: P0 is the most urgent, P3 the least">P</th>
+                    <th className="table-th !px-2" title="Hiring Manager (a role can have several)">HM</th>
                     <th className={`${NUM_TH} w-[72px] !text-gray-700`} title={`All Active candidates in the pipeline — a role is low-pipeline with fewer than ${LOW_PIPELINE_MAX_ACTIVE}`}>Pipeline</th>
                     <th className={`${NUM_TH} w-[60px]`} title="Active candidates with a ResumeIQ fit score above 60 (information only)">Scored &gt;60</th>
                     <th className={`${NUM_TH} w-[76px] !text-gray-700`} title={`Active candidates past Applied and Screened — a role is low-pipeline with fewer than ${LOW_PIPELINE_MAX_SHORTLISTED}`}>Shortlisted</th>
@@ -389,7 +390,7 @@ export default function Dashboard() {
             <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
               <Gauge className="w-4 h-4 text-gray-400" />
               <h2 className="text-sm font-semibold text-gray-900">Turnaround time by stage</h2>
-              <InfoTooltip align="left" text="Average time between entering a stage and leaving it, mined from the stage-change activity log — sorted slowest first, so the top bar is literally where time is being lost the most." />
+              <InfoTooltip align="left" text="Average time between entering a stage and leaving it, mined from the stage-change activity log — sorted slowest first, so the top bar is literally where time is being lost the most. Only stays that have ended count, so people still at a stage, or rejected or withdrawn there, are left out. Applied and Screened is measured from the application date (for Naukri imports, the date they applied on Naukri)." />
             </div>
             <div className="px-5 py-4 space-y-2.5">
               {velocity.tat_by_stage.length === 0 ? (

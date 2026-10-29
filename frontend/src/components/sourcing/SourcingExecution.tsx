@@ -54,7 +54,7 @@ export default function SourcingExecution({ masterFilterParams }: { masterFilter
         <KpiCard
           icon={Compass} label="Sourcing" accent={live.length > 0 ? 'text-red-500' : 'text-dp-600'}
           value={live.filter(r => r.status === 'open').length}
-          info={<>The big number is open exceptions on live plans: a sourcing task that was due and not done, a plan not activated in time, or too few qualified candidates. Blocked, catching-up and provisional items are not counted. Plans active = active plans ÷ open roles (Approved and Live – Sourcing). Done on time = share of tasks finished in the last 14 days by their due date. Overdue now = open tasks past their due day on active plans. Everything follows the filters above.</>}
+          info={<>The big number is open exceptions on live plans: a sourcing task that was due and not done, a plan not activated in time, or too few qualified candidates. Blocked, catching-up and provisional items are not counted. Plans active = active plans ÷ roles that are Approved or Live – Sourcing. Done on time = share of tasks finished in the last 14 days by their due date. Overdue now = open tasks past their due day on active plans. Everything follows the filters above.</>}
           sub={[
             ['Plans active', `${s.plans_active} / ${s.open_roles}`],
             ['Done on time (14d)', s.on_time_pct_14d === null ? '—' : `${s.on_time_pct_14d}%`],
