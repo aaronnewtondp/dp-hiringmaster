@@ -1,0 +1,83 @@
+name: Dependency audit
+
+# `npm audit --omit=dev` on the packages that ship: backend (runs on Vercel) and frontend (bundled into what browsers load).
+# hms-tests-final and tools/ci-lint are dev-only and never deployed, so they are not audited here.
+#
+# Informational on purpose: it reports and annotates but never fails the run, because a NEW advisory against an UNCHANGED
+# lockfile would turn every unrelated build red. (Dependabot alerts, which would notify you, are off; see the notes that came
+# with this change.) Only a tooling failure (npm cannot reach the registry, unparseable output) fails the job.
+#
+# `npm audit` reads the lockfile; it needs no install.
+
+on:
+  schedule:
+    - cron: "23 3 * * 1"   # Mondays 03:23 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - backend/package-lock.json
+      - frontend/package-lock.json
+      - .github/workflows/audit.yml
+
+concurrency:
+  group: audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NPM_CONFIG_FUND: "false"
+  NPM_CONFIG_UPDATE_NOTIFIER: "false"
+
+jobs:
+  npm-audit:
+    name: npm audit (${{ matrix.package }}, production dependencies)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [backend, frontend]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.x
+      - name: npm audit --omit=dev
+        working-directory: ${{ matrix.package }}
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          report="$RUNNER_TEMP/audit-$PACKAGE.json"
+          # exit 1 means "advisories found" (reported below); anything else, or no JSON, is a tooling failure
+          rc=0
+          npm audit --omit=dev --json > "$report" || rc=$?
+          if [ "$rc" -gt 1 ] || ! jq -e '.metadata.vulnerabilities' "$report" >/dev/null 2>&1; then
+            echo "::error::npm audit failed to produce a report (exit $rc)"
+            cat "$report" || true
+            exit 1
+          fi
+
+          read -r critical high moderate low < <(jq -r '.metadata.vulnerabilities | "\(.critical) \(.high) \(.moderate) \(.low)"' "$report")
+          {
+            echo "### npm audit: $PACKAGE (production dependencies)"
+            echo
+            echo "critical **$critical**, high **$high**, moderate **$moderate**, low **$low**"
+            if [ $((critical + high + moderate + low)) -gt 0 ]; then
+              echo
+              echo "| Package | Severity | Direct | Fix available |"
+              echo "|---|---|---|---|"
+              jq -r '.vulnerabilities | to_entries | sort_by(.value.severity) | .[] | "| `\(.key)` | \(.value.severity) | \(.value.isDirect) | \(if .value.fixAvailable == true then "yes" elif .value.fixAvailable == false then "no" else "major bump (\(.value.fixAvailable.name)@\(.value.fixAvailable.version))" end) |"' "$report"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ $((critical + high)) -gt 0 ]; then
+            echo "::warning title=npm audit ($PACKAGE)::$critical critical and $high high advisories in production dependencies (not blocking; see the job summary)"
+          fi

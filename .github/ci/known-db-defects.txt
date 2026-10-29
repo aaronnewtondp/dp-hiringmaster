@@ -1,0 +1,15 @@
+# Known, REPORTED database defects that .github/ci/check-db.sh downgrades from error to warning.
+#
+# Format:  <kind> <subject>      (the first two columns db-guards.sql prints)
+#
+# This is a ratchet, not an allowlist of things that are fine. Every line is a real bug that CI found on
+# its first run and that nobody fixed in the same change. Delete a line the moment its bug is fixed:
+# check-db.sh prints a notice for each line that no longer matches anything, and any NEW finding fails the job.
+#
+# seq_eval_question / seq_comp_benchmark: seed.sql inserts Q001-Q013 and BEN001-BEN012 with explicit ids, but both
+# sequences are created with START 1 (schema.sql lines 17-18). The "START 14" / "START 13" re-declarations at
+# schema.sql lines 564-565 are CREATE SEQUENCE IF NOT EXISTS, so they do nothing, and seed.sql's closing setval
+# block never advances these two. On a database rebuilt from the two files the next generated id is Q001 / BEN001,
+# which already exists (duplicate key on the first INSERT that relies on the default).
+seq-behind-ids seq_eval_question
+seq-behind-ids seq_comp_benchmark

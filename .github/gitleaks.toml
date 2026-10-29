@@ -1,0 +1,55 @@
+# gitleaks configuration (used by .github/workflows/secret-scan.yml).
+# Everything gitleaks ships with stays on; this file only adds narrow exceptions.
+#
+# Policy for adding an exception: verify the flagged value is not a credential, scope the entry to ONE rule, ONE path
+# AND the exact value (condition = "AND"), say how you verified it, and never use a path-only entry: that would blind the
+# scanner to a real secret added to the same file later.
+#
+# WHY the entries are [[rules.allowlists]] and not the global [[allowlists]]: a global allowlist's `paths` skips the whole
+# file whatever `condition` or `regexes` say (measured with gitleaks 8.30.1: with condition = "AND", paths + regexes, a
+# DIFFERENT value in the same file was silently allowed too). A rule-scoped allowlist honours AND. The behaviour of every
+# entry below is pinned by the controls in the PR that added this file; re-run them before editing it.
+#
+# First full-history scan (gitleaks 8.30.1, 2026-10-29): 9 findings, all rule generic-api-key.
+#   7 are verified false positives (entries 1 and 2 below)
+#   2 are real committed values, documented as local-dev defaults (entry 3 below)
+
+title = "DigitalPaani HMS gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+# 1. FALSE POSITIVE. backend/src/services/portfolio/acquire/google.test.ts line 148 is a unit test of Drive URL parsing
+#    that feeds the made-up resourcekey "0-AbC_dEf-123" (visibly a placeholder). Verified by reading the line.
+[[rules.allowlists]]
+description = "Made-up Drive resourcekey placeholder in a URL-parsing unit test"
+condition = "AND"
+paths = ['''^backend/src/services/portfolio/acquire/google\.test\.ts$''']
+regexes = ['''^0-AbC_dEf-123$''']
+
+# 2. FALSE POSITIVE. hms-tests-final/tests/smoke/production.spec.ts posts the literal "definitelyWrong999" as the
+#    password in a negative login test (expects 401). It is deliberately not any account's password. Verified by reading
+#    the line in the current file and in the two older commits that carry it.
+[[rules.allowlists]]
+description = "Deliberately wrong password in the production smoke test's negative login case"
+condition = "AND"
+paths = ['''^hms-tests-final/tests/smoke/production\.spec\.ts$''']
+regexes = ['''^definitelyWrong999$''']
+
+# 3. NOT A FALSE POSITIVE: KNOWN AND ACCEPTED. docker-compose.yml lines ROLE_INGEST_SECRET and CANDIDATE_INGEST_SECRET carry
+#    64-hex values that are real, committed, and live in public history. The repo documents them as LOCAL DOCKER defaults
+#    (hms-tests-final/tests/helpers/api.ts: "already committed there in plaintext - same precedent followed here"), and
+#    keeping them is the owner's standing decision. CI did not and cannot verify they differ from production.
+#    Scoped to the two commits that introduced them, so a NEW secret added to docker-compose.yml, or the same line
+#    re-introduced in any other commit, is still caught. Delete this entry if that decision changes.
+[[rules.allowlists]]
+description = "Known and accepted: local-docker ingest secrets committed in docker-compose.yml (two introducing commits only)"
+condition = "AND"
+paths = ['''^docker-compose\.yml$''']
+commits = [
+  "8a32ec82f28ccb9896b7c4f92d7437c5ba456ad3",
+  "dc2db43098e539130e3785f62298174c6e994ed4",
+]

@@ -1,0 +1,13 @@
+# CodeQL configuration for .github/workflows/codeql.yml.
+name: HMS CodeQL configuration
+
+# Tests and their fixtures are not what runs in production, and they deliberately contain hostile inputs (PDF bombs, SSRF
+# targets, prompt-injection strings, fake credentials) that would only add alerts nobody can act on.
+paths-ignore:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.fixtures.ts"
+  - "**/*.fixtures.*.ts"
+  - hms-tests-final/tests
+  - frontend/dist
+  - backend/dist
