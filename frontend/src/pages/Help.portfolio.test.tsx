@@ -69,7 +69,35 @@ describe('Help — the Portfolio review answer', () => {
     expect(text).not.toMatch(/Every score is shown with how many of the links/);
   });
 
-  it('says what a re-run that finds nothing new does to the earlier score', () => {
-    expect(flat(answer())).toMatch(/if a Re-run finds nothing new, the earlier score stays in the average and the Portfolio column shows it with a small red dot/);
+  it('says what a re-run does to the earlier score: a score from the new run replaces it, and only a run with nothing to score keeps it', () => {
+    const text = flat(answer());
+    expect(text).toMatch(/For Head of Marketing, a Re-run reviews the answer again and replaces the score/);
+    expect(text).toMatch(/If the Re-run ends with nothing that can be scored this time \(for example the links are now private, or the answer is now text only\), the earlier score stays in the average and the Portfolio column shows it with a small red dot/);
+    // the old wording ("finds nothing new") read as if re-reviewing the same work would leave the score alone
+    expect(text).not.toMatch(/finds nothing new/);
+  });
+
+  it('says the designer review holds a missing link against the candidate only when the resume could be read, and how a deck-only or bot-blocked portfolio is treated', () => {
+    const text = flat(answer());
+    expect(text).toMatch(/This applies only if the resume could be read; if it could not, the Portfolio dimension is left out/);
+    expect(text).toMatch(/A portfolio that is only a PDF or slide-deck link is not opened automatically: it gets a low score of 3 and a flag asking you to review it by hand/);
+    expect(text).toMatch(/A site that blocks automated access is not held against the candidate and is not scored/);
+    // all of that is in the designer part
+    expect(text.indexOf('only a PDF or slide-deck link')).toBeLessThan(text.indexOf('Head of Marketing.'));
+  });
+
+  it('says video and Instagram links are only background beside real work, and are never scored on their own', () => {
+    const text = flat(answer());
+    expect(text).toMatch(/YouTube, Vimeo and Loom links and Instagram links are never opened as work/);
+    expect(text).toMatch(/only as background beside real work — if those are the only links, nothing is scored/);
+    expect(text).toMatch(/LinkedIn is never opened/);
+    // the old sentence listed them as if they earned a score
+    expect(text).not.toMatch(/YouTube and Vimeo links are judged from the title/);
+  });
+
+  it('says only a review that has links to open is provisional; an empty or text-only answer is settled at once', () => {
+    const text = flat(answer());
+    expect(text).toMatch(/When a review has to open links, it runs in the background/);
+    expect(text).toMatch(/If there is nothing to open \(no link in the resume, or a blank or text-only answer\) the result is settled at once/);
   });
 });
