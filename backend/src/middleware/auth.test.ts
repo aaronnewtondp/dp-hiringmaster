@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import jwt from 'jsonwebtoken';
 import type { Request, Response } from 'express';
 import { authenticate, isHRTier, isSmokeAccount, canSeeCompForRole, stripRestrictedFields } from './auth.js';
@@ -165,5 +165,106 @@ describe('authenticate — smoke-test accounts are read-only', () => {
     const res = { status: vi.fn().mockReturnValue({ json }) } as unknown as Response;
     authenticate({ headers: {}, method: 'POST' } as unknown as Request, res, vi.fn());
     expect((res.status as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(401);
+  });
+});
+
+describe('authenticate — a token that is not valid is refused with 401 and never reaches next()', () => {
+  const SECRET = 'unit-test-secret';
+  const SMOKE = 'smoke.leadership@hms-smoke.invalid';
+  const claims = { userId: 'u1', email: 'aaron.newton@digitalpaani.com', persona: 'hr_recruiter', name: 'Unit Test' };
+  let saved: string | undefined;
+  beforeEach(() => { saved = process.env.JWT_SECRET; process.env.JWT_SECRET = SECRET; });
+  afterEach(() => { vi.useRealTimers(); if (saved === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = saved; });
+
+  /** Calls authenticate() with `authorization` and returns what the middleware did. */
+  function call(authorization: string | undefined, method = 'GET') {
+    const json = vi.fn();
+    const res = { status: vi.fn().mockReturnValue({ json }) } as unknown as Response;
+    const req = { headers: authorization === undefined ? {} : { authorization }, method } as unknown as Request;
+    const next = vi.fn();
+    authenticate(req, res, next);
+    return { next, req, status: (res.status as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]), body: json.mock.calls.map(c => c[0]) };
+  }
+  const refused = (r: ReturnType<typeof call>, message: RegExp) => {
+    expect(r.next).not.toHaveBeenCalled();
+    expect(r.status).toEqual([401]);                   // exactly one answer, and it is a 401
+    expect(r.body[0].error).toMatch(message);
+    expect(r.req.user).toBeUndefined();                // nothing from a refused token is trusted
+  };
+
+  it('control: a well-formed token signed with the right secret is accepted and its claims are attached to the request', () => {
+    const r = call(`Bearer ${jwt.sign(claims, SECRET)}`);
+    expect(r.next).toHaveBeenCalledTimes(1);
+    expect(r.status).toEqual([]);
+    expect(r.req.user).toMatchObject({ userId: 'u1', persona: 'hr_recruiter' });
+  });
+
+  it('a token signed with a different secret (bad signature) is refused', () => {
+    refused(call(`Bearer ${jwt.sign(claims, 'some-other-secret')}`), /invalid or expired/i);
+  });
+
+  it('a token whose payload was edited after signing (persona escalated, signature kept) is refused', () => {
+    const [header, , signature] = jwt.sign(claims, SECRET).split('.');
+    const forged = Buffer.from(JSON.stringify({ ...claims, persona: 'super_admin' })).toString('base64url');
+    refused(call(`Bearer ${header}.${forged}.${signature}`), /invalid or expired/i);
+  });
+
+  it('an expired token is refused, and the same token is accepted a moment before it expires (the clock is faked, not slept)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-15T10:00:00Z'));
+    const token = jwt.sign(claims, SECRET, { expiresIn: 60 });
+    vi.setSystemTime(new Date('2026-03-15T10:00:59Z'));
+    expect(call(`Bearer ${token}`).next).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(new Date('2026-03-15T10:01:01Z'));
+    refused(call(`Bearer ${token}`), /invalid or expired/i);
+  });
+
+  it('a token that is not yet valid (nbf in the future) is refused', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-15T10:00:00Z'));
+    refused(call(`Bearer ${jwt.sign(claims, SECRET, { notBefore: 3600 })}`), /invalid or expired/i);
+  });
+
+  it.each([
+    ['plain text', 'not-a-jwt'],
+    ['two segments', 'aaa.bbb'],
+    ['four segments', 'aaa.bbb.ccc.ddd'],
+    ['three empty segments', '..'],
+    ['segments that are not base64 JSON', 'aaa.bbb.ccc'],
+    ['whitespace', '   '],
+  ])('a malformed token (%s) is refused', (_name, token) => {
+    refused(call(`Bearer ${token}`), /invalid or expired|no token/i);
+  });
+
+  it('an unsigned token (alg "none") is refused', () => {
+    const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    refused(call(`Bearer ${b64({ alg: 'none', typ: 'JWT' })}.${b64(claims)}.`), /invalid or expired/i);
+  });
+
+  it('every HMAC variant is accepted only with the right secret', () => {
+    expect(call(`Bearer ${jwt.sign(claims, SECRET, { algorithm: 'HS512' })}`).next).toHaveBeenCalledTimes(1);
+    refused(call(`Bearer ${jwt.sign(claims, 'wrong', { algorithm: 'HS512' })}`), /invalid or expired/i);
+  });
+
+  it('with JWT_SECRET missing from the environment every token is refused (a server that lost its secret fails closed, never open)', () => {
+    const token = jwt.sign(claims, SECRET);
+    delete process.env.JWT_SECRET;
+    refused(call(`Bearer ${token}`), /invalid or expired/i);
+  });
+
+  it.each([
+    ['no Authorization header at all', undefined],
+    ['an empty Bearer value', 'Bearer '],
+    ['a scheme other than Bearer', 'Basic dXNlcjpwYXNz'],
+    ['a lower-case scheme', 'bearer abc'],
+    ['the bare token without a scheme', 'abc.def.ghi'],
+  ])('%s is answered "no token" with 401', (_name, header) => {
+    refused(call(header), /no token provided/i);
+  });
+
+  it('a smoke-test account with a BAD token is refused with 401, not 403 (the read-only guard runs only after the token verifies)', () => {
+    for (const method of ['GET', 'POST', 'DELETE']) {
+      refused(call(`Bearer ${jwt.sign({ ...claims, email: SMOKE }, 'some-other-secret')}`, method), /invalid or expired/i);
+    }
   });
 });
