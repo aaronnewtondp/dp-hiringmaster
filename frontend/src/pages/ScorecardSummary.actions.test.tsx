@@ -153,6 +153,21 @@ describe('Ready for Review — the request and its filters', () => {
     expect(h.list).toHaveBeenCalledTimes(calls);
   });
 
+  it('In-budget only cuts exactly 15% above the top of the band: a figure just inside stays, one just outside goes', async () => {
+    // Band 10-20: the allowance runs to 23. Band "10 - 12 LPA" (free text, the largest number counts): to 13.8.
+    h.list.mockResolvedValue({ data: { applications: [
+      row('A9030', { role_ctc_band: '10-20', candidate_expected_ctc: 20 }),                 // at the top of the band
+      row('A9031', { role_ctc_band: '10-20', candidate_expected_ctc: 22.9 }),               // inside the allowance
+      row('A9032', { role_ctc_band: '10-20', candidate_expected_ctc: 23.5 }),               // outside it
+      row('A9033', { role_ctc_band: '10 - 12 LPA', candidate_expected_ctc: 13.7 }),         // inside
+      row('A9034', { role_ctc_band: '10 - 12 LPA', candidate_expected_ctc: 13.9 }),         // outside
+    ] } });
+    mount();
+    await screen.findByText('Test Candidate A9030');
+    fireEvent.click(screen.getByRole('button', { name: 'In-budget only' }));
+    expect(names().slice().sort()).toEqual(['Test Candidate A9030', 'Test Candidate A9031', 'Test Candidate A9033']);
+  });
+
   it('arriving from a role page (?role_id=) filters to that role, says so, and "View all roles" takes the filter away', async () => {
     await showRows({ path: '/?role_id=R9002' });
     await waitFor(() => expect(lastRequest()).toEqual({ ...BASE, role_id: ['R9002'] }));

@@ -122,6 +122,15 @@ describe('Active Candidates — the Unmatched Candidates panel', () => {
     expect(within(r2).getByRole('button', { name: 'Link to role' })).toBeInTheDocument();
   });
 
+  it('a Hiring Manager sees who is unmatched but is given no way to link or delete them', async () => {
+    h.persona = 'hiring_manager';
+    await open(2);
+    expect(await screen.findByText('Test Unmatched 1')).toBeInTheDocument();
+    expect(screen.getByText('u1@example.test')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Link to/ })).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Delete candidate')).not.toBeInTheDocument();
+  });
+
   it('the one-click link posts the suggested role with the Job Application Form channel, drops the row and refreshes the list', async () => {
     await open(2);
     const calls = h.list.mock.calls.length;

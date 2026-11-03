@@ -143,6 +143,13 @@ describe('Active Candidates — the request each filter sends', () => {
     await waitFor(() => expect(lastRequest()).toEqual(BASE));
   });
 
+  it('the Role filter sends every ticked role by id, in the order they were ticked', async () => {
+    await showList();
+    await pick(/^Role/, 'Test Role Beta');
+    fireEvent.click(screen.getByLabelText('Test Role Alpha'));
+    await waitFor(() => expect(lastRequest()).toEqual({ ...BASE, role_id: ['R9002', 'R9001'] }));
+  });
+
   it('Gender: Male and Female send M and F; "Not tagged" sends the literal UNKNOWN (alone, and next to M)', async () => {
     await showList();
     await pick(/^Gender/, 'Male');
@@ -325,6 +332,21 @@ describe('Active Candidates — In-budget only', () => {
     expect(h.list).toHaveBeenCalledTimes(calls);
     fireEvent.click(screen.getByRole('button', { name: 'In-budget only' }));
     expect(names()).toHaveLength(3);
+  });
+
+  it('the cut is exactly 15% above the top of the band: a figure just inside stays, one just outside goes', async () => {
+    // Band 10-20: the allowance runs to 23. Band "10 - 12 LPA" (free text, the largest number counts): to 13.8.
+    h.list.mockResolvedValue({ data: { applications: [
+      app('A9030', { role_ctc_band: '10-20', candidate_expected_ctc: 20 }),                 // at the top of the band
+      app('A9031', { role_ctc_band: '10-20', candidate_expected_ctc: 22.9 }),               // inside the allowance
+      app('A9032', { role_ctc_band: '10-20', candidate_expected_ctc: 23.5 }),               // outside it
+      app('A9033', { role_ctc_band: '10 - 12 LPA', candidate_expected_ctc: 13.7 }),         // inside
+      app('A9034', { role_ctc_band: '10 - 12 LPA', candidate_expected_ctc: 13.9 }),         // outside
+    ] } });
+    mount();
+    await screen.findByText('Test Candidate A9030');
+    fireEvent.click(screen.getByRole('button', { name: 'In-budget only' }));
+    expect(names().slice().sort()).toEqual(['Test Candidate A9030', 'Test Candidate A9031', 'Test Candidate A9033']);
   });
 
   it('never hides a candidate whose band or expected CTC cannot be read (a Hiring Manager gets no band)', async () => {

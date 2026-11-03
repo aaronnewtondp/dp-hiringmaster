@@ -25,6 +25,12 @@ describe('BudgetExceptionModal', () => {
     expect(screen.getByText('A reason is required before shortlisting these candidates.')).toBeInTheDocument();
   });
 
+  it('two candidates is already plural, in the heading and in the sentence under it', () => {
+    mount({ count: 2 });
+    expect(screen.getByRole('heading', { name: '2 candidates are 15%+ over budget' })).toBeInTheDocument();
+    expect(screen.getByText('A reason is required before shortlisting these candidates.')).toBeInTheDocument();
+  });
+
   it('will not shortlist until a reason is chosen, and clicking the disabled button confirms nothing', () => {
     const { onConfirm } = mount();
     expect(shortlist()).toBeDisabled();
