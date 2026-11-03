@@ -404,6 +404,16 @@ describe('GET /workspace', () => {
     expect(h.ensureDraftPlansForOpenRoles).not.toHaveBeenCalled();
     expect(h.getWorkspace).toHaveBeenCalledWith({ userId: 'U-HM', hr: false });
   });
+
+  it('a signed-in user whose persona is neither HR-tier nor hiring_manager (a token from before the "interviewer" persona was merged) is a 403 and nothing runs', async () => {
+    const stale = jwt.sign({ userId: 'U-OLD', email: 'old@example.test', persona: 'interviewer', name: 'Test Interviewer' }, SECRET, { expiresIn: '5m' });
+    const r = await call('GET', '/workspace', { rawToken: stale });
+    expect(r.status).toBe(403);
+    expect(r.json).toEqual({ error: 'Not available' });
+    expect(h.ensureDraftPlansForOpenRoles).not.toHaveBeenCalled();
+    expect(h.maybeRunSourcingCheck).not.toHaveBeenCalled();
+    expect(h.getWorkspace).not.toHaveBeenCalled();
+  });
 });
 
 describe('GET /plans/:roleId (HR-tier sees everything; a Hiring Manager only their own role, redacted)', () => {
