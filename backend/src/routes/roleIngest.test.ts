@@ -124,6 +124,15 @@ describe('the ingest secret', () => {
     expect(h.transaction).not.toHaveBeenCalled();
   });
 
+  it('with ROLE_INGEST_SECRET unset, a request with NO header at all is still 401 (a missing header must never "equal" a missing secret)', async () => {
+    vi.stubEnv('ROLE_INGEST_SECRET', undefined as unknown as string);
+    delete process.env.ROLE_INGEST_SECRET;
+    const r = await ingest(FORM, {});
+    expect(r.status).toBe(401);
+    expect(h.queryOne).not.toHaveBeenCalled();
+    expect(h.transaction).not.toHaveBeenCalled();
+  });
+
   it('the right secret is accepted', async () => {
     expect((await ingest(FORM)).status).toBe(201);
   });

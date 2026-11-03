@@ -141,6 +141,13 @@ describe('the ingest secret', () => {
     expect(h.transaction).not.toHaveBeenCalled();
   });
 
+  it('with CANDIDATE_INGEST_SECRET unset, a request with NO header at all is still 401 (a missing header must never "equal" a missing secret)', async () => {
+    delete process.env.CANDIDATE_INGEST_SECRET;
+    const r = await ingest(FORM, {});
+    expect(r.status).toBe(401);
+    expect(h.transaction).not.toHaveBeenCalled();
+  });
+
   it('with the secret set to an empty string, an empty header is still rejected', async () => {
     vi.stubEnv('CANDIDATE_INGEST_SECRET', '');
     const r = await ingest(FORM, { 'x-ingest-secret': '' });
