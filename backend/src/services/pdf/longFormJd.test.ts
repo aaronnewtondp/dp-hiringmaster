@@ -225,6 +225,24 @@ describe('renderLongFormJd: the header card', () => {
     for (const tag of tags) expect(t).toContain(squash(tag.text.toUpperCase()));
   });
 
+  describe('a tag takes the blue or the green chip colours from its isGreen flag (the long-standing skill-chip colours)', () => {
+    const C = LONG_JD_COLORS;
+    it('a blue tag draws the blue chip fill and text colour and none of the green ones', async () => {
+      const s = streams(await render(role(), content({ tags: [{ text: 'Only Blue', isGreen: false }] })));
+      expect(s).toContain(fill(C.tagBlue));
+      expect(s).toContain(fill(C.tagBlueTxt));
+      expect(s).not.toContain(fill(C.tagGreen));
+      expect(s).not.toContain(fill(C.tagGreenTxt));
+    });
+    it('a green tag draws the green chip fill and text colour and none of the blue ones', async () => {
+      const s = streams(await render(role(), content({ tags: [{ text: 'Only Green', isGreen: true }] })));
+      expect(s).toContain(fill(C.tagGreen));
+      expect(s).toContain(fill(C.tagGreenTxt));
+      expect(s).not.toContain(fill(C.tagBlue));
+      expect(s).not.toContain(fill(C.tagBlueTxt));
+    });
+  });
+
   it('with no tags the card still renders', async () => {
     const buf = await render(role(), content({ tags: [] }));
     expect(pages(buf)).toBe(1);
@@ -269,18 +287,24 @@ describe('renderLongFormJd: the header card', () => {
 });
 
 describe('renderLongFormJd: the variant sets the header gradient', () => {
+  // The band loop runs from the top colour (first band) to the bottom colour (last band, t = 1 is exactly the second hex), so both ends of a variant's pair are in the file.
   const firstTop = (v: 'tech' | 'infra') => fill(v === 'tech' ? LONG_JD_COLORS.headerTech[0] : LONG_JD_COLORS.headerInfra[0]);
+  const lastBottom = (v: 'tech' | 'infra') => fill(v === 'tech' ? LONG_JD_COLORS.headerTech[1] : LONG_JD_COLORS.headerInfra[1]);
 
   it('tech uses the blue gradient and not the green one', async () => {
     const s = streams(await render(role(), content({ variant: 'tech' }), 'tech'));
     expect(s).toContain(firstTop('tech'));
+    expect(s).toContain(lastBottom('tech'));
     expect(s).not.toContain(firstTop('infra'));
+    expect(s).not.toContain(lastBottom('infra'));
   });
 
   it('infra uses the green gradient and not the blue one', async () => {
     const s = streams(await render(role(), content({ variant: 'infra' }), 'infra'));
     expect(s).toContain(firstTop('infra'));
+    expect(s).toContain(lastBottom('infra'));
     expect(s).not.toContain(firstTop('tech'));
+    expect(s).not.toContain(lastBottom('tech'));
   });
 
   it('the two variants differ only in the header: the same text comes out', async () => {
@@ -309,6 +333,21 @@ describe('renderLongFormJd: the Why Join Us grid', () => {
 
   it('the groups above cover every icon key in theme.ts (a new icon must be added to a group)', () => {
     expect([...new Set(ICON_GROUPS.flat())].sort()).toEqual([...WHY_ICON_KEYS].sort());
+  });
+
+  describe('a cell is light blue or light green according to its isGreen flag', () => {
+    // No highlight quote: its box could use one of the same colours and hide a swap.
+    const all = (isGreen: boolean) => why(['pay', 'impact', 'growth', 'team']).map(i => ({ ...i, isGreen }));
+    it('four blue cells draw the light blue fill and no light green one', async () => {
+      const s = streams(await render(role(), content({ highlightQuote: null, whyJoinUs: all(false) })));
+      expect(s).toContain(fill(LONG_JD_COLORS.lightBlue));
+      expect(s).not.toContain(fill(LONG_JD_COLORS.lightGreen));
+    });
+    it('four green cells draw the light green fill and no light blue one', async () => {
+      const s = streams(await render(role(), content({ highlightQuote: null, whyJoinUs: all(true) })));
+      expect(s).toContain(fill(LONG_JD_COLORS.lightGreen));
+      expect(s).not.toContain(fill(LONG_JD_COLORS.lightBlue));
+    });
   });
 
   it('the dollar sign of the pay icon is drawn as text (it cannot sit inside the mirrored group)', async () => {
