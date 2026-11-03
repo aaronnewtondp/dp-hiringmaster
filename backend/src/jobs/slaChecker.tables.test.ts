@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// slaChecker.ts imports the database module. These tests only read its constants and tables, so the module is replaced: nothing here can open a connection.
+vi.mock('../db/index.js', () => ({ query: vi.fn(), queryOne: vi.fn(), transaction: vi.fn(), pool: {} }));
+
 import {
   tieredStandardHours,
   BREACH_IDLE_HOURS, BREACH_STANDARD_HOURS, BREACH_ASSIGNMENT_FEEDBACK_HOURS, HIGH_SCORE_THRESHOLD, BREACH_HIGH_SCORE_HOURS, LEADERSHIP_ESCALATION_HOURS,
