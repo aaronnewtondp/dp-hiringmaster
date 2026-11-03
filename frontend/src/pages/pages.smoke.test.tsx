@@ -29,6 +29,7 @@ const h = vi.hoisted(() => {
     appHm: 'Hm Alpha',          // hiring_manager_name on the application and on the role
     selfEditable: false,        // User Management: the signed-in user's own row carries a persona that has buttons
     google: 'ok',               // how POST /auth/google answers: 'ok' | 'invalid' | 'down'
+    unmatched: false,           // Candidates: one candidate with no application, in the Unmatched Candidates panel
   };
   // A plain function that records its arguments and answers asynchronously — a failing answer throws (never a vi.fn() rejection, which vitest reports as unhandled).
   const rec = (name: string, answer: (...a: Call) => unknown) => (...a: Call) => { (calls[name] ||= []).push(a); return Promise.resolve().then(() => answer(...a)); };
@@ -92,7 +93,9 @@ const h = vi.hoisted(() => {
     },
     candidatesApi: {
       list: rec('candidates.list', () => ({ data: { candidates: [{ ...candidate(), id: 'C9003', full_name: 'Synthetic Archived', applications: [app({ id: 'A9003', status: 'Rejected', stage: 'Interview Round 1', ai_fit_score: 66 })] }], total: 1 } })),
-      unmatched: rec('candidates.unmatched', () => ({ data: { submissions: [], total: 0 } })),
+      unmatched: rec('candidates.unmatched', () => state.unmatched
+        ? ({ data: { submissions: [{ candidate_id: 'C9010', full_name: 'Synthetic Unlinked', email: 'unlinked@example.test', submitted_text: 'Synthetic Role Title', created_at: '2026-10-20T00:00:00Z', suggested_role_id: 'R001', suggested_role_title: 'Smoke Test Engineer' }], total: 1 } })
+        : ({ data: { submissions: [], total: 0 } })),
       get: rec('candidates.get', () => ({ data: { candidate: candidate(), applications: [app()] } })),
       activity: rec('candidates.activity', () => ({ data: { activity: [] } })),
     },
@@ -199,7 +202,7 @@ const present = (el: HTMLElement | null) => el !== null;
 
 beforeEach(() => {
   for (const k of Object.keys(h.calls)) delete h.calls[k];
-  Object.assign(h.state, { persona: 'hr_recruiter', sourcingOn: false, roleStatus: 'Draft', appStage: 'Interview Round 1', appHm: 'Hm Alpha', selfEditable: false, google: 'ok' });
+  Object.assign(h.state, { persona: 'hr_recruiter', sourcingOn: false, roleStatus: 'Draft', appStage: 'Interview Round 1', appHm: 'Hm Alpha', selfEditable: false, google: 'ok', unmatched: false });
   localStorage.clear(); sessionStorage.clear();
   vi.mocked(toast.error).mockClear(); vi.mocked(toast.success).mockClear();
   vi.useFakeTimers({ toFake: ['Date'] });                                   // "today" is fixed; timers stay real
@@ -298,6 +301,16 @@ describe.each(PERSONAS)('as %s', persona => {
       expect(screen.queryByText(/selected$/)).toBeNull();
       expect(screen.queryByRole('button', { name: /Change (Stage|Status)/ })).toBeNull();
     }
+  });
+
+  it('Candidates — Unmatched Candidates panel: everyone sees the candidate; "Link to role", the suggested-role shortcut and "Delete candidate" only for HR-tier', async () => {
+    h.state.unmatched = true;
+    mountAs(persona, <Candidates />);
+    fireEvent.click(await screen.findByText('Unmatched Candidates (1)'));              // the panel is collapsed on load
+    expect(await screen.findByRole('link', { name: 'Synthetic Unlinked' })).toHaveAttribute('href', '/candidates/C9010');
+    expect(present(screen.queryByRole('button', { name: 'Link to role' }))).toBe(who.hr);
+    expect(present(screen.queryByRole('button', { name: 'Link to Smoke Test Engineer' }))).toBe(who.hr);
+    expect(present(screen.queryByTitle('Delete candidate'))).toBe(who.hr);
   });
 
   // ── TalentPool ─────────────────────────────────────────────────────────────────────────────────

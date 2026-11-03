@@ -49,8 +49,9 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); });
 
 // ═══ The four personas ═══════════════════════════════════════════════════════════════════════════════
-// The single place the frontend decides what each persona is. `canLead` is NOT "is HR-tier": it is false for hr_recruiter, which is what hides the
-// Ready-for-Review stage editor from HR/Admin (see the audit note in the task). Pin every cell, not only the interesting ones.
+// The single place the frontend decides what each persona is. `canLead` is NOT "is HR-tier": it is false for hr_recruiter (HR/Admin), which is what hides the
+// Ready-for-Review stage editor from HR/Admin while Leadership and Super Admin keep it (ScorecardSummary.tsx reads `canLead` for it). The backend's own
+// `isHRTier` is a different, wider check. Pin every cell, not only the interesting ones.
 describe('AuthContext — flag derivation (is / canHR / canLead / isSuperAdmin)', () => {
   const EXPECTED: Record<Persona, { canHR: boolean; canLead: boolean; isSuperAdmin: boolean }> = {
     hr_recruiter:   { canHR: true,  canLead: false, isSuperAdmin: false },
