@@ -178,14 +178,14 @@ describe('the SOURCING_ENABLED switch', () => {
 describe('GET /status (open to every signed-in persona)', () => {
   it.each(['hr_recruiter', 'hiring_manager', 'leadership', 'super_admin'] as const)('answers a %s with exactly the five public settings and nothing else', async persona => {
     h.loadSettings.mockResolvedValue({ ...DEFAULT_SOURCING_SETTINGS, go_live_date: '2026-10-20', shadow_until: '2026-12-01', referral_audience_email: 'all@example.test',
-      digest_recipients: ['secret-list@digitalpaani.com'], daily_digest_enabled: true });
+      digest_recipients: ['digest.hidden@digitalpaani.com'], daily_digest_enabled: true });
     const r = await call('GET', '/status', { as: persona });
     expect(r.status).toBe(200);
     expect(r.json).toEqual({
       enabled: true,
       settings: { go_live_date: '2026-10-20', shadow_until: '2026-12-01', qualified_rule: 'either', volume_min_qualified: 5, referral_audience_email: 'all@example.test' },
     });
-    expect(r.text).not.toContain('secret-list@digitalpaani.com');
+    expect(r.text).not.toContain('digest.hidden@digitalpaani.com');
     expect(r.text).not.toContain('digest_recipients');
   });
 

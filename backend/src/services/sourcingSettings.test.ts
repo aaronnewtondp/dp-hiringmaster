@@ -100,10 +100,10 @@ describe('saveSettings (an invalid value is rejected, never stored and silently 
   });
 
   it('digest recipients are stored lower-cased and de-duplicated (what the read will use), not as typed', async () => {
-    const out = await saveSettings({ digest_recipients: ['  HR@digitalpaani.com ', 'hr@digitalpaani.com', 'Ops@DigitalPaani.com'] }, USER_ID);
+    const out = await saveSettings({ digest_recipients: ['  HR@digitalpaani.com ', 'hr@digitalpaani.com', 'Digest.Test@DigitalPaani.com'] }, USER_ID);
     expect(out.saved).toEqual(['digest_recipients']);
-    expect(upserts[0].value).toEqual(['hr@digitalpaani.com', 'ops@digitalpaani.com']);
-    expect(out.settings.digest_recipients).toEqual(['hr@digitalpaani.com', 'ops@digitalpaani.com']);
+    expect(upserts[0].value).toEqual(['hr@digitalpaani.com', 'digest.test@digitalpaani.com']);
+    expect(out.settings.digest_recipients).toEqual(['hr@digitalpaani.com', 'digest.test@digitalpaani.com']);
   });
 
   it('an empty recipient list is valid (it switches the weekly e-mail off)', async () => {

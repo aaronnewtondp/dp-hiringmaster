@@ -185,13 +185,13 @@ describe('hiringManagers: frontend = backend over one table', () => {
     'Test One, Test Two', 'Test One,Test Two', 'Test One ,Test Two', 'Test One , Test Two', 'Test One; Test Two', 'Test One;Test Two', 'Test One & Test Two',
     'Test One&Test Two', 'Test One and Test Two', 'Test One  and  Test Two', 'Test One AND Test Two', 'Test One And Test Two', 'Test One, and Test Two',
     'A, B, and C', 'A, B and C', 'A; B & C', 'and Test One', 'And Test One', 'Test One and', 'Test One,', ',Test One', ',,Test One,,', 'Test One, , Test Two',
-    'Sandeep Anand', 'Anand and Sandeep', 'Sandeep Anand and Test Two', 'Brandon', 'Alexander', 'Alex', 'Amit Gosain', 'Gosain, Amit', 'Amit',
-    'Mandeep Dagar, Piyush Negi', 'Mandeep Dagar and Piyush Negi', 'First Last-Name, Other O’Brien', 'Test One ; ; Test Two',
+    'Sandra Handley', 'Handley and Sandra', 'Sandra Handley and Test Two', 'Brandon', 'Alexander', 'Alex', 'Pat Quill', 'Quill, Pat', 'Pat',
+    'Pat Quill, Robin Vale', 'Pat Quill and Robin Vale', 'First Last-Name, Other O’Brien', 'Test One ; ; Test Two',
     ',;&', ';', '&', ' ', '', null, undefined, 'x'.repeat(2000), 'Test One, '.repeat(200), ' '.repeat(100_000) + 'Test One',
   ];
   const USERS: Array<string | null | undefined> = [
-    'Test One', 'test one', 'TEST ONE', '  Test   One ', 'Test One', 'Test Two', 'Amit', 'Amit Gosain', 'Gosain', 'Gosain, Amit', 'Alexander', 'Alex',
-    'Piyush Negi', ' Mandeep   Dagar ', 'Anand', 'Sandeep Anand', 'Sandeep', 'A', 'B', 'C', ' ', '', null, undefined,
+    'Test One', 'test one', 'TEST ONE', '  Test   One ', 'Test One', 'Test Two', 'Pat', 'Pat Quill', 'Quill', 'Quill, Pat', 'Alexander', 'Alex',
+    'Robin Vale', ' Pat   Quill ', 'Handley', 'Sandra Handley', 'Sandra', 'A', 'B', 'C', ' ', '', null, undefined,
   ];
 
   it('the frontend file exports the three names the app uses', () => {
@@ -218,12 +218,12 @@ describe('hiringManagers: frontend = backend over one table', () => {
 
   describe('and the rule itself, pinned on the backend copy (the frontend copy must then agree)', () => {
     it.each([
-      ['Mandeep Dagar, Piyush Negi', ['Mandeep Dagar', 'Piyush Negi']],
+      ['Pat Quill, Robin Vale', ['Pat Quill', 'Robin Vale']],
       ['A, B, and C', ['A', 'B', 'C']],
       ['A and B', ['A', 'B']],
       ['A; B & C', ['A', 'B', 'C']],
-      ['Sandeep Anand', ['Sandeep Anand']],
-      ['Gosain, Amit', ['Gosain', 'Amit']],
+      ['Sandra Handley', ['Sandra Handley']],
+      ['Quill, Pat', ['Quill', 'Pat']],
       ['  Test   One  ', ['Test One']],
       [',;&', []], ['', []], [null, []], [undefined, []],
     ] as Array<[string | null | undefined, string[]]>)('%j splits to %j in both', (field, expected) => {
@@ -235,9 +235,9 @@ describe('hiringManagers: frontend = backend over one table', () => {
       ['Test One', 'Test One, Test Two', true],
       ['test  one', 'Test One, Test Two', true],
       ['Test Two', 'Test One and Test Two', true],
-      ['Amit', 'Amit Gosain', false],
+      ['Pat', 'Pat Quill', false],
       ['Alex', 'Alexander', false],
-      ['Gosain, Amit', 'Gosain, Amit', true],
+      ['Quill, Pat', 'Quill, Pat', true],
       ['Test One', null, false], [null, 'Test One', false], ['', 'Test One', false], [' ', 'Test One', false],
     ] as Array<[string | null, string | null, boolean]>)('user %j in field %j is %s in both', (user, field, expected) => {
       expect(isNamedHiringManager(user, field)).toBe(expected);
