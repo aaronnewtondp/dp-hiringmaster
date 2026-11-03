@@ -17,6 +17,14 @@ import { preparePdf, TOO_COMPLEX_REASON } from '../portfolio/acquire/pdf.js';
 import { BudgetTracker } from '../portfolio/acquire/budget.js';
 import { steadyHeartbeat } from '../../testing/timing.js';
 
+// Counts the processes the sandbox starts (every call still goes through to the real `spawn`): "an item whose deadline has passed is not given a process" is
+// a statement about whether one was started, so it is checked by counting, not by how fast an answer came back on a machine of unknown speed.
+const spawned = vi.hoisted(() => ({ calls: 0 }));
+vi.mock('child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return { ...actual, spawn: ((...args: Parameters<typeof actual.spawn>) => { spawned.calls++; return actual.spawn(...args); }) as typeof actual.spawn };
+});
+
 // A stand-in for pdf-parse, loaded by the child process in place of the real module (the child takes the module's path as an argument).
 // It does what the "PDF" bytes say, so each test can make the child spin, run out of heap in one step or in many, die, never answer, throw,
 // flood its pipes or allocate external memory, with no real hostile file needed. Real pdf-parse over real (and real hostile) PDFs is
@@ -176,15 +184,11 @@ describe('readPdfInSandbox — the parent stays responsive and the child is kill
   });
 
   it('an item whose deadline has already passed is not given a process at all', async () => {
-    // A child takes tens of milliseconds just to start; the answer for a deadline that is past comes back without one. The fastest of three tries is
-    // taken, so a process that is descheduled once on a busy machine does not look like a spawn.
-    let fastest = Infinity;
-    for (let attempt = 0; attempt < 3 && fastest >= 100; attempt++) {
-      const started = Date.now();
-      expect(await fakeRead('spin', { deadline: Date.now() - 5 })).toEqual({ kind: 'timeout', limitedBy: 'item' });
-      fastest = Math.min(fastest, Date.now() - started);
-    }
-    expect(fastest).toBeLessThan(100);
+    const before = spawned.calls;
+    expect(await fakeRead('spin', { deadline: Date.now() - 5 })).toEqual({ kind: 'timeout', limitedBy: 'item' });
+    expect(spawned.calls).toBe(before);                 // the answer came back with no child started
+    expect(await fakeRead('x')).toMatchObject({ kind: expect.any(String) });
+    expect(spawned.calls).toBe(before + 1);             // control: an ordinary read does start exactly one
   });
 
   it('a real form-XObject bomb (a 5 KB file whose work doubles with every level: 20 levels take ~14 s and 1.6 GB in-process) is killed at the deadline with the parent alive', async () => {
