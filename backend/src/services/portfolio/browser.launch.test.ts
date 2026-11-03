@@ -278,26 +278,45 @@ describe('closeBrowser / withBrowser — a browser that does not close is killed
     });
   });
 
+  /** Lets real asynchronous work that needs no clock (a dynamic import of a mocked module) finish while the faked clock stands still. */
+  const letRealWorkFinish = async () => { for (let i = 0; i < 10; i++) await new Promise<void>(resolve => setImmediate(resolve)); };
+
   describe('a close that never answers', () => {
     it('closeBrowser kills the process with SIGKILL once the limit has passed, and returns', async () => {
+      // The limit is 40 ms on a FAKED clock: nothing sleeps, so how fast or busy this machine is cannot change the answer.
+      vi.useFakeTimers();
       const b = fake({ close: NEVER });
-      const started = Date.now();
-      expect(await closeBrowser(b as never, 40)).toBe('killed');
-      expect(Date.now() - started).toBeGreaterThanOrEqual(35);
-      expect(Date.now() - started).toBeLessThan(1500);
+      let ended: string | undefined;
+      const closing = closeBrowser(b as never, 40).then(how => { ended = how; return how; });
+      try {
+        await vi.advanceTimersByTimeAsync(39);
+        expect(ended).toBeUndefined();                    // not given up on early...
+        expect(b.kill).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(2);
+        expect(ended).toBe('killed');                     // ...and killed once the limit has passed (checked before awaiting: a close that waits for ever fails here, it does not hang)
+      } finally { await vi.runAllTimersAsync(); vi.useRealTimers(); }
+      expect(await closing).toBe('killed');
       expect(b.kill).toHaveBeenCalledTimes(1);
       expect(b.kill).toHaveBeenCalledWith('SIGKILL');
       expect(warn).toHaveBeenCalledTimes(1);
     });
 
     it('withBrowser returns the work\'s result about one limit after the work ended, and the slot is free again (a second review gets in at once)', async () => {
+      // The close limit is 60 ms on a FAKED clock (nothing sleeps): the work ends, the close never answers, and the result arrives once the limit has passed.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
       const b = fake({ close: NEVER });
       h.launch.mockReset().mockResolvedValueOnce(b);
-      const started = Date.now();
-      expect(await withBrowser(async () => 'captured', { closeTimeoutMs: 60 })).toBe('captured');
-      const took = Date.now() - started;
-      expect(took).toBeGreaterThanOrEqual(55);
-      expect(took).toBeLessThan(2000);
+      let result: string | undefined;
+      const running = withBrowser(async () => 'captured', { closeTimeoutMs: 60 }).then(r => { result = r; return r; });
+      try {
+        await letRealWorkFinish();                        // the slot, the (mocked) module import and the work itself: real asynchronous steps that need no clock
+        await vi.advanceTimersByTimeAsync(59);
+        expect(result).toBeUndefined();                   // still waiting for the close: the result is not handed back early
+        expect(b.kill).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(2);
+        expect(result).toBe('captured');                  // about one limit after the work ended (checked before awaiting: it fails here, it does not hang)
+      } finally { await vi.runAllTimersAsync(); vi.useRealTimers(); }
+      expect(await running).toBe('captured');
       expect(b.kill).toHaveBeenCalledWith('SIGKILL');
       expect(isBrowserInUse()).toBe(false);
       h.launch.mockResolvedValueOnce(fake());
@@ -372,11 +391,19 @@ describe('closeBrowser / withBrowser — a browser that does not close is killed
     beforeEach(() => { process.env.PORTFOLIO_BROWSER_WS_ENDPOINT = 'wss://browser.example/devtools'; });
 
     it('a disconnect that never answers is given up on after the limit: never closed or killed (not ours), and the slot is released', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });   // the limit is 40 ms on a FAKED clock: nothing sleeps
       const b = fake({ disconnect: NEVER });
       h.connect.mockReset().mockResolvedValueOnce(b);
-      const started = Date.now();
-      await expect(withBrowser(async () => 'x', { closeTimeoutMs: 40 })).resolves.toBe('x');
-      expect(Date.now() - started).toBeGreaterThanOrEqual(35);
+      let result: string | undefined;
+      const running = withBrowser(async () => 'x', { closeTimeoutMs: 40 }).then(r => { result = r; return r; });
+      try {
+        await letRealWorkFinish();
+        await vi.advanceTimersByTimeAsync(39);
+        expect(result).toBeUndefined();                   // the disconnect is still being waited for
+        await vi.advanceTimersByTimeAsync(2);
+        expect(result).toBe('x');                         // given up on after the limit (checked before awaiting)
+      } finally { await vi.runAllTimersAsync(); vi.useRealTimers(); }
+      await expect(running).resolves.toBe('x');
       expect(b.close).not.toHaveBeenCalled();
       expect(b.kill).not.toHaveBeenCalled();
       expect(isBrowserInUse()).toBe(false);
