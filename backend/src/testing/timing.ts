@@ -108,13 +108,62 @@ export function assertLinear(
   const { factor = 3, floorMs = 20, runs = 3 } = opts;
   run(small);                                                   // warm-up: compiled regular expressions, JIT, caches
   const smallMs = minCpu(() => run(small), runs).ms;
-  const bigMs = minCpu(() => run(big), runs).ms;
   const allowedMs = factor * (big / small) * smallMs + floorMs * hostSlowdown();
+  // The big input is run again only when the first run is close enough to the bound for noise to matter: a run that is already many times over it is a
+  // regression, not a pause for garbage collection, and a quadratic path can take minutes per run (repeating it would only slow the failure down).
+  let bigMs = cpuTimed(() => run(big)).ms;
+  for (let again = 1; again < runs && bigMs > allowedMs && bigMs <= 8 * allowedMs; again++) bigMs = Math.min(bigMs, cpuTimed(() => run(big)).ms);
   expect(
     bigMs,
     `${label}: size ${big} used ${bigMs.toFixed(1)} ms of CPU, size ${small} used ${smallMs.toFixed(1)} ms; linear scaling allows ${allowedMs.toFixed(1)} ms`,
   ).toBeLessThanOrEqual(allowedMs);
   return { smallMs, bigMs, allowedMs };
+}
+
+/**
+ * `assertLinear` for "this input family stays linear": `make(size)` builds the input (both are built BEFORE anything is measured, so building is never counted),
+ * `run(input)` is the code under test. Also holds the big input to an absolute `scaled(backstopMs)`, for a path that is linear but a hundred times slower than
+ * it was. (A fixed millisecond bound alone is blind to a quadratic walk made of native searches that costs 0.9 s where the bound is 1 s.)
+ */
+export function assertLinearOn<I>(
+  label: string,
+  make: (size: number) => I,
+  run: (input: I) => unknown,
+  small: number,
+  big: number,
+  opts: { backstopMs?: number; runs?: number; factor?: number } = {},
+): { smallMs: number; bigMs: number; allowedMs: number } {
+  const { backstopMs = 1000, runs = 3, factor } = opts;
+  const inputs = new Map<number, I>([[small, make(small)], [big, make(big)]]);
+  const r = assertLinear(label, size => run(inputs.get(size) as I), small, big, { runs, factor });
+  expect(r.bigMs, `${label}: the big input alone`).toBeLessThan(scaled(backstopMs));
+  return r;
+}
+
+// ─── "this is not slow" (absolute, in CPU time, scaled to the machine) ───────────────────────────────────────────
+
+/**
+ * Runs `work` and fails if it used more than `boundMs` of this process's CPU time, scaled to the machine (`scaled`). For code that is synchronous on this
+ * thread: the bound exists to catch a quadratic pass or catastrophic backtracking (seconds or minutes on these inputs), so it is set at 5x or more above what
+ * the code costs, and neither a descheduled process nor a slower runner can fail it. Set TIMING_DEBUG=1 to print every reading (label, cost, bound).
+ */
+export function expectCpuUnder<T>(boundMs: number, work: () => T, label = 'work'): T {
+  const { value, ms } = cpuTimed(work);
+  report(label, ms, scaled(boundMs));
+  expect(ms, `${label}: used ${ms.toFixed(1)} ms of CPU, the bound is ${scaled(boundMs).toFixed(0)} ms`).toBeLessThan(scaled(boundMs));
+  return value;
+}
+
+/** expectCpuUnder for work that returns a promise (the CPU of THIS process: a child process's work is not in it, so use it for in-process passes). */
+export async function expectCpuUnderAsync<T>(boundMs: number, work: () => Promise<T>, label = 'work'): Promise<T> {
+  const { value, ms } = await cpuTimedAsync(work);
+  report(label, ms, scaled(boundMs));
+  expect(ms, `${label}: used ${ms.toFixed(1)} ms of CPU, the bound is ${scaled(boundMs).toFixed(0)} ms`).toBeLessThan(scaled(boundMs));
+  return value;
+}
+
+function report(label: string, ms: number, bound: number): void {
+  if (process.env.TIMING_DEBUG) process.stderr.write(`[timing] ${label}: ${ms.toFixed(1)} ms of ${bound.toFixed(0)} ms\n`);
 }
 
 // ─── is this thread's event loop getting its turns? ──────────────────────────────────────────────────────────────
