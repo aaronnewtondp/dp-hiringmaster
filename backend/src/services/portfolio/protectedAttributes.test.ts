@@ -3,6 +3,7 @@ import {
   candidateNameSignal, filterProtectedAttributes, findFullPersonName, findProtectedAttribute, maskNameTokens, nameAppears, nameTokens,
   redactPersonalStatements, replaceYearsOfExperience, urlNameText,
 } from './protectedAttributes.js';
+import { expectCpuUnder } from '../../testing/timing.js';
 
 // The adversarial review (finding 1.13): strings that state or infer an attribute of the candidate (207), copied from its corpus, hard-negative and singular-they probe files.
 const REVIEW_LEAKS: string[] = [
@@ -1080,9 +1081,8 @@ describe('legacy contract (the rubric.marketing tests before the swap): filterPr
       'a '.repeat(50_000) + '!', `she is ${'very '.repeat(20_000)}`, `likely ${'in '.repeat(20_000)}`, '(('.repeat(50_000),
       'aged '.repeat(20_000), 'a.'.repeat(60_000), `${'a'.repeat(60)}@`.repeat(1_000), '+'.repeat(100_000), '- '.repeat(100_000),
     ];
-    const started = Date.now();
-    for (const h of hostile) filterProtectedAttributes([h]);
-    expect(Date.now() - started).toBeLessThan(3_000);
+    // CPU time scaled to the machine (testing/timing.ts), not the clock: catastrophic backtracking costs seconds to minutes on these inputs
+    expectCpuUnder(3_000, () => { for (const h of hostile) filterProtectedAttributes([h]); }, 'filterProtectedAttributes over the hostile set');
   });
 });
 

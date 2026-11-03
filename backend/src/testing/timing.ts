@@ -14,6 +14,11 @@
 import { performance } from 'perf_hooks';
 import { expect, vi } from 'vitest';
 
+/** With TIMING_DEBUG=1 every CPU reading is printed with the name of the test it belongs to (how much margin does each bound have on this machine?). */
+function report(ms: number): void {
+  if (process.env.TIMING_DEBUG) process.stderr.write(`[timing] ${ms.toFixed(2)} ms: ${expect.getState().currentTestName ?? '(outside a test)'}\n`);
+}
+
 /** CPU time (user + system, every thread of this process) used so far, in milliseconds. */
 export function cpuNowMs(): number {
   const used = process.cpuUsage();
@@ -24,14 +29,18 @@ export function cpuNowMs(): number {
 export function cpuTimed<T>(work: () => T): { value: T; ms: number } {
   const before = cpuNowMs();
   const value = work();
-  return { value, ms: cpuNowMs() - before };
+  const ms = cpuNowMs() - before;
+  report(ms);
+  return { value, ms };
 }
 
 /** The async form of cpuTimed. (CPU time of THIS process: a child process's work is not in it.) */
 export async function cpuTimedAsync<T>(work: () => Promise<T>): Promise<{ value: T; ms: number }> {
   const before = cpuNowMs();
   const value = await work();
-  return { value, ms: cpuNowMs() - before };
+  const ms = cpuNowMs() - before;
+  report(ms);
+  return { value, ms };
 }
 
 /**
@@ -81,7 +90,8 @@ let slowdown: number | undefined;
 export function hostSlowdown(): number {
   if (slowdown === undefined) {
     referenceWorkload();                                       // warm-up
-    const ms = minCpu(referenceWorkload, 7).ms;
+    let ms = Infinity;                                         // (read straight off the CPU counter: the calibration is not one of the test's own readings)
+    for (let i = 0; i < 7; i++) { const before = cpuNowMs(); referenceWorkload(); ms = Math.min(ms, cpuNowMs() - before); }
     slowdown = Math.min(MAX_SLOWDOWN, Math.max(1, ms / REFERENCE_WORKLOAD_MS));
   }
   return slowdown;
@@ -145,11 +155,10 @@ export function assertLinearOn<I>(
 /**
  * Runs `work` and fails if it used more than `boundMs` of this process's CPU time, scaled to the machine (`scaled`). For code that is synchronous on this
  * thread: the bound exists to catch a quadratic pass or catastrophic backtracking (seconds or minutes on these inputs), so it is set at 5x or more above what
- * the code costs, and neither a descheduled process nor a slower runner can fail it. Set TIMING_DEBUG=1 to print every reading (label, cost, bound).
+ * the code costs, and neither a descheduled process nor a slower runner can fail it.
  */
 export function expectCpuUnder<T>(boundMs: number, work: () => T, label = 'work'): T {
   const { value, ms } = cpuTimed(work);
-  report(label, ms, scaled(boundMs));
   expect(ms, `${label}: used ${ms.toFixed(1)} ms of CPU, the bound is ${scaled(boundMs).toFixed(0)} ms`).toBeLessThan(scaled(boundMs));
   return value;
 }
@@ -157,13 +166,8 @@ export function expectCpuUnder<T>(boundMs: number, work: () => T, label = 'work'
 /** expectCpuUnder for work that returns a promise (the CPU of THIS process: a child process's work is not in it, so use it for in-process passes). */
 export async function expectCpuUnderAsync<T>(boundMs: number, work: () => Promise<T>, label = 'work'): Promise<T> {
   const { value, ms } = await cpuTimedAsync(work);
-  report(label, ms, scaled(boundMs));
   expect(ms, `${label}: used ${ms.toFixed(1)} ms of CPU, the bound is ${scaled(boundMs).toFixed(0)} ms`).toBeLessThan(scaled(boundMs));
   return value;
-}
-
-function report(label: string, ms: number, bound: number): void {
-  if (process.env.TIMING_DEBUG) process.stderr.write(`[timing] ${label}: ${ms.toFixed(1)} ms of ${bound.toFixed(0)} ms\n`);
 }
 
 // ─── is this thread's event loop getting its turns? ──────────────────────────────────────────────────────────────
