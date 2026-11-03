@@ -304,9 +304,11 @@ describe('Active Candidates — the list, count and states', () => {
   });
 
   it('relative dates: "Nd ago" for the application date and a distance for the last update (fixed clock)', async () => {
+    // Only Date is faked and the page is mounted directly: showList() would put the real clock (and so the real date) back.
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);
-    await showList();
+    mount();
+    await screen.findByText('Test Candidate A9001');
     const r1 = rowOf('Test Candidate A9001');
     expect(within(r1).getByText('9d ago')).toBeInTheDocument();
     expect(within(r1).getByText('2 days ago')).toBeInTheDocument();
