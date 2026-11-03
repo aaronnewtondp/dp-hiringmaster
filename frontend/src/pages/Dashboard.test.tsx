@@ -123,6 +123,18 @@ describe('Dashboard — the master filters and what they ask for', () => {
     expect(screen.getByRole('checkbox', { name: 'Test Role Beta' })).toBeInTheDocument();
   });
 
+  it('until the server has answered there is no recruitment mode or role to choose from, and nothing is made up in their place', async () => {
+    filterOptions.mockReturnValue(new Promise(() => {}));
+    mount();
+    await ready();
+    await waitFor(() => expect(filterOptions).toHaveBeenCalledTimes(1));
+    for (const filter of [/^Recruitment Mode/, /^Role(\s|$)/]) {
+      fireEvent.click(screen.getByRole('button', { name: filter }));
+      expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+      fireEvent.mouseDown(document.body);
+    }
+  });
+
   it('hands the same filters to the funnel snapshot, the SLA-by-role chart and Sourcing execution', async () => {
     mount();
     await ready();
@@ -250,6 +262,16 @@ describe('Dashboard — loading and failing', () => {
     expect(await screen.findByText('Failed to load dashboard')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 1, name: 'Dashboard' })).toBeNull();
     expect(screen.queryByTestId('funnel-snapshot')).toBeNull();
+  });
+
+  it('a refresh that fails after the page has loaded also ends in "Failed to load dashboard": the numbers already shown are not kept', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    mount();
+    await ready();
+    dashboardGet.mockImplementation(async () => { throw new Error('Network Error'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60 * 1000); });
+    expect(await screen.findByText('Failed to load dashboard')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Dashboard' })).toBeNull();
   });
 
   it('re-reads the dashboard every 5 minutes, and not before', async () => {

@@ -95,10 +95,17 @@ describe('AgencyDetail — the page', () => {
     first.unmount();
 
     get.mockResolvedValue({ data: { agency: agency({ total_submitted: undefined, total_hired: 2 }) } });
-    mount();
+    const second = mount();
     await ready();
     expect(screen.getByText('0 submitted')).toBeInTheDocument();
     expect(screen.getByText('2 hired')).toBeInTheDocument();
+    second.unmount();
+
+    get.mockResolvedValue({ data: { agency: agency({ total_submitted: 4, total_hired: undefined }) } });
+    mount();
+    await ready();
+    expect(screen.getByText('4 submitted')).toBeInTheDocument();
+    expect(screen.getByText('0 hired')).toBeInTheDocument();
   });
 
   const tones: Array<[string, RegExp]> = [['Active', /bg-green-100/], ['On Hold', /bg-amber-100/], ['Inactive', /bg-gray-100/]];
@@ -129,6 +136,34 @@ describe('AgencyDetail — the page', () => {
     expect(screen.queryByText('Agency not found')).toBeNull();
     resolve({ data: { agency: agency() } });
     expect(await ready()).toBeInTheDocument();
+  });
+});
+
+describe('AgencyDetail — what each section offers to edit', () => {
+  type Kind = 'text' | 'number' | 'select' | 'textarea';
+  const kindOf = (el: Element): Kind => el.tagName === 'SELECT' ? 'select' : el.tagName === 'TEXTAREA' ? 'textarea' : (el as HTMLInputElement).type === 'number' ? 'number' : 'text';
+  const SECTIONS: Array<[string, Array<[string, Kind]>]> = [
+    ['Contact', [['Agency Name', 'text'], ['Contact Name', 'text'], ['Contact Email', 'text'], ['Contact Phone', 'text']]],
+    ['Contract', [['Status', 'select'], ['Replacement Guarantee (days)', 'number']]],
+    ['Commission Tiers', [
+      ['Tier 1 Band', 'text'], ['Tier 1 Rate', 'text'], ['Tier 2 Band', 'text'], ['Tier 2 Rate', 'text'], ['Tier 3 Band', 'text'], ['Tier 3 Rate', 'text'],
+      ['CTC Definition (what the fee is calculated on)', 'textarea'], ['Market Positioning', 'textarea'],
+    ]],
+    ['Replacement Policy', [
+      ['Triggers (what qualifies)', 'textarea'], ['Exclusions (what doesn\'t)', 'textarea'], ['Remedy if no replacement', 'textarea'], ['Conditions to stay valid', 'textarea'],
+    ]],
+    ['Billing and Payment Terms', [
+      ['Invoice Trigger', 'text'], ['Invoice Raised', 'text'], ['Payment Due', 'text'], ['Effective Total Window', 'text'], ['Late Payment Penalty', 'textarea'],
+    ]],
+    ['Notes & Links', [['Specialisations', 'textarea'], ['Agreement Link', 'text'], ['Notes', 'textarea']]],
+  ];
+
+  it.each(SECTIONS)('%s: exactly these fields, in this order, each in the right kind of input', async (title, expected) => {
+    mount();
+    await ready();
+    edit(title);
+    const fields = Array.from(section(title).querySelectorAll('label')).map(l => [l.textContent, kindOf((l.parentElement as HTMLElement).querySelector('input, select, textarea') as Element)]);
+    expect(fields).toEqual(expected);
   });
 });
 

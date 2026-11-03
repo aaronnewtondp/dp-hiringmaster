@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { ROLE_STATUSES, STAGES } from '../types/index.ts';
+import { HIRING_MANAGER_FIELD_HINT } from '../utils/hiringManagers.ts';
 
 // RoleDetail apart from its Sourcing plan (RoleDetail.sourcing.test.tsx has that): who may approve, change the status of, discard or
 // regenerate the JD of a role, what a Hiring Manager is never shown (the CTC band, the benchmark panel), the toasts each outcome of a
@@ -731,7 +732,7 @@ describe('RoleDetail — the Hiring Manager field and users who do not exist', (
     mount();
     await pageReady();
     fireEvent.click(screen.getByTitle('Edit Basic Info'));
-    expect(screen.getByText(/Separate them with a comma/)).toBeInTheDocument();
+    expect(screen.getByText(HIRING_MANAGER_FIELD_HINT)).toBeInTheDocument();
   });
 });
 
