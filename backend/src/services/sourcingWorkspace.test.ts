@@ -29,13 +29,15 @@ const planRow = (over: Partial<PlanRow> & { role_id: string }): PlanRow => ({
 let plans: PlanRow[];
 let apps: Array<{ role_id: string; shortlisted_at: Date | null; scored_at: Date | null }>;
 let hmName: string | null;
+let settingRows: Array<{ key: string; value: unknown }>;
 
 beforeEach(() => {
   plans = [];
   apps = [];
   hmName = 'Test Manager';
+  settingRows = [];
   h.query.mockReset().mockImplementation(async (sql: string) => {
-    if (sql.includes('SELECT key, value FROM sourcing_settings')) return [];
+    if (sql.includes('SELECT key, value FROM sourcing_settings')) return settingRows;
     if (sql.includes('FROM sourcing_plans p JOIN roles r')) return plans;
     if (sql.includes('FROM applications a')) return apps;
     return [];
@@ -226,6 +228,43 @@ describe('getWorkspace: counts, target and "behind"', () => {
     const appCall = h.query.mock.calls.find(c => String(c[0]).includes('FROM applications a'))!;
     expect((appCall[1] as unknown[])[0]).toEqual(['R1', 'R2']);                                    // not the P3 role, not the draft
     expect(((appCall[1] as unknown[])[1] as Date).toISOString()).toBe(new Date(NOW.getTime() - 21 * 86400000).toISOString());
+  });
+
+  describe('the qualified count follows the settings, not constants', () => {
+    it('volume_window_days sets the window: with 14 days an application that qualified 10 days ago counts, with the default 7 it does not', async () => {
+      plans = [planRow({ role_id: 'R1', priority: 'P0' })];
+      apps = [{ role_id: 'R1', shortlisted_at: shortlistedDaysAgo(10), scored_at: null }];
+      expect((await getWorkspace(HR, NOW)).roles[0].qualified).toBe(0);
+      settingRows = [{ key: 'volume_window_days', value: 14 }];
+      expect((await getWorkspace(HR, NOW)).roles[0].qualified).toBe(1);
+    });
+
+    it('qualified_rule decides what qualifies: "shortlisted" ignores a candidate who was only scored, "scored" ignores one who was only shortlisted, "either" counts both', async () => {
+      plans = [planRow({ role_id: 'R1', priority: 'P0' })];
+      apps = [
+        { role_id: 'R1', shortlisted_at: shortlistedDaysAgo(1), scored_at: null },                // shortlisted only
+        { role_id: 'R1', shortlisted_at: null, scored_at: shortlistedDaysAgo(2) },                // scored only
+      ];
+      const qualifiedWith = async (rule: string) => {
+        settingRows = [{ key: 'qualified_rule', value: rule }];
+        return (await getWorkspace(HR, NOW)).roles[0].qualified;
+      };
+      expect(await qualifiedWith('either')).toBe(2);
+      expect(await qualifiedWith('shortlisted')).toBe(1);
+      expect(await qualifiedWith('scored')).toBe(1);
+    });
+
+    it('volume_min_qualified is the default target of a P0/P1 role, and the "behind" line moves with it', async () => {
+      plans = [planRow({ role_id: 'R1', priority: 'P1' })];
+      apps = [
+        { role_id: 'R1', shortlisted_at: shortlistedDaysAgo(1), scored_at: null },
+        { role_id: 'R1', shortlisted_at: shortlistedDaysAgo(2), scored_at: null },
+      ];
+      settingRows = [{ key: 'volume_min_qualified', value: 2 }];
+      expect((await getWorkspace(HR, NOW)).roles[0]).toMatchObject({ target: 2, qualified: 2, behind: false });
+      settingRows = [{ key: 'volume_min_qualified', value: 3 }];
+      expect((await getWorkspace(HR, NOW)).roles[0]).toMatchObject({ target: 3, qualified: 2, behind: true });
+    });
   });
 
   it('a Hiring Manager\'s application lookup is limited to their own roles', async () => {
