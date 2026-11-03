@@ -490,6 +490,160 @@ describe('GET /plans/:roleId (HR-tier sees everything; a Hiring Manager only the
   });
 });
 
+// ─── GET /queue: what the My Tasks "Sourcing" box shows (the same for every HR-tier user) ─────────────────
+describe('GET /queue', () => {
+  const NOW = new Date('2026-10-14T06:00:00Z');                       // 11:30 IST on 2026-10-14
+  type Rows = {
+    toActivate: unknown[]; due: unknown[]; exceptions: unknown[]; counts: unknown; volApps: unknown[]; activePlans: unknown[];
+  };
+  let rows: Rows;
+  const serve = () => {
+    h.query.mockImplementation(async (sql: string) => {
+      if (sql.includes("WHERE p.status = 'draft' AND r.status = ANY")) return rows.toActivate;
+      if (sql.includes('FROM sourcing_commitments c JOIN')) return rows.due;
+      if (sql.includes('FROM sourcing_exceptions e JOIN sourcing_plans p')) return rows.exceptions;
+      if (sql.includes('FROM applications a')) return rows.volApps;
+      if (sql.includes('p.weekly_qualified_target AS target FROM sourcing_plans p JOIN roles r')) return rows.activePlans;
+      return [];
+    });
+    h.queryOne.mockImplementation(async (sql: string) => (sql.includes("count(*) FILTER (WHERE e.status = 'snoozed'") ? rows.counts : null));
+  };
+  const exception = (id: string, role_id: string, severity: number, over: Record<string, unknown> = {}) => ({
+    id, plan_id: '5' + role_id.slice(1), role_id, title: `Title ${role_id}`, priority: 'P1', channel: 'LinkedIn', type: 'COMMITMENT_OVERDUE', severity,
+    detected_at: '2026-10-11T06:00:00Z', evidence: { count: 1, overdue: [{ title: 'Log the post', due: '2026-10-09', days_overdue: 5 }] }, ...over,
+  });
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+    rows = { toActivate: [], due: [], exceptions: [], counts: { snoozed: '0', blocked: '0', active_plans: '0' }, volApps: [], activePlans: [] };
+    serve();
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('an empty system answers an empty queue with the IST date, zero counts and the engine run first', async () => {
+    const r = await call('GET', '/queue');
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({
+      enabled: true, today: '2026-10-14', plans_to_activate: [], due: [], exceptions: [], exception_count: 0,
+      snoozed_count: 0, blocked_count: 0, active_plans: 0, volume: [], volume_ok: 0,
+    });
+    expect(h.maybeRunSourcingCheck).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['hr_recruiter', 'leadership', 'super_admin'] as const)('a %s gets the same queue: there is no "mine" and no scope', async persona => {
+    rows.counts = { snoozed: '1', blocked: '2', active_plans: '3' };
+    serve();
+    const r = await call('GET', '/queue?scope=mine', { as: persona });
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ snoozed_count: 1, blocked_count: 2, active_plans: 3 });
+    expect(h.query.mock.calls.every(c => !String(c[0]).includes('owner_user_id'))).toBe(true);
+  });
+
+  it('plans waiting for activation are passed through as they come (already ordered by the database)', async () => {
+    rows.toActivate = [{ plan_id: '7', role_id: 'R7', title: 'Synthetic Seven', priority: 'P0', approval_date: '2026-10-12' }, { plan_id: '8', role_id: 'R8', title: 'Synthetic Eight', priority: 'P1', approval_date: null }];
+    serve();
+    expect((await call('GET', '/queue')).json!.plans_to_activate).toEqual(rows.toActivate);
+  });
+
+  it('a commitment is overdue once its due time has passed (not just its day), and its day is the IST day', async () => {
+    const due = (id: string, due_at: string) => ({ id, plan_id: '501', role_id: 'R1', title: 'T1', priority: 'P0', channel: 'LinkedIn', kind: 'renew_posting', ctitle: `Renew ${id}`, due_at });
+    rows.due = [due('1', '2026-10-13T00:00:00Z'), due('2', '2026-10-14T05:59:59Z'), due('3', '2026-10-14T06:00:00Z'), due('4', '2026-10-14T18:29:59Z')];
+    serve();
+    const out = (await call('GET', '/queue')).json!.due as Array<Record<string, unknown>>;
+    expect(out.map(d => [d.id, d.overdue, d.due_date])).toEqual([['1', true, '2026-10-13'], ['2', true, '2026-10-14'], ['3', false, '2026-10-14'], ['4', false, '2026-10-14']]);
+    expect(out[0]).toEqual({ id: '1', plan_id: '501', role_id: 'R1', role_title: 'T1', priority: 'P0', channel: 'LinkedIn', kind: 'renew_posting', title: 'Renew 1', due_date: '2026-10-13', overdue: true });
+  });
+
+  it('days are IST days: 20:00 UTC is already the next day in India, for "today" and for a commitment\'s due date', async () => {
+    vi.setSystemTime(new Date('2026-10-14T20:00:00Z'));                     // 01:30 IST on 15 Oct
+    rows.due = [{ id: '1', plan_id: '501', role_id: 'R1', title: 'T1', priority: 'P0', channel: 'LinkedIn', kind: 'renew_posting', ctitle: 'Renew', due_at: '2026-10-14T19:00:00Z' }];   // 00:30 IST on 15 Oct
+    serve();
+    const j = (await call('GET', '/queue')).json!;
+    expect(j.today).toBe('2026-10-15');
+    expect((j.due as Array<Record<string, unknown>>)[0]).toMatchObject({ due_date: '2026-10-15', overdue: true });
+  });
+
+  it('open exceptions are grouped by role, the role with the worst exception first, and counted', async () => {
+    rows.exceptions = [exception('9', 'R2', 40), exception('10', 'R1', 30), exception('11', 'R1', 50), exception('12', 'R3', 10)];
+    serve();
+    const j = (await call('GET', '/queue')).json!;
+    expect(j.exception_count).toBe(4);
+    const groups = j.exceptions as Array<{ role_id: string; severity: number; items: Array<Record<string, unknown>> }>;
+    expect(groups.map(g => [g.role_id, g.severity, g.items.map(i => i.id)])).toEqual([['R1', 50, ['10', '11']], ['R2', 40, ['9']], ['R3', 10, ['12']]]);
+    expect(groups[0]).toMatchObject({ title: 'Title R1', priority: 'P1' });
+  });
+
+  it('each exception carries its age in whole days and the plain-language text, and none of the raw evidence', async () => {
+    rows.exceptions = [exception('9', 'R1', 30)];                           // detected 3 days before NOW
+    serve();
+    const item = ((await call('GET', '/queue')).json!.exceptions as Array<{ items: Array<Record<string, unknown>> }>)[0].items[0];
+    expect(item).toMatchObject({ id: '9', plan_id: '51', channel: 'LinkedIn', type: 'COMMITMENT_OVERDUE', severity: 30, age_days: 3 });
+    expect(String(item.committed)).toContain('Log the post');
+    expect(String(item.happened)).toContain('5 days overdue');
+    expect(String(item.next_action).length).toBeGreaterThan(0);
+    expect(item).not.toHaveProperty('evidence');
+  });
+
+  it('snoozed, blocked and active-plan counts arrive as numbers', async () => {
+    rows.counts = { snoozed: '4', blocked: '1', active_plans: '12' };
+    serve();
+    expect((await call('GET', '/queue')).json).toMatchObject({ snoozed_count: 4, blocked_count: 1, active_plans: 12 });
+  });
+
+  it('a missing counts row reads as zeros', async () => {
+    rows.counts = null;
+    serve();
+    expect((await call('GET', '/queue')).json).toMatchObject({ snoozed_count: 0, blocked_count: 0, active_plans: 0 });
+  });
+
+  describe('the volume lines: qualified in the settings window against the target in force', () => {
+    const app = (role_id: string, daysAgo: number) => ({ role_id, shortlisted_at: new Date(NOW.getTime() - daysAgo * 86400000).toISOString(), scored_at: null });
+
+    it('counts per role, with the role target over the default, and volume_ok counts the roles at or above their target', async () => {
+      rows.activePlans = [
+        { role_id: 'R1', title: 'T1', priority: 'P0', target: null },        // default 5
+        { role_id: 'R2', title: 'T2', priority: 'P3', target: 2 },           // own target 2
+        { role_id: 'R3', title: 'T3', priority: 'P1', target: null },        // default 5, nobody qualified
+      ];
+      rows.volApps = [...[1, 2, 3, 4, 5].map(d => app('R1', d)), app('R1', 9), app('R2', 1), app('R2', 6)];     // R1: five in the last 7 days (the 9-day one is out)
+      serve();
+      const j = (await call('GET', '/queue')).json!;
+      expect(j.volume).toEqual([
+        { role_id: 'R1', title: 'T1', priority: 'P0', min: 5, qualified: 5 },
+        { role_id: 'R2', title: 'T2', priority: 'P3', min: 2, qualified: 2 },
+        { role_id: 'R3', title: 'T3', priority: 'P1', min: 5, qualified: 0 },
+      ]);
+      expect(j.volume_ok).toBe(2);
+    });
+
+    it('one short of the target is not ok; the settings decide the default target and the window', async () => {
+      rows.activePlans = [{ role_id: 'R1', title: 'T1', priority: 'P1', target: null }];
+      rows.volApps = [app('R1', 1), app('R1', 10)];
+      h.loadSettings.mockResolvedValue({ ...DEFAULT_SOURCING_SETTINGS, volume_min_qualified: 2 });
+      serve();
+      expect((await call('GET', '/queue')).json).toMatchObject({ volume: [{ min: 2, qualified: 1 }], volume_ok: 0 });
+      h.loadSettings.mockResolvedValue({ ...DEFAULT_SOURCING_SETTINGS, volume_min_qualified: 2, volume_window_days: 14 });
+      expect((await call('GET', '/queue')).json).toMatchObject({ volume: [{ min: 2, qualified: 2 }], volume_ok: 1 });
+    });
+
+    it('the application lookback is 21 days before now', async () => {
+      await call('GET', '/queue');
+      const lookup = h.query.mock.calls.find(c => String(c[0]).includes('FROM applications a'))!;
+      expect((lookup[1] as Date[])[0].toISOString()).toBe(new Date(NOW.getTime() - 21 * 86400000).toISOString());
+    });
+  });
+
+  it('a failing read is a 500 that names the action and never the internal message', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    h.query.mockRejectedValue(new Error('relation "sourcing_secret_table" does not exist'));
+    const r = await call('GET', '/queue');
+    expect(r.status).toBe(500);
+    expect(r.json).toEqual({ error: 'Loading the sourcing queue failed' });
+    expect(r.text).not.toContain('sourcing_secret_table');
+  });
+});
+
 describe('GET /plans/:roleId/advice', () => {
   it.each([['1', true], ['true', true], ['0', false], ['yes', false], ['', false]])('?refresh=%j asks for a new answer: %s', async (value, refresh) => {
     h.getAdvice.mockResolvedValue({ headline: 'h', steps: [] });
