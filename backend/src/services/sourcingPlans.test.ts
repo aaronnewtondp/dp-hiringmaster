@@ -18,8 +18,9 @@ vi.mock('../db/index.js', () => ({
 
 import {
   effectiveTarget, redactForHiringManager, HISTORY_LIMIT, SourcingError, validUrl, listPeople, logChange, logChangeQ,
-  ensureDraftPlansForOpenRoles, getPlanView, updatePlan, resolveException, onRoleSaved, type PlanView,
+  ensureDraftPlansForOpenRoles, getPlanView, updatePlan, resolveException, onRoleSaved, syncChannelWeeks, syncChannelWeeksSafe, type PlanView,
 } from './sourcingPlans.js';
+import { endOfIstDay } from '../utils/workingDays.js';
 import { SMOKE_EMAIL_DOMAIN } from '../middleware/auth.js';
 import { DEFAULT_SOURCING_SETTINGS, OPEN_ROLE_STATUSES } from '../utils/sourcingConfig.js';
 import type { JwtPayload } from '../types/index.js';
@@ -637,6 +638,229 @@ describe('getPlanView', () => {
     const hm = redactForHiringManager(hr);
     expect(JSON.stringify(hm)).not.toMatch(/REDACTED_SENTINEL/);
     expect(hm.exceptions[0]).toMatchObject({ resolution_path: 'blocker', blocker_due: '2026-11-01' });
+  });
+
+  describe('the weekly tracker of a channel', () => {
+    // NOW is 2026-10-14 in IST. A tracker anchored on 2026-10-05 has one finished week (5-11 Oct) and the week of 12-18 Oct in progress.
+    const tracked = (over: Record<string, unknown> = {}) => channelRow({ state: 'active', tracker_anchor: '2026-10-05', targets: { weekly_target: 20 }, ...over });
+    const dayRow = (channel: string, d: string, n: string, q: string) => ({ channel, d, n, q });
+    const finishedWeek = { plan_channel_id: '11', week_start: '2026-10-05', week_end: '2026-10-11', target: 20, actual: 22, qualified: 9, partial: false };
+
+    it('a live tracker counts the applications tagged with its channel from the day after the last finished week, and states the target', async () => {
+      const rows = baseRows();
+      rows.channels = [tracked()];
+      rows.weeks = [finishedWeek];
+      rows.days = [
+        dayRow('LinkedIn', '2026-10-12', '3', '1'), dayRow('LinkedIn', '2026-10-13', '2', '2'),
+        dayRow('LinkedIn', '2026-10-09', '9', '9'),            // in the finished week: not part of the running one
+        dayRow('Agency', '2026-10-13', '7', '7'),              // another channel's tag
+      ];
+      serve(rows);
+      const t = (await getPlanView('R9001', NOW))!.channels[0].tracker;
+      expect(t.anchor).toBe('2026-10-12');                    // the day after the finished week, not the logged anchor
+      expect(t.running).toEqual({ start: '2026-10-12', end: '2026-10-18', actual: 5, qualified: 3, target: 20 });
+      expect(t.weeks).toEqual([{ week_start: '2026-10-05', week_end: '2026-10-11', target: 20, actual: 22, qualified: 9, met: true, partial: false }]);
+      expect(t.totals).toEqual({ weeks: 1, met: 1, actual: 22, target: 20 });
+    });
+
+    it('a week that fell short is not met (the target is "at least")', async () => {
+      const rows = baseRows();
+      rows.channels = [tracked()];
+      rows.weeks = [{ ...finishedWeek, actual: 19 }, { ...finishedWeek, week_start: '2026-09-28', week_end: '2026-10-04', actual: 20 }];
+      serve(rows);
+      expect((await getPlanView('R9001', NOW))!.channels[0].tracker.weeks.map(w => [w.week_start, w.met])).toEqual([['2026-10-05', false], ['2026-09-28', true]]);
+    });
+
+    it('a channel with no weekly target shows no running week even when it has an anchor', async () => {
+      const rows = baseRows();
+      rows.channels = [tracked({ targets: {} })];
+      serve(rows);
+      const t = (await getPlanView('R9001', NOW))!.channels[0].tracker;
+      expect(t.target).toBeNull();
+      expect(t.running).toBeNull();
+    });
+
+    it('a tracker runs only while its plan is active: on a paused plan there is no anchor, no running week and no day-count query', async () => {
+      const rows = baseRows();
+      rows.plan = { ...rows.plan!, status: 'paused' };
+      rows.channels = [tracked()];
+      serve(rows);
+      const t = (await getPlanView('R9001', NOW))!.channels[0].tracker;
+      expect(t.anchor).toBeNull();
+      expect(t.running).toBeNull();
+      expect(t.target).toBe(20);
+      expect(h.query.mock.calls.some(c => String(c[0]).includes('a.sub_source = ANY'))).toBe(false);
+    });
+
+    it('a channel that is not active has no running week either', async () => {
+      const rows = baseRows();
+      rows.channels = [tracked({ state: 'planned' })];
+      serve(rows);
+      expect((await getPlanView('R9001', NOW))!.channels[0].tracker.running).toBeNull();
+    });
+
+    it.each([
+      ['a string', 'https://example.test/post', 'https://example.test/post'],
+      ['a number', 12345, null],
+      ['an object', { href: 'https://example.test/x' }, null],
+      ['null', null, null],
+    ])('the post link is the config posting_url only when it is a string (%s)', async (_label, value, expected) => {
+      const rows = baseRows();
+      rows.channels = [channelRow({ config: { posting_url: value } })];
+      serve(rows);
+      expect((await getPlanView('R9001', NOW))!.channels[0].tracker.link).toBe(expected);
+    });
+  });
+
+  it('the volume block follows the settings: the window length and the qualified rule', async () => {
+    const rows = baseRows();
+    rows.volumeApps = [
+      { shortlisted_at: new Date('2026-10-04T00:00:00Z'), scored_at: null },                    // 10 days back, shortlisted only
+      { shortlisted_at: null, scored_at: new Date('2026-10-13T00:00:00Z') },                    // yesterday, scored only
+    ];
+    serve(rows);
+    expect((await getPlanView('R9001', NOW))!.volume).toMatchObject({ weekly_qualified: 1, shortlisted: 0, scored: 1 });
+    rows.settings = [{ key: 'volume_window_days', value: 14 }];
+    serve(rows);
+    expect((await getPlanView('R9001', NOW))!.volume).toMatchObject({ weekly_qualified: 2, shortlisted: 1, scored: 1 });
+    rows.settings = [{ key: 'volume_window_days', value: 14 }, { key: 'qualified_rule', value: 'shortlisted' }];
+    serve(rows);
+    expect((await getPlanView('R9001', NOW))!.volume).toMatchObject({ weekly_qualified: 1, rule: 'shortlisted' });
+  });
+
+  it('finishes any tracker week that has ended BEFORE it reads the plan\'s channels (the weekly sync runs first)', async () => {
+    serve(baseRows());
+    await getPlanView('R9001', NOW);
+    const sqls = h.query.mock.calls.map(c => String(c[0]));
+    const sync = sqls.findIndex(s => s.includes('FROM sourcing_plan_channels ch JOIN sourcing_plans p'));
+    const channels = sqls.findIndex(s => s.includes('FROM sourcing_plan_channels WHERE plan_id'));
+    expect(sync).toBeGreaterThanOrEqual(0);
+    expect(sync).toBeLessThan(channels);
+  });
+});
+
+// ─── syncChannelWeeks: one immutable row per finished 7-day window ───────────────────────────────────
+describe('syncChannelWeeks (writes the weeks that have ended, once each)', () => {
+  type SyncRow = { channel_id: string; plan_id: string; role_id: string; channel: string; anchor: string; target_raw: string | null; last_end: string | null };
+  const syncRow = (over: Partial<SyncRow> = {}): SyncRow => ({ channel_id: '11', plan_id: '501', role_id: 'R9001', channel: 'LinkedIn', anchor: '2026-10-05', target_raw: '20', last_end: null, ...over });
+  let channels: SyncRow[];
+  let days: Array<{ d: string; n: string; q: string }>;
+  let insertAnswer: (params: unknown[]) => Array<{ id: string }>;
+  const callsTo = (fragment: string) => h.query.mock.calls.filter(c => String(c[0]).includes(fragment));
+
+  beforeEach(() => {
+    channels = [];
+    days = [];
+    insertAnswer = () => [{ id: '900' }];
+    h.query.mockReset().mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('FROM sourcing_plan_channels ch JOIN sourcing_plans p')) return channels;
+      if (sql.includes('FROM applications a')) return days;
+      if (sql.includes('INSERT INTO sourcing_channel_weeks')) return insertAnswer(params);
+      return [];
+    });
+  });
+
+  it('only looks at live channels of ACTIVE plans that have a tracker anchor, and can be limited to one plan', async () => {
+    await syncChannelWeeks('501', NOW);
+    const sql = String(h.query.mock.calls[0][0]).replace(/\s+/g, ' ');
+    expect(sql).toContain("WHERE p.status = 'active' AND ch.state = 'active' AND ch.tracker_anchor IS NOT NULL AND ($1::bigint IS NULL OR p.id = $1::bigint)");
+    expect(h.query.mock.calls[0][1]).toEqual(['501']);
+    h.query.mockClear();
+    await syncChannelWeeks(null, NOW);
+    expect(h.query.mock.calls[0][1]).toEqual([null]);
+  });
+
+  it('writes one row for a finished week with its target and the day counts inside it, and logs a weekly_result stamped with the end of that IST day', async () => {
+    channels = [syncRow()];
+    days = [{ d: '2026-10-06', n: '4', q: '2' }, { d: '2026-10-09', n: '3', q: '1' }, { d: '2026-10-12', n: '50', q: '50' }];   // the last day is in the week still running
+    expect(await syncChannelWeeks(null, NOW)).toBe(1);
+    expect(callsTo('INSERT INTO sourcing_channel_weeks')).toHaveLength(1);
+    expect(callsTo('INSERT INTO sourcing_channel_weeks')[0][1]).toEqual(['11', '2026-10-05', '2026-10-11', 20, 7, 3]);
+    const log = callsTo('INSERT INTO sourcing_plan_changes');
+    expect(log).toHaveLength(1);
+    const [planId, by, json, reason, at] = log[0][1] as [string, unknown, string, unknown, Date];
+    expect([planId, by, reason]).toEqual(['501', null, null]);
+    expect(JSON.parse(json)).toEqual({ type: 'weekly_result', channel: 'LinkedIn', week_start: '2026-10-05', week_end: '2026-10-11', target: 20, actual: 7, qualified: 3, met: false, partial: false });
+    expect(at.toISOString()).toBe(endOfIstDay('2026-10-11').toISOString());
+  });
+
+  it('a week that reached the target is logged as met (at least the target, not more than it)', async () => {
+    channels = [syncRow({ target_raw: '7' })];
+    days = [{ d: '2026-10-06', n: '4', q: '2' }, { d: '2026-10-09', n: '3', q: '1' }];
+    await syncChannelWeeks(null, NOW);
+    expect(JSON.parse((callsTo('INSERT INTO sourcing_plan_changes')[0][1] as string[])[2])).toMatchObject({ actual: 7, target: 7, met: true });
+  });
+
+  it('every finished week is written, with ONE day-count query spanning the first to the last of them', async () => {
+    channels = [syncRow({ anchor: '2026-09-21' })];                                   // 21-27 Sep, 28 Sep - 4 Oct, 5-11 Oct
+    expect(await syncChannelWeeks(null, NOW)).toBe(3);
+    expect(callsTo('INSERT INTO sourcing_channel_weeks').map(c => (c[1] as unknown[]).slice(1, 3))).toEqual([
+      ['2026-09-21', '2026-09-27'], ['2026-09-28', '2026-10-04'], ['2026-10-05', '2026-10-11'],
+    ]);
+    const dayQueries = callsTo('FROM applications a');
+    expect(dayQueries).toHaveLength(1);
+    expect(dayQueries[0][1]).toEqual(['R9001', 'LinkedIn', '2026-09-21', '2026-10-11']);
+  });
+
+  it('starts the day after the last week already written (a channel closed and reopened never overlaps its earlier weeks)', async () => {
+    channels = [syncRow({ anchor: '2026-09-21', last_end: '2026-10-04' })];
+    expect(await syncChannelWeeks(null, NOW)).toBe(1);
+    expect((callsTo('INSERT INTO sourcing_channel_weeks')[0][1] as unknown[]).slice(0, 3)).toEqual(['11', '2026-10-05', '2026-10-11']);
+  });
+
+  it('a week that is still running (today inside it) writes nothing and asks nothing more', async () => {
+    channels = [syncRow({ anchor: '2026-10-12' })];
+    expect(await syncChannelWeeks(null, NOW)).toBe(0);
+    expect(h.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('a week ends at the end of its last day: on the day after, it is written; on that last day itself, it is not', async () => {
+    channels = [syncRow({ anchor: '2026-10-05' })];
+    expect(await syncChannelWeeks(null, new Date('2026-10-11T12:00:00Z'))).toBe(0);              // 17:30 IST on 11 Oct
+    expect(await syncChannelWeeks(null, new Date('2026-10-11T18:29:59Z'))).toBe(0);              // 23:59:59 IST on 11 Oct
+    expect(await syncChannelWeeks(null, new Date('2026-10-11T18:30:00Z'))).toBe(1);              // 00:00 IST on 12 Oct
+  });
+
+  it.each([['abc'], ['5.5'], ['99999999999'], ['0'], ['-3'], [''], [null]])('a malformed or empty weekly target (%j) skips that channel: nothing is written', async raw => {
+    channels = [syncRow({ target_raw: raw })];
+    expect(await syncChannelWeeks(null, NOW)).toBe(0);
+    expect(h.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('one channel with a malformed target does not stop the others', async () => {
+    channels = [syncRow({ channel_id: '11', target_raw: 'abc' }), syncRow({ channel_id: '12', channel: 'Direct Outreach', target_raw: '10' })];
+    expect(await syncChannelWeeks(null, NOW)).toBe(1);
+    expect(callsTo('INSERT INTO sourcing_channel_weeks')).toHaveLength(1);
+    expect((callsTo('INSERT INTO sourcing_channel_weeks')[0][1] as unknown[])[0]).toBe('12');
+  });
+
+  it('a week that is already recorded (the insert returns no row) is not counted and not logged again', async () => {
+    channels = [syncRow()];
+    insertAnswer = () => [];
+    expect(await syncChannelWeeks(null, NOW)).toBe(0);
+    expect(callsTo('INSERT INTO sourcing_channel_weeks')).toHaveLength(1);
+    expect(callsTo('INSERT INTO sourcing_plan_changes')).toHaveLength(0);
+  });
+
+  it('writes the week with partial = false (only a stop writes a cut-short week)', async () => {
+    channels = [syncRow()];
+    await syncChannelWeeks(null, NOW);
+    expect(String(callsTo('INSERT INTO sourcing_channel_weeks')[0][0])).toContain(', false)');
+    expect(String(callsTo('INSERT INTO sourcing_channel_weeks')[0][0])).toContain('ON CONFLICT (plan_channel_id, week_start) DO NOTHING');
+  });
+
+  describe('syncChannelWeeksSafe', () => {
+    it('returns what the sync returned', async () => {
+      channels = [syncRow()];
+      expect(await syncChannelWeeksSafe(null, NOW)).toBe(1);
+    });
+
+    it('never throws: a failing query is logged and the answer is 0', async () => {
+      const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      h.query.mockRejectedValue(new Error('connection reset'));
+      await expect(syncChannelWeeksSafe('501', NOW)).resolves.toBe(0);
+      expect(err).toHaveBeenCalled();
+    });
   });
 });
 
