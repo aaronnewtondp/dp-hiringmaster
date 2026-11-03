@@ -17,13 +17,26 @@ import { preparePdf, TOO_COMPLEX_REASON } from '../portfolio/acquire/pdf.js';
 import { BudgetTracker } from '../portfolio/acquire/budget.js';
 import { steadyHeartbeat } from '../../testing/timing.js';
 
-// Counts the processes the sandbox starts (every call still goes through to the real `spawn`): "an item whose deadline has passed is not given a process" is
-// a statement about whether one was started, so it is checked by counting, not by how fast an answer came back on a machine of unknown speed.
-const spawned = vi.hoisted(() => ({ calls: 0 }));
+// Counts the processes the sandbox starts and records every signal it sends them (every call still goes through to the real `spawn` and the real `kill`):
+// "an item whose deadline has passed is not given a process" is a statement about whether one was started, and "the child is killed at the deadline" is a
+// statement about WHO killed it, so both are checked by what was called, not by how fast an answer came back on a machine of unknown speed. (Waiting for the
+// pid to vanish cannot tell the parent's SIGKILL from the child's own deadman switch, which ends it a few seconds later anyway.)
+const spawned = vi.hoisted(() => ({ calls: 0, kills: [] as Array<{ pid: number | undefined; signal: string }> }));
 vi.mock('child_process', async importOriginal => {
   const actual = await importOriginal<typeof import('child_process')>();
-  return { ...actual, spawn: ((...args: Parameters<typeof actual.spawn>) => { spawned.calls++; return actual.spawn(...args); }) as typeof actual.spawn };
+  return {
+    ...actual,
+    spawn: ((...args: Parameters<typeof actual.spawn>) => {
+      spawned.calls++;
+      const child = actual.spawn(...args);
+      const kill = child.kill.bind(child);
+      child.kill = ((signal?: NodeJS.Signals | number) => { spawned.kills.push({ pid: child.pid, signal: String(signal ?? 'SIGTERM') }); return kill(signal); }) as typeof child.kill;
+      return child;
+    }) as typeof actual.spawn,
+  };
 });
+/** The signals the sandbox itself has sent to child `pid` since `from` (an index into spawned.kills). */
+const signalsTo = (pid: number, from: number) => spawned.kills.slice(from).filter(k => k.pid === pid).map(k => k.signal);
 
 // A stand-in for pdf-parse, loaded by the child process in place of the real module (the child takes the module's path as an argument).
 // It does what the "PDF" bytes say, so each test can make the child spin, run out of heap in one step or in many, die, never answer, throw,
@@ -171,10 +184,14 @@ describe('readPdfInSandbox — the parent stays responsive and the child is kill
 
   it('the killed child is really gone (SIGKILL, not a polite request)', async () => {
     let pid = 0;
+    const from = spawned.kills.length;
     const r = await fakeRead('spin', { capMs: 1100, memory: { probe: id => { pid = id; return null; }, intervalMs: 20 } });
     expect(r.kind).toBe('timeout');
     expect(pid).toBeGreaterThan(0);
     expect(pid).not.toBe(process.pid);
+    // the PARENT sent SIGKILL, once, in the same turn as the verdict (the child's own deadman switch would also end it, but seconds later, and it is not
+    // what is under test): this does not depend on how long a busy machine takes to reap the process
+    expect(signalsTo(pid, from)).toEqual(['SIGKILL']);
     await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 20_000 });
   });
 

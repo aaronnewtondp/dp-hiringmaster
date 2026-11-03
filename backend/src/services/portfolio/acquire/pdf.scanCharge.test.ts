@@ -10,7 +10,7 @@ import type { PdfReadResult } from './pdfSandbox.js';
 import { MB, OFF_PAGE_BAD, buildPdf, onePage } from './pdf.fixtures.js';
 import { manyStreams, pageWith } from './pdf.cpu.fixtures.js';
 import { deflateSync } from 'zlib';
-import { advancingClock } from '../../../testing/timing.js';
+import { advancingClock, scaled } from '../../../testing/timing.js';
 
 // The fourth review's finding on the content scan (A3): every UNFILTERED stream span was converted to a string and regex-tested with no charge, so a
 // parseable one-page PDF carrying thousands of stream starts that all end at ONE far "endstream" cost (starts x span) of this thread's CPU: 4,000 starts over
@@ -56,8 +56,10 @@ function cpuOf<T>(work: () => T): { value: T; cpuMs: number } {
 }
 
 const SPAN = 7_800_000;
-// The old code took 10.5 s / 2.8 s for these. Anything near a second would mean the charge is not doing its job; the bound leaves room for a loaded machine.
-const CPU_BOUND_MS = 800;
+// The old code took 10.5 s / 2.8 s for these. Anything near a second would mean the charge is not doing its job. The bound is scaled to how fast this machine runs
+// a fixed reference workload (testing/timing.ts: 1 on the laptop it was written on, never more than 6): the code costs 14-57 ms here, so there is a 14x margin on
+// a machine that is the same speed and the same margin on a slower one.
+const CPU_BOUND_MS = scaled(800);
 
 describe('the content scan charges an unfiltered span BEFORE it reads it (the fourth review\'s 4,000 overlapping stream starts)', () => {
   it('4,000 stream starts over one 7.8 MB span: a small fraction of a second of CPU, and the scan says it cannot vouch for the file', () => {
