@@ -24,7 +24,7 @@ function mount() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={qc}><MemoryRouter><Agencies /></MemoryRouter></QueryClientProvider>);
 }
-const row = (name: string) => screen.getByText(name).closest('tr') as HTMLElement;
+const row = (name: string) => screen.getByText(name).closest('tr') as HTMLTableRowElement;
 const cell = (name: string, i: number) => row(name).cells[i];
 // the column positions in the table
 const COL = { name: 0, status: 1, type: 2, tiers: 3, positioning: 4, hires: 5, replacement: 6, billing: 7, agreement: 8 };

@@ -39,7 +39,7 @@ function mount() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={qc}><UserManagement /></QueryClientProvider>);
 }
-const row = (email: string) => screen.getByText(email).closest('tr') as HTMLElement;
+const row = (email: string) => screen.getByText(email).closest('tr') as HTMLTableRowElement;
 const modal = () => screen.getByRole('heading', { name: /^(Add user|Edit user)$/ }).closest('div.fixed') as HTMLElement;
 const inModal = (label: string) => (within(modal()).getByText(label).parentElement as HTMLElement).querySelector('input, select') as HTMLInputElement | HTMLSelectElement;
 const setIn = (label: string, value: string) => fireEvent.change(inModal(label), { target: { value } });

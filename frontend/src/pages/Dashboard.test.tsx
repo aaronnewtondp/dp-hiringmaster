@@ -442,7 +442,7 @@ describe('Dashboard — Aging roles', () => {
     ] as unknown as DashboardData['aging_roles'] }));
     mount();
     await ready();
-    const markerCell = (title: string) => (screen.getByText(title).closest('tr') as HTMLElement).cells[1];
+    const markerCell = (title: string) => (screen.getByText(title).closest('tr') as HTMLTableRowElement).cells[1];
     expect(markerCell('Quiet One').querySelector('svg')).not.toBeNull();
     expect(markerCell('Busy One').querySelector('svg')).toBeNull();
   });
@@ -468,7 +468,7 @@ describe('Dashboard — Low pipeline roles', () => {
     ] as unknown as DashboardData['low_pipeline'] }));
     mount();
     await ready();
-    const cells = (title: string) => Array.from((screen.getByText(title).closest('tr') as HTMLElement).cells).map(c => c.textContent);
+    const cells = (title: string) => Array.from((screen.getByText(title).closest('tr') as HTMLTableRowElement).cells).map(c => c.textContent);
     expect(cells('Thin One')).toEqual(['Thin One', 'P0', 'Ivan Lead', '7', '4', '2', '1']);
     expect(cells('Thin Two')).toEqual(['Thin Two', 'P2', 'Hana Manager', '5', '3', '1', '1']);
     expect(within(sectionCard('Low pipeline roles')).getByRole('link', { name: 'Thin One' })).toHaveAttribute('href', '/roles/R1');

@@ -213,7 +213,7 @@ describe('Roles — loading, links and what a row shows', () => {
   it('shows the openings, the Active Candidates and Active Shortlist counts and the age', async () => {
     mount();
     await screen.findByText('Test Role Alpha');
-    const cells = Array.from((screen.getByText('Test Role Alpha').closest('tr') as HTMLElement).cells).map(c => c.textContent);
+    const cells = Array.from((screen.getByText('Test Role Alpha').closest('tr') as HTMLTableRowElement).cells).map(c => c.textContent);
     expect(cells[1]).toBe('P1');
     expect(cells[2]).toBe('Tech/Devs');
     expect(cells[3]).toBe('Pune');
@@ -231,8 +231,8 @@ describe('Roles — loading, links and what a row shows', () => {
     ] } });
     mount();
     await screen.findByText('Test Role Gamma');
-    const countCell = (title: string) => (screen.getByText(title).closest('tr') as HTMLElement).cells[6];
-    const shortlistCell = (title: string) => (screen.getByText(title).closest('tr') as HTMLElement).cells[7];
+    const countCell = (title: string) => (screen.getByText(title).closest('tr') as HTMLTableRowElement).cells[6];
+    const shortlistCell = (title: string) => (screen.getByText(title).closest('tr') as HTMLTableRowElement).cells[7];
     expect(countCell('Test Role Gamma').textContent).toBe('0');
     expect(countCell('Test Role Gamma').querySelector('span')?.className).toContain('text-red-500');
     expect(shortlistCell('Test Role Gamma').textContent).toBe('0');
@@ -291,7 +291,7 @@ describe('Roles — what each persona sees', () => {
     list.mockResolvedValue({ data: { roles: [role({ ctc_band: undefined })] } });
     mount();
     await screen.findByText('Test Role Alpha');
-    const cells = (screen.getByText('Test Role Alpha').closest('tr') as HTMLElement).cells;
+    const cells = (screen.getByText('Test Role Alpha').closest('tr') as HTMLTableRowElement).cells;
     const headers = screen.getAllByRole('columnheader').map(h => h.textContent);
     expect(cells[headers.findIndex(h => /Salary Range/.test(h ?? ''))].textContent).toBe('—');
   });
@@ -299,12 +299,12 @@ describe('Roles — what each persona sees', () => {
   it('the Hiring Manager\'s rows have one cell fewer than HR-tier\'s (no Salary Range cell)', async () => {
     const hr = mount();
     await screen.findByText('Test Role Alpha');
-    const hrCells = (screen.getByText('Test Role Alpha').closest('tr') as HTMLElement).cells.length;
+    const hrCells = (screen.getByText('Test Role Alpha').closest('tr') as HTMLTableRowElement).cells.length;
     hr.unmount();
     auth.persona = 'hiring_manager';
     mount();
     await screen.findByText('Test Role Alpha');
-    const hmCells = (screen.getByText('Test Role Alpha').closest('tr') as HTMLElement).cells.length;
+    const hmCells = (screen.getByText('Test Role Alpha').closest('tr') as HTMLTableRowElement).cells.length;
     expect(hmCells).toBe(hrCells - 1);
   });
 });
