@@ -193,6 +193,21 @@ describe('small constants and helpers', () => {
       await ensureDraftPlansForOpenRoles('R9001');
       expect(h.query.mock.calls[0][1]).toEqual([OPEN_ROLE_STATUSES, 'R9001']);
     });
+
+    // The mock cannot run SQL, so the clauses that make the parameters mean something are pinned as text: only open roles, only one role when asked,
+    // only roles without a plan, and channels only for the plans just created and only the known channels.
+    it('its SQL really restricts to open roles, to the one role asked for, to roles without a plan, and seeds channels only for the plans just created', async () => {
+      h.query.mockResolvedValueOnce([{ id: '7' }]).mockResolvedValueOnce([]);
+      await ensureDraftPlansForOpenRoles('R9001');
+      const plans = String(h.query.mock.calls[0][0]).replace(/\s+/g, ' ');
+      expect(plans).toContain('r.status = ANY($1::text[])');
+      expect(plans).toContain('($2::text IS NULL OR r.id = $2)');
+      expect(plans).toContain('NOT EXISTS (SELECT 1 FROM sourcing_plans p WHERE p.role_id = r.id)');
+      expect(plans).toContain('ON CONFLICT (role_id) DO NOTHING');
+      const channels = String(h.query.mock.calls[1][0]).replace(/\s+/g, ' ');
+      expect(channels).toContain('WHERE p.id = ANY($1::bigint[]) AND ch = ANY($2::text[])');
+      expect(channels).toContain("'planned'");
+    });
   });
 });
 
@@ -821,6 +836,14 @@ describe('resolveException (catch up / blocker / change strategy)', () => {
         .rejects.toMatchObject({ status: 400, message: 'The blocker owner must be an active user' });
       expect(writes()).toEqual([]);
     });
+
+    it('the owner lookup itself asks for an ACTIVE user with that id (the canned answer above cannot check it)', async () => {
+      withException({}, [['FROM users WHERE id', [{ id: OWNER, name: 'Test Owner' }]]]);
+      await resolveException('900', { path: 'blocker', reason: 'waiting', blocker_due: '2026-10-20', blocker_owner_user_id: OWNER }, USER, NOW);
+      const lookup = h.clientQuery.mock.calls.find(c => String(c[0]).includes('FROM users WHERE id'))!;
+      expect(String(lookup[0])).toContain('is_active = true');
+      expect(lookup[1]).toEqual([OWNER]);
+    });
   });
 
   describe('change_strategy', () => {
@@ -939,6 +962,96 @@ describe('onRoleSaved', () => {
       h.queryOne.mockResolvedValue({ status: 'closed', id: '501' });
       await onRoleSaved(role('Closed – Filled'), role('Closed – Cancelled'), USER.userId);
       expect(h.transaction).not.toHaveBeenCalled();
+    });
+
+    it('a role put On Hold pauses its active plan (clocks stopped) and logs the pause as a system entry', async () => {
+      h.queryOne.mockImplementation(async (sql: string) => (sql.includes("AND status = 'active'") ? { id: '501' } : { status: 'active' }));
+      useClient([
+        ['FROM sourcing_plans WHERE id = $1::bigint FOR UPDATE', [{ id: '501', status: 'active' }]],
+        ['SELECT status FROM roles WHERE id', [{ status: 'On Hold' }]],
+      ]);
+      await onRoleSaved(role('Live – Sourcing'), role('On Hold'), USER.userId);
+      expect(writes().some(s => s.includes("SET status = 'paused', paused_at = NOW()"))).toBe(true);
+      expect(loggedChanges()).toContainEqual({ type: 'paused' });
+    });
+
+    it('a pause is skipped when the role is no longer On Hold by the time the hook takes the lock (a second save put it back)', async () => {
+      h.queryOne.mockImplementation(async (sql: string) => (sql.includes("AND status = 'active'") ? { id: '501' } : { status: 'active' }));
+      useClient([
+        ['FROM sourcing_plans WHERE id = $1::bigint FOR UPDATE', [{ id: '501', status: 'active' }]],
+        ['SELECT status FROM roles WHERE id', [{ status: 'Approved' }]],
+      ]);
+      await onRoleSaved(role('Live – Sourcing'), role('On Hold'), USER.userId);
+      expect(writes()).toEqual([]);
+    });
+
+    it('a role back to an open status resumes its paused plan, moving due dates by the whole days spent paused (3 here) and logging them', async () => {
+      h.queryOne.mockResolvedValue({ status: 'paused' });
+      useClient([
+        ["FROM sourcing_plans WHERE role_id = $1 AND status = 'paused' FOR UPDATE", [{ id: '501', paused_at: '2026-10-11T06:00:00.000Z' }]],
+        ['SELECT status FROM roles WHERE id', [{ status: 'Approved' }]],
+      ]);
+      await onRoleSaved(role('On Hold'), role('Approved'), USER.userId);
+      const shift = h.clientQuery.mock.calls.find(c => String(c[0]).includes('SET due_at = due_at +'))!;
+      expect(shift[1]).toEqual(['501', 3]);
+      const activate = h.clientQuery.mock.calls.find(c => String(c[0]).includes("SET status = 'active', paused_at = NULL"))!;
+      expect(activate[1]).toEqual(['501', 3]);
+      expect(loggedChanges()).toContainEqual({ type: 'resumed', paused_days: 3 });
+    });
+
+    it.each([
+      ['a few seconds', 0, 5_000],
+      ['a few hours', 0, 6 * 3_600_000],
+      ['just under half a day', 0, 0.49 * 86_400_000],
+      ['1.4 days', 1, 1.4 * 86_400_000],
+      ['1.6 days', 2, 1.6 * 86_400_000],
+      ['exactly 5 days', 5, 5 * 86_400_000],
+    ])('the days spent paused are rounded to the nearest whole day (never up): %s moves due dates by %s whole days', async (_label, days, ms) => {
+      h.queryOne.mockResolvedValue({ status: 'paused' });
+      useClient([
+        ["FROM sourcing_plans WHERE role_id = $1 AND status = 'paused' FOR UPDATE", [{ id: '501', paused_at: new Date(NOW.getTime() - ms).toISOString() }]],
+        ['SELECT status FROM roles WHERE id', [{ status: 'Live – Sourcing' }]],
+      ]);
+      await onRoleSaved(role('On Hold'), role('Live – Sourcing'), USER.userId);
+      expect(h.clientQuery.mock.calls.find(c => String(c[0]).includes('SET due_at = due_at +'))![1]).toEqual(['501', days]);
+      expect(loggedChanges()).toContainEqual({ type: 'resumed', paused_days: days });
+    });
+
+    it('a paused plan that has no paused_at stamp resumes with 0 days moved', async () => {
+      h.queryOne.mockResolvedValue({ status: 'paused' });
+      useClient([
+        ["FROM sourcing_plans WHERE role_id = $1 AND status = 'paused' FOR UPDATE", [{ id: '501', paused_at: null }]],
+        ['SELECT status FROM roles WHERE id', [{ status: 'Approved' }]],
+      ]);
+      await onRoleSaved(role('On Hold'), role('Approved'), USER.userId);
+      expect(loggedChanges()).toContainEqual({ type: 'resumed', paused_days: 0 });
+    });
+
+    it('a role that goes back On Hold again before the resume takes the lock leaves the plan paused', async () => {
+      h.queryOne.mockResolvedValue({ status: 'paused' });
+      useClient([
+        ["FROM sourcing_plans WHERE role_id = $1 AND status = 'paused' FOR UPDATE", [{ id: '501', paused_at: '2026-10-11T06:00:00.000Z' }]],
+        ['SELECT status FROM roles WHERE id', [{ status: 'On Hold' }]],
+      ]);
+      await onRoleSaved(role('On Hold'), role('Approved'), USER.userId);
+      expect(writes()).toEqual([]);
+    });
+
+    it('a plan that is no longer closed by the time the hook takes the lock is left alone (a second save already reopened it)', async () => {
+      h.queryOne.mockResolvedValue({ status: 'closed' });
+      useClient([['FROM sourcing_plans WHERE role_id = $1 FOR UPDATE', [{ id: '501', status: 'draft' }]]]);
+      await onRoleSaved(role('Closed – Filled'), role('Approved'), USER.userId);
+      expect(writes()).toEqual([]);
+    });
+
+    it('a closed plan on a role that is open again goes back to draft (history kept, channels re-planned, logged with the reopening user)', async () => {
+      h.queryOne.mockResolvedValue({ status: 'closed' });
+      useClient([['FROM sourcing_plans WHERE role_id = $1 FOR UPDATE', [{ id: '501', status: 'closed' }]]]);
+      await onRoleSaved(role('Closed – Filled'), role('Approved'), USER.userId);
+      expect(writes().some(s => s.includes("SET status = 'draft', closed_at = NULL"))).toBe(true);
+      expect(writes().some(s => s.includes("UPDATE sourcing_plan_channels SET state = CASE WHEN state = 'excluded' THEN state ELSE 'planned' END"))).toBe(true);
+      const entry = h.clientQuery.mock.calls.find(c => String(c[0]).includes('INSERT INTO sourcing_plan_changes'))!;
+      expect(entry[1]).toEqual(['501', USER.userId, JSON.stringify({ type: 'role_reopened' }), 'Plan returned to draft — re-activate to start the clocks', null]);
     });
   });
 });
