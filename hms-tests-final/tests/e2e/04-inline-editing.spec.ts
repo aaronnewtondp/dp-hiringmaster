@@ -12,24 +12,8 @@
  * that the UI optimistically rendered it.
  */
 import { test, expect, Page } from '@playwright/test';
-import { BASE, FRONTEND_BASE, USERS, getToken, authed, uid } from '../helpers/api';
-
-async function loginViaApi(page: Page, user: keyof typeof USERS = 'hr') {
-  const cred = USERS[user];
-  const res  = await page.request.post(`${BASE}/api/auth/login`, {
-    data: { email: cred.email, password: cred.password },
-  });
-  const { token, user: userBody } = await res.json();
-
-  await page.goto(FRONTEND_BASE);
-  await page.evaluate(({ token, userBody }) => {
-    localStorage.setItem('hms_token', token);
-    localStorage.setItem('hms_user', JSON.stringify(userBody));
-  }, { token, userBody });
-
-  await page.goto(`${FRONTEND_BASE}/dashboard`);
-  await page.waitForURL(/\/dashboard/, { timeout: 15000 });
-}
+import { FRONTEND_BASE, getToken, authed, uid } from '../helpers/api';
+import { loginViaApi } from '../helpers/e2e';
 
 // ─── Fresh, isolated test data — created directly via API so each test edits
 // its own row rather than seeded data other tests might also touch ──────────

@@ -13,6 +13,7 @@ import { Client } from 'pg';
 import { getToken, authed, CRON_SECRET, BASE, ROLE_INGEST_SECRET, uid } from '../helpers/api';
 import { isNamedHiringManager, namedHiringManagerSql } from '../../../backend/src/utils/hiringManagers';
 import { isNamedHiringManager as isNamedHiringManagerFrontend } from '../../../frontend/src/utils/hiringManagers';
+import { TEST_DB_URL } from '../helpers/db';
 
 // Invisible characters that arrive when a name is pasted from Slack, Docs or a web page.
 const NBSP = String.fromCharCode(0xa0);
@@ -20,7 +21,6 @@ const ZWSP = String.fromCharCode(0x200b);
 const IDEO = String.fromCharCode(0x3000);
 const BOM  = String.fromCharCode(0xfeff);
 
-const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
 type Req = Parameters<typeof authed>[0];
 type Who = 'hr' | 'hm_alex' | 'hm_satyadev' | 'leadership';
 type Pending = { owner_type: string; action_type: string; application_id: string | null; responsible_person: string | null };
@@ -40,7 +40,7 @@ test.describe('Several Hiring Managers on one role', () => {
     Number((await (await authed(request, await getToken(request, who)).get('/api/dashboard')).json()).metrics.sla_breach_total);
 
   test.beforeAll(async ({ request }) => {
-    client = new Client({ connectionString: LOCAL_DB_URL });
+    client = new Client({ connectionString: TEST_DB_URL });
     await client.connect();
 
     // read the KPIs first: opening the dashboard also runs any pending sweep, so what follows is a clean "before"

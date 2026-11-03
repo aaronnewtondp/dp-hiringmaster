@@ -18,4 +18,4 @@ export function loadSmokeEnv(): void {
   }
 }
 
-export const isLocalTarget = (url: string): boolean => /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(url);
+export const isLocalTarget = (url: string): boolean => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(url);

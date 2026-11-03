@@ -17,8 +17,7 @@
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
 import { getToken, authed } from '../helpers/api';
-
-const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
+import { TEST_DB_URL } from '../helpers/db';
 
 type Row = { active_count: number; scored_above_60_count: number; shortlisted_count: number; shortlisted_scored_count: number };
 
@@ -27,7 +26,7 @@ test.describe('Low Pipeline Roles — rule and breakdown counts', () => {
   const roleIds: string[] = [];
   const candidateIds: string[] = [];
 
-  test.beforeAll(async () => { client = new Client({ connectionString: LOCAL_DB_URL }); await client.connect(); });
+  test.beforeAll(async () => { client = new Client({ connectionString: TEST_DB_URL }); await client.connect(); });
   test.afterAll(async () => {
     // pending_actions.application_id has no index, so each deleted application's ON DELETE
     // CASCADE scans the whole (multi-million-row, locally) table once: ~100 applications here
