@@ -328,7 +328,7 @@ describe('runMarketingReview: acquisition', () => {
     fetchDoes(() => new Promise<Acquired[]>(r => { finishFetch = r; }));
 
     const pending = runWith([DOC, SITE]);
-    await vi.waitFor(() => expect(browser.withBrowser).toHaveBeenCalledTimes(1));   // both in flight before either has finished
+    await vi.waitFor(() => expect(browser.withBrowser).toHaveBeenCalledTimes(1), { timeout: 10_000 });   // both in flight before either has finished (vitest's default wait is 1 s)
     expect(fetching.calls).toHaveLength(1);
 
     finishBrowser([captured(SITE)]);

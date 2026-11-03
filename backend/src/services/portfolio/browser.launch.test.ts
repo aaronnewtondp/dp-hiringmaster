@@ -278,8 +278,18 @@ describe('closeBrowser / withBrowser — a browser that does not close is killed
     });
   });
 
-  /** Lets real asynchronous work that needs no clock (a dynamic import of a mocked module) finish while the faked clock stands still. */
-  const letRealWorkFinish = async () => { for (let i = 0; i < 10; i++) await new Promise<void>(resolve => setImmediate(resolve)); };
+  /**
+   * Waits, on the REAL event loop, until `started()` is true while the faked clock stands still: the slot, the (mocked) module import and the work itself are
+   * real asynchronous steps that need no clock, and how many turns of the loop they take depends on the machine, so this polls for the thing the test needs
+   * (the close or the disconnect was called, which is also when the limit's timer is set) instead of guessing a number of turns. Bounded in real time.
+   */
+  const untilStarted = async (started: () => boolean) => {
+    const begun = process.hrtime.bigint();
+    while (!started()) {
+      if (process.hrtime.bigint() - begun > 10_000_000_000n) throw new Error('the browser was never asked to close or disconnect');
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+  };
 
   describe('a close that never answers', () => {
     it('closeBrowser kills the process with SIGKILL once the limit has passed, and returns', async () => {
@@ -309,7 +319,7 @@ describe('closeBrowser / withBrowser — a browser that does not close is killed
       let result: string | undefined;
       const running = withBrowser(async () => 'captured', { closeTimeoutMs: 60 }).then(r => { result = r; return r; });
       try {
-        await letRealWorkFinish();                        // the slot, the (mocked) module import and the work itself: real asynchronous steps that need no clock
+        await untilStarted(() => b.close.mock.calls.length > 0);   // the work is done and the close is pending: its 60 ms limit starts now
         await vi.advanceTimersByTimeAsync(59);
         expect(result).toBeUndefined();                   // still waiting for the close: the result is not handed back early
         expect(b.kill).not.toHaveBeenCalled();
@@ -397,7 +407,7 @@ describe('closeBrowser / withBrowser — a browser that does not close is killed
       let result: string | undefined;
       const running = withBrowser(async () => 'x', { closeTimeoutMs: 40 }).then(r => { result = r; return r; });
       try {
-        await letRealWorkFinish();
+        await untilStarted(() => b.disconnect.mock.calls.length > 0);   // the work is done and the disconnect is pending: its 40 ms limit starts now
         await vi.advanceTimersByTimeAsync(39);
         expect(result).toBeUndefined();                   // the disconnect is still being waited for
         await vi.advanceTimersByTimeAsync(2);
