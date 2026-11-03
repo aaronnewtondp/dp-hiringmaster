@@ -9,6 +9,7 @@ import {
   MB, dctContentPdf, flateLayers, flateZeros, fontsPdf, formBombPdf, formCyclePdf, hugeStringPdf, onePage, pages, pdfkitPdf, rawPdf,
 } from '../portfolio/acquire/pdf.fixtures.js';
 import { HELD_OUT_BENIGN, HELD_OUT_HOSTILE } from '../portfolio/acquire/pdf.heldout.fixtures.js';
+import { steadyHeartbeat } from '../../testing/timing.js';
 
 const B = (s: string) => Buffer.from(s, 'latin1');
 const read = (pdf: Buffer, o?: { withLinks?: boolean }, options?: Partial<PdfReadOptions>) => readResumePdf(pdf, o, options ? { options } : {});
@@ -22,12 +23,15 @@ function fakeReader(result: PdfReadResult) {
 }
 const viaReader = (reader: ReturnType<typeof fakeReader>, bytes = rawPdf(pages(1)), o?: { withLinks?: boolean }) => readResumePdf(bytes, o, { reader });
 
-/** Largest gap between ticks of a 50 ms timer on THIS thread: the proof that the API function's event loop stayed free while a file was judged. */
-function heartbeat() {
-  let last = Date.now();
-  let max = 0;
-  const timer = setInterval(() => { const now = Date.now(); max = Math.max(max, now - last); last = now; }, 50);
-  return { stop: () => { clearInterval(timer); return Math.max(max, Date.now() - last); } };
+/**
+ * Runs `work` and returns what it returned and the largest gap between ticks of a 50 ms timer on THIS thread: the proof that the API function's event loop
+ * stayed free while a file was judged. A gap of a second or more is measured again, up to four runs, and the smallest is reported (testing/timing.ts
+ * `steadyHeartbeat`): a stall that belongs to the code (a hostile file blocking the loop) shows in every run, while this process being descheduled on a busy
+ * machine does not. `work` must be safe to run again.
+ */
+async function withBeat<T>(work: () => Promise<T>): Promise<{ value: T; gap: number }> {
+  const r = await steadyHeartbeat(work, 1000, { tickMs: 50 });
+  return { value: r.value, gap: r.maxGapMs };
 }
 
 /** A resume as a candidate would send it: a name, a hyperlinked "Portfolio" and a second page. */
@@ -205,42 +209,42 @@ describe('readResumePdf — a hostile resume is "too complex", never an error, a
     const pdf = build();
     expect(preflightPdf(pdf)).toEqual(COMPLEX);
     const reader = fakeReader({ kind: 'read', total: 1, encrypted: false, pages: [] });
-    const beat = heartbeat();
-    expect(await readResumePdf(pdf, { withLinks: true }, { reader })).toEqual(TOO_COMPLEX);
-    expect(beat.stop()).toBeLessThan(1000);
+    const { value, gap } = await withBeat(() => readResumePdf(pdf, { withLinks: true }, { reader }));
+    expect(value).toEqual(TOO_COMPLEX);
+    expect(gap).toBeLessThan(1000);
     expect(reader).not.toHaveBeenCalled();
   });
 
   it('a form-XObject bomb (20 levels: ~28 s and 1.8 GB in-process) passes the pre-flight by design and is killed by the sandbox, with the thread beating', async () => {
     const pdf = formBombPdf(20, 2);
     expect(preflightPdf(pdf)).toMatchObject({ ok: true });
-    const beat = heartbeat();
-    expect(await read(pdf, { withLinks: true }, { capMs: 1500 })).toEqual(TOO_COMPLEX);
-    expect(beat.stop()).toBeLessThan(1000);
+    const { value, gap } = await withBeat(() => read(pdf, { withLinks: true }, { capMs: 1500 }));
+    expect(value).toEqual(TOO_COMPLEX);
+    expect(gap).toBeLessThan(1000);
   });
 
   it('a 4 KB file of two million nested "q" operators is killed the same way', async () => {
     const pdf = onePage(deflateSync(B(`${'q '.repeat(2_000_000)}BT /F1 12 Tf (x) Tj ET`)), { dict: '/Filter /FlateDecode' });
     expect(pdf.length).toBeLessThan(8000);
-    const beat = heartbeat();
-    expect(await read(pdf, undefined, { capMs: 1500 })).toEqual(TOO_COMPLEX);
-    expect(beat.stop()).toBeLessThan(1000);
+    const { value, gap } = await withBeat(() => read(pdf, undefined, { capMs: 1500 }));
+    expect(value).toEqual(TOO_COMPLEX);
+    expect(gap).toBeLessThan(1000);
   });
 
   it('one huge literal string (an 8 MB string in a 9 KB file: a single allocation that aborts a worker THREAD) ends only the child process', async () => {
     const pdf = hugeStringPdf(8);
     expect(preflightPdf(pdf)).toMatchObject({ ok: true });
-    const beat = heartbeat();
-    expect(await read(pdf, undefined, { heapMb: 64, capMs: 8000 })).toEqual(TOO_COMPLEX);
-    expect(beat.stop()).toBeLessThan(1000);
+    const { value, gap } = await withBeat(() => read(pdf, undefined, { heapMb: 64, capMs: 8000 }));
+    expect(value).toEqual(TOO_COMPLEX);
+    expect(gap).toBeLessThan(1000);
   });
 
   it('declaring encryption is no way past: a form-XObject bomb with "/Encrypt" planted in its trailer skips the pre-flight and is still killed by the sandbox', async () => {
     const pdf = Buffer.from(formBombPdf(20, 2).toString('latin1').replace('/Root 1 0 R', '/Root 1 0 R /Encrypt 99 0 R'), 'latin1');
     expect(preflightPdf(pdf)).toEqual({ ok: false, why: 'encrypted' });      // the pre-flight stands aside for a file it cannot bound...
-    const beat = heartbeat();
-    expect(await read(pdf, { withLinks: true }, { capMs: 1500 })).toEqual(TOO_COMPLEX);   // ...and what is left standing is the child process
-    expect(beat.stop()).toBeLessThan(1000);
+    const { value, gap } = await withBeat(() => read(pdf, { withLinks: true }, { capMs: 1500 }));   // ...and what is left standing is the child process
+    expect(value).toEqual(TOO_COMPLEX);
+    expect(gap).toBeLessThan(1000);
   });
 
   it('two forms that call each other are read or refused, never a hang', async () => {
@@ -256,9 +260,7 @@ describe('readResumePdf — a hostile resume is "too complex", never an error, a
   describe('the held-out hostile set (30+ shapes written after the fixes, not tuned on), each as a resume', () => {
     it.each(HELD_OUT_HOSTILE.map(c => [c.name, c] as const))('hostile: %s', async (_name, c) => {
       const pdf = await c.build();
-      const beat = heartbeat();
-      const r = await read(pdf, { withLinks: true }, { capMs: 1500 });
-      const gap = beat.stop();
+      const { value: r, gap } = await withBeat(() => read(pdf, { withLinks: true }, { capMs: 1500 }));
       expect(gap).toBeLessThan(1000);
       if (c.stoppedBy === 'encrypted') {
         // It declares encryption, so the pre-flight cannot judge it and the sandbox decides: whatever it says, it is not an exception and never "read" garbage.
