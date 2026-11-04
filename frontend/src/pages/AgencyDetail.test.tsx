@@ -155,7 +155,7 @@ describe('AgencyDetail — what each section offers to edit', () => {
     ['Billing and Payment Terms', [
       ['Invoice Trigger', 'text'], ['Invoice Raised', 'text'], ['Payment Due', 'text'], ['Effective Total Window', 'text'], ['Late Payment Penalty', 'textarea'],
     ]],
-    ['Notes & Links', [['Specialisations', 'textarea'], ['Agreement Link', 'text'], ['Notes', 'textarea']]],
+    ['Notes & Links', [['Requirement Type', 'textarea'], ['Agreement Link', 'text'], ['Notes', 'textarea']]],
   ];
 
   it.each(SECTIONS)('%s: exactly these fields, in this order, each in the right kind of input', async (title, expected) => {
@@ -292,7 +292,7 @@ describe('AgencyDetail — every field is saved under its own column', () => {
     ['Billing and Payment Terms', 'Invoice Trigger', 'billing_invoice_trigger', 'x'], ['Billing and Payment Terms', 'Invoice Raised', 'billing_invoice_raised', 'x'],
     ['Billing and Payment Terms', 'Payment Due', 'billing_payment_due', 'x'], ['Billing and Payment Terms', 'Effective Total Window', 'billing_effective_window', 'x'],
     ['Billing and Payment Terms', 'Late Payment Penalty', 'billing_late_penalty', 'x'],
-    ['Notes & Links', 'Specialisations', 'specialisations', 'x'], ['Notes & Links', 'Agreement Link', 'agreement_drive_link', 'x'], ['Notes & Links', 'Notes', 'notes', 'x'],
+    ['Notes & Links', 'Requirement Type', 'specialisations', 'x'], ['Notes & Links', 'Agreement Link', 'agreement_drive_link', 'x'], ['Notes & Links', 'Notes', 'notes', 'x'],
   ];
 
   it.each(FIELDS)('%s › %s is sent as %s', async (title, label, key, typed) => {

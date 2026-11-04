@@ -204,7 +204,7 @@ describe('Dashboard — the master filters and what they ask for', () => {
     await pick(/^Department/, 'Tech/Devs');
     await waitFor(() => expect(sub('Roles Snapshot', 'Filled (30D)')).toBe('N/A'));
     expect(sub('Active candidates', 'Unmatched')).toBe('N/A');
-    expect(sub('Active candidates', 'Score ≥75')).toBe('11');          // the rest are unaffected
+    expect(sub('Active candidates', 'Fit score ≥75')).toBe('11');          // the rest are unaffected
   });
 });
 
@@ -339,8 +339,8 @@ describe('Dashboard — the headline cards', () => {
     mount();
     await ready();
     expect(headline('Active candidates')).toBe('120');
-    expect(sub('Active candidates', 'Score ≥75')).toBe('11');
-    expect(sub('Active candidates', 'Score ≤45')).toBe('22');
+    expect(sub('Active candidates', 'Fit score ≥75')).toBe('11');
+    expect(sub('Active candidates', 'Fit score ≤45')).toBe('22');
     expect(sub('Active candidates', '≥Interview 1')).toBe('15');
     expect(sub('Active candidates', 'Unmatched')).toBe('6');
   });
@@ -519,12 +519,12 @@ describe('Dashboard — Low pipeline roles', () => {
     mount();
     await ready();
     const card = within(sectionCard('Low pipeline roles'));
-    expect(card.getByText(/^Open roles with fewer than/).textContent)
-      .toBe('Open roles with fewer than 11 shortlisted candidates and fewer than 17 active candidates in the pipeline');
+    expect(card.getByText(/^Approved, Live – Sourcing, Under Review or On Hold roles with fewer than/).textContent)
+      .toBe('Approved, Live – Sourcing, Under Review or On Hold roles with fewer than 11 shortlisted candidates and fewer than 17 active candidates in the pipeline');
     expect(card.getByRole('columnheader', { name: 'Pipeline' })).toHaveAttribute('title', expect.stringMatching(/fewer than 17$/));
     expect(card.getByRole('columnheader', { name: 'Shortlisted' })).toHaveAttribute('title', expect.stringMatching(/fewer than 11$/));
     fireEvent.mouseEnter(card.getByRole('button', { name: 'More info' }));
-    expect(card.getByText(/^Open roles \(Approved/).textContent).toMatch(/fewer than 11 shortlisted candidates .* AND fewer than 17 Active candidates/);
+    expect(card.getByText(/^Roles that are Approved/).textContent).toMatch(/fewer than 11 shortlisted candidates .* AND fewer than 17 Active candidates/);
   });
 
   it('says there are none, with no table, when no role is low on pipeline', async () => {
@@ -544,9 +544,9 @@ describe('Dashboard — Source quality', () => {
     mount();
     await ready();
     const block = (name: string) => within(sectionCard('Source quality')).getByText(name).closest('div')!.parentElement as HTMLElement;
-    expect(block('LinkedIn').textContent).toContain('n=40');
+    expect(block('LinkedIn').textContent).toContain('40 applications');
     for (const text of ['25%', '5%', '60%']) expect(within(block('LinkedIn')).getByText(text)).toBeInTheDocument();
-    expect(block('Agency').textContent).toContain('n=10');
+    expect(block('Agency').textContent).toContain('10 applications');
     for (const text of ['50%', '20%', '15%']) expect(within(block('Agency')).getByText(text)).toBeInTheDocument();
   });
 
