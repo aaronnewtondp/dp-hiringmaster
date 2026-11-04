@@ -11,7 +11,9 @@
  * Google button is not involved.
  */
 import { test, expect, Page, APIRequestContext } from '@playwright/test';
+import fs from 'fs';
 import { BASE, FRONTEND_BASE, SMOKE_USERS, getToken, authed } from '../helpers/api';
+import { expectRealText, nextDownload, waitForServiceWorkerControl } from '../helpers/browser-checks';   // DB-free helpers only: this file runs against production
 
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(120_000);          // the first dashboard load after idle runs the whole SLA sweep
@@ -83,4 +85,85 @@ test('user management is Super-Admin only: the page bounces both smoke accounts 
     await openAs(page, request, key, '/users');
     await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
   }
+});
+
+// ── Help & FAQ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Read-only: the page is static prose; the only interaction is opening and closing FAQ rows, which is client-side state. No sentence is
+// pinned (the text is reworded from time to time): groups, rows, non-empty answers, no leaked template syntax. The Sourcing group is
+// decided by diffing the page with the status call answered "off" in the browser (page.route changes nothing on the server).
+test.describe('help page (read-only)', () => {
+  test.use({ serviceWorkers: 'block' });          // so page.route sees the status call
+
+  const groupHeadings = (page: Page) => page.locator('main h2');
+  const groupTitles = async (page: Page) => (await groupHeadings(page).allInnerTexts()).map(t => t.replace(/\s+/g, ' ').trim());
+
+  for (const key of ['smoke_lead', 'smoke_hm'] as const) {
+    test(`${key}: every group lists FAQ rows that open to real text, and the Sourcing group follows GET /api/sourcing/status`, async ({ page, request }) => {
+      const problems = await openAs(page, request, key, '/help');
+      await expect(page.getByRole('heading', { name: 'Help & FAQ', level: 1 })).toBeVisible({ timeout: 60_000 });
+      await expect(groupHeadings(page).first()).toBeVisible();
+      const real = await groupTitles(page);
+      expect(real.length, 'groups on the page').toBeGreaterThanOrEqual(2);
+
+      let rows = 0;
+      for (let g = 0; g < real.length; g++) {
+        expectRealText(real[g], `the title of group ${g + 1}`);
+        const questions = groupHeadings(page).nth(g).locator('xpath=..').getByRole('button');
+        const n = await questions.count();
+        expect(n, `group "${real[g]}" has no FAQ rows`).toBeGreaterThan(0);
+        for (let r = 0; r < n; r++) {
+          const question = questions.nth(r);
+          const label = `group "${real[g]}" row ${r + 1}`;
+          expectRealText(await question.innerText(), `${label} question`);
+          const answer = question.locator('xpath=following-sibling::div');
+          await question.click();
+          await expect(answer, `${label} did not open`).toBeVisible();
+          expectRealText(await answer.innerText(), `${label} answer`);
+          await question.click();
+          await expect(answer, `${label} did not close`).toHaveCount(0);
+          rows++;
+        }
+      }
+      expect(rows).toBeGreaterThanOrEqual(10);
+
+      // the Sourcing group: present exactly when the real status says the module is on
+      const status = await (await authed(request, await getToken(request, key)).get('/api/sourcing/status')).json() as { enabled?: boolean };
+      await page.route('**/api/sourcing/status', r => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ enabled: false }) }));
+      await page.reload();
+      await expect(groupHeadings(page).first()).toBeVisible({ timeout: 60_000 });
+      const withoutSourcing = await groupTitles(page);
+      expect(real.length, `the real status is ${JSON.stringify(status)}`).toBe(withoutSourcing.length + (status.enabled === true ? 1 : 0));
+      expect(real.filter(t => withoutSourcing.includes(t))).toEqual(withoutSourcing);
+      expect(problems).toEqual([]);
+    });
+  }
+
+  test.describe('the guide PDFs', () => {
+    test.use({ serviceWorkers: 'allow' });         // the point is the real service worker, which once swallowed these navigations
+
+    for (const [link, file] of [['Open guide', 'DigitalPaani_HMS_User_Access_Guide.pdf'], ['Open SOP', 'DigitalPaani_Hiring_SOP.pdf']] as const) {
+      test(`"${link}" opens ${file} as a PDF in a real navigation, with the service worker in control (curl cannot show the difference)`, async ({ page, request }) => {
+        const seen: Array<{ path: string; status: number; type: string }> = [];
+        page.context().on('response', r => {
+          const path = new URL(r.url()).pathname;
+          if (path.endsWith('.pdf')) seen.push({ path, status: r.status(), type: r.headers()['content-type'] || '' });
+        });
+        const problems = await openAs(page, request, 'smoke_lead', '/help');
+        await expect(page.getByRole('link', { name: link })).toBeVisible({ timeout: 60_000 });
+        await waitForServiceWorkerControl(page);
+
+        const started = nextDownload(page);
+        await page.getByRole('link', { name: link }).click();
+        const download = await started;
+        expect(new URL(download.url()).pathname).toBe(`/${file}`);
+        const bytes = fs.readFileSync((await download.path())!);
+        expect(bytes.subarray(0, 5).toString('latin1'), 'the file starts like a PDF').toBe('%PDF-');
+        expect(bytes.length, 'a real document, not a stub').toBeGreaterThan(10_000);
+        const answered = seen.filter(s => s.path === `/${file}`);
+        expect(answered.length).toBeGreaterThan(0);
+        for (const s of answered) { expect(s.status).toBe(200); expect(s.type).toMatch(/^application\/pdf/); }
+        expect(problems).toEqual([]);
+      });
+    }
+  });
 });
