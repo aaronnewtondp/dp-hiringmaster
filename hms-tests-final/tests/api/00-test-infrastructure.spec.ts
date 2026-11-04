@@ -108,6 +108,7 @@ test.describe('date helpers (helpers/dates.ts) are computed from the real clock'
     expect([istToday(30), istToday(30)]).toContain(iso.slice(0, 10));
     expect(new Date(iso).getTime()).toBeGreaterThan(Date.now() + 29 * DAY);   // really in the future
     expect(futureIso(2, { hour: 9, minute: 5 })).toMatch(/T09:05:00Z$/);       // default offset is Z
+    expect(futureIso(2, { minute: 7 })).toMatch(/T00:07:00Z$/);               // `minute` alone also fixes the time of day (hour 0)
     expect(pastIso(3, { hour: 9, offset: '-05:00' })).toMatch(/T09:00:00-05:00$/);
     expect(new Date(pastIso(3, { hour: 9, offset: '-05:00' })).getTime()).toBeLessThan(Date.now());
   });
