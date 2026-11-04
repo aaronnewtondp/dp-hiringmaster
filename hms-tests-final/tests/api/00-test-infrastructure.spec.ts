@@ -158,6 +158,7 @@ test.describe('date helpers (helpers/dates.ts) are computed from the real clock'
 // ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 test.describe('database URL guards (helpers/db.ts)', () => {
   test('default, override, and the local-host rule', () => {
+    expect(DEFAULT_TEST_DB_URL).toBe('postgresql://hms_user:hms_password@localhost:5432/dp_hms');   // the contract with docker-compose.yml and the CI service: pinned literally, or the next line only compares the constant with itself
     expect(resolveTestDbUrl({})).toBe(DEFAULT_TEST_DB_URL);
     expect(resolveTestDbUrl({ TEST_DB_URL: 'postgresql://u:p@localhost:55440/dp_hms' })).toBe('postgresql://u:p@localhost:55440/dp_hms');
     expect(resolveTestDbUrl({ TEST_DB_URL: 'postgresql://u:p@127.0.0.1:55441/dp_hms' })).toContain('127.0.0.1');
@@ -266,7 +267,7 @@ test.describe('scripts/test-stack.sh: argument validation and the port plan (no 
       expect(r.status, `env ${n}`).toBe(0);
       const api = Number(/TEST_API_URL=http:\/\/localhost:(\d+)/.exec(r.stdout)?.[1]);
       const fe = Number(/TEST_FRONTEND_URL=http:\/\/localhost:(\d+)/.exec(r.stdout)?.[1]);
-      const db = Number(/TEST_DB_URL=postgresql:\/\/hms_user:hms_password@localhost:(\d+)\/dp_hms/.exec(r.stdout)?.[1]);
+      const db = Number(/TEST_DB_URL=postgresql:\/\/hms_user:hms_password@localhost:(\d+)\/dp_hms$/m.exec(r.stdout)?.[1]);   // anchored: the database name is exactly dp_hms (the db specs' default)
       expect([api, fe, db]).toEqual([4110 + n, 5180 + n, 55440 + n]);
       for (const p of [api, fe, db]) { expect(RESERVED, `port ${p} of stack ${n}`).not.toContain(p); ports.add(p); }
       expect(r.stdout.trim().split('\n').every(l => l.startsWith('export '))).toBe(true);
