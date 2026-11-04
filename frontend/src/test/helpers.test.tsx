@@ -53,6 +53,19 @@ describe('drain — everything already in flight has run when it returns', () =>
     expect(log).toEqual(['timer', 'immediate']);
   });
 
+  // React's own act() already waits one check phase when its async scope ends, so ONE immediate queued by a timer would be caught even without drain's own
+  // `setImmediate` step (the test above cannot tell). A second, nested immediate can only be caught by that step: it is queued during the first one's check
+  // phase, so it runs after act's single wait unless drain waits one more phase itself.
+  it('follows an immediate that queues another immediate (the second check phase is drain\'s own step, not act\'s)', async () => {
+    const log: string[] = [];
+    setTimeout(() => {
+      log.push('timer');
+      nodeSetImmediate(() => { log.push('immediate 1'); nodeSetImmediate(() => log.push('immediate 2')); });
+    }, 0);
+    await drain(1);
+    expect(log).toEqual(['timer', 'immediate 1', 'immediate 2']);
+  });
+
   it('a state change queued by a mount effect has rendered when it returns — no waitFor needed', async () => {
     function Late() {
       const [text, setText] = useState('first');
@@ -115,6 +128,19 @@ describe('cpuMs / bestCpuMs', () => {
     const heavy = bestCpuMs(spin(1e8));
     expect(light).toBeGreaterThanOrEqual(0);
     expect(heavy).toBeGreaterThan(light);
+  });
+
+  // Noise only ever ADDS to a measurement, so the cheapest run is the honest one: the first, the last or the largest of the runs would each make expectLinearCpu
+  // noisier and flakier without changing anything else, which is why the position of the cheap run is varied.
+  it.each([
+    ['the first run is the expensive one', [40, 0, 0]],
+    ['the last runs are the expensive ones', [0, 40, 40]],
+    ['only the middle run is cheap', [40, 0, 40]],
+  ])('bestCpuMs is the LOWEST of its runs: %s', (_label, costs) => {
+    let call = 0;
+    const best = bestCpuMs(() => { burn(costs[call++]); }, 3);
+    expect(call).toBe(3);
+    expect(best).toBeLessThan(20);                 // the cheap run costs ~0 ms of CPU; any of the 40 ms runs would break this
   });
 
   it('cpuMs runs the function exactly once and bestCpuMs at most `runs` times (a run already past 500 ms is not repeated)', () => {
