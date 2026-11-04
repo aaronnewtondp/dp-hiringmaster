@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   AGE_COLUMN_INFO, AGING_FLAG_DAYS, AGING_THRESHOLDS_TEXT, DASHBOARD_REFRESH_MINUTES, DASHBOARD_REFRESH_MS, FIT_COLUMN_INFO, IN_BUDGET_FILTER_INFO,
   NO_MOVEMENT_DAYS, OVER_BUDGET_TOLERANCE_PERCENT, SESSION_HOURS, SLA_ASSIGNMENT_DEADLINE_HOURS, SLA_ASSIGNMENT_FEEDBACK_HOURS,
-  SLA_CHECK_THROTTLE_MINUTES, SLA_ESCALATION_HOURS, SLA_HIGH_SCORE_FIT, SLA_HIGH_SCORE_HOURS, SLA_JOINING_RISK_DAYS, SLA_STANDARD_HOURS,
+  SLA_CHECK_THROTTLE_MINUTES, SLA_ESCALATION_HOURS, SLA_HIGH_SCORE_FIT, SLA_HIGH_SCORE_HOURS, SLA_JOINING_RISK_DAYS, SLA_STANDARD_HOURS, SOURCING_ON_TIME_DAYS,
 } from './columnInfo.ts';
 import { OVER_BUDGET_TOLERANCE } from './budget.ts';
 import { LOW_PIPELINE_MAX_ACTIVE, LOW_PIPELINE_MAX_SHORTLISTED } from '../types/index.ts';
@@ -100,6 +100,9 @@ describe('compensation: the 15% is the backend tolerance', () => {
 describe('other figures the markers quote', () => {
   it('a sign-in lasts the backend default number of hours, which User Management says about deactivated people', () => {
     expect(SESSION_HOURS).toBe(b.sessionHours);
+  });
+  it('the Sourcing tile\'s "done on time" window is the number of days the backend counts', () => {
+    expect(SOURCING_ON_TIME_DAYS).toBe(b.sourcingDoneWindowDays);
   });
   it('Low pipeline roles: the frontend thresholds are the backend ones', () => {
     expect(LOW_PIPELINE_MAX_SHORTLISTED).toBe(b.lowPipelineMaxShortlisted);

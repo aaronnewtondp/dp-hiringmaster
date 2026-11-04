@@ -18,6 +18,7 @@ export const SLA_ASSIGNMENT_DEADLINE_HOURS = 60;    // routes/interviews.ts: ass
 export const SLA_JOINING_RISK_DAYS = 5;             // jobs/slaChecker.ts checkJoiningRisk (INTERVAL '5 days'; its task is stored as 120 hours overdue)
 export const NO_MOVEMENT_DAYS = 3;                  // routes/dashboard.ts NO_MOVEMENT_DAYS (the red ! on an Aging role, strictly more than this)
 export const SLA_CHECK_THROTTLE_MINUTES = 3;        // routes/dashboard.ts SLA_CHECK_THROTTLE_MS (per server)
+export const SOURCING_ON_TIME_DAYS = 14;            // routes/dashboard.ts: the Sourcing tile's "done on time" window (l.done_at >= NOW() - INTERVAL '14 days')
 export const SESSION_HOURS = 24;                    // routes/auth.ts: the sign-in token lasts JWT_EXPIRES_IN, default '24h'
 export const DASHBOARD_REFRESH_MINUTES = 5;         // this app: how often the Dashboard's own queries refetch
 export const DASHBOARD_REFRESH_MS = DASHBOARD_REFRESH_MINUTES * 60 * 1000;

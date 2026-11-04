@@ -8,7 +8,7 @@ import { EmptyState, PriorityBadge } from '../shared/Badges.tsx';
 import KpiCard from '../shared/KpiCard.tsx';
 import InfoTooltip from '../shared/InfoTooltip.tsx';
 import { exceptionLabel, topN } from '../../utils/sourcingFormat.ts';
-import { DASHBOARD_REFRESH_MS } from '../../utils/columnInfo.ts';
+import { DASHBOARD_REFRESH_MS, SOURCING_ON_TIME_DAYS } from '../../utils/columnInfo.ts';
 
 const TOP = 10;
 
@@ -55,10 +55,10 @@ export default function SourcingExecution({ masterFilterParams }: { masterFilter
         <KpiCard
           icon={Compass} label="Sourcing" accent={live.length > 0 ? 'text-red-500' : 'text-dp-600'}
           value={live.filter(r => r.status === 'open').length}
-          info={<>The big number is open exceptions on live plans: a sourcing task that was due and not done, a plan not activated in time, or too few qualified candidates. Blocked, catching-up and provisional items are not counted. Plans active = active plans ÷ roles that are Approved or Live – Sourcing. Done on time = share of tasks finished in the last 14 days by their due date. Overdue now = open tasks past their due day on active plans. Everything follows the filters above.</>}
+          info={<>The big number is open exceptions on live plans: a sourcing task that was due and not done, a plan not activated in time, or too few qualified candidates. Blocked, catching-up and provisional items are not counted. Plans active = active plans ÷ roles that are Approved or Live – Sourcing. Done on time = share of tasks finished in the last {SOURCING_ON_TIME_DAYS} days by their due date. Overdue now = open tasks past their due day on active plans. Everything follows the filters above.</>}
           sub={[
             ['Plans active', `${s.plans_active} / ${s.open_roles}`],
-            ['Done on time (14d)', s.on_time_pct_14d === null ? '—' : `${s.on_time_pct_14d}%`],
+            [`Done on time (${SOURCING_ON_TIME_DAYS}d)`, s.on_time_pct_14d === null ? '—' : `${s.on_time_pct_14d}%`],
             ['Overdue now', s.overdue_commitments],
             [d.read_only ? 'Blocked' : 'Provisional signals', d.read_only ? s.exceptions_blocked : s.provisional_signals],
           ]}
