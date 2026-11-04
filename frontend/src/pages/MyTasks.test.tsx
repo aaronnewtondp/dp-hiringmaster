@@ -429,3 +429,28 @@ describe('My Tasks — the Sourcing box', () => {
     expect(screen.getByRole('button', { name: 'Show fewer' })).toBeInTheDocument();
   });
 });
+
+describe('My Tasks — what the box hints say', () => {
+  const hint = (name: RegExp) => screen.getByRole('button', { name }).getAttribute('title')!;
+
+  it('Ready for Review: the number follows the table\'s own filters, which the tab remembers (sessionStorage), and Leadership\'s scope is named', async () => {
+    pending.mockResolvedValue({ data: { actions: [], alerts: [], hm_roles: [] } });
+    mount();
+    await screen.findByTestId('scorecard');
+    const tip = hint(/Ready for Review/);
+    expect(tip).toContain('shortlist decision at Applied and Screened');
+    expect(tip).toContain('The number follows the filters set in the table');       // ScorecardSummary: onCountChange(reviewable.length), after its filters
+    expect(tip).toContain('this browser tab remembers until it is closed');          // hooks/usePersistedState.ts: sessionStorage, not localStorage
+    expect(tip).toContain('Leadership Founder-flagged candidates plus roles they are Hiring Manager of');
+  });
+
+  it('Feedback Due: a Hiring Manager sees listed interviewers\' rounds plus rounds on their own roles that list no interviewer', async () => {
+    pending.mockResolvedValue({ data: { actions: [], alerts: [], hm_roles: [] } });
+    mount();
+    await screen.findByTestId('scorecard');
+    const tip = hint(/Feedback Due/);
+    expect(tip).toContain('a listed interviewer');                                   // jobs/slaChecker.ts: interviewer names, else the role's Hiring Manager
+    expect(tip).toContain('rounds on their own roles that list no interviewer');
+    expect(tip).not.toContain('sees only rounds where they are an interviewer');
+  });
+});
