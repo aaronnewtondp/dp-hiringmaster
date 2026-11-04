@@ -10,7 +10,13 @@
     "test:db":     "playwright test tests/db --reporter=list",
     "test:local":  "playwright test tests/api tests/db tests/e2e --reporter=list",
     "test:prod":   "TEST_API_URL=https://dp-hiringmaster-be.vercel.app TEST_FRONTEND_URL=https://dp-hiringmaster.vercel.app playwright test tests/smoke --reporter=list",
-    "test:report": "playwright show-report"
+    "test:report": "playwright show-report",
+    "test:ci":     "playwright test --project=api --project=db",
+    "test:live":   "TEST_LIVE=1 playwright test --grep @live --reporter=list",
+    "test:mobile": "playwright test --project=e2e-mobile --reporter=list",
+    "stack:up":    "bash scripts/test-stack.sh up ${STACK:-0}",
+    "stack:down":  "bash scripts/test-stack.sh down ${STACK:-0}",
+    "stack:env":   "bash scripts/test-stack.sh env ${STACK:-0}"
   },
   "devDependencies": {
     "@playwright/test": "^1.44.0",

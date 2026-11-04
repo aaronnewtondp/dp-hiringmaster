@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { drain } from '../test/helpers.ts';
 
 // The "Portfolio >= 7.5" filter in Ready for Review: only offered where it can match (a role that gets a portfolio review),
 // applied server-side, and never silently applied while hidden.
@@ -189,7 +190,7 @@ describe('Ready for Review — Portfolio ≥ 7.5 filter', () => {
     roles.mockReturnValue(new Promise(r => { resolveRoles = r; }));
     mount();
     await waitFor(() => expect(roles).toHaveBeenCalled());
-    await new Promise(r => setTimeout(r, 50));
+    await drain();                                                // the role options are still pending; every effect and query the mount could have started has run
     expect(list).not.toHaveBeenCalled();                          // nothing fetched while it is unknown whether the filter applies
     resolveRoles(ROLE_OPTIONS);
     await waitFor(() => expect(list).toHaveBeenCalled());

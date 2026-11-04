@@ -185,7 +185,7 @@ describe('Candidate page — what each persona is given', () => {
     expect(screen.getByRole('button', { name: 'Stage' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Status' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add Application' })).toBeInTheDocument();
-    expect(screen.getByTitle('Flag for Founder Review')).toBeInTheDocument();
+    expect(screen.getByTitle(/^Flag for Founder Review:/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '+ Add HR Screening Notes' })).toBeInTheDocument();
     await waitFor(() => expect(h.agenciesList).toHaveBeenCalled());
   });
@@ -196,7 +196,7 @@ describe('Candidate page — what each persona is given', () => {
     expect(screen.queryByRole('button', { name: 'Stage' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Status' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add Application' })).not.toBeInTheDocument();
-    expect(screen.queryByTitle('Flag for Founder Review')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/^Flag for Founder Review:/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '+ Add HR Screening Notes' })).not.toBeInTheDocument();
     expect(h.agenciesList).not.toHaveBeenCalled();
   });
@@ -363,7 +363,7 @@ describe('Candidate page — the Founder Review flag', () => {
   it('HR flags an unflagged application with an optional note, and the dialog closes and the candidate reloads', async () => {
     await show();
     const before = h.get.mock.calls.length;
-    fireEvent.click(screen.getByTitle('Flag for Founder Review'));
+    fireEvent.click(screen.getByTitle(/^Flag for Founder Review:/));
     const modal = modalOf('Flag for Founder Review');
     fireEvent.change(within(modal).getByPlaceholderText('Note (optional)'), { target: { value: 'worth a founder look' } });
     fireEvent.click(within(modal).getByRole('button', { name: 'Confirm' }));
@@ -375,15 +375,15 @@ describe('Candidate page — the Founder Review flag', () => {
 
   it('a blank note is sent as no note', async () => {
     await show();
-    fireEvent.click(screen.getByTitle('Flag for Founder Review'));
+    fireEvent.click(screen.getByTitle(/^Flag for Founder Review:/));
     fireEvent.click(within(modalOf('Flag for Founder Review')).getByRole('button', { name: 'Confirm' }));
     await waitFor(() => expect(h.setFounderFlag).toHaveBeenCalledWith('A9001', true, undefined));
   });
 
   it('a flagged application offers to clear the flag instead', async () => {
     await show([application('A9001', { founder_review_flag: true })]);
-    expect(screen.queryByTitle('Flag for Founder Review')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTitle('Clear Founder Review flag'));
+    expect(screen.queryByTitle(/^Flag for Founder Review:/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle(/Click to clear the flag\.$/));
     fireEvent.click(within(modalOf('Clear Founder Review flag')).getByRole('button', { name: 'Confirm' }));
     await waitFor(() => expect(h.setFounderFlag).toHaveBeenCalledWith('A9001', false, undefined));
     expect(h.toastSuccess).toHaveBeenCalledWith('Founder Review flag cleared');
@@ -392,7 +392,7 @@ describe('Candidate page — the Founder Review flag', () => {
   it('a failure shows a toast and keeps the dialog open', async () => {
     h.setFounderFlag.mockImplementation(async () => { throw new Error('boom'); });
     await show();
-    fireEvent.click(screen.getByTitle('Flag for Founder Review'));
+    fireEvent.click(screen.getByTitle(/^Flag for Founder Review:/));
     fireEvent.click(within(modalOf('Flag for Founder Review')).getByRole('button', { name: 'Confirm' }));
     await waitFor(() => expect(h.toastError).toHaveBeenCalledWith('Failed to update Founder Review flag'));
     expect(screen.getByRole('heading', { name: 'Flag for Founder Review' })).toBeInTheDocument();
@@ -400,7 +400,7 @@ describe('Candidate page — the Founder Review flag', () => {
 
   it('Cancel changes nothing', async () => {
     await show();
-    fireEvent.click(screen.getByTitle('Flag for Founder Review'));
+    fireEvent.click(screen.getByTitle(/^Flag for Founder Review:/));
     fireEvent.click(within(modalOf('Flag for Founder Review')).getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('heading', { name: 'Flag for Founder Review' })).not.toBeInTheDocument();
     expect(h.setFounderFlag).not.toHaveBeenCalled();

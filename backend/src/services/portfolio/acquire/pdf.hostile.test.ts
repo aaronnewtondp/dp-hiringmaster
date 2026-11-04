@@ -12,6 +12,7 @@ import {
 } from './pdf.fixtures.js';
 import { HELD_OUT_BENIGN, HELD_OUT_HOSTILE } from './pdf.heldout.fixtures.js';
 import type { AcquireContext } from './types.js';
+import { expectCpuUnder, steadyHeartbeat } from '../../../testing/timing.js';
 
 const B = (s: string) => Buffer.from(s, 'latin1');
 const ctx = (): AcquireContext => ({ deadline: Date.now() + 60_000, budget: new BudgetTracker() });
@@ -19,12 +20,15 @@ const COMPLEX = { ok: false, why: 'complex' } as const;
 /** A reader that must never be reached: whatever the pre-flight refuses is never handed to pdfjs. */
 const neverRead = () => vi.fn(async (): Promise<PdfReadResult> => { throw new Error('the parser must not be started'); });
 
-/** Largest gap between ticks of a 50 ms timer on THIS thread. */
-function heartbeat() {
-  let last = Date.now();
-  let max = 0;
-  const timer = setInterval(() => { const now = Date.now(); max = Math.max(max, now - last); last = now; }, 50);
-  return { stop: () => { clearInterval(timer); return Math.max(max, Date.now() - last); } };
+/**
+ * Runs `work` (a sandboxed read: the real child process does the heavy lifting, this thread must stay free) and returns what it returned and the largest gap
+ * between ticks of a 50 ms timer on THIS thread. A gap of a second or more is measured again, up to four runs, and the smallest is reported (testing/timing.ts
+ * `steadyHeartbeat`): a stall that belongs to the code (the hostile file blocking the loop) shows in every run, while this process being descheduled on a busy
+ * machine does not. `work` must be safe to run again.
+ */
+async function withBeat<T>(work: () => Promise<T>): Promise<{ value: T; gap: number }> {
+  const r = await steadyHeartbeat(work, 1000, { tickMs: 50 });
+  return { value: r.value, gap: r.maxGapMs };
 }
 
 describe('F17 — "stream" followed by junk before the line break is still a stream (to pdfjs, to the pre-flight and to the injection scan)', { timeout: 60_000 }, () => {
@@ -82,13 +86,14 @@ describe('F17 — "stream" followed by junk before the line break is still a str
 
   it('the shapes of a file full of the keyword (a hostile input for a naive scan) are read in linear time', () => {
     const junk = Buffer.from('>>stream   '.repeat(50_000));
-    const started = Date.now();
-    expect(preflightPdf(Buffer.concat([B('%PDF-1.4\n'), junk]))).toEqual(COMPLEX);   // no line break within the window: refused at the first one
-    expect(preflightPdf(Buffer.concat([B('%PDF-1.4\n'), Buffer.from('>>stream \n'.repeat(1_000))]))).toMatchObject({ ok: true });
-    // 15,000 streams with no obj header of their own each make the pass read up to 4 KB of text: past the allowance for that, so refused (it was "ok", and 60 MB of regex work)
-    expect(preflightPdf(Buffer.concat([B('%PDF-1.4\n'), Buffer.from('>>stream \n'.repeat(15_000))]))).toEqual(COMPLEX);
-    expect(scanPdfContentStreams(Buffer.concat([B('%PDF-1.4\n'), Buffer.from('>>stream \n'.repeat(15_000))])).complete).toBe(false);   // more streams or text than the scan takes
-    expect(Date.now() - started).toBeLessThan(3000);
+    // CPU time scaled to the machine (testing/timing.ts), not the clock: all of this is synchronous work on this thread, and a quadratic pass costs seconds to minutes
+    expectCpuUnder(3000, () => {
+      expect(preflightPdf(Buffer.concat([B('%PDF-1.4\n'), junk]))).toEqual(COMPLEX);   // no line break within the window: refused at the first one
+      expect(preflightPdf(Buffer.concat([B('%PDF-1.4\n'), Buffer.from('>>stream \n'.repeat(1_000))]))).toMatchObject({ ok: true });
+      // 15,000 streams with no obj header of their own each make the pass read up to 4 KB of text: past the allowance for that, so refused (it was "ok", and 60 MB of regex work)
+      expect(preflightPdf(Buffer.concat([B('%PDF-1.4\n'), Buffer.from('>>stream \n'.repeat(15_000))]))).toEqual(COMPLEX);
+      expect(scanPdfContentStreams(Buffer.concat([B('%PDF-1.4\n'), Buffer.from('>>stream \n'.repeat(15_000))])).complete).toBe(false);   // more streams or text than the scan takes
+    }, 'a file full of the keyword');
   });
 
   it('a /Length that lies (larger than the file) is NOT refused: 8 of 820 real PDFs have one and pdfjs just scans for endstream', () => {
@@ -103,9 +108,7 @@ describe('F18 — more than one filter layer is inflated and bounded too', { tim
   it('[/FlateDecode /FlateDecode] over a 30 MB inner stream (a 3 KB file) is refused, in milliseconds', () => {
     const data = bombInside(1);
     expect(data.length).toBeLessThan(5000);
-    const started = Date.now();
-    expect(preflightPdf(onePage(data, { dict: '/Filter [/FlateDecode /FlateDecode]' }))).toEqual(COMPLEX);
-    expect(Date.now() - started).toBeLessThan(1000);
+    expectCpuUnder(1000, () => expect(preflightPdf(onePage(data, { dict: '/Filter [/FlateDecode /FlateDecode]' }))).toEqual(COMPLEX), 'two Flate layers over 30 MB');
   });
 
   it('[/ASCII85Decode /FlateDecode /FlateDecode] and the ASCIIHex form are refused too', () => {
@@ -286,11 +289,11 @@ describe('F19 — shapes the stream sizes cannot show', { timeout: 60_000 }, () 
 
     it('is linear on a hostile file made of tens of thousands of range sections', () => {
       const sections = 'beginbfrange <0000> <0001> <0000> endbfrange '.repeat(60_000);
-      const started = Date.now();
-      expect(cmapRangeCells(Buffer.from(sections))).toBe(120_000);
-      expect(cmapRangeCells(Buffer.from('beginbfrange '.repeat(200_000)))).toBe(0);
-      expect(cmapRangeCells(Buffer.from(`beginbfrange ${'<0000> '.repeat(1_000_000)}`))).toBeLessThan(100_000);        // one section is read at most 1 MB deep
-      expect(Date.now() - started).toBeLessThan(2000);
+      expectCpuUnder(2000, () => {
+        expect(cmapRangeCells(Buffer.from(sections))).toBe(120_000);
+        expect(cmapRangeCells(Buffer.from('beginbfrange '.repeat(200_000)))).toBe(0);
+        expect(cmapRangeCells(Buffer.from(`beginbfrange ${'<0000> '.repeat(1_000_000)}`))).toBeLessThan(100_000);        // one section is read at most 1 MB deep
+      }, 'tens of thousands of range sections');
     });
   });
 
@@ -319,9 +322,8 @@ describe('F19 — shapes the stream sizes cannot show', { timeout: 60_000 }, () 
     it('a form-XObject bomb (20 levels: ~14 s and 1.6 GB in-process) passes the pre-flight and is "too complex" at the deadline', async () => {
       const pdf = formBombPdf(20, 2);
       expect(preflightPdf(pdf)).toMatchObject({ ok: true });                       // the pre-flight cannot see this one, by design
-      const beat = heartbeat();
-      const r = await preparePdf(pdf, 'f', ctx(), cap);
-      expect(beat.stop()).toBeLessThan(1000);
+      const { value: r, gap } = await withBeat(() => preparePdf(pdf, 'f', ctx(), cap));
+      expect(gap).toBeLessThan(1000);
       expect(r).toMatchObject({ outcome: 'unreviewable', reason: TOO_COMPLEX_REASON, media: [], text: '' });
     });
 
@@ -329,9 +331,8 @@ describe('F19 — shapes the stream sizes cannot show', { timeout: 60_000 }, () 
       const pdf = onePage(deflateSync(B(`${'q '.repeat(2_000_000)}BT /F1 12 Tf (x) Tj ET`)), { dict: '/Filter /FlateDecode' });
       expect(pdf.length).toBeLessThan(8000);
       expect(preflightPdf(pdf)).toMatchObject({ ok: true });
-      const beat = heartbeat();
-      const r = await preparePdf(pdf, 'f', ctx(), cap);
-      expect(beat.stop()).toBeLessThan(1000);
+      const { value: r, gap } = await withBeat(() => preparePdf(pdf, 'f', ctx(), cap));
+      expect(gap).toBeLessThan(1000);
       expect(r).toMatchObject({ outcome: 'unreviewable', reason: TOO_COMPLEX_REASON });
     });
 

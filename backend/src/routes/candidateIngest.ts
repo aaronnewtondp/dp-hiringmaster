@@ -10,20 +10,20 @@ const router = Router();
 // Profile fields eligible for the fill-null-only update on a repeat
 // applicant — deliberately excludes full_name (always refreshed) and
 // email/id (identity, never rewritten here).
-const PROFILE_FIELDS = [
+export const PROFILE_FIELDS = [
   'phone', 'linkedin_url', 'current_ctc_fixed', 'current_ctc_variable', 'current_esops',
   'expected_ctc', 'notice_period_days', 'current_company', 'current_industry',
   'current_designation', 'current_location', 'years_of_experience', 'resume_drive_link',
   'languages_known',
 ] as const;
 
-function toNum(raw: unknown): number | null {
+export function toNum(raw: unknown): number | null {
   if (raw === undefined || raw === null || raw === '') return null;
   const n = Number(raw);
   return Number.isFinite(n) ? n : null;
 }
 
-function toStr(raw: unknown): string | null {
+export function toStr(raw: unknown): string | null {
   if (raw === undefined || raw === null) return null;
   const s = String(raw).trim();
   return s === '' ? null : s;

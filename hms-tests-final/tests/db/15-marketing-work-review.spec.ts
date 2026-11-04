@@ -30,8 +30,7 @@ import fs from 'fs';
 import path from 'path';
 import { getToken, authed, uid, BASE, ROLE_INGEST_SECRET } from '../helpers/api';
 import { purgeRolesFast } from '../helpers/sourcing-db';
-
-const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
+import { TEST_DB_URL } from '../helpers/db';
 
 // The two live wordings of the Job Application Form question (one has a typo, "intitiatives"), plus variants a form edit could produce.
 const Q_TYPO  = "Links to public resources/portfolio to highlight your past work? eg: brand campaigns/marketing intitiatives/ad designs etc that you've run";
@@ -202,7 +201,7 @@ test.describe('R019 work-sample review (local Postgres + API)', () => {
   // ── set-up / tear-down ─────────────────────────────────────────────────────
 
   test.beforeAll(async ({ request }) => {
-    db = new Client({ connectionString: LOCAL_DB_URL });
+    db = new Client({ connectionString: TEST_DB_URL });
     await db.connect();
 
     mktRole = await newRoleViaApi(request, 'marketing');

@@ -13,9 +13,9 @@ const scoreColor = (s?: number | null) => {
 // Hover text on the 9th row's label. It cannot be an InfoTooltip: the table sits in an overflow-x-auto box, which
 // would clip a popover opened below its last row. The kind is read from the review itself (null until it arrives).
 const PORTFOLIO_ROW_INFO: Record<PortfolioReviewKind | 'unknown', string> = {
-  design_portfolio: "Ninth dimension for designer roles: the candidate's portfolio site(s) are opened in a browser and reviewed against the JD and the hiring manager's criteria. Scored 0-10 and averaged in with the 8 dimensions above once the review finishes.",
+  design_portfolio: "Ninth dimension for designer roles: the candidate's portfolio site(s) are opened in a browser and reviewed against the JD and the hiring manager's criteria. Scored 0-10 and averaged in with the 8 dimensions above once the review finishes. A resume with no portfolio link scores 0 and a link that is private or cannot be reached scores 1 (3 for a file or deck only); these count in the average. A site that blocks automated access, or a resume that could not be read, is not scored.",
   marketing_work: "Ninth dimension for the Head of Marketing role: the work samples the candidate linked in their application are reviewed against the role's requirements. Scored 0-10 and averaged in with the 8 dimensions above, but left out of the average when there is nothing that could be reviewed (no samples, text only, private or unopenable links).",
-  unknown: "Ninth dimension for designer and Head of Marketing roles: a review of the candidate's portfolio or linked work samples, scored 0-10 and averaged in with the 8 dimensions above once it finishes. Not scored when there is nothing that could be reviewed.",
+  unknown: "Ninth dimension for roles with a portfolio or work-sample review: a review of the candidate's portfolio or linked work samples, scored 0-10 and averaged in with the 8 dimensions above once it finishes. Some outcomes are not scored; the note beside the rating says why.",
 };
 
 // What to say in the Portfolio row when the review ended without a score — worded for either kind, since the
@@ -88,7 +88,7 @@ export default function ResumeIQPanel({ app }: { app: Application }) {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">ResumeIQ Analysis</span>
-          <InfoTooltip align="left" text="Scored automatically the moment this candidate applied, across 8 dimensions — averaged into the score shown here. The Senior UX/Product Designer and Head of Marketing roles add a ninth, Portfolio, once the portfolio or work-sample review finishes a few minutes later (for Head of Marketing it is left out when there is nothing to review). Reads the actual resume text from Drive when it can; falls back to scoring from profile fields alone if the resume can't be fetched (see the 'No resume read' tag when that happens), rather than failing outright." />
+          <InfoTooltip align="left" text="Scored automatically the moment this candidate applied, across 8 dimensions — averaged into the score shown here. Roles that have a portfolio or work-sample review add a ninth, Portfolio, once that review finishes a few minutes later; it counts whenever the review gives it a score, and a review that ends without one leaves the score at the 8 dimensions alone (the note beside the Portfolio rating says why). The Verdict beside the score is ResumeIQ's own recommendation from reading the resume: it is not calculated from the score and does not change when Portfolio is added. Reads the actual resume text from Drive when it can; falls back to scoring from profile fields alone if the resume can't be fetched (see the 'No resume read' tag when that happens), rather than failing outright." />
         </div>
         <div className="flex items-center gap-2">
           <span className="text-lg font-bold text-gray-900">{Number(app.score_avg).toFixed(1)}</span>

@@ -59,7 +59,7 @@ describe('Hiring Funnel Snapshot — what it asks for', () => {
 
   it('the owner buttons add `owner` to the request without touching the master filters, and "All owners" removes it', async () => {
     await show({ role_id: ['R9001'] });
-    fireEvent.click(screen.getByRole('button', { name: 'HR / Recruiter' }));
+    fireEvent.click(screen.getByRole('button', { name: 'HR/Admin' }));
     await waitFor(() => expect(lastRequest()).toEqual({ role_id: ['R9001'], owner: 'HR / Recruiter' }));
     fireEvent.click(screen.getByRole('button', { name: 'Hiring Manager' }));
     await waitFor(() => expect(lastRequest()).toEqual({ role_id: ['R9001'], owner: 'Hiring Manager' }));
@@ -130,7 +130,7 @@ describe('Hiring Funnel Snapshot — a stage\'s breach types', () => {
     expect(first).toHaveTextContent('Hiring Manager');
     expect(first).toHaveTextContent('2');
     const second = typeButton('Not Shortlisted In Time');
-    expect(second).toHaveTextContent('HR / Recruiter');
+    expect(second).toHaveTextContent('HR/Admin');
     expect(second).toHaveTextContent('1');
   });
 

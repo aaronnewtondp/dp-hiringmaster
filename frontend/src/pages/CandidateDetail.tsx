@@ -25,6 +25,7 @@ import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import LinkifiedText from '../components/shared/LinkifiedText.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { isNamedHiringManager } from '../utils/hiringManagers.ts';
+import { SLA_FLAG_INFO, lastUpdatedInfo } from '../utils/columnInfo.ts';
 import { formatDistanceToNow, format } from 'date-fns';
 
 // Screening & Risk Notes stays collapsed by default (item #10) unless it
@@ -356,6 +357,7 @@ export default function CandidateDetail() {
         <div className="space-y-4">
           <EditableSection
             title="Identity"
+            tooltip="Source is how this candidate was found, and it feeds Source quality on the Dashboard. Candidates who arrive through the Job Application Form are recorded as LinkedIn when they have no Source yet. What an applicant says on the form's “How did you hear about this opening?” is kept separately, on the application, and is shown on the Sourcing page. Sourcing Agency appears when the Source is Agency, and it is what the Agency Repository counts as a hire."
             data={candidate}
             onSave={saveCandidateFields}
             fields={[
@@ -462,17 +464,19 @@ export default function CandidateDetail() {
                           <div className="flex items-center gap-2 flex-wrap">
                             <Link to={`/roles/${app.role_id}`} className="font-medium text-gray-900 hover:text-dp-600 text-sm">{app.role_title}</Link>
                             {app.role_priority && <PriorityBadge priority={app.role_priority} />}
-                            {app.sla_breach && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">SLA</span>}
+                            {app.sla_breach && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium" title={SLA_FLAG_INFO}>SLA</span>}
                             {canHR ? (
                               <button
                                 onClick={() => { setFounderAppId(app.id); setFounderSetTo(!app.founder_review_flag); setFounderNote(''); setShowFounderModal(true); }}
                                 className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 ${app.founder_review_flag ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-400 hover:bg-purple-50 hover:text-purple-600'}`}
-                                title={app.founder_review_flag ? 'Clear Founder Review flag' : 'Flag for Founder Review'}
+                                title={app.founder_review_flag
+                                  ? 'Flagged for Founder Review: Leadership sees this candidate in My Tasks → Ready for Review. Click to clear the flag.'
+                                  : "Flag for Founder Review: gives Leadership a Founder Review task and puts this candidate in their Ready for Review list in My Tasks."}
                               >
                                 <Star className={`w-3 h-3 ${app.founder_review_flag ? 'fill-current' : ''}`} /> Founder
                               </button>
                             ) : app.founder_review_flag && (
-                              <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded"><Star className="w-3 h-3 inline fill-current" /> Founder</span>
+                              <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded" title="Flagged for Founder Review: Leadership sees this candidate in My Tasks → Ready for Review."><Star className="w-3 h-3 inline fill-current" /> Founder</span>
                             )}
                           </div>
                           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
@@ -493,8 +497,8 @@ export default function CandidateDetail() {
                             {app.rejection_email_sent_at && (
                               <span className="text-xs text-gray-400">✓ Rejection email sent</span>
                             )}
-                            <span className="text-xs text-gray-400">{app.recruiter_screening_status}</span>
-                            {app.score_avg != null && <span className="text-xs font-semibold text-dp-700">ResumeIQ: {Number(app.score_avg).toFixed(1)}/10</span>}
+                            <span className="text-xs text-gray-400" title="Recruiter screening status: HR's own screening tracker, separate from Stage and Status. It is shown for reference only: HMS has no screen that changes it, so it normally stays at New.">{app.recruiter_screening_status}</span>
+                            {app.score_avg != null && <span className="text-xs font-semibold text-dp-700" title="ResumeIQ's average score out of 10. The Fit score on the candidate lists is this number × 10.">ResumeIQ: {Number(app.score_avg).toFixed(1)}/10</span>}
                             {/* Stacked, not side-by-side — CTC → ECTC sits
                                 directly above the Over Budget badge, same
                                 reasoning as the Candidates/Scorecard Summary
@@ -509,8 +513,8 @@ export default function CandidateDetail() {
                             )}
                           </div>
                           <div className="flex gap-3 mt-2 text-xs text-gray-400">
-                            <span>Source: {app.source_channel || '—'}</span>
-                            <span>Updated {formatDistanceToNow(new Date(app.last_updated), { addSuffix: true })}</span>
+                            <span title="How this application entered HMS (for example the Job Application Form, a Naukri import or a Talent Pool reactivation). It is not the candidate's Source in Identity.">Source: {app.source_channel || '—'}</span>
+                            <span title={lastUpdatedInfo(false)}>Updated {formatDistanceToNow(new Date(app.last_updated), { addSuffix: true })}</span>
                             {rounds.length > 0 && <span>{rounds.length} round{rounds.length !== 1 ? 's' : ''}</span>}
                           </div>
                         </div>
@@ -809,6 +813,7 @@ export default function CandidateDetail() {
                           hasScreeningNotes(app) || screeningNotesOpen.has(app.id) ? (
                             <EditableSection
                               title="Screening & Risk Notes"
+                              tooltip="Priority Override is a note for the team: it is saved and shown in the activity timeline, but it does not change SLA timers, sorting or any queue. Tags here belong to this application only; the Tag filter on Archived Pipeline searches the candidate's HR Tags (under Resume & Tags), not these."
                               data={app}
                               onSave={(changes) => saveApplicationNotes(app.id, changes)}
                               fields={[
@@ -817,7 +822,7 @@ export default function CandidateDetail() {
                                 { key: 'hr_key_concerns', label: 'Key Concerns', type: 'textarea' },
                                 { key: 'hr_comp_alignment', label: 'Compensation Alignment', type: 'textarea' },
                                 { key: 'hr_communication_assessment', label: 'Communication Assessment', type: 'textarea' },
-                                { key: 'hr_priority_override', label: 'Priority Override', type: 'select', options: ['Normal', 'High', 'Critical'] },
+                                { key: 'hr_priority_override', label: 'Priority Override', type: 'select', options: ['Normal', 'High', 'Critical'], hint: 'A note for the team only: it is saved and logged, but it does not change SLA timers, sorting or any queue.' },
                                 { key: 'hr_priority_override_reason', label: 'Override Reason', type: 'text' },
                                 { key: 'hr_tags', label: 'Tags', type: 'tags' },
                                 { key: 'internal_risk_notes', label: 'Internal Risk Notes', type: 'textarea' },

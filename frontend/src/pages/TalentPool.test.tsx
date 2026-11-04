@@ -364,11 +364,11 @@ describe('Archived Pipeline — sorting (client side, over the rows loaded)', ()
     expect(names()).toEqual([P(3), P(1), P(2)]);
   });
 
-  it('Last Added: most recent first, then least recent', async () => {
+  it('Last Updated (sort key last_added): most recent first, then least recent', async () => {
     three(); mount(); await screen.findByText(P(1));
-    sortBy('Last Added');
+    sortBy('Last Updated');
     expect(names()).toEqual([P(3), P(1), P(2)]);
-    sortBy('Last Added');
+    sortBy('Last Updated');
     expect(names()).toEqual([P(2), P(1), P(3)]);
   });
 
