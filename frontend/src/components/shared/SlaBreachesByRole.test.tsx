@@ -280,3 +280,15 @@ describe('SlaBreachesByRole', () => {
     });
   });
 });
+
+describe('SlaBreachesByRole — the marker', () => {
+  it('names the owners the way the rest of the page does (HR/Admin, not the stored "HR / Recruiter") and lists the four open statuses', async () => {
+    mount(DATA);
+    const heading = await screen.findByText('SLA breaches by role');
+    fireEvent.mouseEnter(heading.parentElement!.querySelector('[aria-label="More info"]')!);
+    const tip = heading.parentElement!.querySelector('div.absolute')!.textContent!;
+    expect(tip).toContain('always counts both HR/Admin and Hiring Manager breaches (the owner buttons don\'t apply)');
+    expect(tip).not.toMatch(/HR \/ Recruiter|both HR and/);
+    expect(tip).toContain('each role that is Approved, Live – Sourcing, Under Review or On Hold');
+  });
+});

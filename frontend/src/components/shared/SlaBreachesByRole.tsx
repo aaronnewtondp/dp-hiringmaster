@@ -7,6 +7,7 @@ import { SlaByRole, SlaRoleBar } from '../../types/index.ts';
 import { EmptyState } from './Badges.tsx';
 import InfoTooltip from './InfoTooltip.tsx';
 import { ownerLabel } from '../../utils/ownerLabel.ts';
+import { DASHBOARD_REFRESH_MS } from '../../utils/columnInfo.ts';
 import { bucketCounts, SLA_STAGE_BUCKETS, OTHER_BUCKET, SlaStageBucket } from '../../utils/slaStageBuckets.ts';
 
 // How many roles the chart shows before "Show all" (the rest are still in the table view).
@@ -63,7 +64,7 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
     queryKey: ['dashboard-sla-by-role', masterFilterParams],
     queryFn:  () => dashboardApi.slaByRole(masterFilterParams),
     placeholderData: keepPreviousData,       // refetch keeps the frame: hold the last chart, dimmed, instead of flashing
-    refetchInterval: 5 * 60 * 1000,          // same cadence as the KPI cards, so a tab left open doesn't drift from them
+    refetchInterval: DASHBOARD_REFRESH_MS,   // same cadence as the KPI cards, so a tab left open doesn't drift from them
   });
 
   const result = data?.data;
@@ -107,7 +108,7 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold text-gray-900">SLA breaches by role</h2>
-            <InfoTooltip align="left" text="Open SLA breaches on each role that is Approved, Live – Sourcing, Under Review or On Hold, longest bar first. Each bar is split by how far along the funnel the overdue candidates are — lighter = earlier, darker = later. Click a bar to see every stage and what is overdue there. Uses the same dashboard filters as the Hiring Funnel Snapshot above, but always counts both HR and Hiring Manager breaches (the owner buttons don't apply)." />
+            <InfoTooltip align="left" text={`Open SLA breaches on each role that is Approved, Live – Sourcing, Under Review or On Hold, longest bar first. Each bar is split by how far along the funnel the overdue candidates are — lighter = earlier, darker = later. Click a bar to see every stage and what is overdue there. Uses the same dashboard filters as the Hiring Funnel Snapshot above, but always counts both ${ownerLabel('HR / Recruiter')} and Hiring Manager breaches (the owner buttons don't apply).`} />
           </div>
           <p className="text-xs text-gray-400 mt-0.5">
             {result && roles.length > 0

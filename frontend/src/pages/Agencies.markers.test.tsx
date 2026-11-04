@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { backendFacts } from '../test/backendSource.ts';
 
 // What the Agency Repository, the agency page and User Management say about their numbers and fields. Each assertion pins a
-// FACT that the backend decides (named in the comment), not the exact wording.
+// sentence; the fact behind it, which the backend decides, is named in the comment. A figure the sentence quotes (how long a
+// sign-in lasts) is taken from the backend's own source (src/test/backendSource.ts), not typed here.
 const agenciesList = vi.fn();
 const agenciesGet = vi.fn();
 const usersList = vi.fn();
@@ -84,22 +86,28 @@ describe('Agency page', () => {
 });
 
 describe('User Management', () => {
-  it('Name must match the role\'s Hiring Manager field; Role says what each persona sees; Status says what deactivating does', async () => {
+  it('Name must match the role\'s Hiring Manager field; Role says what each persona sees; Status says what deactivating does and does not do', async () => {
     mount(<UserManagement />);
     await screen.findByText('Test Person');
-    expect(th('Name').getAttribute('title')).toContain("exactly as it appears in a role's Hiring Manager field");   // utils/hiringManagers.ts: whole-name match on users.name
-    expect(th('Name').getAttribute('title')).toContain('capitals and spacing are ignored');
+    const name = th('Name').getAttribute('title')!;
+    expect(name).toContain("the way it appears in a role's Hiring Manager field");   // utils/hiringManagers.ts: whole-name match on users.name
+    expect(name).toContain('capitals and extra spaces do not matter, spelling does');
+    expect(name).not.toContain('exactly');                                           // "exactly" contradicted "capitals are ignored"
     const role = th('Role').getAttribute('title')!;
     expect(role).toContain('HR/Admin and Leadership have the same access to roles, candidates and compensation');
     expect(role).toContain('only for roles that name them as Hiring Manager');        // canSeeCompForRole, applyHiringManagerRoleLock
-    expect(th('Status').getAttribute('title')).toContain('their history stays on candidates and roles');
+    const status = th('Status').getAttribute('title')!;
+    expect(status).toContain('Deactivating stops them signing in again');             // routes/auth.ts: both sign-in routes need is_active
+    // middleware/auth.ts authenticate() only verifies the token: a person who is already signed in keeps working until it expires
+    expect(status).toContain(`a session that is already open keeps working until it expires (${backendFacts().sessionHours} hours by default)`);
+    expect(status).toContain('Their history stays on candidates and roles');
   });
 
   it('the form repeats the help under Name, Email and Role', async () => {
     mount(<UserManagement />);
     await screen.findByText('Test Person');
     fireEvent.click(screen.getByRole('button', { name: /Add user/ }));
-    expect(await screen.findByText(/HMS matches Hiring Managers to roles by name/)).toBeInTheDocument();
+    expect(await screen.findByText(/HMS matches Hiring Managers to roles by name: capitals and extra spaces do not matter/)).toBeInTheDocument();
     expect(screen.getByText(/only people added here can sign in/)).toBeInTheDocument();     // routes/auth.ts: sign-in needs an active users row
     expect(screen.getByText(/same access to roles, candidates and compensation/)).toBeInTheDocument();
   });

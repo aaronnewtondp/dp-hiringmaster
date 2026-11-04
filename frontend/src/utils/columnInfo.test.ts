@@ -4,18 +4,20 @@ import {
   DIMENSION_INFO, FIT_COLUMN_INFO, IN_BUDGET_FILTER_INFO, OVER_BUDGET_INFO, PORTFOLIO_COLUMN_INFO, SLA_FLAG_INFO, VERDICT_INFO,
   lastUpdatedInfo, priorityInfo,
 } from './columnInfo.ts';
-import { OVER_BUDGET_TOLERANCE } from './budget.ts';
 import { ownerLabel } from './ownerLabel.ts';
+import { agingPhrase, backendFacts, overBudgetPercent } from '../test/backendSource.ts';
 
-// The shared explanations pin FACTS that the code behind each number decides. Where the frontend has the constant, the
-// test reads it, so a changed threshold fails here instead of leaving a stale sentence on screen.
+// What the shared explanations say. The sentences are pinned by their wording; the NUMBERS in them are never typed into this
+// file: they come from `backendFacts()`, which reads the backend's own source (src/test/backendSource.ts), so a changed backend
+// threshold fails here. utils/markerFacts.backend.test.ts checks the frontend's copies of those figures against the same source.
+const b = backendFacts();
 
 describe('role age', () => {
-  it('lists, for every priority, the days past the Close Target at which a role turns yellow and then red', () => {
-    // backend/src/types/index.ts AGING_THRESHOLDS (yellow, red): P0 10/23, P1 15/45, P2 30/68, P3 30/90
-    expect(AGING_FLAG_DAYS).toEqual({ P0: [10, 23], P1: [15, 45], P2: [30, 68], P3: [30, 90] });
-    expect(AGING_THRESHOLDS_TEXT).toBe('10 and 23 days (P0), 15 and 45 days (P1), 30 and 68 days (P2) or 30 and 90 days (P3)');
-    expect(AGE_COLUMN_INFO).toContain(`past its Close Target by ${AGING_THRESHOLDS_TEXT}`);
+  it('lists, for every priority, the days past the Close Target at which a role turns yellow and then red (the backend numbers)', () => {
+    expect(AGING_FLAG_DAYS).toEqual(b.aging);                                         // backend/src/types/index.ts AGING_THRESHOLDS
+    expect(AGING_THRESHOLDS_TEXT).toBe(agingPhrase(b));
+    expect(AGE_COLUMN_INFO).toContain(`past its Close Target by ${agingPhrase(b)}`);
+    expect(AGING_THRESHOLDS_TEXT).toMatch(/^\d+ and \d+ days \(P0\), .* or \d+ and \d+ days \(P3\)$/);   // one entry per priority, nothing dropped
   });
 
   it('says what happens with no Close Target, which statuses never flag, and that P0 is the most urgent', () => {
@@ -35,11 +37,11 @@ describe('role age', () => {
 });
 
 describe('Fit, Average Score and Verdict', () => {
-  it('Fit is the Average Score x 10, coloured at 75 and 50, and 75 shortens the 48 hour SLA windows to 24', () => {
+  it('Fit is the Average Score x 10, coloured at 75 and 50, and the backend threshold shortens the standard SLA windows', () => {
     expect(FIT_COLUMN_INFO).toContain('from 0 to 100');
     expect(FIT_COLUMN_INFO).toContain('× 10');
     expect(FIT_COLUMN_INFO).toContain('Green is 75 and above, amber 50 to 74, red below 50');       // Badges.tsx FitScore
-    expect(FIT_COLUMN_INFO).toContain('shortens the 48 hour SLA windows to 24 hours');             // jobs/slaChecker.ts HIGH_SCORE_THRESHOLD
+    expect(FIT_COLUMN_INFO).toContain(`A score of ${b.slaHighScoreFit} or more also shortens the ${b.slaStandardHours} hour SLA windows to ${b.slaHighScoreHours} hours`);   // jobs/slaChecker.ts
     expect(FIT_COLUMN_INFO).toContain('Applied and Screened, the interview rounds, Founders Round and Assignment Round');
   });
 
@@ -74,12 +76,14 @@ describe('compensation', () => {
     expect(CTC_COLUMN_INFO).not.toContain('Current fixed CTC');
   });
 
-  it('Over Budget is any amount above the top of the band; the filter keeps up to 15% over (utils/budget.ts)', () => {
+  it('Over Budget is any amount above the top of the band; the filter keeps up to the backend tolerance over, and says who else it keeps', () => {
     expect(OVER_BUDGET_INFO).toContain('above the top of the role\'s CTC band');
-    expect(OVER_BUDGET_TOLERANCE).toBe(1.15);
-    expect(IN_BUDGET_FILTER_INFO).toContain('more than 15% above the top of the role\'s CTC band');
-    expect(IN_BUDGET_FILTER_INFO).toContain('with the red Over Budget tag');
-    expect(IN_BUDGET_FILTER_INFO).toContain('band or expected CTC is missing');
+    const pct = overBudgetPercent(b);                                                  // backend/src/utils/budget.ts OVER_BUDGET_TOLERANCE
+    expect(IN_BUDGET_FILTER_INFO).toContain(`more than ${pct}% above the top of the role's CTC band`);
+    expect(IN_BUDGET_FILTER_INFO).toContain(`Candidates over the band by up to ${pct}% still show, with the red Over Budget tag`);
+    // nobody with a missing band or CTC gets a tag: they are shown, untagged (isOverBudget is false when either is missing)
+    expect(IN_BUDGET_FILTER_INFO).toContain('expected CTC is missing, or whose band is missing or has no number in it, also still show, without the tag');
+    expect(IN_BUDGET_FILTER_INFO).not.toContain('and so do candidates whose band');
   });
 });
 
@@ -94,7 +98,9 @@ describe('dates and SLA', () => {
   });
 
   it('the SLA tag says what clears it, that putting an application on hold does not, and why the Dashboard number differs', () => {
-    expect(SLA_FLAG_INFO).toContain('another stage, an interview is scheduled, feedback is submitted or an assignment is sent');
+    // routes/interviews.ts clears the mark only for a Standard round saved WITH a scheduled date: a round left TBD clears nothing
+    expect(SLA_FLAG_INFO).toContain('another stage, an interview is scheduled with a date, feedback is submitted or an assignment is sent');
+    expect(SLA_FLAG_INFO).not.toContain('an interview is scheduled,');
     expect(SLA_FLAG_INFO).toContain('putting it on hold does not clear it');
     expect(SLA_FLAG_INFO).toContain('counts open overdue tasks instead');
   });

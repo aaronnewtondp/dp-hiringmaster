@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { backendFacts, overBudgetPercent } from '../test/backendSource.ts';
 
 // Active Candidates' column headers: every name is written out in full and wraps at its spaces instead of
 // being truncated ("Notice", "Preferred Location", "Resume Link", "Application Date" used to be cut off).
@@ -142,13 +143,14 @@ describe('Active Candidates — what the markers and hovers say', () => {
     expect(tip).toContain("the Dashboard's Active candidates counts Active only");
   });
 
-  it('the "In-budget only" button says it is more lenient than the Over Budget tag (up to 15% over still shows)', async () => {
+  it('the "In-budget only" button says it is more lenient than the Over Budget tag (still shows up to the backend tolerance over)', async () => {
     mount();
     await screen.findByText('Candidate A1');
     const tip = screen.getByRole('button', { name: 'In-budget only' }).getAttribute('title')!;
-    expect(tip).toContain('more than 15% above the top of the role\'s CTC band');
-    expect(tip).toContain('still show, with the red Over Budget tag');
-    expect(tip).toContain('band or expected CTC is missing');
+    const pct = overBudgetPercent(backendFacts());                                 // backend/src/utils/budget.ts OVER_BUDGET_TOLERANCE, read from the source
+    expect(tip).toContain(`more than ${pct}% above the top of the role's CTC band`);
+    expect(tip).toContain(`over the band by up to ${pct}% still show, with the red Over Budget tag`);
+    expect(tip).toContain('expected CTC is missing, or whose band is missing or has no number in it, also still show, without the tag');
   });
 
   it('the "SLA breached only" button says what the SLA tag is, including that putting an application on hold does not clear it', async () => {

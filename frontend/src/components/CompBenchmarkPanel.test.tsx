@@ -18,8 +18,8 @@ describe('CompBenchmarkPanel — the marker', () => {
     expect(tip).toContain('not any one candidate');
     expect(tip).toContain('when one exists for exactly this role title');
     expect(tip).toContain("the one for the role's experience range, otherwise the first on file");
-    expect(tip).toContain('a Claude estimate');
-    expect(tip).toContain('labelled as an AI estimate');
+    expect(tip).toContain('it gives an AI estimate from the role\'s title, department, experience, must-have skills and responsibilities, labelled as such');   // the result card's footer says "AI estimate", so the marker uses the same name
+    expect(tip).not.toContain('Claude');
     expect(tip).toContain("not compared with this role's CTC Band");
     expect(tip).not.toContain('role like this one');                     // the old claim: a similarly named role is NOT matched
   });

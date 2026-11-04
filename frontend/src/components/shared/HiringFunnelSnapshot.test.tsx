@@ -3,11 +3,14 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { HiringFunnelSnapshotStage } from '../../types/index.ts';
+import { backendFacts } from '../../test/backendSource.ts';
 
 // What the Hiring Funnel Snapshot says about its owners and about "Overdue": the stored owner value 'HR / Recruiter' is shown
 // as HR/Admin (the persona's name everywhere else) but is still what is sent to the API, and the marker names the two
 // breach types whose "Overdue" figure is not live (backend/src/jobs/slaChecker.ts: 'Joining risk — no contact' is stored with
-// a constant 120 hours, 'Assignment deadline breached' is written once and never refreshed).
+// a constant number of hours, 'Assignment deadline breached' is written once and never refreshed). The numbers come from the
+// backend's own source (src/test/backendSource.ts), not from digits typed here.
+const b = backendFacts();
 const funnelSnapshot = vi.fn();
 vi.mock('../../services/api.ts', () => ({ dashboardApi: { funnelSnapshot: (p: unknown) => funnelSnapshot(p) } }));
 
@@ -15,7 +18,7 @@ import HiringFunnelSnapshot from './HiringFunnelSnapshot.tsx';
 
 const cand = (over: Record<string, unknown> = {}) => ({
   application_id: 'A0001', candidate_id: 'C0001', candidate_name: 'Test Candidate', role_id: 'R001', role_title: 'Quality Assurance Engineer',
-  owner: 'HR / Recruiter', stage: 'Offer Accepted', overdue_hours: 120, ...over,
+  owner: 'HR / Recruiter', stage: 'Offer Accepted', overdue_hours: b.joiningRiskStoredHours, ...over,
 });
 
 const SNAPSHOT: HiringFunnelSnapshotStage[] = [
@@ -51,8 +54,8 @@ describe('HiringFunnelSnapshot — owners', () => {
     fireEvent.click(type);
     expect(await screen.findByText('SLA Owner: HR/Admin')).toBeInTheDocument();
     expect(screen.queryByText(/HR \/ Recruiter/)).not.toBeInTheDocument();
-    // a joining-risk breach is stored with a constant 120 hours, so its card always reads 5D, whatever the real delay
-    expect(screen.getByText('Overdue 5D')).toBeInTheDocument();
+    // a joining-risk breach is stored with a constant number of hours (checkJoiningRisk), so its card always reads the same days, whatever the real delay
+    expect(screen.getByText(`Overdue ${b.joiningRiskStoredHours / 24}D`)).toBeInTheDocument();
   });
 });
 
@@ -63,7 +66,8 @@ describe('HiringFunnelSnapshot — the marker', () => {
     fireEvent.mouseEnter(heading.parentElement!.querySelector('[aria-label="More info"]')!);
     const tip = heading.parentElement!.querySelector('div.absolute')!.textContent!;
     expect(tip).toContain('how far past its SLA limit each one was when HMS last checked');
-    expect(tip).toContain("'Joining risk — no contact' always shows 5D");
+    expect(tip).toContain(`'Joining risk — no contact' always shows ${b.joiningRiskStoredHours / 24}D`);
+    expect(b.joiningRiskStoredHours / 24, 'the marker says the figure is the joining-risk number of days').toBe(b.joiningRiskDays);
     expect(tip).toContain("'Assignment deadline breached' shows how late it was when it was first flagged");
     expect(tip).not.toContain('how far past its SLA limit each one is ');
   });

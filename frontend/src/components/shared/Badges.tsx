@@ -1,5 +1,5 @@
 import { PRIORITY_COLORS, Priority, AgingAlert } from '../../types/index.ts';
-import { priorityInfo, SLA_FLAG_INFO, AGING_NO_TARGET_INFO } from '../../utils/columnInfo.ts';
+import { priorityInfo, SLA_FLAG_INFO, AGING_NO_TARGET_INFO, FIT_GREEN_FROM, FIT_AMBER_FROM } from '../../utils/columnInfo.ts';
 
 // ─── Priority badge ───────────────────────────────────────────────────────────
 export function PriorityBadge({ priority }: { priority: Priority }) {
@@ -81,7 +81,7 @@ export function GenderBadge({ gender }: { gender?: 'M' | 'F' | null }) {
 // ─── Fit score ────────────────────────────────────────────────────────────────
 export function FitScore({ score }: { score?: number | null }) {
   if (score == null) return <span className="text-xs text-gray-400">—</span>;
-  const color = score >= 75 ? 'text-green-700 font-semibold' : score >= 50 ? 'text-amber-700' : 'text-red-600';
+  const color = score >= FIT_GREEN_FROM ? 'text-green-700 font-semibold' : score >= FIT_AMBER_FROM ? 'text-amber-700' : 'text-red-600';
   return <span className={`text-sm font-mono ${color}`}>{score}</span>;
 }
 

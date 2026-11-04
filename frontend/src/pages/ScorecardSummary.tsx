@@ -21,6 +21,7 @@ import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 import {
   GENDER_COLUMN_INFO, CTC_COLUMN_INFO, OVER_BUDGET_INFO, IN_BUDGET_FILTER_INFO, AVERAGE_SCORE_INFO, VERDICT_INFO,
   DIMENSION_INFO, PORTFOLIO_COLUMN_INFO, APPLICATION_AGE_INFO, NOTICE_PERIOD_INFO, COMPANY_INDUSTRY_INFO, STAGE_COLUMN_INFO,
+  OVER_BUDGET_TOLERANCE_PERCENT,
 } from '../utils/columnInfo.ts';
 
 // Same chunked-batching constant as Candidates.tsx / MyTasks.tsx's bulk actions.
@@ -50,7 +51,7 @@ const HEADER_HOVER: Record<string, string> = {
   'Verdict': VERDICT_INFO,
   'Portfolio': PORTFOLIO_COLUMN_INFO,
   'Application Age': APPLICATION_AGE_INFO,
-  'Actions': "Only for candidates at Applied and Screened. Shortlist moves the candidate straight to Interview Round 1 (a reason is asked first when the expected CTC is 15% or more over the role's CTC band). Hold for Future puts the application on hold; it is then listed in Archived Pipeline. Reject asks for one or more reasons.",
+  'Actions': `Only for candidates at Applied and Screened. Shortlist moves the candidate straight to Interview Round 1 (a reason is asked first when the expected CTC is ${OVER_BUDGET_TOLERANCE_PERCENT}% or more over the role's CTC band). Hold for Future puts the application on hold; it is then listed in Archived Pipeline. Reject asks for one or more reasons.`,
 };
 
 // Compact 0-10 dimension cell — mirrors ResumeIQPanel.tsx's private

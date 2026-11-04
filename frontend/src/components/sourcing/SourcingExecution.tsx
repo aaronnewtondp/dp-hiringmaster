@@ -8,6 +8,7 @@ import { EmptyState, PriorityBadge } from '../shared/Badges.tsx';
 import KpiCard from '../shared/KpiCard.tsx';
 import InfoTooltip from '../shared/InfoTooltip.tsx';
 import { exceptionLabel, topN } from '../../utils/sourcingFormat.ts';
+import { DASHBOARD_REFRESH_MS } from '../../utils/columnInfo.ts';
 
 const TOP = 10;
 
@@ -23,7 +24,7 @@ export default function SourcingExecution({ masterFilterParams }: { masterFilter
     queryKey: ['dashboard-sourcing', masterFilterParams],
     queryFn:  () => sourcingApi.dashboard(masterFilterParams),
     placeholderData: keepPreviousData,
-    refetchInterval: 5 * 60 * 1000,
+    refetchInterval: DASHBOARD_REFRESH_MS,
     retry: false,
   });
 

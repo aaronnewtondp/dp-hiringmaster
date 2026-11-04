@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { PriorityBadge, StageBadge, StatusBadge, AgingBadge, FitScore, SlaBadge, OverBudgetBadge, GenderBadge } from './Badges.tsx';
+import { FIT_COLUMN_INFO } from '../../utils/columnInfo.ts';
 
 describe('PriorityBadge', () => {
   it('renders the priority label', () => {
@@ -54,6 +55,21 @@ describe('FitScore', () => {
   it('renders the numeric score when present', () => {
     render(<FitScore score={82} />);
     expect(screen.getByText('82')).toBeInTheDocument();
+  });
+
+  it('colours match what the Fit column marker says: green from 75, amber 50 to 74, red below 50', () => {
+    const colourOf = (n: number) => {
+      const { unmount } = render(<FitScore score={n} />);
+      const cls = screen.getByText(String(n)).className;
+      unmount();
+      return cls;
+    };
+    // the boundaries on both sides of each line, so a ">" for a ">=" or a moved line shows up
+    expect(colourOf(75)).toContain('text-green-700');
+    expect(colourOf(74)).toContain('text-amber-700');
+    expect(colourOf(50)).toContain('text-amber-700');
+    expect(colourOf(49)).toContain('text-red-600');
+    expect(FIT_COLUMN_INFO).toContain('Green is 75 and above, amber 50 to 74, red below 50');
   });
 });
 

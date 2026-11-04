@@ -7,6 +7,7 @@ import { HiringFunnelSnapshotStage } from '../../types/index.ts';
 import { EmptyState } from './Badges.tsx';
 import InfoTooltip from './InfoTooltip.tsx';
 import { ownerLabel } from '../../utils/ownerLabel.ts';
+import { SLA_JOINING_RISK_DAYS } from '../../utils/columnInfo.ts';
 import { STAGE_COLORS, UNLIT_BG, shade, glossyFill } from './PipelineProgress.tsx';
 
 // ─── Chevron geometry — same interlocking-arrow shape/overlap as the
@@ -94,7 +95,7 @@ export default function HiringFunnelSnapshot({
       <div className="px-5 py-4 border-b border-gray-100">
         <div className="flex items-center gap-1.5">
           <h2 className="text-sm font-semibold text-gray-900">Hiring Funnel Snapshot</h2>
-          <InfoTooltip align="left" width="w-80" text="Each chevron counts open SLA breaches at that stage (one per overdue task, not a headcount). Click a stage to see the breach types, who owns each and how far past its SLA limit each one was when HMS last checked — 'Overdue' counts from the limit, not from entering the stage. Two types are the exception: 'Joining risk — no contact' always shows 5D, and 'Assignment deadline breached' shows how late it was when it was first flagged." />
+          <InfoTooltip align="left" width="w-80" text={`Each chevron counts open SLA breaches at that stage (one per overdue task, not a headcount). Click a stage to see the breach types, who owns each and how far past its SLA limit each one was when HMS last checked — 'Overdue' counts from the limit, not from entering the stage. Two types are the exception: 'Joining risk — no contact' always shows ${SLA_JOINING_RISK_DAYS}D, and 'Assignment deadline breached' shows how late it was when it was first flagged.`} />
         </div>
         <p className="text-xs text-gray-400 mt-0.5">SLA breaches across the pipeline — click a stage to see what's overdue and who owns it</p>
       </div>

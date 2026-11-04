@@ -7,6 +7,7 @@ import { usersApi } from '../services/api.ts';
 import { ManagedUser, PERSONAS } from '../types/index.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { Spinner, EmptyState } from '../components/shared/Badges.tsx';
+import { SESSION_HOURS } from '../utils/columnInfo.ts';
 
 // super_admin is assigned to exactly one person by policy — never a
 // selectable role in this UI, matching the backend's own guard on
@@ -16,12 +17,13 @@ type AssignableRole = typeof ASSIGNABLE_ROLES[number];
 
 // Plain-words help for the form and the table. Facts: roles.hiring_manager_name is matched against users.name (whole name,
 // capitals and spacing ignored; utils/hiringManagers.ts); HR/Admin and Leadership pass the same HR-tier checks
-// (middleware/auth.ts isHRTier); sign-in needs an active row here (routes/auth.ts), and nothing is deleted when someone is
-// deactivated.
-const NAME_HELP = "Write the name exactly as it appears in a role's Hiring Manager field: HMS matches Hiring Managers to roles by name (capitals and spacing are ignored), so a different spelling means the role is not theirs.";
+// (middleware/auth.ts isHRTier); sign-in needs an active row here (routes/auth.ts) but a request made with a token that is
+// already issued is not checked against is_active, so a deactivated person keeps working until it expires (SESSION_HOURS,
+// utils/columnInfo.ts: routes/auth.ts JWT_EXPIRES_IN, default 24h); nothing is deleted when someone is deactivated.
+const NAME_HELP = "Write the name the way it appears in a role's Hiring Manager field. HMS matches Hiring Managers to roles by name: capitals and extra spaces do not matter, spelling does, so a different spelling means the role is not theirs.";
 const EMAIL_HELP = "People sign in with their @digitalpaani.com Google account, and only people added here can sign in.";
 const ROLE_HELP = "HR/Admin and Leadership have the same access to roles, candidates and compensation. A Hiring Manager sees compensation, and the numbers on the Dashboard, only for roles that name them as Hiring Manager.";
-const STATUS_HELP = "Active people can sign in. Deactivating stops them signing in again; their history stays on candidates and roles.";
+const STATUS_HELP = `Active people can sign in. Deactivating stops them signing in again; a session that is already open keeps working until it expires (${SESSION_HOURS} hours by default). Their history stays on candidates and roles.`;
 const HEADER_HOVER: Record<string, string> = { Name: NAME_HELP, Role: ROLE_HELP, Status: STATUS_HELP };
 
 function UserModal({ user, onClose, onSuccess }: {

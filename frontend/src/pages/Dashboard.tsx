@@ -12,7 +12,11 @@ import KpiCard from '../components/shared/KpiCard.tsx';
 import SourcingExecution from '../components/sourcing/SourcingExecution.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
-import { AGING_THRESHOLDS_TEXT, AGE_COLUMN_INFO } from '../utils/columnInfo.ts';
+import {
+  AGING_THRESHOLDS_TEXT, AGE_COLUMN_INFO, DASHBOARD_REFRESH_MINUTES, DASHBOARD_REFRESH_MS, NO_MOVEMENT_DAYS, SLA_ASSIGNMENT_DEADLINE_HOURS,
+  SLA_ASSIGNMENT_FEEDBACK_HOURS, SLA_CHECK_THROTTLE_MINUTES, SLA_ESCALATION_HOURS, SLA_HIGH_SCORE_FIT, SLA_HIGH_SCORE_HOURS, SLA_JOINING_RISK_DAYS,
+  SLA_STANDARD_HOURS,
+} from '../utils/columnInfo.ts';
 
 // SLA breach types, per slaChecker.ts's stage/breach-type engine — kept here
 // (not generated from the backend) since these are fixed, named categories
@@ -22,18 +26,19 @@ import { AGING_THRESHOLDS_TEXT, AGE_COLUMN_INFO } from '../utils/columnInfo.ts';
 // actually need attention still surface at the top of a now-longer list.
 const AGING_SEVERITY: Record<'red' | 'yellow' | 'ok', number> = { red: 0, yellow: 1, ok: 2 };
 
+// Every figure comes from the constants in utils/columnInfo.ts, which utils/markerFacts.backend.test.ts checks against jobs/slaChecker.ts.
 const SLA_BREACH_TYPES_INFO = (
   <div className="space-y-1.5">
     <div className="font-medium text-white">SLA breach types</div>
     <ul className="space-y-1">
-      <li><b>Idle Candidate</b> (HR/Admin) — no stage change in 48h+ (Reference Check, Pre-Joining Docs, Offer Discussion, Offer Released)</li>
-      <li><b>Resume Shortlist Pending</b> (Hiring Manager) — not shortlisted within 48h of Applied and Screened (24h if fit score ≥75)</li>
-      <li><b>Interview/Founders Round Not Scheduled</b> (HR/Admin) — no round with a date booked within 48h of entering that stage (24h if fit score ≥75)</li>
-      <li><b>Assignment Not Sent</b> (HR/Admin) — assignment not sent within 48h of entering Assignment Round (24h if fit score ≥75)</li>
-      <li><b>Interview/Founders Feedback Due</b> (Hiring Manager) — feedback not submitted within 48h of the interview (24h if fit score ≥75); feedback still outstanding 96h after the interview also raises a Leadership-owned "Feedback Overdue — Leadership Escalation" alert alongside it</li>
-      <li><b>Assignment Feedback Due</b> (Hiring Manager) — feedback not submitted within 96h of the assignment being sent (untouched by the score-tiering above)</li>
-      <li><b>Assignment deadline breached</b> (HR/Admin) — the candidate hasn't submitted within 60h of the assignment being sent</li>
-      <li><b>Joining risk — no contact</b> (HR/Admin) — a candidate at Offer Accepted whose last logged HR contact is more than 5 days old, or who has none logged (flagged at the next check, not after 5 days). There is no screen for logging HR contact yet, so it clears when the candidate joins or leaves Active.</li>
+      <li><b>Idle Candidate</b> (HR/Admin) — no stage change in {SLA_STANDARD_HOURS}h+ (Reference Check, Pre-Joining Docs, Offer Discussion, Offer Released)</li>
+      <li><b>Resume Shortlist Pending</b> (Hiring Manager) — not shortlisted within {SLA_STANDARD_HOURS}h of Applied and Screened ({SLA_HIGH_SCORE_HOURS}h if fit score ≥{SLA_HIGH_SCORE_FIT})</li>
+      <li><b>Interview/Founders Round Not Scheduled</b> (HR/Admin) — no round with a date booked within {SLA_STANDARD_HOURS}h of entering that stage ({SLA_HIGH_SCORE_HOURS}h if fit score ≥{SLA_HIGH_SCORE_FIT})</li>
+      <li><b>Assignment Not Sent</b> (HR/Admin) — assignment not sent within {SLA_STANDARD_HOURS}h of entering Assignment Round ({SLA_HIGH_SCORE_HOURS}h if fit score ≥{SLA_HIGH_SCORE_FIT})</li>
+      <li><b>Interview/Founders Feedback Due</b> (Hiring Manager) — feedback not submitted within {SLA_STANDARD_HOURS}h of the interview ({SLA_HIGH_SCORE_HOURS}h if fit score ≥{SLA_HIGH_SCORE_FIT}); feedback still outstanding {SLA_ESCALATION_HOURS}h after the interview also raises a Leadership-owned "Feedback Overdue — Leadership Escalation" alert alongside it</li>
+      <li><b>Assignment Feedback Due</b> (Hiring Manager) — feedback not submitted within {SLA_ASSIGNMENT_FEEDBACK_HOURS}h of the assignment being sent (untouched by the score-tiering above)</li>
+      <li><b>Assignment deadline breached</b> (HR/Admin) — the candidate hasn't submitted within {SLA_ASSIGNMENT_DEADLINE_HOURS}h of the assignment being sent</li>
+      <li><b>Joining risk — no contact</b> (HR/Admin) — a candidate at Offer Accepted whose last logged HR contact is more than {SLA_JOINING_RISK_DAYS} days old, or who has none logged (flagged at the next check, not after {SLA_JOINING_RISK_DAYS} days). There is no screen for logging HR contact yet, so it clears when the candidate joins or leaves Active.</li>
     </ul>
     <p>HR/Admin and Hiring Manager show who owns the overdue step. Top type / Top stage = the breach type and stage with the most open breaches. For a Hiring Manager this card counts only breaches assigned to them; the sections below show every breach on their roles.</p>
   </div>
@@ -81,7 +86,7 @@ export default function Dashboard() {
   const { data, isLoading, error } = useQuery<{ data: DashboardData }>({
     queryKey: ['dashboard', departments, locations, modes, filterPriorities, roleIds],
     queryFn:  () => dashboardApi.get(filterParams),
-    refetchInterval: 5 * 60 * 1000, // refresh every 5 min
+    refetchInterval: DASHBOARD_REFRESH_MS,
   });
 
   if (isLoading) return (
@@ -115,7 +120,10 @@ export default function Dashboard() {
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Dashboard</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Hiring health overview — refreshes every 5 minutes; SLA breaches are re-checked when the page loads, at most every 3 minutes</p>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {`Hiring health overview — refreshes every ${DASHBOARD_REFRESH_MINUTES} minutes, except the Hiring Funnel Snapshot, which updates when you reload the page or return to this tab. ` +
+              `SLA breaches are re-checked when the page loads, at most once every ${SLA_CHECK_THROTTLE_MINUTES} minutes on each server.`}
+          </p>
         </div>
       </div>
 
@@ -186,7 +194,7 @@ export default function Dashboard() {
         <div className="card overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
             <h2 className="text-sm font-semibold text-gray-900">Aging roles</h2>
-            <InfoTooltip align="left" text={`Every role currently Approved, Live – Sourcing, or On Hold, with how long it's been open. Only an Approved or Live – Sourcing role is ever highlighted: it turns yellow, then red, once it is past its own Close Target by ${AGING_THRESHOLDS_TEXT}, so a role just past its target is not highlighted yet. A role with no Close Target set is flagged on days since opened instead, with the same numbers, and its badge then reads 'no target' where a role with a target shows the days over. On Hold roles are shown for reference (how long they've been open) but never get an aging alert, since the clock isn't really running while a role is paused. A red ! next to a role's name means no candidate on that role has had any real movement (a stage or status change, feedback, etc.) in more than 3 days — new applications arriving and automatic scoring don't count, so a role can't look 'active' just because people are still applying to it.`} width="w-96" />
+            <InfoTooltip align="left" text={`Every role currently Approved, Live – Sourcing, or On Hold, with how long it's been open. Only an Approved or Live – Sourcing role is ever highlighted: it turns yellow, then red, once it is past its own Close Target by ${AGING_THRESHOLDS_TEXT}, so a role just past its target is not highlighted yet. A role with no Close Target set is flagged on days since opened instead, with the same numbers, and its badge then reads 'no target' where a role with a target shows the days over. On Hold roles are shown for reference (how long they've been open) but never get an aging alert, since the clock isn't really running while a role is paused. A red ! next to a role's name means no candidate on that role has had any real movement (a stage or status change, feedback, etc.) in more than ${NO_MOVEMENT_DAYS} days — new applications arriving and automatic scoring don't count, so a role can't look 'active' just because people are still applying to it.`} width="w-96" />
           </div>
           {aging_roles.length === 0 ? (
             <div className="p-5"><EmptyState title="No open roles" /></div>
@@ -212,7 +220,7 @@ export default function Dashboard() {
                       </td>
                       <td className="table-td">
                         {r.no_recent_candidate_activity && (
-                          <span title="No candidate movement in 3+ days (new applications don't count)">
+                          <span title={`No candidate movement in more than ${NO_MOVEMENT_DAYS} days (new applications don't count)`}>
                             <AlertTriangle className="w-4 h-4 text-red-600 fill-red-100 shrink-0" strokeWidth={2.5} />
                           </span>
                         )}

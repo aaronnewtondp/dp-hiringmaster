@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { backendFacts, overBudgetPercent } from '../test/backendSource.ts';
 
 // The Ready for Review table's column headers: every name is written out in full (they used to be
 // "Tech", "Exp", "Ind", "Cult", "Traj", "Lead", "Comm", "Port", "Avg", "App. Age" — several clipped, and
@@ -102,6 +103,8 @@ describe('Ready for Review — column headers', () => {
     expect(hover('Application Age')).toContain('number of days, not a date');
     expect(hover('Actions')).toContain('Only for candidates at Applied and Screened');
     expect(hover('Actions')).toContain('Interview Round 1');
+    // a reason is asked first at the backend's severe-over-budget line (utils/budget.ts isSeverelyOverBudget: at or above band top x tolerance)
+    expect(hover('Actions')).toContain(`expected CTC is ${overBudgetPercent(backendFacts())}% or more over the role's CTC band`);
     expect(hover('#')).toContain('not a saved rank');
     expect(hover('Stage')).toContain('changes its status, not its stage');
     expect(hover('Notice Period')).toContain('Notice period in days');          // same words as the marker on the other two lists
@@ -121,11 +124,12 @@ describe('Ready for Review — column headers', () => {
 });
 
 describe('Ready for Review — filter and CTC explanations', () => {
-  it('"In-budget only" says up to 15% over the band still shows (the Over Budget tag is stricter)', async () => {
+  it('"In-budget only" says the band plus the backend tolerance still shows (the Over Budget tag is stricter)', async () => {
     mount();
     await screen.findByText('Candidate A1');
     const tip = screen.getByRole('button', { name: 'In-budget only' }).getAttribute('title')!;
-    expect(tip).toContain("more than 15% above the top of the role's CTC band");
+    const pct = overBudgetPercent(backendFacts());                                 // backend/src/utils/budget.ts OVER_BUDGET_TOLERANCE, read from the source
+    expect(tip).toContain(`more than ${pct}% above the top of the role's CTC band`);
     expect(tip).toContain('still show, with the red Over Budget tag');
   });
 

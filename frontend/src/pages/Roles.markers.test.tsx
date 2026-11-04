@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { agingPhrase, backendFacts } from '../test/backendSource.ts';
 
-// What the Roles table's markers and header hovers say. Each assertion pins a FACT that the code behind the number decides
-// (named in the comment), not the exact wording: when the code changes, the sentence has to.
+// What the Roles table's markers and header hovers say. Each assertion pins a sentence; the fact behind it, which the code
+// decides, is named in the comment. A figure the sentence quotes (the aging thresholds) is taken from the backend's own source
+// (src/test/backendSource.ts), not typed here, so a changed backend threshold turns the test red.
 const list = vi.fn();
 let canHR = true;
 vi.mock('../services/api.ts', () => ({
@@ -44,7 +46,7 @@ describe('Roles — what the markers and hovers say', () => {
     mount();
     await screen.findByText('Quality Assurance Engineer');
     const tip = markerOf('Age');
-    expect(tip).toContain('10 and 23 days (P0), 15 and 45 days (P1), 30 and 68 days (P2) or 30 and 90 days (P3)');   // types/index.ts AGING_THRESHOLDS
+    expect(tip).toContain(agingPhrase(backendFacts()));   // types/index.ts AGING_THRESHOLDS, read from the backend source
     expect(tip).toContain('past its Close Target by');
     expect(tip).toContain('If no Close Target is set, the same numbers are applied to the days it has been open');   // utils/aging.ts
     expect(tip).toContain('Draft, Under Review, On Hold and Closed roles never flag');

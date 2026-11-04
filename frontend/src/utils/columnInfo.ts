@@ -1,7 +1,30 @@
 // Explanations that more than one screen shows, kept in ONE place so the markers can never drift apart. Each text
 // says exactly what the number counts; the fact behind every sentence is named next to it (backend paths are
-// relative to backend/src). When one of these facts changes in the code, change the sentence here — the unit test
-// in columnInfo.test.ts pins the facts, not the exact words.
+// relative to backend/src). When one of these facts changes in the code, change the sentence here. The tests do two
+// different jobs: the sentences are pinned by their wording (columnInfo.test.ts and the page tests), and every figure
+// the sentences quote comes from the constants just below, which utils/markerFacts.backend.test.ts compares with the
+// backend's own source, so a changed backend number turns a test red instead of leaving a stale figure on screen.
+import { OVER_BUDGET_TOLERANCE } from './budget.ts';
+
+// ─── Figures the markers quote ───────────────────────────────────────────────
+// Each constant is the number that the backend (or, where it says so, this app) uses. Sentences are built from them with
+// template strings, never typed again as digits.
+export const SLA_STANDARD_HOURS = 48;               // jobs/slaChecker.ts BREACH_STANDARD_HOURS and BREACH_IDLE_HOURS
+export const SLA_HIGH_SCORE_HOURS = 24;             // jobs/slaChecker.ts BREACH_HIGH_SCORE_HOURS (the shorter window for a high fit score)
+export const SLA_HIGH_SCORE_FIT = 75;               // jobs/slaChecker.ts HIGH_SCORE_THRESHOLD: a Fit score at or above this gets the shorter window
+export const SLA_ASSIGNMENT_FEEDBACK_HOURS = 96;    // jobs/slaChecker.ts BREACH_ASSIGNMENT_FEEDBACK_HOURS
+export const SLA_ESCALATION_HOURS = 96;             // jobs/slaChecker.ts LEADERSHIP_ESCALATION_HOURS (counted from the interview)
+export const SLA_ASSIGNMENT_DEADLINE_HOURS = 60;    // routes/interviews.ts: assignment_deadline = the send time + 60 hours
+export const SLA_JOINING_RISK_DAYS = 5;             // jobs/slaChecker.ts checkJoiningRisk (INTERVAL '5 days'; its task is stored as 120 hours overdue)
+export const NO_MOVEMENT_DAYS = 3;                  // routes/dashboard.ts NO_MOVEMENT_DAYS (the red ! on an Aging role, strictly more than this)
+export const SLA_CHECK_THROTTLE_MINUTES = 3;        // routes/dashboard.ts SLA_CHECK_THROTTLE_MS (per server)
+export const SESSION_HOURS = 24;                    // routes/auth.ts: the sign-in token lasts JWT_EXPIRES_IN, default '24h'
+export const DASHBOARD_REFRESH_MINUTES = 5;         // this app: how often the Dashboard's own queries refetch
+export const DASHBOARD_REFRESH_MS = DASHBOARD_REFRESH_MINUTES * 60 * 1000;
+export const FIT_GREEN_FROM = 75;                   // this app: components/shared/Badges.tsx FitScore colour bands
+export const FIT_AMBER_FROM = 50;
+// Over Budget shortlisting gate and the In-budget filter both use the 15% on top of the band (utils/budget.ts, twin in backend/src/utils/budget.ts).
+export const OVER_BUDGET_TOLERANCE_PERCENT = Math.round((OVER_BUDGET_TOLERANCE - 1) * 100);
 
 // ─── Gender ───────────────────────────────────────────────────────────────────
 // One explanation for the Gender column, shared by the three independent candidate tables (Active Candidates, Archived
@@ -23,9 +46,9 @@ export const FIT_COLUMN_INFO =
   "ResumeIQ's score for this application, from 0 to 100: the Average Score (the mean of its 8 ratings out of 10: Technical, " +
   "Experience, Industry Fit, Culture Fit, Role Alignment, Trajectory, Leadership and Communication) × 10. Roles that have a " +
   "portfolio or work-sample review add a ninth rating, Portfolio, once that review finishes; it counts whenever the review " +
-  "gives it a score, and when a review ends without one the average is the 8 ratings alone. Green is 75 and above, amber " +
-  "50 to 74, red below 50. Scored automatically when the candidate applies. A score of 75 or more also shortens the 48 hour " +
-  "SLA windows to 24 hours at Applied and Screened, the interview rounds, Founders Round and Assignment Round.";
+  `gives it a score, and when a review ends without one the average is the 8 ratings alone. Green is ${FIT_GREEN_FROM} and above, amber ` +
+  `${FIT_AMBER_FROM} to ${FIT_GREEN_FROM - 1}, red below ${FIT_AMBER_FROM}. Scored automatically when the candidate applies. A score of ${SLA_HIGH_SCORE_FIT} or more also shortens the ${SLA_STANDARD_HOURS} hour ` +
+  `SLA windows to ${SLA_HIGH_SCORE_HOURS} hours at Applied and Screened, the interview rounds, Founders Round and Assignment Round.`;
 
 export const AVERAGE_SCORE_INFO =
   "ResumeIQ's mean of its 8 ratings, each from 0 to 10, plus the Portfolio rating for roles that have a portfolio or " +
@@ -72,8 +95,8 @@ export const OVER_BUDGET_INFO =
 // The In-budget only filter is more lenient than the badge (utils/budget.ts isWithinBudgetOrNear: expected <= band top x 1.15,
 // and true when the band or the expected CTC is missing or unreadable).
 export const IN_BUDGET_FILTER_INFO =
-  "Hides candidates whose expected CTC is more than 15% above the top of the role's CTC band. Candidates between 0% and 15% " +
-  "over still show, with the red Over Budget tag, and so do candidates whose band or expected CTC is missing.";
+  `Hides candidates whose expected CTC is more than ${OVER_BUDGET_TOLERANCE_PERCENT}% above the top of the role's CTC band. Candidates over the band by up to ` +
+  `${OVER_BUDGET_TOLERANCE_PERCENT}% still show, with the red Over Budget tag. Candidates whose expected CTC is missing, or whose band is missing or has no number in it, also still show, without the tag.`;
 
 // ─── Dates ───────────────────────────────────────────────────────────────────
 // Both tables show the number of days since applying (not a date): application_date.
@@ -91,12 +114,13 @@ export function lastUpdatedInfo(withLatestEvent: boolean): string {
 }
 
 // ─── SLA ─────────────────────────────────────────────────────────────────────
-// applications.sla_breach is set by the stage-SLA sweep (jobs/slaChecker.ts applyBreachBatch) and cleared by a stage change,
-// scheduling an interview, submitting feedback or sending an assignment. A status change does NOT clear it. The
+// applications.sla_breach is set by the stage-SLA sweep (jobs/slaChecker.ts applyBreachBatch) and cleared by a stage change
+// (routes/applications.ts), by saving a Standard interview round WITH a scheduled date (routes/interviews.ts: a round left TBD
+// clears nothing), by submitting feedback, or by sending an assignment. A status change does NOT clear it. The
 // assignment-deadline and joining-risk checks never set it. The Dashboard counts open breach tasks (pending_actions).
 export const SLA_FLAG_INFO =
   "Marked when HMS finds the application past one of its time limits (SLA). The mark stays until the application moves to " +
-  "another stage, an interview is scheduled, feedback is submitted or an assignment is sent; putting it on hold does not " +
+  "another stage, an interview is scheduled with a date, feedback is submitted or an assignment is sent; putting it on hold does not " +
   "clear it. The Dashboard's SLA breaches counts open overdue tasks instead, so the two numbers can differ.";
 
 // ─── Role age and priority ───────────────────────────────────────────────────

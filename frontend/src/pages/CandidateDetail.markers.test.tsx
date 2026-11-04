@@ -4,7 +4,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // What the hovers and markers on the candidate page say about the badges and fields that have no label of their own. Each
-// assertion pins a FACT that the backend decides (named in the comment), not the exact wording.
+// assertion pins a sentence; the fact behind it, which the backend decides, is named in the comment. These sentences quote no
+// backend figures; the ones that do are checked against the backend's source in utils/markerFacts.backend.test.ts.
 const { empty, candidateGet } = vi.hoisted(() => ({
   empty: () => new Proxy({}, { get: () => async () => ({ data: {} }) }),
   candidateGet: vi.fn(),
@@ -67,7 +68,8 @@ describe('Candidate page — what the unlabelled badges and fields say', () => {
     mount();
     const badge = await screen.findByText('SLA');
     expect(badge.getAttribute('title')).toContain('putting it on hold does not clear it');   // routes/applications.ts: the status route does not reset sla_breach
-    expect(badge.getAttribute('title')).toContain('another stage, an interview is scheduled, feedback is submitted or an assignment is sent');
+    // routes/interviews.ts clears the mark only for a Standard round saved WITH a scheduled date, so the text says "with a date"
+    expect(badge.getAttribute('title')).toContain('another stage, an interview is scheduled with a date, feedback is submitted or an assignment is sent');
   });
 
   it('Founder: raises a Founder Review task for Leadership and puts the candidate in their Ready for Review list', async () => {

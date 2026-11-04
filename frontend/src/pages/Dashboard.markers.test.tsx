@@ -3,9 +3,13 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { DashboardData } from '../types/index.ts';
+import { agingPhrase, backendFacts } from '../test/backendSource.ts';
+import { DASHBOARD_REFRESH_MINUTES } from '../utils/columnInfo.ts';
 
-// What the Dashboard's info markers and header hovers say. Each assertion pins a FACT that the backend query or function
-// behind the number decides (named in the comment), not the exact wording — when the code changes, the sentence has to.
+// What the Dashboard's info markers and header hovers say. Each assertion pins a sentence; the fact behind it, which the backend
+// decides, is named in the comment. Every NUMBER the sentences quote is taken from `backendFacts()`, which reads the backend's
+// own source (src/test/backendSource.ts), not typed into this file, so a changed backend constant turns these tests red.
+const b = backendFacts();
 const dashboardGet = vi.fn();
 vi.mock('../services/api.ts', () => ({
   dashboardApi: { get: (p: unknown) => dashboardGet(p) },
@@ -79,23 +83,35 @@ describe('Dashboard — what the markers say', () => {
     mount();
     await screen.findByText('Active candidates');
     const tip = markerText('Active candidates');
-    expect(tip).toContain('Fit score ≥75 / ≤45');
+    // routes/dashboard.ts counts ai_fit_score >= 75 and <= 45 (b.fitHighCount, b.fitLowCount)
+    expect(tip).toContain(`Fit score ≥${b.fitHighCount} / ≤${b.fitLowCount}`);
+    expect(tip).toContain(`at or above ${b.fitHighCount} or at or below ${b.fitLowCount}`);
     expect(tip).toContain('the Average Score × 10');
     expect(tip).toContain('Hold for Future, Joined and Closed applications');
-    expect(screen.getByText('Fit score ≥75')).toBeInTheDocument();             // the tile's own label matches the marker
-    expect(screen.getByText('Fit score ≤45')).toBeInTheDocument();
-    expect(screen.queryByText('Score ≥75')).not.toBeInTheDocument();
+    expect(screen.getByText(`Fit score ≥${b.fitHighCount}`)).toBeInTheDocument();     // the tile's own label matches the marker
+    expect(screen.getByText(`Fit score ≤${b.fitLowCount}`)).toBeInTheDocument();
+    expect(screen.queryByText(`Score ≥${b.fitHighCount}`)).not.toBeInTheDocument();
   });
 
-  it('SLA breaches: HR owner is "HR/Admin", the escalation counts from the interview, and joining risk is the real rule', async () => {
+  it('SLA breaches: HR owner is "HR/Admin", every window is the backend\'s, the escalation counts from the interview, and joining risk is the real rule', async () => {
     mount();
     await screen.findByText('SLA breaches');
     const tip = markerText('SLA breaches');
-    expect(tip).toContain('feedback still outstanding 96h after the interview');   // jobs/slaChecker.ts: hoursSinceAnchor > 96, anchored to the interview
+    // jobs/slaChecker.ts: BREACH_STANDARD_HOURS / BREACH_IDLE_HOURS, BREACH_HIGH_SCORE_HOURS, HIGH_SCORE_THRESHOLD (>=), LEADERSHIP_ESCALATION_HOURS,
+    // BREACH_ASSIGNMENT_FEEDBACK_HOURS; routes/interviews.ts for the 60 hour assignment deadline; checkJoiningRisk for the days
+    const tiered = `(${b.slaHighScoreHours}h if fit score ≥${b.slaHighScoreFit})`;
+    expect(tip).toContain(`no stage change in ${b.slaIdleHours}h+`);
+    expect(tip).toContain(`not shortlisted within ${b.slaStandardHours}h of Applied and Screened ${tiered}`);
+    expect(tip).toContain(`no round with a date booked within ${b.slaStandardHours}h of entering that stage ${tiered}`);
+    expect(tip).toContain(`assignment not sent within ${b.slaStandardHours}h of entering Assignment Round ${tiered}`);
+    expect(tip).toContain(`feedback not submitted within ${b.slaStandardHours}h of the interview ${tiered}`);
+    expect(tip).toContain(`feedback still outstanding ${b.slaEscalationHours}h after the interview`);          // anchored to the interview, not to the first breach
     expect(tip).not.toContain('still open 96h later');
+    expect(tip).toContain(`feedback not submitted within ${b.slaAssignmentFeedbackHours}h of the assignment being sent (untouched by the score-tiering above)`);
+    expect(tip).toContain(`hasn't submitted within ${b.slaAssignmentDeadlineHours}h of the assignment being sent`);
     expect(tip).toContain('Joining risk — no contact');
-    expect(tip).toContain('last logged HR contact is more than 5 days old, or who has none logged');
-    expect(tip).toContain('flagged at the next check, not after 5 days');
+    expect(tip).toContain(`last logged HR contact is more than ${b.joiningRiskDays} days old, or who has none logged`);
+    expect(tip).toContain(`flagged at the next check, not after ${b.joiningRiskDays} days`);
     expect(tip).not.toContain('(HR)');
     expect(tip).toContain('(HR/Admin)');
   });
@@ -104,15 +120,29 @@ describe('Dashboard — what the markers say', () => {
     mount();
     await screen.findByText('Aging roles');
     const tip = markerText('Aging roles');
-    expect(tip).toContain('10 and 23 days (P0), 15 and 45 days (P1), 30 and 68 days (P2) or 30 and 90 days (P3)');   // types/index.ts AGING_THRESHOLDS
+    expect(tip).toContain(agingPhrase(b));                                      // types/index.ts AGING_THRESHOLDS, read from the backend source
     expect(tip).toContain('a role just past its target is not highlighted yet');
     expect(tip).toContain("its badge then reads 'no target'");
     expect(tip).not.toContain("'0d over'");
     // the badge itself, for the flagged role in the fixture (days_overdue 0, no Close Target): no misleading "0d over"
     expect(screen.getByText(/40d open · no target/)).toBeInTheDocument();
     expect(screen.queryByText(/0d over/)).not.toBeInTheDocument();
-    expect(tip).toContain('more than 3 days');                                  // NO_MOVEMENT_DAYS = 3, strictly greater
+    expect(tip).toContain(`in more than ${b.noMovementDays} days`);             // routes/dashboard.ts NO_MOVEMENT_DAYS, compared with > (b.noMovementIsStrict)
     expect(tip).not.toContain('actually passed its own Close Target gets highlighted');
+  });
+
+  it('the red triangle on an Aging role says "more than N days", like the marker, and shows only for a role with no recent movement', async () => {
+    dashboardGet.mockResolvedValue((() => {
+      const d = data();
+      d.data.aging_roles = [role({ id: 'R003', title: 'Stalled Role', no_recent_candidate_activity: true }), role({ id: 'R004', title: 'Busy Role' })] as unknown as DashboardData['aging_roles'];
+      return d;
+    })());
+    mount();
+    await screen.findByText('Stalled Role');
+    const triangle = screen.getByTitle(/No candidate movement in/);
+    expect(triangle.getAttribute('title')).toBe(`No candidate movement in more than ${b.noMovementDays} days (new applications don't count)`);
+    expect(screen.getAllByTitle(/No candidate movement in/)).toHaveLength(1);    // not on the busy role
+    expect(triangle.closest('tr')!.textContent).toContain('Stalled Role');
   });
 
   it('the abbreviated Aging roles and Low pipeline headers say what they stand for on hover', async () => {
@@ -128,6 +158,8 @@ describe('Dashboard — what the markers say', () => {
     await screen.findByText('Low pipeline roles');
     const tip = markerText('Low pipeline roles');
     expect(tip).toContain('Roles that are Approved, Live – Sourcing, Under Review or On Hold');
+    expect(tip).toContain(`fewer than ${b.lowPipelineMaxShortlisted} shortlisted candidates`);       // utils/lowPipeline.ts
+    expect(tip).toContain(`fewer than ${b.lowPipelineMaxActive} Active candidates in the pipeline`);
     expect(tip).not.toMatch(/^Open roles/);
     expect(tip).toContain('Shortlisted = Active candidates past Applied and Screened, including Reference Check onwards');
     expect(tip).toContain('not the same as Active Shortlist on the Roles page');
@@ -150,11 +182,13 @@ describe('Dashboard — what the markers say', () => {
     expect(tip).toContain('Applied and Screened is measured from the application date');
   });
 
-  it('the subtitle says how fresh the numbers are (a 5 minute refresh, and an SLA sweep at most every 3 minutes), not "updated live"', async () => {
+  it('the subtitle says how fresh the numbers are (the 5 minute refresh, its one exception, the SLA sweep throttle), not "updated live"', async () => {
     mount();
     await screen.findByText('Roles Snapshot');
-    expect(screen.getByText(/refreshes every 5 minutes/)).toBeInTheDocument();
-    expect(screen.getByText(/at most every 3 minutes/)).toBeInTheDocument();
+    // frontend/src/utils/markerFacts.backend.test.ts checks which components really refetch on that interval
+    const subtitle = screen.getByText(/Hiring health overview/).textContent!;
+    expect(subtitle).toContain(`refreshes every ${DASHBOARD_REFRESH_MINUTES} minutes, except the Hiring Funnel Snapshot, which updates when you reload the page or return to this tab`);
+    expect(subtitle).toContain(`at most once every ${b.slaCheckThrottleMinutes} minutes on each server`);     // routes/dashboard.ts SLA_CHECK_THROTTLE_MS
     expect(screen.queryByText(/updated live/)).not.toBeInTheDocument();
   });
 });
