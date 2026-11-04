@@ -140,6 +140,17 @@ describe('UserManagement — who has controls', () => {
     expect(within(row('test.twin@example.test')).getByRole('button', { name: 'Deactivate' })).toBeEnabled();
     expect(within(row('test.self@example.test')).getByRole('button', { name: 'Deactivate' })).toBeDisabled();
   });
+
+  it('"yourself" is decided by user id, not e-mail: another row carrying your e-mail address is not you', async () => {
+    list.mockResolvedValue({ data: { users: [SELF, user({ id: 'u-lookalike', name: 'Someone Else', email: 'test.self@example.test' })] } });
+    mount();
+    await waitFor(() => expect(screen.getAllByText('test.self@example.test')).toHaveLength(2));
+    const [own, other] = screen.getAllByRole('row').slice(1).map(r => within(r as HTMLElement));        // the header row first, then SELF, then the look-alike
+    expect(own.getByText('Test Self')).toBeInTheDocument();
+    expect(other.getByText('Someone Else')).toBeInTheDocument();
+    expect(own.getByRole('button', { name: 'Deactivate' })).toBeDisabled();
+    expect(other.getByRole('button', { name: 'Deactivate' })).toBeEnabled();
+  });
 });
 
 describe('UserManagement — switching access off and on', () => {
@@ -158,6 +169,20 @@ describe('UserManagement — switching access off and on', () => {
     fireEvent.click(within(row('test.lead@example.test')).getByRole('button', { name: 'Reactivate' }));
     await waitFor(() => expect(update).toHaveBeenCalledWith('u-lead', { is_active: true }));
     await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('Access restored'));
+  });
+
+  it('while a change is on its way the button is disabled, so a second click sends nothing, and it works again once the change is done', async () => {
+    let done!: (v: unknown) => void;
+    update.mockReturnValue(new Promise(r => { done = r; }));
+    mount();
+    await screen.findByText('test.manager@example.test');
+    const deactivate = () => within(row('test.manager@example.test')).getByRole('button', { name: 'Deactivate' });
+    fireEvent.click(deactivate());
+    await waitFor(() => expect(deactivate()).toBeDisabled());
+    fireEvent.click(deactivate());
+    expect(update).toHaveBeenCalledTimes(1);
+    done({ data: {} });
+    await waitFor(() => expect(deactivate()).toBeEnabled());
   });
 
   it('a refused change shows the server\'s own message, or a generic one, and leaves the button usable', async () => {
@@ -266,6 +291,21 @@ describe('UserManagement — adding a user', () => {
     expect(list).toHaveBeenCalledTimes(1);                          // nothing was added, so nothing was re-read
   });
 
+  it('while the new user is being saved the dialog\'s button is disabled, so a second click sends nothing, and the dialog closes when it is done', async () => {
+    let done!: (v: unknown) => void;
+    create.mockReturnValue(new Promise(r => { done = r; }));
+    await open();
+    setIn('Name', 'Test Newcomer');
+    setIn('Email', 'test.newcomer@example.test');
+    const submit = within(modal()).getByRole('button', { name: 'Add user' });        // the same button throughout: only its label turns into a spinner
+    fireEvent.click(submit);
+    await waitFor(() => expect(submit).toBeDisabled());
+    fireEvent.click(submit);
+    expect(create).toHaveBeenCalledTimes(1);
+    done({ data: {} });
+    await waitFor(modalClosed);
+  });
+
   it('Cancel closes the dialog without sending anything', async () => {
     await open();
     setIn('Name', 'Test Newcomer');
@@ -308,6 +348,19 @@ describe('UserManagement — editing a user', () => {
     await waitFor(modalClosed);
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it('while the change is being saved the dialog\'s button is disabled, so a second click sends nothing, and the dialog closes when it is done', async () => {
+    let done!: (v: unknown) => void;
+    update.mockReturnValue(new Promise(r => { done = r; }));
+    await open('test.manager@example.test');
+    const submit = within(modal()).getByRole('button', { name: 'Save' });
+    fireEvent.click(submit);
+    await waitFor(() => expect(submit).toBeDisabled());
+    fireEvent.click(submit);
+    expect(update).toHaveBeenCalledTimes(1);
+    done({ data: {} });
+    await waitFor(modalClosed);
   });
 
   it('emptying the name is refused in the same way as for a new user', async () => {
