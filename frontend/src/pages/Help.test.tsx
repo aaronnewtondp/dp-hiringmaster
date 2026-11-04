@@ -760,7 +760,10 @@ describe('Help — the names and figures in the answers are the ones the screens
   it('names every pipeline stage in STAGES, in pipeline order', () => {
     mount();
     const t = answerTo(/Why does an application have a Stage, a Status, AND a Screening Status/);
-    const bullet = t.slice(t.indexOf('Stage —'), t.indexOf('Status —'));
+    const from = t.indexOf('Stage —'), to = t.indexOf('Status —');
+    expect(from, 'the Stage bullet has moved').toBeGreaterThanOrEqual(0);
+    expect(to, 'the Status bullet has moved').toBeGreaterThan(from);
+    const bullet = t.slice(from, to);
     for (const stage of STAGES) expect(bullet, stage).toContain(stage);
     const at = STAGES.map(stage => bullet.indexOf(stage));
     expect(at).toEqual([...at].sort((a, b) => a - b));
@@ -769,22 +772,31 @@ describe('Help — the names and figures in the answers are the ones the screens
   it('names every status a person can set (all but the unused "Closed") and every role status, in order', () => {
     mount();
     const t = answerTo(/Why does an application have a Stage, a Status, AND a Screening Status/);
-    const bullet = t.slice(t.indexOf('Status —'), t.indexOf('Recruiter Screening Status'));
+    const from = t.indexOf('Status —'), to = t.indexOf('Recruiter Screening Status');
+    expect(from, 'the Status bullet has moved').toBeGreaterThanOrEqual(0);
+    expect(to, 'the Recruiter Screening Status bullet has moved').toBeGreaterThan(from);
+    const bullet = t.slice(from, to);
     // 'Closed' is allowed by the database and listed by the Status filter, but nothing in HMS ever sets it
     for (const status of APPLICATION_STATUSES.filter(s => s !== 'Closed')) expect(bullet, status).toContain(status);
     const roles = answerTo(/What do the role statuses mean/);
-    for (const status of ROLE_STATUSES) expect(roles, status).toContain(status);
-    const at = ROLE_STATUSES.map(status => roles.indexOf(status));
+    // the first paragraph is the chain of statuses; later paragraphs mention some of them again, which must not hide one that is missing from the chain
+    const end = roles.indexOf('These are not automatic steps');
+    expect(end, 'the paragraph after the chain of statuses has moved').toBeGreaterThan(0);
+    const chain = roles.slice(0, end);
+    for (const status of ROLE_STATUSES) expect(chain, status).toContain(status);
+    const at = ROLE_STATUSES.map(status => chain.indexOf(status));
     expect(at).toEqual([...at].sort((a, b) => a - b));
   });
 
-  it('says there are as many personas as the app has, and names each by the label the screens show', () => {
+  it('says there are as many personas as the app has, and gives each one its own bullet under the label the screens show', () => {
     mount();
     const t = answerTo('What can each role/persona do?');
     const n = Object.keys(PERSONAS).length;
     expect(WORD[n], `add the word for ${n} personas to this test`).toBeDefined();
     expect(t).toContain(`There are ${WORD[n]} personas`);
-    for (const label of Object.values(PERSONAS)) expect(t, label).toContain(label);
+    // one bullet per persona, led by the label PERSONAS gives it (the labels also appear in running text, so a bare search would not notice a missing bullet)
+    const bullets = [...screen.getByRole('button', { name: 'What can each role/persona do?' }).parentElement!.querySelectorAll('li > strong')].map(b => b.textContent);
+    expect(bullets).toEqual(Object.values(PERSONAS));
   });
 
   it('lists the over-budget reasons exactly as the reason picker offers them', () => {
@@ -817,7 +829,9 @@ describe('Help — the names and figures in the answers are the ones the screens
     expect(isWithinBudgetOrNear(edge, band)).toBe(true);
     expect(isWithinBudgetOrNear(edge + 0.01, band)).toBe(false);
     expect(asked).toMatch(/If the band or the expected CTC isn't recorded, no reason is asked for/);
+    // with no band or no expected CTC there is nothing to compare: no badge, no reason asked for, and the filter keeps the candidate
     for (const [expected, ctcBand] of [[null, band], [edge * 2, null], [null, null]] as const) {
+      expect(isOverBudget(expected, ctcBand)).toBe(false);
       expect(isSeverelyOverBudget(expected, ctcBand)).toBe(false);
       expect(isWithinBudgetOrNear(expected, ctcBand)).toBe(true);
     }
@@ -1035,6 +1049,10 @@ describe('Help — the Sourcing figures are the ones the module uses', () => {
     const scored = numberIn(BACKEND.qualified, /ai_fit_score > (\d+) THEN/);
     const dashboardScored = numberIn(BACKEND.dashboard, /ai_fit_score > (\d+)\) AS scored_above_60_count/);
     expect(dashboardScored).toBe(scored);
+    // the same rule is written out in SQL in several places (the qualified count, the plan view, the Low Pipeline columns): every one must agree
+    const everywhere = [BACKEND.qualified, BACKEND.plans, BACKEND.dashboard].flatMap(rel => [...source(rel).matchAll(/ai_fit_score > (\d+)/g)].map(m => Number(m[1])));
+    expect(everywhere.length).toBeGreaterThan(3);
+    expect([...new Set(everywhere)]).toEqual([scored]);
     await mountReady();
     expect(said(answerTo(/What does "Provisional" mean/), /first (\d+) weeks/)).toBe(weeks);
     expect(said(answerTo('Can the qualified-candidate target differ by role?'), /scored above (\d+) by ResumeIQ/)).toBe(scored);
