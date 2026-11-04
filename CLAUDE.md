@@ -158,6 +158,8 @@ outside HR-tier), the Founder Review flag route, and the recruiter-screening-
 status route. **`leadership` sees everything `hr_recruiter` sees** — there is
 no field or route either is blocked from that the other isn't.
 
+**Deactivation takes effect live (2026-11-05).** `authenticate()` (async) does not trust the 24 h JWT alone: after verifying it, and after the smoke-account read-only check (a smoke write is still refused 403 before any lookup), it confirms the user still exists and `is_active` via `SELECT is_active FROM users WHERE id=$1`; an inactive or missing row is 401 "Account is deactivated or no longer exists", and a database failure fails closed with 503 "Could not verify account status". The answer is cached in-process for 15 s (max 1000 entries, definitive answers only), so `PATCH /api/users/:id` calls `invalidateUserAccess(id)` and a deactivation is immediate on that instance and reaches other serverless instances within the 15 s TTL. Tests that run the real `authenticate` with a mocked database must answer that lookup: `fakeDb` does it by default (`setUserAccess`), hand-written mocks use `src/test/accessLookup.ts`.
+
 `super_admin` is a strict superset of HR-tier (passes `isHRTier` too) plus
 `requireSuperAdmin`-gated routes (`/api/users`, the User Management API) that
 nothing else can reach. **Policy: `super_admin` is assigned to exactly one

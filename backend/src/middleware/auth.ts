@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { JwtPayload, Persona } from '../types/index.js';
 import { isNamedHiringManager } from '../utils/hiringManagers.js';
+import { queryOne } from '../db/index.js';
 
 // Extend Express Request to carry the decoded JWT payload
 declare global {
@@ -24,28 +25,94 @@ export function isSmokeAccount(email: unknown): boolean {
   return typeof email === 'string' && email.trim().toLowerCase().endsWith(`@${SMOKE_EMAIL_DOMAIN}`);
 }
 
-// ─── Verify JWT and attach user to request ───────────────────────────────────
-export function authenticate(req: Request, res: Response, next: NextFunction): void {
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+// ─── Live account-status check ────────────────────────────────────────────────
+// A JWT lives 24 h (routes/auth.ts), so verifying the signature alone would let a user deactivated via PATCH /api/users/:id
+// keep full access for up to a day. authenticate() therefore also confirms the user still exists and is_active = true.
+// To avoid one extra query per request the answer is cached in-process for ACCESS_CACHE_TTL_MS (15 s): on the instance that
+// handled the PATCH, invalidateUserAccess() makes a deactivation immediate; on any other serverless instance it takes effect
+// within the TTL, which therefore bounds how stale an answer can be. Only definitive answers (active / inactive / no row)
+// are cached, never a database error: a failed lookup fails CLOSED (503) and is retried on the next request.
+export const ACCESS_CACHE_TTL_MS = 15_000;
+export const ACCESS_CACHE_MAX_ENTRIES = 1000;
+const accessCache = new Map<string, { active: boolean; at: number }>();
+// Bumped by every invalidateUserAccess(): a lookup that was already in flight when an invalidation happened may have read the
+// row BEFORE the update committed, so its answer is used for that one request but never cached (it would otherwise put a stale
+// "active" back for a full TTL right after a deactivation).
+let accessEpoch = 0;
 
-  if (!token) {
-    res.status(401).json({ error: 'No token provided' });
-    return;
+/** Forget the cached active/inactive answer for one user, or for everyone when called with no argument. */
+export function invalidateUserAccess(userId?: string): void {
+  accessEpoch++;
+  if (userId === undefined) accessCache.clear();
+  else accessCache.delete(String(userId));
+}
+
+async function isUserActive(userId: string): Promise<boolean> {
+  const now = Date.now();
+  const hit = accessCache.get(userId);
+  if (hit && now - hit.at < ACCESS_CACHE_TTL_MS) return hit.active;
+  const epoch = accessEpoch;
+  const row = await queryOne<{ is_active: boolean }>('SELECT is_active FROM users WHERE id=$1', [userId]);
+  const active = row?.is_active === true;
+  if (epoch !== accessEpoch) return active;
+  if (accessCache.size >= ACCESS_CACHE_MAX_ENTRIES && !accessCache.has(userId)) {
+    // Hard cap: drop the oldest entry (Map keeps insertion order); entries are re-inserted on refresh so this is oldest-written.
+    const oldest = accessCache.keys().next().value;
+    if (oldest !== undefined) accessCache.delete(oldest);
   }
+  accessCache.delete(userId);
+  accessCache.set(userId, { active, at: now });
+  return active;
+}
 
+// ─── Verify JWT, confirm the account is still active, attach user to request ───
+export async function authenticate(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const secret = process.env.JWT_SECRET;
-    if (!secret) throw new Error('JWT_SECRET not configured');
-    const payload = jwt.verify(token, secret) as JwtPayload;
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+    if (!token) {
+      res.status(401).json({ error: 'No token provided' });
+      return;
+    }
+
+    let payload: JwtPayload;
+    try {
+      const secret = process.env.JWT_SECRET;
+      if (!secret) throw new Error('JWT_SECRET not configured');
+      payload = jwt.verify(token, secret) as JwtPayload;
+    } catch {
+      res.status(401).json({ error: 'Invalid or expired token' });
+      return;
+    }
+
+    if (typeof payload.userId !== 'string' || !payload.userId) {
+      res.status(401).json({ error: 'Invalid or expired token' });
+      return;
+    }
     req.user = payload;
+    // Smoke accounts are refused here, before any database lookup.
     if (isSmokeAccount(payload.email) && !READ_ONLY_METHODS.has(req.method)) {
       res.status(403).json({ error: 'Smoke-test accounts are read-only' });
       return;
     }
+
+    let active: boolean;
+    try {
+      active = await isUserActive(payload.userId);
+    } catch {
+      delete req.user;
+      res.status(503).json({ error: 'Could not verify account status' });
+      return;
+    }
+    if (!active) {
+      delete req.user;
+      res.status(401).json({ error: 'Account is deactivated or no longer exists' });
+      return;
+    }
     next();
   } catch {
-    res.status(401).json({ error: 'Invalid or expired token' });
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
   }
 }
 
