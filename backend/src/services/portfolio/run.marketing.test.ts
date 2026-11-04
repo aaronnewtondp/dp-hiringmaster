@@ -328,7 +328,7 @@ describe('runMarketingReview: acquisition', () => {
     fetchDoes(() => new Promise<Acquired[]>(r => { finishFetch = r; }));
 
     const pending = runWith([DOC, SITE]);
-    await vi.waitFor(() => expect(browser.withBrowser).toHaveBeenCalledTimes(1));   // both in flight before either has finished
+    await vi.waitFor(() => expect(browser.withBrowser).toHaveBeenCalledTimes(1), { timeout: 10_000 });   // both in flight before either has finished (vitest's default wait is 1 s)
     expect(fetching.calls).toHaveLength(1);
 
     finishBrowser([captured(SITE)]);
@@ -1363,8 +1363,16 @@ describe('runMarketingReview: short links and link-in-bio pages are expanded BEF
   };
   const capturedLinks = () => vi.mocked(capturePortfolios).mock.calls[0][1];
   // The real expansion runs under the review's own clock (the deadline is start + BUDGET.acquireMs), so the job starts NOW here,
-  // not at the fixed T0 the rest of this file uses (which is long past).
-  const started = Date.now();
+  // not at the fixed T0 the rest of this file uses (which is long past). "Now" is read when each test STARTS, from a clock that is then held still:
+  // it used to be read once, when the file was collected, so any delay of more than BUDGET.acquireMs (180 s) before a test ran (a paused runner, a
+  // machine that slept, a long earlier test) made the deadline pass and eight of these tests failed with "Ran out of time".
+  let started = 0;
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-22T10:00:00.000Z'));
+    started = Date.now();
+  });
+  afterEach(() => { vi.useRealTimers(); });
   const runIn = (links: PortfolioLink[], over: Partial<MarketingRunContext> = {}) => runWith(links, { startedAt: started, ...over });
 
   it('a Linktree that leads to a website and a Behance page: both go to Chromium, as <ref>.1 and <ref>.2', async () => {

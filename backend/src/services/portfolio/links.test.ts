@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeUrl, extractUrlsFromText, classifyUrl, pickPortfolioLinks, mergeResumeLinks, dedupeKey, nameTokens, customLinkScore } from './links.js';
+import { assertLinearOn, expectCpuUnder } from '../../testing/timing.js';
 
 describe('normalizeUrl', () => {
   it('adds https, lowercases the host, drops the fragment and a bare-origin trailing slash', () => {
@@ -155,9 +156,9 @@ describe('pickPortfolioLinks — real-world noise', () => {
 // A single hostile 100 KB "URL" in a resume used to freeze the API process for
 // ~15 seconds (quadratic trailing-punctuation regex). Bounded now — assert it.
 describe('hostile input cannot stall the process', () => {
-  const fast = (f: () => unknown) => { const t = Date.now(); f(); return Date.now() - t; };
+  // CPU time scaled to the machine (testing/timing.ts), not the clock: the quadratic regex took ~15 s on this input, the bounded code a fraction of a millisecond.
   it('a huge run of trailing punctuation is rejected/handled in milliseconds', () => {
-    expect(fast(() => normalizeUrl('https://x.com/' + '.'.repeat(100000) + 'a'))).toBeLessThan(250);
+    expectCpuUnder(250, () => normalizeUrl('https://x.com/' + '.'.repeat(100000) + 'a'), 'normalizeUrl on 100,000 dots');
     expect(normalizeUrl('https://x.com/' + '.'.repeat(100000) + 'a')).toBeNull();
   });
   it('an over-long URL is not a URL', () => {
@@ -165,8 +166,10 @@ describe('hostile input cannot stall the process', () => {
     expect(normalizeUrl('https://x.com/' + 'a'.repeat(1000))).not.toBeNull();
   });
   it('the text sweeps are linear on adversarial shapes', () => {
+    // Linear: the same shape at 25,000 and at 400,000 characters (16x; the function reads at most 400,000); the big one may cost no more than linear scaling allows, and, as a second guard, under an
+    // absolute bound (a quadratic sweep costs 16x more than linear scaling allows on that step, whatever the speed of the machine).
     for (const chunk of ['a.', 'figma.', 'portfolio: a.b ', 'www.a', 'https://']) {
-      expect(fast(() => extractUrlsFromText(chunk.repeat(Math.ceil(400_000 / chunk.length))))).toBeLessThan(500);
+      assertLinearOn(`extractUrlsFromText on ${JSON.stringify(chunk)} repeated`, chars => chunk.repeat(Math.ceil(chars / chunk.length)), extractUrlsFromText, 25_000, 400_000, { backstopMs: 500 });
     }
   });
   it('trailing punctuation is still stripped from ordinary links', () => {

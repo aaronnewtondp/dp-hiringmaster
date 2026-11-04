@@ -60,6 +60,11 @@ describe('ResumeIQPanel — the Portfolio row', () => {
     await waitFor(() => expect(cells()[0]).toHaveAttribute('title', expect.stringContaining('Ninth dimension for designer roles')));
     expect(cells()[0].getAttribute('title')).toContain('portfolio site(s)');
     expect(cells()[0].getAttribute('title')).not.toContain('Head of Marketing');
+    // the designer review SCORES a missing or dead portfolio (and counts it); only a blocked site or an unreadable resume is left out
+    expect(cells()[0].getAttribute('title')).toContain('no portfolio link scores 0');
+    expect(cells()[0].getAttribute('title')).toContain('scores 1');
+    expect(cells()[0].getAttribute('title')).toContain('count in the average');
+    expect(cells()[0].getAttribute('title')).toContain('blocks automated access');
   });
 
   it('explains a marketing review as work samples, left out when there is nothing to review', async () => {
@@ -70,10 +75,11 @@ describe('ResumeIQPanel — the Portfolio row', () => {
     expect(cells()[0].getAttribute('title')).toContain('left out of the average when there is nothing that could be reviewed');
   });
 
-  it('names both roles until it knows which review this is', () => {
+  it('speaks of both kinds of review, without promising a score, until it knows which review this is', () => {
     portfolioReview.mockReturnValue(new Promise(() => { /* never settles */ }));
     mount(app({ portfolio_analysis_status: 'pending' }));
-    expect(cells()[0].getAttribute('title')).toContain('designer and Head of Marketing roles');
+    expect(cells()[0].getAttribute('title')).toContain('roles with a portfolio or work-sample review');
+    expect(cells()[0].getAttribute('title')).toContain('Some outcomes are not scored');
   });
 
   it('does not call a review that could not be queued "in progress": nothing is on its way', async () => {
@@ -157,12 +163,13 @@ describe('ResumeIQPanel — the Portfolio row', () => {
 });
 
 describe('ResumeIQPanel — header', () => {
-  it('says in its tooltip that designer and Head of Marketing roles add a ninth dimension, and that Head of Marketing may be left out', () => {
+  it('says in its tooltip that roles with a portfolio or work-sample review add a ninth dimension, that a review ending without a score leaves the 8, and what the Verdict is', () => {
     mount(app());
     fireEvent.click(screen.getByRole('button', { name: 'More info' }));
     const tip = screen.getByText(/Scored automatically the moment this candidate applied/);
-    expect(tip).toHaveTextContent('The Senior UX/Product Designer and Head of Marketing roles add a ninth, Portfolio');
-    expect(tip).toHaveTextContent('left out when there is nothing to review');
+    expect(tip).toHaveTextContent('Roles that have a portfolio or work-sample review add a ninth, Portfolio');
+    expect(tip).toHaveTextContent('a review that ends without one leaves the score at the 8 dimensions alone');
+    expect(tip).toHaveTextContent('not calculated from the score and does not change when Portfolio is added');
     expect(tip.textContent).not.toMatch(/Designer roles add a ninth/);
   });
 

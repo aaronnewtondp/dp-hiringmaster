@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { Candidate, Role } from '../../types/index.js';
 import type { Acquired, MediaBlock } from './acquire/types.js';
 import type { PortfolioPlatform } from './types.js';
+import { assertLinear, cpuTimed, scaled } from '../../testing/timing.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The Head of Marketing work-sample analyzer. Only the Anthropic SDK is replaced:
@@ -1901,24 +1902,25 @@ describe('parseRawRequirementList', () => {
   });
 
   it('is linear on hostile input: a huge run of "1.", of digits, and 100k numbered lines return promptly', () => {
-    realClock(() => {
+    // the function reads at most 20,000 characters, so even a quadratic pass over that costs a few hundred ms; measured: ~20 ms for the four calls together
+    cpuBudget(() => {
       parseRawRequirementList('1.'.repeat(100_000));
       parseRawRequirementList(`1. ${'9'.repeat(200_000)}`);
       parseRawRequirementList(Array.from({ length: 100_000 }, (_, i) => `${(i % 99) + 1}. x`).join('\n'));
       parseRawRequirementList(`${'- '.repeat(100_000)}`);
-    });
+    }, 300);
   });
 });
 
-/** Runs `fn` under the real clock and fails if it takes longer than two seconds (the suite fakes Date). */
-function realClock(fn: () => void) {
-  vi.useRealTimers();
-  const start = performance.now();
-  fn();
-  const took = performance.now() - start;
-  vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date(NOW));
-  expect(took).toBeLessThan(2000);
+/**
+ * Runs `fn` and fails if it costs more than `budgetMs` of this process's CPU time, scaled to the machine (`scaled`, testing/timing.ts). CPU time, not the clock
+ * (the suite fakes Date, and wall time on a loaded or slower machine measures the machine: this check failed at 2.11 s against 2.0 s with no regression in
+ * the code). The budgets are 5x to 15x above what the code costs on the inputs here (see each call), so what they catch is a quadratic pass or catastrophic backtracking, which costs
+ * seconds or more on the same inputs.
+ */
+function cpuBudget(fn: () => void, budgetMs: number) {
+  const { ms } = cpuTimed(fn);
+  expect(ms).toBeLessThan(scaled(budgetMs));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -2064,12 +2066,21 @@ describe('fairness inputs: nothing that identifies the candidate reaches the mod
   });
 
   it('masking and redaction stay fast on hostile text (8 items of 12,000 characters of dots, URLs, commas and names, and a long answer)', () => {
-    const shapes = ['. '.repeat(6000), 'https://example.com/path?id=9876543210 '.repeat(300), ', '.repeat(6000), 'Priya Sharma priyasharma.design '.repeat(400), 'I have 12 years of experience and she is 38. '.repeat(250)];
-    realClock(() => {
-      for (const text of shapes) {
-        buildMarketingContent({ role, candidate: priya, claimText: text, listedNotReviewed: [], acquired: Array.from({ length: 8 }, (_, i) => item(`L${i + 1}`, { text, media: [] })) });
-      }
-    });
+    // Linear, not "under N ms": each shape is built at 1,500 characters per item and at 12,000 (8x), in this process, and the big one may cost no more than
+    // linear scaling allows. Catastrophic backtracking and a quadratic pass both cost 8x too much (or far more) on that step, whatever the speed or the load
+    // of the machine; wall-clock bounds measured the machine (this check failed at 2.11 s against 2.0 s with no regression). CPU time, the smallest of two runs.
+    // (Text per item is cut at 12,000 characters before masking, so that is as large as the input can usefully get.)
+    const build = (text: string) => buildMarketingContent({ role, candidate: priya, claimText: text, listedNotReviewed: [], acquired: Array.from({ length: 8 }, (_, i) => item(`L${i + 1}`, { text, media: [] })) });
+    const shapes: Array<[string, (chars: number) => string]> = [
+      ['dots', n => '. '.repeat(n / 2)],
+      ['URLs', n => 'https://example.com/path?id=9876543210 '.repeat(Math.ceil(n / 39))],
+      ['commas', n => ', '.repeat(n / 2)],
+      ['the name and its handle', n => 'Priya Sharma priyasharma.design '.repeat(Math.ceil(n / 32))],
+      ['years of experience and an age', n => 'I have 12 years of experience and she is 38. '.repeat(Math.ceil(n / 45))],
+    ];
+    for (const [label, make] of shapes) {
+      assertLinear(`masking ${label}`, chars => build(make(chars)), 1_500, 12_000, { factor: 2.5, runs: 2 });
+    }
   });
 
   it('the system prompt says honestly what the model may rely on: the name is [candidate], and a per-link line says whether it appears', () => {
@@ -2395,12 +2406,12 @@ describe('parseReviewJson (balanced-brace extraction)', () => {
   });
 
   it('is linear on hostile input: 150,000 open braces, then a real review, finish promptly', () => {
-    realClock(() => {
+    cpuBudget(() => {
       parseReviewJson('{'.repeat(150_000));
       parseReviewJson(`${'{ '.repeat(80_000)}${text}`);
       parseReviewJson('{"a":"'.repeat(30_000));
       parseReviewJson(`${'{}'.repeat(100_000)}`);
-    });
+    }, 500);               // measured: ~60 ms for the four calls together
   });
 });
 
