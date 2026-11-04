@@ -3,6 +3,8 @@ import {
   candidateNameSignal, filterProtectedAttributes, findFullPersonName, findProtectedAttribute, maskNameTokens, nameAppears, nameTokens,
   redactPersonalStatements, replaceYearsOfExperience, urlNameText,
 } from './protectedAttributes.js';
+import { expectCpuUnder } from '../../testing/timing.js';
+import { cpuTimed, scaled } from '../../testing/timing.js';
 
 // The adversarial review (finding 1.13): strings that state or infer an attribute of the candidate (207), copied from its corpus, hard-negative and singular-they probe files.
 const REVIEW_LEAKS: string[] = [
@@ -1080,9 +1082,8 @@ describe('legacy contract (the rubric.marketing tests before the swap): filterPr
       'a '.repeat(50_000) + '!', `she is ${'very '.repeat(20_000)}`, `likely ${'in '.repeat(20_000)}`, '(('.repeat(50_000),
       'aged '.repeat(20_000), 'a.'.repeat(60_000), `${'a'.repeat(60)}@`.repeat(1_000), '+'.repeat(100_000), '- '.repeat(100_000),
     ];
-    const started = Date.now();
-    for (const h of hostile) filterProtectedAttributes([h]);
-    expect(Date.now() - started).toBeLessThan(3_000);
+    // CPU time scaled to the machine (testing/timing.ts), not the clock: catastrophic backtracking costs seconds to minutes on these inputs
+    expectCpuUnder(3_000, () => { for (const h of hostile) filterProtectedAttributes([h]); }, 'filterProtectedAttributes over the hostile set');
   });
 });
 
@@ -1092,13 +1093,9 @@ const cp = (n: number): string => String.fromCodePoint(n);
 const ZWSP = cp(0x200b);
 const SHY = cp(0x00ad);
 // CPU time of this test process (each test file runs in its own process), not wall-clock: when the whole suite runs in
-// parallel a wall-clock budget measures the machine's load, not the regular expressions.
-const cpuMs = (fn: () => void): number => {
-  const before = process.cpuUsage();
-  fn();
-  const used = process.cpuUsage(before);
-  return (used.user + used.system) / 1000;
-};
+// parallel a wall-clock budget measures the machine's load, not the regular expressions. The bounds are compared with scaled(...)
+// (testing/timing.ts: the bound times how much slower than the reference machine this one is right now), so a slower runner does not fail them.
+const cpuMs = (fn: () => void): number => cpuTimed(fn).ms;
 
 describe('filterProtectedAttributes — singular they/their, adjectives before religion, health, nationality, accent (were all kept)', () => {
   const leaks: Array<[string, string]> = [
@@ -1411,7 +1408,7 @@ describe('filterProtectedAttributes — performance on 20,000-character adversar
     const slow: string[] = [];
     for (const [name, text] of shapes) {
       const ms = cpuMs(() => { findProtectedAttribute(text); });
-      if (ms >= 100) slow.push(`${name}: ${Math.round(ms)} ms of CPU`);
+      if (ms >= scaled(100)) slow.push(`${name}: ${Math.round(ms)} ms of CPU`);
     }
     expect(slow).toEqual([]);
   });
@@ -1500,7 +1497,7 @@ describe('redactPersonalStatements', () => {
       redactPersonalStatements('a\n'.repeat(30_000));
       redactPersonalStatements('. '.repeat(30_000));
     });
-    expect(ms).toBeLessThan(1_500);
+    expect(ms).toBeLessThan(scaled(1_500));
   });
 });
 
@@ -1629,7 +1626,7 @@ describe('the new first-person and reviewer-style rules stay linear on hostile i
       ['pregnant', 'pregnant '.repeat(N / 9)], ['expecting', 'she is expecting '.repeat(N / 17)], ['father of', 'father of a '.repeat(N / 12)], ['pipes', '35 | f | '.repeat(N / 9)],
     ];
     const slow: string[] = [];
-    for (const [name, text] of shapes) { const ms = cpuMs(() => { findProtectedAttribute(text); }); if (ms >= 100) slow.push(`${name}: ${Math.round(ms)} ms`); }
+    for (const [name, text] of shapes) { const ms = cpuMs(() => { findProtectedAttribute(text); }); if (ms >= scaled(100)) slow.push(`${name}: ${Math.round(ms)} ms`); }
     expect(slow).toEqual([]);
   });
   it('redaction of hostile text (commas, bullets, brackets, years, repeated statements) is fast too', () => {
@@ -1638,7 +1635,7 @@ describe('the new first-person and reviewer-style rules stay linear on hostile i
       'I have 12 years of experience. '.repeat(N / 31), '12 years '.repeat(N / 9), 'She is married. '.repeat(N / 16), `${'38, '.repeat(N / 4)}mother of two`, `${'we shipped the launch film '.repeat(N / 27)}and she is a woman`,
     ];
     const slow: string[] = [];
-    shapes.forEach((text, i) => { const ms = cpuMs(() => { redactPersonalStatements(text); }); if (ms >= 300) slow.push(`shape ${i}: ${Math.round(ms)} ms`); });
+    shapes.forEach((text, i) => { const ms = cpuMs(() => { redactPersonalStatements(text); }); if (ms >= scaled(300)) slow.push(`shape ${i}: ${Math.round(ms)} ms`); });
     expect(slow).toEqual([]);
   });
 });
@@ -1722,7 +1719,7 @@ describe('maskNameTokens', () => {
       maskNameTokens('priya sharma https://priyasharma.design/x '.repeat(3_000), N);
       maskNameTokens('é'.repeat(60_000), 'José Álvarez');
     });
-    expect(ms).toBeLessThan(1_500);
+    expect(ms).toBeLessThan(scaled(1_500));
   });
 });
 

@@ -5,6 +5,7 @@ import {
   ZipGuardError, ZipLimitError, openZip,
 } from './zip.js';
 import { buildZip, endRecordOffset, forgedDirectory, patchDeclaredSizes, zipOf } from './zip.fixtures.js';
+import { expectCpuUnder } from '../../../testing/timing.js';
 
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -74,19 +75,18 @@ describe('openZip - not a zip, or not an honest one', () => {
     marker.writeUInt16LE(0xffff, endRecordOffset(marker) + 8);
     rejects(marker, TOO_MANY_ENTRIES_REASON);
     // 300,000 real directory records: the 16-bit count wraps to 37,856, which is still far over the cap.
-    const started = Date.now();
-    rejects(forgedDirectory(300_000, 300_000), TOO_MANY_ENTRIES_REASON);
-    expect(Date.now() - started).toBeLessThan(1000);
+    // CPU time scaled to the machine (testing/timing.ts), not the clock; the same goes for the other two bounds in this file
+    expectCpuUnder(1000, () => rejects(forgedDirectory(300_000, 300_000), TOO_MANY_ENTRIES_REASON), 'forged directory of 300,000 records');
   });
 
   it('refuses a directory that holds more entries than the end record counts (a forged count), without walking it', () => {
-    const started = Date.now();
-    rejects(forgedDirectory(300_000, 3), BAD_ZIP_REASON);
-    const many = Buffer.from(zipOf(Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`f${i}.txt`, 'x']))));
-    many.writeUInt16LE(3, endRecordOffset(many) + 8);
-    many.writeUInt16LE(3, endRecordOffset(many) + 10);
-    rejects(many, BAD_ZIP_REASON);
-    expect(Date.now() - started).toBeLessThan(1000);
+    expectCpuUnder(1000, () => {
+      rejects(forgedDirectory(300_000, 3), BAD_ZIP_REASON);
+      const many = Buffer.from(zipOf(Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`f${i}.txt`, 'x']))));
+      many.writeUInt16LE(3, endRecordOffset(many) + 8);
+      many.writeUInt16LE(3, endRecordOffset(many) + 10);
+      rejects(many, BAD_ZIP_REASON);
+    }, 'forged entry count');
   });
 
   it('refuses multi-disk archives, zip64 locators and 0xFFFFFFFF sizes it cannot bound', () => {
@@ -161,9 +161,7 @@ describe('ZipArchive.inflate - sizes may lie, memory and work stay bounded', () 
     const real = 3 * MB;
     const liar = patchDeclaredSizes(zipOf({ 'big.bin': Buffer.alloc(real) }), () => 1000);
     const zip = openZip(liar);
-    const started = Date.now();
-    expect(() => zip.inflate(zip.find('big.bin')!, 4 * MB)).toThrow(ZipGuardError);
-    expect(Date.now() - started).toBeLessThan(1000);
+    expectCpuUnder(1000, () => expect(() => zip.inflate(zip.find('big.bin')!, 4 * MB)).toThrow(ZipGuardError), 'entry that lies about its size');
     expect(spy).toHaveBeenCalledTimes(1);
     expect((spy.mock.calls[0][1] as { maxOutputLength: number }).maxOutputLength).toBe(1000);   // never the real size
     expect(zip.inflatedBytes).toBe(0);

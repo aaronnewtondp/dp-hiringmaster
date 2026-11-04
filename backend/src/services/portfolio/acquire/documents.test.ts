@@ -10,6 +10,7 @@ import { preparePdf } from './pdf.js';
 import type { PortfolioLink, PortfolioPlatform } from '../types.js';
 import type { AcquireContext } from './types.js';
 import { buildZip, zipOf } from './zip.fixtures.js';
+import { cpuTimedAsync, scaled } from '../../../testing/timing.js';
 
 // Only the network is replaced. The type sniffing, the PDF / Word / PowerPoint readers, the Google helpers and the
 // budget are the real ones, so these tests exercise the wiring end to end.
@@ -368,9 +369,10 @@ describe('fetchDocument — files built to hurt the worker are refused as values
   it('a ~0.5 MB PDF whose stream inflates to 500 MB is "too complex" (neutral), not failed, and nothing is read', async () => {
     serve({ [driveFetch]: reply(withExtraStream('/Filter /FlateDecode', flateZeros(500))) });
     const ctx = ctxFor();
-    const started = Date.now();
-    const r = await fetchDocument(item(driveUrl, 'gdrive_file'), ctx);
-    expect(Date.now() - started).toBeLessThan(2000);
+    // CPU time of this process, not wall time: what is guarded is the work done on this thread (inflating 500 MB would take seconds of it and gigabytes
+    // of memory), and a busy machine adds none to it.
+    const { value: r, ms } = await cpuTimedAsync(() => fetchDocument(item(driveUrl, 'gdrive_file'), ctx));
+    expect(ms).toBeLessThan(scaled(500));       // measured: about 13 ms; inflating the 500 MB for real costs over a second
     expect(r).toMatchObject({ outcome: 'unreviewable', reason: 'This PDF is too complex to open automatically', media: [], text: '', injectionHit: false });
     expect(ctx.budget.snapshot()).toEqual({ bytes: 0, pages: 0, images: 0, chars: 0 });
   });
@@ -399,10 +401,12 @@ describe('fetchDocument — files built to hurt the worker are refused as values
     const pptx = zipOf({ 'ppt/presentation.xml': '<p/>', 'ppt/slides/slide1.xml': `<p:sld>${'<a:t '.repeat(100_000)}</p:sld>` });
     const docx = zipOf({ 'word/document.xml': `<w:document><w:body>${'<w:t '.repeat(100_000)}</w:body></w:document>` });
     serve({ 'https://brand.example/a.pptx': reply(pptx), 'https://brand.example/b.docx': reply(docx) });
-    const started = Date.now();
-    const a = await fetchDocument(item('https://brand.example/a.pptx', 'pptx_file'), ctxFor());
-    const b = await fetchDocument(item('https://brand.example/b.docx', 'docx_file'), ctxFor());
-    expect(Date.now() - started).toBeLessThan(1500);
+    // CPU time, not wall time (see above); a quadratic walk over 100,000 unclosed tags would take hours of it, and the test timeout would end it.
+    const { value: [a, b], ms } = await cpuTimedAsync(async () => [
+      await fetchDocument(item('https://brand.example/a.pptx', 'pptx_file'), ctxFor()),
+      await fetchDocument(item('https://brand.example/b.docx', 'docx_file'), ctxFor()),
+    ] as const);
+    expect(ms).toBeLessThan(scaled(750));       // measured: about 12 ms
     expect(a.outcome).toBe('unreviewable');
     expect(b.outcome).toBe('unreviewable');
   });

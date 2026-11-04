@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { findInjection, scanForInjection } from './injection.js';
+import { cpuTimed, scaled } from '../../testing/timing.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Reviewer-directed phrasing: the generic families added after the second review (finding 9), with their numbers.
@@ -384,11 +385,8 @@ describe('the new families stay linear on hostile input', () => {
     ];
     const slow: string[] = [];
     shapes.forEach((text, i) => {
-      const a = process.cpuUsage();
-      scanForInjection(text);
-      const u = process.cpuUsage(a);
-      const ms = (u.user + u.system) / 1000;
-      if (ms >= 200) slow.push(`shape ${i}: ${Math.round(ms)} ms`);
+      const { ms } = cpuTimed(() => scanForInjection(text));       // CPU time, scaled to the machine (testing/timing.ts)
+      if (ms >= scaled(200)) slow.push(`shape ${i}: ${Math.round(ms)} ms`);
     });
     expect(slow).toEqual([]);
   });
