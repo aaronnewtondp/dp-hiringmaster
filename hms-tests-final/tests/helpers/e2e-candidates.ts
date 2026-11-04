@@ -18,6 +18,8 @@ import { purgeRolesFast } from './sourcing-db';
 export type Api = ReturnType<typeof authed>;
 type Json = Record<string, any>;   // eslint-disable-line @typescript-eslint/no-explicit-any
 
+export type TestRole = Json & { id: string; title: string };
+
 export const STAGES = [
   'Applied and Screened', 'Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round',
   'Reference Check', 'Pre-Joining Documents', 'Offer Discussion', 'Offer Released', 'Offer Accepted', 'Joined',
@@ -41,7 +43,7 @@ export async function hrApi(request: APIRequestContext): Promise<Api> {
 }
 
 /** A role of this spec's own. Draft unless `status` is given (then set by SQL: that is the one thing the API cannot do without a JD run). */
-export async function createRole(request: APIRequestContext, over: Json = {}): Promise<Json & { id: string; title: string }> {
+export async function createRole(request: APIRequestContext, over: Json = {}): Promise<TestRole> {
   const { status, ...body } = over;
   const res = await (await hrApi(request)).post('/api/roles', {
     title: `E2E Cand Role ${uid()}`, priority: 'P2', department: 'Product/QA', location: 'Gurgaon', ctc_band: '10-20 LPA',

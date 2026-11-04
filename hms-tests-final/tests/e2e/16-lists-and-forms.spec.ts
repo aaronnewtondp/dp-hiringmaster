@@ -11,7 +11,7 @@ import { gotoAs } from '../helpers/e2e';
 import { authed, getToken, uid } from '../helpers/api';
 import { withDb } from '../helpers/db';
 import {
-  test, expect, Cleanup, createRole, createApplicant, toastWith, recordRequests, isPost, queryValues, hrApi, escapeRe,
+  test, expect, Cleanup, createRole, createApplicant, toastWith, recordRequests, isPost, queryValues, hrApi, escapeRe, TestRole,
 } from '../helpers/e2e-candidates';
 import type { Page, APIRequestContext } from '@playwright/test';
 
@@ -20,7 +20,7 @@ test.afterAll(() => cleanup.purge());
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 test.describe('Roles list', () => {
-  interface Trio { marker: string; alpha: Record<string, any>; beta: Record<string, any>; gamma: Record<string, any> } // eslint-disable-line @typescript-eslint/no-explicit-any
+  interface Trio { marker: string; alpha: TestRole; beta: TestRole; gamma: TestRole }
 
   /**
    * Three roles told apart by every filter the page has. Alpha and Beta are Drafts; Gamma is Live – Sourcing, so it shows in the page's DEFAULT
