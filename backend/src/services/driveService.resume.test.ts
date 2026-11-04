@@ -31,15 +31,27 @@ vi.mock('googleapis', () => ({
   },
 }));
 
-// The real sandbox, with a short cap, unless a test says what the reader returns.
-const reader = vi.hoisted(() => ({ override: null as null | (() => Promise<ResumePdfRead>), calls: [] as Array<{ withLinks?: boolean }> }));
+// The real sandbox, unless a test says what the reader returns. Its per-PDF cap is GENEROUS by default (30 s; the real read's own 25 s budget is the tighter
+// one): an ordinary resume takes 0.1-2 s, but under load the child sometimes needed more than the 1.5 s this file used to inject, and the cap's own verdict
+// ("timeout" = unreadable, text null) was then reported for a perfectly good PDF. Only a test whose file is MEANT to be killed lowers it (`bombCap`).
+const NORMAL_CAP_MS = 30_000;
+const reader = vi.hoisted(() => ({
+  override: null as null | (() => Promise<ResumePdfRead>),
+  calls: [] as Array<{ withLinks?: boolean }>,
+  capMs: 30_000,
+  last: 'the reader was not called',
+}));
 vi.mock('./pdfSandbox/resume.js', async importOriginal => {
   const actual = await importOriginal<typeof import('./pdfSandbox/resume.js')>();
   return {
     ...actual,
-    readResumePdf: (bytes: Buffer, o?: { withLinks?: boolean }) => {
+    readResumePdf: async (bytes: Buffer, o?: { withLinks?: boolean }) => {
       reader.calls.push({ withLinks: o?.withLinks });
-      return reader.override ? reader.override() : actual.readResumePdf(bytes, o, { options: { capMs: 1500 } });
+      if (reader.override) return reader.override();
+      const out = await actual.readResumePdf(bytes, o, { options: { capMs: reader.capMs } });
+      // what the real reader said, kept so that a null text can be told apart from the wrong text in a failure message
+      reader.last = out.kind === 'read' ? 'read' : out.kind === 'unreadable' ? `unreadable (${out.why})` : `unavailable (${out.message})`;
+      return out;
     },
   };
 });
@@ -49,6 +61,7 @@ import { RESUME_MAX_BYTES } from './pdfSandbox/resume.js';
 import { fontsPdf, formBombPdf, pages, rawPdf } from './portfolio/acquire/pdf.fixtures.js';
 import { buildZip, zipOf } from './portfolio/acquire/zip.fixtures.js';
 import zlib from 'zlib';
+import { cpuTimedAsync, scaled } from '../testing/timing.js';
 
 const URL = 'https://drive.google.com/file/d/RESUMEFILE123/view';
 
@@ -77,7 +90,7 @@ let warn: ReturnType<typeof vi.spyOn>;
 let error: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   drive.mediaCalls = 0; drive.fail = null; drive.doc = { text: 'Google Doc text', html: '' };
-  reader.override = null; reader.calls = [];
+  reader.override = null; reader.calls = []; reader.capMs = NORMAL_CAP_MS; reader.last = 'the reader was not called';
   warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   error = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -92,13 +105,14 @@ describe('a resume PDF is read through the sandbox, to the same text as before',
   ] as Array<[string, () => Promise<Buffer>]>)('%s: byte-identical to what in-process pdf-parse produced (the old behaviour)', async (_n, build) => {
     const bytes = await build();
     serve(bytes);
-    expect(await fetchResumeText(URL)).toBe(await extractPdfText(bytes));
+    const text = await fetchResumeText(URL);
+    expect(text, `the sandbox reader said: ${reader.last}`).toBe(await extractPdfText(bytes));
   });
 
   it('fetchResumeTextAndLinks returns the text and the real hyperlink with the words it covers', async () => {
     serve(await resumeWithLink());
     const r = await fetchResumeTextAndLinks(URL);
-    expect(r.text).toContain('Jane Doe, senior product designer');
+    expect(r.text, `the sandbox reader said: ${reader.last}`).toContain('Jane Doe, senior product designer');
     expect(r.linksError).toBeUndefined();
     expect(r.links).toEqual([expect.objectContaining({ url: expect.stringContaining('janedoe.example/work'), label: 'My Portfolio' })]);
   });
@@ -122,9 +136,11 @@ describe('a resume the PDF reader will not open is neutral, never an error', { t
 
   it('a form-XObject bomb that only the sandbox can stop: the same neutral answer, and the next resume is read normally', async () => {
     serve(formBombPdf(20, 2));
+    reader.capMs = 1500;                       // this file is meant to be killed: a short cap keeps it cheap (a bomb is "unreadable" whether the cap or the heap ends it)
     expect(await fetchResumeTextAndLinks(URL)).toEqual({ text: null, links: [] });
+    reader.capMs = NORMAL_CAP_MS;              // ...and the next, ordinary resume gets the generous one
     serve(rawPdf(pages(2)));
-    expect(await fetchResumeText(URL)).toContain('Page 1 describes');
+    expect(await fetchResumeText(URL), `the sandbox reader said: ${reader.last}`).toContain('Page 1 describes');
   });
 
   it.each([
@@ -193,10 +209,13 @@ describe('a Word resume is read by the bounded reader (never mammoth), with the 
     const bomb = buildZip([{ name: 'word/document.xml', rawCompressed: zlib.deflateRawSync(Buffer.alloc(40 * 1024 * 1024, 0x20)), rawSize: 40 * 1024 * 1024 }]);
     expect(bomb.length).toBeLessThan(200_000);
     serve(bomb, { mimeType: WORD });
-    const t = performance.now();
-    expect(await fetchResumeText(URL)).toBeNull();
-    expect(await fetchResumeTextAndLinks(URL)).toEqual({ text: null, links: [] });
-    expect(performance.now() - t).toBeLessThan(1000);
+    // CPU time of this process, not wall time: the Word reader is synchronous on this thread, so what matters is the work it does (refusing the archive
+    // costs well under a millisecond (measured 0.2-0.7 ms); inflating the 40 MB alone costs 170 ms, and mammoth's attempt aborted node), and being
+    // descheduled on a busy machine costs none of it.
+    const { value: answers, ms } = await cpuTimedAsync(async () => [await fetchResumeText(URL), await fetchResumeTextAndLinks(URL)] as const);
+    expect(ms).toBeLessThan(scaled(50));
+    expect(answers[0]).toBeNull();
+    expect(answers[1]).toEqual({ text: null, links: [] });
     expect(warn.mock.calls.some(c => String(c[0]).includes('RESUMEFILE123') && String(c[0]).includes('too-complex'))).toBe(true);
     expect(error).not.toHaveBeenCalled();
   });
@@ -251,6 +270,6 @@ describe('a file too big to hold is not even downloaded', () => {
 
   it('exactly at the limit is still read', async () => {
     serve(rawPdf(pages(1)), { size: String(RESUME_MAX_BYTES) });
-    expect(await fetchResumeText(URL)).toContain('Page 1 describes');
+    expect(await fetchResumeText(URL), `the sandbox reader said: ${reader.last}`).toContain('Page 1 describes');
   });
 });

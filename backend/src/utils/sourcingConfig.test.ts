@@ -3,6 +3,7 @@ import {
   DEFAULT_SOURCING_SETTINGS, isSourcingChannel, isSourcingEnabled, isTrackedChannel, mergeSettings, normalizeSourceTag, OTHER_SOURCE, parseQualifiedTarget, parseWeeklyTarget,
   SOURCING_CHANNELS, UNTAGGED_SOURCE, WRITABLE_SETTING_KEYS,
 } from './sourcingConfig.js';
+import { expectCpuUnder } from '../testing/timing.js';
 
 describe('normalizeSourceTag — the form\'s "How did you hear about this opening?" answer', () => {
   it('a channel name in any case or spacing becomes its canonical name', () => {
@@ -118,11 +119,12 @@ describe('normalizeSourceTag — more edges', () => {
     expect(normalizeSourceTag('Agency referral')).toBe(OTHER_SOURCE);
   });
   it('a very long answer is quick and is "Other"', () => {
-    const t0 = Date.now();
-    expect(normalizeSourceTag('x'.repeat(200_000))).toBe(OTHER_SOURCE);
-    expect(normalizeSourceTag(' '.repeat(200_000) + 'x')).toBe(OTHER_SOURCE);
-    expect(normalizeSourceTag('/ '.repeat(100_000))).toBe(OTHER_SOURCE);
-    expect(Date.now() - t0).toBeLessThan(2000);                      // linear work: well under a millisecond per kilobyte, with a generous margin
+    // CPU time scaled to the machine (testing/timing.ts), not the clock: linear work is a few milliseconds here, a quadratic pass is seconds
+    expectCpuUnder(2000, () => {
+      expect(normalizeSourceTag('x'.repeat(200_000))).toBe(OTHER_SOURCE);
+      expect(normalizeSourceTag(' '.repeat(200_000) + 'x')).toBe(OTHER_SOURCE);
+      expect(normalizeSourceTag('/ '.repeat(100_000))).toBe(OTHER_SOURCE);
+    }, 'normalizeSourceTag on 200 KB answers');
   });
 });
 

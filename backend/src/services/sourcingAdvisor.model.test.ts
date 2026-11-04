@@ -245,7 +245,7 @@ describe('getAdvice — plans it advises on, and when it does not call the model
     const a = getAdvice('R003', {}, NOW);
     const b = getAdvice('R003', {}, NOW);
     // let both calls get as far as the model request
-    await vi.waitFor(() => expect(h.create).toHaveBeenCalled());
+    await vi.waitFor(() => expect(h.create).toHaveBeenCalled(), { timeout: 10_000 });   // (vitest's default is 1 s: a slow runner is not a failure)
     release(modelAnswer());
     const [ra, rb] = await Promise.all([a, b]);
     expect(h.create).toHaveBeenCalledTimes(1);

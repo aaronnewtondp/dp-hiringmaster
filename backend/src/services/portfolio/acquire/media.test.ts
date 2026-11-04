@@ -23,6 +23,7 @@ import {
   ResolveFailedError, extractHubHrefs, fetchImage, fetchSocial, fetchVideo, formatBytes, formatCount, isoDurationToText,
   readMeta, readTitle, resolveLink, youtubeVideoId,
 } from './media.js';
+import { expectCpuUnder } from '../../../testing/timing.js';
 
 const fetchCappedMock = vi.mocked(fetchCapped);
 const safeFetchMock = vi.mocked(safeFetch);
@@ -344,9 +345,8 @@ describe('readMeta / readTitle', () => {
 
   it('does a bounded amount of work on a page made of unclosed tags', () => {
     const hostile = '<meta content="x'.repeat(30_000);
-    const started = Date.now();
-    expect(readMeta(hostile, 'og:title')).toBeNull();
-    expect(Date.now() - started).toBeLessThan(1500);
+    // CPU time scaled to the machine (testing/timing.ts), not the clock: a rescanning reader costs seconds on this page
+    expect(expectCpuUnder(1500, () => readMeta(hostile, 'og:title'), 'readMeta over unclosed tags')).toBeNull();
   });
 
   it('readTitle: first <title>, entities decoded, case-insensitive, capped', () => {
@@ -409,9 +409,7 @@ describe('extractHubHrefs', () => {
 
   it('does a bounded amount of work on a page made of unclosed anchors', () => {
     const hostile = '<a href="https://x.example/'.repeat(20_000);
-    const started = Date.now();
-    expect(extractHubHrefs(hostile, 'linktr.ee')).toEqual([]);
-    expect(Date.now() - started).toBeLessThan(1500);
+    expect(expectCpuUnder(1500, () => extractHubHrefs(hostile, 'linktr.ee'), 'extractHubHrefs over unclosed anchors')).toEqual([]);
   });
 
   it('returns nothing for an empty page', () => {
@@ -1422,10 +1420,19 @@ describe('fetchVideo - direct video file', () => {
     safeFetchMock.mockImplementation((_url, init) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' })));
     }));
-    const started = Date.now();
-    const r = await fetchVideo(file(), ctx({ deadline: Date.now() + 60 }));
-    expect(r.outcome).toBe('failed');
-    expect(Date.now() - started).toBeLessThan(2000);
+    // The deadline is 60 ms on a FAKED clock: nothing sleeps, and the answer does not depend on how fast or busy this machine is.
+    vi.useFakeTimers();
+    try {
+      const pending = fetchVideo(file(), ctx({ deadline: Date.now() + 60 }));
+      let settled = false;
+      void pending.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(30);
+      expect(settled).toBe(false);                       // still inside its time: the request is not abandoned early
+      await vi.advanceTimersByTimeAsync(60);             // past the deadline: the request is aborted
+      expect(settled).toBe(true);                        // (checked before awaiting: a request that is never aborted fails here, it does not hang)
+      const r = await pending;
+      expect(r.outcome).toBe('failed');
+    } finally { vi.useRealTimers(); }
   });
 
   it('does not start past the deadline', async () => {
@@ -2054,9 +2061,18 @@ describe('resolveLink - short links', () => {
     fetchMock.mockImplementation((_url, init) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' })));
     }));
-    const started = Date.now();
-    await expect(resolveLink(short(), ctx({ deadline: Date.now() + 60 }))).rejects.toBeInstanceOf(ResolveFailedError);
-    expect(Date.now() - started).toBeLessThan(2000);
+    // The deadline is 60 ms on a FAKED clock: nothing sleeps, and the answer does not depend on how fast or busy this machine is.
+    vi.useFakeTimers();
+    try {
+      const outcome = resolveLink(short(), ctx({ deadline: Date.now() + 60 })).then(() => 'resolved', e => e);
+      let settled = false;
+      void outcome.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(30);
+      expect(settled).toBe(false);                       // still inside its time
+      await vi.advanceTimersByTimeAsync(60);             // past the deadline: the chain gives up
+      expect(settled).toBe(true);                        // (checked before awaiting: a chain that never gives up fails here, it does not hang)
+      expect(await outcome).toBeInstanceOf(ResolveFailedError);
+    } finally { vi.useRealTimers(); }
   });
 
   it('does not start past the deadline', async () => {
