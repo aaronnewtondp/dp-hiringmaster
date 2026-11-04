@@ -108,6 +108,28 @@ describe('steadyHeartbeat: a stall that belongs to the code shows every time, a 
     expect(runs).toBe(1);
   });
 
+  /** Blocks this thread for `ms` of WALL time without using CPU: what an overloaded machine does to a process it does not schedule. */
+  function notScheduled(ms: number): void { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+
+  it('cpuAware: a thread held by code that BURNS CPU still shows the whole stall (an in-process pass that does not hand the loop back is caught)', async () => {
+    const r = await steadyHeartbeat(async () => { burnCpu(150); }, 100, { tries: 3, tickMs: 5, cpuAware: true });
+    expect(r.maxGapMs).toBeGreaterThanOrEqual(130);        // the CPU it burned, a little under the 150 ms wall
+  });
+
+  it('cpuAware: time the process simply was not running (descheduled on an overloaded machine) is not a stall, while the default wall-clock gap still counts it', async () => {
+    const wall = await withHeartbeat(async () => { notScheduled(200); }, 5);
+    expect(wall.maxGapMs).toBeGreaterThanOrEqual(190);     // the wall gap sees it (a synchronous wait of a child process is caught this way)
+    const cpu = await withHeartbeat(async () => { notScheduled(200); }, 5, { cpuAware: true });
+    expect(cpu.maxGapMs).toBeLessThan(60);                 // it used almost no CPU in those 200 ms
+  });
+
+  it('cpuAware reaches steadyHeartbeat: a stall that is over the limit on every run is reported, an unscheduled gap is measured away', async () => {
+    const stalled = await steadyHeartbeat(async () => { burnCpu(150); }, 100, { tries: 2, tickMs: 5, cpuAware: true });
+    expect(stalled.maxGapMs).toBeGreaterThanOrEqual(130);
+    const idle = await steadyHeartbeat(async () => { notScheduled(150); }, 100, { tries: 2, tickMs: 5, cpuAware: true });
+    expect(idle.maxGapMs).toBeLessThan(100);
+  });
+
   it('withHeartbeat counts the ticks a cooperative pass gives the event loop, and none for a synchronous one', async () => {
     const sync = await withHeartbeat(async () => { burnCpu(60); }, 5);
     expect(sync.ticks).toBeLessThanOrEqual(1);

@@ -272,8 +272,11 @@ describe('readResumePdf — a hostile resume is "too complex", never an error, a
   });
 
   describe('the held-out benign set (heavy but real), each as a resume', () => {
+    // What these prove is that a heavy but real file is not REFUSED for what it is (the pre-flight's allowances, the heap flag and the resident-size ceiling
+    // are all the production ones). The 12 s per-PDF cap and 25 s read budget are a time limit, not a judgement of the file, and a busy machine used them up
+    // (one of these, 100 fonts of full ToUnicode ranges, took 12.09 s under a load of 100 and came back "unreadable"), so they are raised far above any load here.
     it.each(HELD_OUT_BENIGN.map(c => [c.name, c] as const))('benign: %s', async (_name, c) => {
-      const r = await read(await c.build(), { withLinks: true });
+      const r = await readResumePdf(await c.build(), { withLinks: true }, { options: { capMs: 90_000 }, budgetMs: 110_000 });
       expect(r.kind).toBe('read');
     });
   });

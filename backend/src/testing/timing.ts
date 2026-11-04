@@ -172,20 +172,37 @@ export async function expectCpuUnderAsync<T>(boundMs: number, work: () => Promis
 
 // ─── is this thread's event loop getting its turns? ──────────────────────────────────────────────────────────────
 
-/** Largest gap between ticks of a `tickMs` timer on THIS thread while `work` runs, how many ticks there were, and what `work` returned. */
-export async function withHeartbeat<T>(work: () => Promise<T>, tickMs = 5): Promise<{ value: T; maxGapMs: number; ticks: number }> {
+/**
+ * Largest gap between ticks of a `tickMs` timer on THIS thread while `work` runs, how many ticks there were, and what `work` returned.
+ *
+ * By default a gap is WALL time, so it catches everything that keeps the loop from its timers: a pass that burns CPU, a synchronous wait (`spawnSync`,
+ * `Atomics.wait`) and a process the OS did not schedule. `cpuAware` counts a gap as `min(wall, CPU time this process used during it)`: a loop that is held
+ * by code that BURNS CPU (a pass that does not hand the loop back) still shows its full length, because the CPU it used is the length of the stall, whatever
+ * else the machine is doing; a process that was merely not scheduled on an overloaded machine (a load of 100 on 10 cores stretches a 200 ms step to 700 ms of
+ * wall time, with the same 200 ms of CPU) shows only the CPU it actually spent. Use it for in-process, CPU-bound passes; keep the wall gap where the thing under
+ * test is a WAIT (a child process) because a synchronous wait burns no CPU and `cpuAware` would not see it.
+ */
+export async function withHeartbeat<T>(work: () => Promise<T>, tickMs = 5, opts: { cpuAware?: boolean } = {}): Promise<{ value: T; maxGapMs: number; ticks: number }> {
+  const cpuAware = opts.cpuAware === true;
   let last = process.hrtime.bigint();
+  let lastCpu = cpuNowMs();
   let max = 0;
   let ticks = 0;
+  const gapSince = (now: bigint, cpu: number): number => {
+    const wall = Number(now - last) / 1e6;
+    return cpuAware ? Math.min(wall, cpu - lastCpu) : wall;
+  };
   const timer = setInterval(() => {
     const now = process.hrtime.bigint();
-    max = Math.max(max, Number(now - last) / 1e6);
+    const cpu = cpuNowMs();
+    max = Math.max(max, gapSince(now, cpu));
     last = now;
+    lastCpu = cpu;
     ticks++;
   }, tickMs);
   try {
     const value = await work();
-    const tail = Number(process.hrtime.bigint() - last) / 1e6;
+    const tail = gapSince(process.hrtime.bigint(), cpuNowMs());
     return { value, maxGapMs: Math.max(max, tail), ticks };
   } finally {
     clearInterval(timer);
@@ -194,13 +211,18 @@ export async function withHeartbeat<T>(work: () => Promise<T>, tickMs = 5): Prom
 
 /**
  * withHeartbeat, but a gap at or over `limitMs` is measured again (up to `tries` runs in all) and the SMALLEST is reported. A stall that belongs to the code
- * shows up every time; a gap that is only this process being descheduled on a busy machine does not. `work` must be safe to run again.
+ * shows up every time; a gap that is only this process being descheduled on a busy machine does not. `work` must be safe to run again. `cpuAware`: see
+ * withHeartbeat.
  */
-export async function steadyHeartbeat<T>(work: () => Promise<T>, limitMs: number, opts: { tries?: number; tickMs?: number } = {}): Promise<{ value: T; maxGapMs: number; ticks: number }> {
-  const { tries = 4, tickMs = 5 } = opts;
-  let best = await withHeartbeat(work, tickMs);
+export async function steadyHeartbeat<T>(
+  work: () => Promise<T>,
+  limitMs: number,
+  opts: { tries?: number; tickMs?: number; cpuAware?: boolean } = {},
+): Promise<{ value: T; maxGapMs: number; ticks: number }> {
+  const { tries = 4, tickMs = 5, cpuAware = false } = opts;
+  let best = await withHeartbeat(work, tickMs, { cpuAware });
   for (let again = 1; again < tries && best.maxGapMs >= limitMs; again++) {
-    const next = await withHeartbeat(work, tickMs);
+    const next = await withHeartbeat(work, tickMs, { cpuAware });
     if (next.maxGapMs < best.maxGapMs) best = next;
   }
   return best;

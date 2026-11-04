@@ -55,7 +55,11 @@ function longestStep<T>(steps: PdfSteps<T>): { value: T; maxMs: number; totalMs:
  * reference workload (`hostSlowdown`, testing/timing.ts: 1 on that laptop, never more than 6), so a 2 vCPU CI runner that is 2-3x slower per core keeps the
  * same margin, while a return of the 2-80 SECOND stalls these shapes used to cause (10x and more) still fails. A wall-clock gap is also measured again
  * when it is over the limit (`steadyHeartbeat`, up to four runs, the smallest kept): a stall that is the code's shows in every run, a process that was
- * descheduled on a busy machine does not.
+ * descheduled on a busy machine does not. The gap is also CPU-aware here (`cpuAware`: a gap counts as the smaller of its wall time and the CPU this process
+ * used during it): everything these tests hold the thread with is CPU-bound work on this thread (the passes themselves, or the in-process parse the child
+ * process replaced), whose stall is as long as the CPU it burns however busy the machine is, while a load of 100+ on 10 cores stretches a 200 ms step to 700 ms
+ * of wall time (seen twice in loaded full runs, always on the 22 MB literal-string case). A thread held by a synchronous WAIT burns no CPU and is not what
+ * these tests guard; sandbox.test.ts and resume.test.ts keep the wall-clock gap for that.
  */
 const MAX_STEP_MS = scaled(400);
 const MAX_GAP_MS = scaled(600);
@@ -85,7 +89,7 @@ const sweep = (label: string, cases: Array<StallCase | CpuHeldOutCase>) => {
       else if (expected === 'incomplete') expect(scan.value).toMatchObject({ hit: null, complete: false });
 
       // 3. Everything the parent does with it, end to end, with this thread's timers beating: nothing waits for more than a slice or two.
-      const beat = await steady(() => preparePdf(bytes, 'x.pdf', ctx(), { reader: stubReader }), MAX_GAP_MS);
+      const beat = await steady(() => preparePdf(bytes, 'x.pdf', ctx(), { reader: stubReader }), MAX_GAP_MS, { cpuAware: true });
       expect(beat.maxGapMs, `longest gap between 5 ms ticks (${beat.ticks} ticks)`).toBeLessThan(MAX_GAP_MS);
       if (c.preflight === 'refused') {
         expect(beat.value).toMatchObject({ outcome: 'unreviewable', reason: TOO_COMPLEX_REASON, media: [], text: '' });
@@ -519,7 +523,7 @@ describe('the injection scan over windows gives what the plain scan gives', { ti
 describe('the whole of preparePdf on a stalling file ends neutrally without holding this thread', { timeout: 120_000 }, () => {
   it('a 22 MB literal string through the real child process (a 22 KB file): "too complex", the thread beating, and nothing left running', async () => {
     const bytes = STALL_SHAPES.find(s => s.name.startsWith('ONE 22 MB literal string'))!.build();
-    const beat = await steady(() => preparePdf(bytes, 'bomb.pdf', ctx(), { options: { capMs: 20_000 } }), MAX_GAP_MS);
+    const beat = await steady(() => preparePdf(bytes, 'bomb.pdf', ctx(), { options: { capMs: 20_000 } }), MAX_GAP_MS, { cpuAware: true });
     expect(beat.value).toMatchObject({ outcome: 'unreviewable', reason: TOO_COMPLEX_REASON, media: [], text: '' });
     expect(beat.maxGapMs).toBeLessThan(MAX_GAP_MS);
     expect(pageWith(Buffer.alloc(0)).length).toBeGreaterThan(0);
