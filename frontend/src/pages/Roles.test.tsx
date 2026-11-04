@@ -119,13 +119,21 @@ describe('Roles — what it asks the server for', () => {
     await waitFor(() => expect(lastParams()).toEqual({ department: ['Tech/Devs', 'Domain'], priority: ['P1'], status: DEFAULT_STATUSES }));
   });
 
-  it('offers exactly the recruitment modes the server reports, and none while it reports none', async () => {
+  it('offers exactly the recruitment modes the server reports', async () => {
     mount();
     await waitFor(() => expect(filterOptions).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: /^Recruitment Mode/ }));
     await waitFor(() => expect(screen.getByRole('checkbox', { name: 'LinkedIn' })).toBeInTheDocument());
     expect(screen.getByRole('checkbox', { name: 'Direct Outreach' })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: 'Agency' })).toBeNull();     // a fixed channel list is not the source
+  });
+
+  it('until the server has answered the filter offers no recruitment mode at all, and none is made up in its place', async () => {
+    filterOptions.mockReturnValue(new Promise(() => {}));
+    mount();
+    await waitFor(() => expect(filterOptions).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: /^Recruitment Mode/ }));
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   });
 
   it('the filter options a role can be filtered by are fixed lists, not taken from the rows', async () => {
@@ -165,7 +173,7 @@ describe('Roles — client-side search', () => {
     expect(screen.getByText(/^2 roles shown/)).toBeInTheDocument();
     const calls = list.mock.calls.length;
     fireEvent.change(searchBox(), { target: { value: 'alpha' } });
-    expect(screen.getByText(/^1 roles shown/)).toBeInTheDocument();
+    expect(screen.getByText(/^1 roles? shown/)).toBeInTheDocument();
     fireEvent.change(searchBox(), { target: { value: '' } });
     expect(shownTitles()).toEqual(['Test Role Alpha', 'Test Role Beta']);
     expect(list).toHaveBeenCalledTimes(calls);
@@ -223,7 +231,7 @@ describe('Roles — loading, links and what a row shows', () => {
     expect(cells[7]).toBe('1');                    // Active Shortlist
   });
 
-  it('missing counts read as 0, and an Active Candidates count of 0 is shown in red', async () => {
+  it('missing counts read as 0, and only an Active Candidates count that really is 0 is shown in red', async () => {
     list.mockResolvedValue({ data: { roles: [
       role({ id: 'R9003', title: 'Test Role Gamma', active_candidate_count: 0, shortlisted_count: undefined }),
       role({ id: 'R9004', title: 'Test Role Delta', active_candidate_count: undefined, shortlisted_count: 5 }),
@@ -236,7 +244,8 @@ describe('Roles — loading, links and what a row shows', () => {
     expect(countCell('Test Role Gamma').textContent).toBe('0');
     expect(countCell('Test Role Gamma').querySelector('span')?.className).toContain('text-red-500');
     expect(shortlistCell('Test Role Gamma').textContent).toBe('0');
-    expect(countCell('Test Role Delta').textContent).toBe('0');          // an absent count falls back to showing 0
+    expect(countCell('Test Role Delta').textContent).toBe('0');          // an absent count falls back to showing 0 ...
+    expect(countCell('Test Role Delta').querySelector('span')?.className).not.toContain('text-red-500');   // ... but is not flagged: nobody counted a zero
     expect(shortlistCell('Test Role Delta').textContent).toBe('5');
     expect(countCell('Test Role Alpha').querySelector('span')?.className).not.toContain('text-red-500');
   });
