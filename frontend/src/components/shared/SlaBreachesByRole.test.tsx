@@ -95,7 +95,9 @@ describe('SlaBreachesByRole', () => {
     expect(within(panel).getByText('Founders Round')).toBeInTheDocument();
     expect(within(panel).getByText('Resume Shortlist Pending')).toBeInTheDocument();
     expect(within(panel).getByText('Interview 1 Not Scheduled')).toBeInTheDocument();
-    expect(within(panel).getAllByText('HR / Recruiter').length).toBeGreaterThan(0);
+    // the stored owner value is 'HR / Recruiter'; people read it as the persona's name, HR/Admin
+    expect(within(panel).getAllByText('HR/Admin').length).toBeGreaterThan(0);
+    expect(within(panel).queryByText('HR / Recruiter')).not.toBeInTheDocument();
     expect(within(panel).getByText(/Hiring Manager: Alex/)).toBeInTheDocument();
     expect(bars()[0]).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(bars()[0]);
@@ -276,5 +278,17 @@ describe('SlaBreachesByRole', () => {
       fireEvent.pointerEnter(segment, { clientX: 100, clientY: 100, pointerType: 'touch' });
       expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
     });
+  });
+});
+
+describe('SlaBreachesByRole — the marker', () => {
+  it('names the owners the way the rest of the page does (HR/Admin, not the stored "HR / Recruiter") and lists the four open statuses', async () => {
+    mount(DATA);
+    const heading = await screen.findByText('SLA breaches by role');
+    fireEvent.mouseEnter(heading.parentElement!.querySelector('[aria-label="More info"]')!);
+    const tip = heading.parentElement!.querySelector('div.absolute')!.textContent!;
+    expect(tip).toContain('always counts both HR/Admin and Hiring Manager breaches (the owner buttons don\'t apply)');
+    expect(tip).not.toMatch(/HR \/ Recruiter|both HR and/);
+    expect(tip).toContain('each role that is Approved, Live – Sourcing, Under Review or On Hold');
   });
 });

@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { useEffect } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { DashboardData } from '../types/index.ts';
 import type { SourcingDashboard, SourcingDashboardRow } from '../types/sourcing.ts';
+import { drain } from '../test/helpers.ts';
 
 // The Dashboard keeps ONE Sourcing section — "Sourcing execution", the cross-role exceptions overview. One role's whole plan (the workspace) moved
 // to its own page (sidebar → Sourcing). Everything else on the Dashboard is incidental here; the two sections with their own data calls are stubbed.
@@ -23,6 +25,14 @@ vi.mock('../services/api.ts', () => ({
     advice:    () => Promise.resolve({ data: { enabled: false } }),
   },
 }));
+// The real workspace, wrapped only so a test can ask the question that matters — was it ever MOUNTED? — instead of inferring it from a sleep
+// followed by "its endpoint was not called". A mount effect runs inside the render's own act(), so by the time anything is on screen it has run.
+const workspaceMounted = vi.fn();
+vi.mock('../components/sourcing/SourcingWorkspace.tsx', async () => {
+  const actual = await vi.importActual<typeof import('../components/sourcing/SourcingWorkspace.tsx')>('../components/sourcing/SourcingWorkspace.tsx');
+  const Actual = actual.default;
+  return { default: (props: { heading?: boolean }) => { useEffect(() => { workspaceMounted(); }, []); return <Actual {...props} />; } };
+});
 vi.mock('../components/shared/HiringFunnelSnapshot.tsx', () => ({ default: () => <div data-testid="funnel-snapshot" /> }));
 vi.mock('../components/shared/SlaBreachesByRole.tsx', () => ({ default: () => <div data-testid="sla-by-role" /> }));
 
@@ -57,14 +67,15 @@ const sourcingOn = (rows: SourcingDashboardRow[] = [row(1), row(2)]): { data: So
   },
 });
 
+let qc: QueryClient;
 function mount(entry = '/dashboard') {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={qc}><MemoryRouter initialEntries={[entry]}><Dashboard /></MemoryRouter></QueryClientProvider>);
 }
 const scrollIntoView = vi.fn();
 
 beforeEach(() => {
-  dashboardGet.mockReset(); filterOptions.mockReset(); sourcingDashboard.mockReset(); workspaceCalls.mockReset(); planCalls.mockReset(); scrollIntoView.mockReset();
+  dashboardGet.mockReset(); filterOptions.mockReset(); sourcingDashboard.mockReset(); workspaceCalls.mockReset(); planCalls.mockReset(); scrollIntoView.mockReset(); workspaceMounted.mockReset();
   sessionStorage.clear();
   Element.prototype.scrollIntoView = scrollIntoView;
   currentUser = { id: 'u1', name: 'Aaron Newton', email: 'aaron.newton@digitalpaani.com', persona: 'hr_recruiter' };
@@ -75,6 +86,7 @@ beforeEach(() => {
 afterEach(() => { delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView; });
 
 const noWorkspace = (container: HTMLElement) => {
+  expect(workspaceMounted).not.toHaveBeenCalled();                                  // not mounted at all, rather than mounted and hidden
   expect(screen.queryByTestId('sourcing-workspace')).toBeNull();
   expect(container.querySelector('#sourcing-workspace')).toBeNull();
   expect(screen.queryByRole('region', { name: 'Sourcing plans' })).toBeNull();
@@ -94,9 +106,11 @@ describe('Dashboard — Sourcing: the plan workspace has moved to its own page',
   });
 
   it('never asks the workspace endpoint for anything (it is not mounted, not merely hidden)', async () => {
-    mount();
-    await screen.findByText('Plans active');
-    await new Promise(r => setTimeout(r, 20));
+    const { container } = mount();
+    await screen.findByText('Plans active');                                        // the page and its Sourcing execution section have rendered
+    await waitFor(() => expect(qc.isFetching()).toBe(0));                           // and nothing is still loading
+    await drain();                                                                  // every effect and query those renders could have started has run
+    noWorkspace(container);                                                         // the structural cause: the workspace never mounted
     expect(workspaceCalls).not.toHaveBeenCalled();
     expect(planCalls).not.toHaveBeenCalled();
     expect(sourcingDashboard).toHaveBeenCalledTimes(1);
@@ -131,7 +145,8 @@ describe('Dashboard — Sourcing: the plan workspace has moved to its own page',
   it('a legacy #sourcing-workspace hash on the Dashboard itself neither mounts the workspace nor scrolls (DashboardRoute redirects those before the Dashboard mounts)', async () => {
     const { container } = mount('/dashboard?sourcing_role=R1#sourcing-workspace');
     await screen.findByText('Plans active');
-    await new Promise(r => setTimeout(r, 20));
+    await waitFor(() => expect(qc.isFetching()).toBe(0));
+    await drain();                                                                  // a scroll nudge, were there one, would come from an effect after the load
     noWorkspace(container);
     expect(workspaceCalls).not.toHaveBeenCalled();
     expect(scrollIntoView).not.toHaveBeenCalled();
@@ -154,7 +169,8 @@ describe('Dashboard — Sourcing: module off or unavailable', () => {
     const { container } = mount();
     expect(await screen.findByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument();
     await waitFor(() => expect(sourcingDashboard).toHaveBeenCalled());
-    await new Promise(r => setTimeout(r, 20));
+    await waitFor(() => expect(qc.isFetching()).toBe(0));                           // the "module off" answer has arrived: the section had its chance to appear
+    await drain();
     expect(screen.queryByText('Sourcing execution')).toBeNull();
     expect(screen.queryByText('Plans active')).toBeNull();
     noWorkspace(container);

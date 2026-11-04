@@ -261,6 +261,16 @@ describe('renderSocialJd — robustness', () => {
   it('renders from a completely empty content object', async () => {
     const buf = await renderSocialJd({ id: 'R1', title: 'Anything' } as Role, {} as JdContent);
     expect(buf.length).toBeGreaterThan(5000);
+    // ...and it is the real template, not an empty page: one 1080x1350 page that prints the role's title, the fixed hook and intro, and the apply bar
+    expect(buf.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(buf.toString('latin1')).toMatch(/\/MediaBox \[0 0 1080 1350\]/);
+    const t = squash(await extractPdfText(buf));
+    expect(t).toContain('Anything');
+    for (const line of SOCIAL_HOOK_MUTED) expect(t).toContain(squash(line));
+    expect(t).toContain(squash(SOCIAL_INTRO_FACT));
+    expect(t).toContain(squash(SOCIAL_CTA_TEXT));
+    expect(t).toContain(squash(SOCIAL_COL_HEADINGS.job));
+    expect(t).not.toMatch(/undefined|null|NaN/);
   });
 
   it('survives hostile / odd strings without throwing', async () => {

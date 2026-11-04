@@ -18,7 +18,11 @@ import { isOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
-import { GENDER_COLUMN_INFO } from '../utils/columnInfo.ts';
+import {
+  GENDER_COLUMN_INFO, CTC_COLUMN_INFO, OVER_BUDGET_INFO, IN_BUDGET_FILTER_INFO, AVERAGE_SCORE_INFO, VERDICT_INFO,
+  DIMENSION_INFO, PORTFOLIO_COLUMN_INFO, APPLICATION_AGE_INFO, NOTICE_PERIOD_INFO, COMPANY_INDUSTRY_INFO, STAGE_COLUMN_INFO,
+  OVER_BUDGET_TOLERANCE_PERCENT,
+} from '../utils/columnInfo.ts';
 
 // Same chunked-batching constant as Candidates.tsx / MyTasks.tsx's bulk actions.
 const BULK_CONCURRENCY = 3;
@@ -33,7 +37,21 @@ const PORTFOLIO_SCORE_FILTER_MIN = 7.5;
 
 const COLUMN_INFO: Record<string, string> = {
   'Gender': GENDER_COLUMN_INFO,
-  'Current CTC → Expected CTC': "Current fixed CTC → expected CTC, both from the candidate's own profile (one figure per candidate, not per role), in ₹ lakhs. 'Over Budget' = expected CTC above the top of the role's CTC band.",
+  'Current CTC → Expected CTC': `${CTC_COLUMN_INFO} ${OVER_BUDGET_INFO}`,
+};
+
+// What the headers without an info marker mean, shown when hovering over the header. A marker icon would change the
+// column's width (see the note above the header row), so these are plain hover text; the label stays as it is.
+const HEADER_HOVER: Record<string, string> = {
+  '#': "Position in the list as it is currently sorted and filtered. It is not a saved rank.",
+  'Stage': STAGE_COLUMN_INFO,
+  'Notice Period': NOTICE_PERIOD_INFO,
+  'Company / Industry': COMPANY_INDUSTRY_INFO,
+  'Average Score': AVERAGE_SCORE_INFO,
+  'Verdict': VERDICT_INFO,
+  'Portfolio': PORTFOLIO_COLUMN_INFO,
+  'Application Age': APPLICATION_AGE_INFO,
+  'Actions': `Only for candidates at Applied and Screened. Shortlist moves the candidate straight to Interview Round 1 (a reason is asked first when the expected CTC is ${OVER_BUDGET_TOLERANCE_PERCENT}% or more over the role's CTC band). Hold for Future puts the application on hold; it is then listed in Archived Pipeline. Reject asks for one or more reasons.`,
 };
 
 // Compact 0-10 dimension cell — mirrors ResumeIQPanel.tsx's private
@@ -108,6 +126,13 @@ const DIMENSIONS: Array<{ key: keyof Application; label: string; width: string }
   { key: 'score_leadership',     label: 'Leadership',     width: 'w-[88px]'  },
   { key: 'score_communication',  label: 'Communication',  width: 'w-[122px]' },
 ];
+
+// The hover text of a header: the explanation when there is one (led by the label, so a clipped label is still readable),
+// else just the label.
+const headerHover = (label: string): string => {
+  const hint = HEADER_HOVER[label] ?? (DIMENSIONS.some(d => d.label === label) ? DIMENSION_INFO : undefined);
+  return hint ? `${label}: ${hint}` : label;
+};
 
 // Column counts flanking the DIMENSIONS block, for the toggle/detail rows'
 // colSpan math — kept as named constants so a future column add/remove only
@@ -476,6 +501,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
         <div className="shrink-0"><MultiSelectFilter label="Role"             options={roleOptions}          selected={roleIds}      onChange={setRoleIds} /></div>
         <button
           onClick={() => setFilterInBudget(v => !v)}
+          title={IN_BUDGET_FILTER_INFO}
           className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
             filterInBudget ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
           }`}
@@ -578,7 +604,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                   { label: 'Notice Period', width: 'w-[68px]' },
                   { label: 'Preferred Location', width: 'w-[110px]' },
                   { label: 'Company / Industry', width: 'w-[148px]' },
-                  { label: 'Resume', width: 'w-[68px]' },
+                  { label: 'Resume Link', width: 'w-[68px]' },
                   ...DIMENSIONS.map(d => ({ label: d.label, width: d.width })),
                   ...(showPortfolioCol ? [{ label: 'Portfolio', width: 'w-[84px]' }] : []),
                   { label: 'Average Score', width: 'w-[92px]', sortKey: 'avg' as const },
@@ -591,7 +617,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                   // except on a header that carries an info marker, whose popover hangs below
                   // the cell and was being clipped to a sliver by it. whitespace-normal
                   // overrides .table-th's nowrap so the label wraps instead of truncating.
-                  <th key={`${col.label}-${i}`} title={col.label} className={`table-th px-1.5 tracking-normal whitespace-normal align-bottom leading-tight ${COLUMN_INFO[col.label] ? '' : 'overflow-hidden'} ${col.width}`}>
+                  <th key={`${col.label}-${i}`} title={headerHover(col.label)} className={`table-th px-1.5 tracking-normal whitespace-normal align-bottom leading-tight ${COLUMN_INFO[col.label] ? '' : 'overflow-hidden'} ${col.width}`}>
                     <div className="flex items-center gap-1 min-w-0">
                       {col.sortKey ? (
                         <button

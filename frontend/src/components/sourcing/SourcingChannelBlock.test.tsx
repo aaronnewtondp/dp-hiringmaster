@@ -300,6 +300,15 @@ describe('SourcingChannelBlock — finished weeks', () => {
     expect(rows()[0]).toHaveTextContent('7 Oct – 13 Oct');
   });
 
+  it('the Applicants header says it counts only applicants who chose this channel on the form (untagged ones count toward no channel)', () => {
+    mount(channel({ tracker: tracker({ weeks: [week(0, { actual: 12, qualified: 4, target: 10, met: true })] }) }));
+    const table = screen.getByRole('table', { name: 'LinkedIn weekly results' });
+    const hover = within(table).getByRole('columnheader', { name: 'Applicants' }).getAttribute('title')!;
+    expect(hover).toContain('chose this channel on the application form');                        // utils/sourcingWeeks.ts counts applications.sub_source = the channel
+    expect(hover).toContain('Applicants who skipped that question count toward no channel');
+    expect(hover).toContain("The role's target of qualified candidates is a separate measure");
+  });
+
   it('shows 6 and then "Show all N weeks" / "Show fewer weeks"', () => {
     const weeks = Array.from({ length: 9 }, (_, i) => week(i));
     mount(channel({ tracker: tracker({ weeks }) }));
