@@ -12,7 +12,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { test, expect } from '@playwright/test';
 import { authed, getSession, getToken, uid } from '../helpers/api';
-import { HR_TIER_USERS, activityOf, applicationRow, newApplicationAt, pendingRows, rawStatus } from '../helpers/api-specs';
+import { HR_TIER_USERS, activityOf, applicationRow, newApplicationAt, pendingRows, rawStatus, retireTrackedApplications } from '../helpers/api-specs';
+
+test.afterAll(retireTrackedApplications);   // leave no open pending rows behind (see helpers/api-specs.ts)
 
 const HR_ONLY_SCREENING = 'Only HR/Leadership can set this screening status.';
 const SCREENING_VALUES = ['New', 'Under Recruiter Review', 'Awaiting HM Review', 'HM Shortlisted', 'Screening Hold', 'Screening Rejected'];

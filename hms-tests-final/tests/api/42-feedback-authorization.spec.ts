@@ -13,7 +13,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { test, expect } from '@playwright/test';
 import { authed, getSession, getToken, uid } from '../helpers/api';
-import { HR_TIER_USERS, activityOf, forgeToken, newApplicationAt, newRound, rawStatus, roundsOf } from '../helpers/api-specs';
+import { HR_TIER_USERS, activityOf, forgeToken, newApplicationAt, newRound, rawStatus, retireTrackedApplications, roundsOf } from '../helpers/api-specs';
+
+test.afterAll(retireTrackedApplications);   // leave no open pending rows behind (see helpers/api-specs.ts)
 
 const ALEX = 'alex@digitalpaani.com';
 const SATYADEV = 'satyadev@digitalpaani.com';

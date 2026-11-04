@@ -17,8 +17,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { test, expect } from '@playwright/test';
 import { BASE, CANDIDATE_INGEST_SECRET, authed, createCandidate, getToken, uid } from '../helpers/api';
-import { activityOf, applicationRow, newApplicationAt, roundsOf, settleAll } from '../helpers/api-specs';
+import { activityOf, applicationRow, newApplicationAt, retireTrackedApplications, roundsOf, settleAll } from '../helpers/api-specs';
 import { withDb } from '../helpers/db';
+
+test.afterAll(retireTrackedApplications);   // leave no open pending rows behind (see helpers/api-specs.ts)
 
 const RACE_TRIES = 10;
 const FLIP_HINT = (what: string) => `${what} no longer fails with a 500 in ${RACE_TRIES} tries: the race is probably fixed — replace this TODAY test with the clean contract.`;

@@ -11,8 +11,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { test, expect } from '@playwright/test';
 import { authed, createCandidate, getToken, uid } from '../helpers/api';
-import { HR_TIER_USERS, activityOf, applicationRow, newApplicationAt, rawStatus } from '../helpers/api-specs';
+import { HR_TIER_USERS, activityOf, applicationRow, newApplicationAt, rawStatus, retireTrackedApplications, trackApplication } from '../helpers/api-specs';
 import { withDb } from '../helpers/db';
+
+test.afterAll(retireTrackedApplications);   // leave no open pending rows behind (see helpers/api-specs.ts)
 
 const SCORING_FAILED = 'Scoring failed — will retry automatically the next time this is retried';
 
@@ -86,6 +88,7 @@ test.describe('POST /api/applications/:id/retry-scoring — an unscored applicat
     test.skip(created.resumeiq?.scored === true, 'this backend can reach the model (it scored at creation): the failure path cannot be observed here');
     expect(created.resumeiq).toEqual({ scored: false, error: SCORING_FAILED });
     const appId = created.application.id as string;
+    trackApplication(appId);
     expect(candidate.id).toBe(created.application.candidate_id);
 
     const before = await applicationRow(appId);
@@ -115,6 +118,7 @@ test.describe('retry-scoring against the real model (needs ANTHROPIC_API_KEY on 
       current_company: 'Test Co', current_designation: 'Product Manager', years_of_experience: 5,
     });
     const created = await res.json();
+    trackApplication(created.application.id);
     expect(created.resumeiq?.scored, 'the unreadable resume must degrade to profile-only scoring, never a hard error').toBe(true);
 
     const row = await applicationRow(created.application.id);

@@ -20,7 +20,9 @@ import { CRON_SECRET, authed, createCandidate, getToken, uid } from '../helpers/
 import { hasCalendarCredentials } from '../helpers/calendar';
 import { futureIso } from '../helpers/dates';
 import { withDb } from '../helpers/db';
-import { activityOf, applicationRow, newApplicationAt, newRound, pendingRows, rawStatus, roundsOf } from '../helpers/api-specs';
+import { activityOf, applicationRow, newApplicationAt, newRound, pendingRows, rawStatus, retireTrackedApplications, roundsOf, trackApplication } from '../helpers/api-specs';
+
+test.afterAll(retireTrackedApplications);   // leave no open pending rows behind (see helpers/api-specs.ts)
 
 const MAIL = { mail_body_content: 'Please find your assignment below.', assignment_link: 'https://example.com/assignment' };
 
@@ -229,6 +231,7 @@ test.describe('a candidate with no e-mail address — the send is refused before
     expect(res.status()).toBe(201);
     expect(candidate.email).toBeNull();
     const application = (await res.json()).application as { id: string };
+    trackApplication(application.id);
     const move = await hr.post(`/api/applications/${application.id}/stage`, { new_stage: stage });
     expect(move.status()).toBe(200);
     return { hr, application, candidate };

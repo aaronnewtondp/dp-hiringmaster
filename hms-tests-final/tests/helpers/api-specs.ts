@@ -91,6 +91,25 @@ export async function rawStatus(
 // ─── Data builders ────────────────────────────────────────────────────────────
 export const HR_TIER_USERS = ['hr', 'hr2', 'leadership', 'super_admin'] as const;
 
+// ─── Keeping the shared queues small ──────────────────────────────────────────
+// GET /api/dashboard/pending answers only the 100 OLDEST open rows (ORDER BY priority_level DESC, created_at ASC LIMIT 100), so a test that
+// looks for a freshly raised row there (api/02 "updating ctc_band creates a Leadership pending action") stops finding it once enough open
+// rows have piled up. Every application a spec of this family creates is therefore RETIRED in afterAll: its open pending_actions rows are
+// resolved and it is closed, so a run leaves no open work behind (and the SLA sweep, which only looks at Active applications, ignores it).
+// Register with `test.afterAll(retireTrackedApplications)` at the top of a spec file.
+const tracked = new Set<string>();
+export function trackApplication(applicationId: string): void { tracked.add(applicationId); }
+
+export async function retireTrackedApplications(): Promise<void> {
+  if (!tracked.size) return;
+  const ids = [...tracked];
+  tracked.clear();
+  await withDb(async c => {
+    await c.query(`UPDATE pending_actions SET resolved = true, resolved_at = NOW() WHERE application_id = ANY($1::text[]) AND resolved = false`, [ids]);
+    await c.query(`UPDATE applications SET status = 'Closed', sla_breach = false WHERE id = ANY($1::text[]) AND status = 'Active'`, [ids]);
+  });
+}
+
 /** A fresh candidate + application on `roleId`, moved by HR to `stage` ('Applied and Screened' = left where creation put it). */
 export async function newApplicationAt(
   request: APIRequestContext,
@@ -100,6 +119,7 @@ export async function newApplicationAt(
   const hrToken = await getToken(request, 'hr');
   const hr = authed(request, hrToken);
   const { candidate, application } = await createCandidateWithApp(request, hrToken, roleId);
+  trackApplication(application.id);
   if (stage !== 'Applied and Screened') {
     const res = await hr.post(`/api/applications/${application.id}/stage`, { new_stage: stage });
     if (res.status() !== 200) throw new Error(`newApplicationAt: moving ${application.id} to ${stage} answered ${res.status()}`);
