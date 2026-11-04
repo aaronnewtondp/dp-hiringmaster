@@ -7,9 +7,9 @@
 // put the role On Hold and back; the fourth belongs to ANOTHER Hiring Manager (Satyadev), so Alex can be shown not to see it. All are removed afterwards.
 import { test, expect, Page, APIRequestContext } from '@playwright/test';
 import { Client } from 'pg';
-import { BASE, FRONTEND_BASE, USERS, uid, CRON_SECRET } from '../helpers/api';
+import { BASE, FRONTEND_BASE, getToken, uid, CRON_SECRET } from '../helpers/api';
 import { purgeRolesFast } from '../helpers/sourcing-db';
-import { TEST_DB_URL } from '../helpers/db';
+import { newClient } from '../helpers/db';
 import { loginViaApi } from '../helpers/e2e';
 
 test.describe('Sourcing module (browser)', () => {
@@ -21,16 +21,15 @@ test.describe('Sourcing module (browser)', () => {
   let flowId = '', flowTitle = '', flowPlanId = '';
   let otherId = '', otherTitle = '';                                       // a role of a DIFFERENT Hiring Manager (Satyadev): Alex must not see it
   const FLOW_EMAIL = `e2e-flow+${uid()}@example.com`;
-  const hrToken = async (request: APIRequestContext) => (await (await request.post(`${BASE}/api/auth/login`, { data: { email: USERS.hr.email, password: USERS.hr.password } })).json()).token as string;
+  const hrToken = (request: APIRequestContext) => getToken(request, 'hr');                          // the session globalSetup cached: no login of its own
 
   test.beforeAll(async ({ request }) => {
-    const login = await request.post(`${BASE}/api/auth/login`, { data: { email: USERS.hr.email, password: USERS.hr.password } });
-    const { token } = await login.json();
+    const token = await hrToken(request);
     const h = { Authorization: `Bearer ${token}` };
     const s = await request.get(`${BASE}/api/sourcing/status`, { headers: h });
     enabled = s.ok() && (await s.json()).enabled === true;
     if (!enabled) return;
-    db = new Client({ connectionString: TEST_DB_URL });
+    db = newClient();
     await db.connect();
     const mk = async (title: string, priority: string, hiringManager = 'Alex') => (await db.query(
       `INSERT INTO roles (title, department, hiring_manager_name, priority, status, location, employment_type, start_date, approval_date, recruitment_mode)

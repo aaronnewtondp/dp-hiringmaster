@@ -12,8 +12,31 @@
  * that the UI optimistically rendered it.
  */
 import { test, expect, Page } from '@playwright/test';
+import { Client } from 'pg';
 import { FRONTEND_BASE, getToken, authed, uid } from '../helpers/api';
+import { newClient } from '../helpers/db';
 import { loginViaApi } from '../helpers/e2e';
+import { recordRequests } from '../helpers/e2e-roles';
+import { purgeRolesFast } from '../helpers/sourcing-db';
+
+// What the tests below create is removed in afterAll: the Role filter everywhere lists every open role, and the candidate and agency lists
+// grow with every run otherwise.
+let db: Client;
+const createdRoleIds: string[] = [];
+const createdCandidateEmails: string[] = [];
+const createdAgencyIds: string[] = [];
+
+test.beforeAll(async () => {
+  db = newClient();
+  await db.connect();
+});
+
+test.afterAll(async () => {
+  test.setTimeout(180_000);
+  await purgeRolesFast(db, createdRoleIds, createdCandidateEmails);
+  if (createdAgencyIds.length) await db.query(`DELETE FROM agencies WHERE id = ANY($1::text[])`, [createdAgencyIds]);   // its edit log goes with it (ON DELETE CASCADE)
+  await db.end();
+});
 
 // ─── Fresh, isolated test data — created directly via API so each test edits
 // its own row rather than seeded data other tests might also touch ──────────
@@ -25,19 +48,24 @@ async function createTestRole(page: Page, overrides: Record<string, unknown> = {
     department: `Dept ${uid()}`,
     ...overrides,
   });
+  expect(res.status(), 'creating the role fixture').toBe(201);
   const { role } = await res.json();
+  createdRoleIds.push(role.id);
   return role;
 }
 
 async function createTestCandidate(page: Page, overrides: Record<string, unknown> = {}) {
   const token = await getToken(page.request, 'hr');
+  const email = (overrides.email as string | undefined) ?? `e2e+${uid()}@example.com`;
   const res   = await authed(page.request, token).post('/api/candidates', {
     full_name:        `E2E Candidate ${uid()}`,
-    email:            `e2e+${uid()}@example.com`,
     current_company:  `Initial Co ${uid()}`,
     ...overrides,
+    email,
   });
+  expect(res.status(), 'creating the candidate fixture').toBe(201);
   const body = await res.json();
+  createdCandidateEmails.push(email);
   return body.candidate;
 }
 
@@ -48,7 +76,9 @@ async function createTestAgency(page: Page, overrides: Record<string, unknown> =
     contact_name: `Initial Contact ${uid()}`,
     ...overrides,
   });
+  expect(res.status(), 'creating the agency fixture').toBe(201);
   const { agency } = await res.json();
+  createdAgencyIds.push(agency.id);
   return agency;
 }
 
@@ -172,13 +202,21 @@ test.describe('Inline Editing (EditableSection) E2E', () => {
       // deliberately different from that test's 'Sales & Growth' so the two
       // tests' edited values are also non-clashing strings within this file.
       const discardedValue = 'CSM/Service';
+      // attached before the edit, so a save sent at any point (not only at Cancel) is seen
+      const writes = recordRequests(page, r => r.method === 'PATCH' || r.method === 'PUT' || r.method === 'POST');
       await editField(page, 'Basic Info', 'Department', discardedValue, { save: false });
+
+      // right away, without a reload: back in read mode, on the original value
+      const basicInfo = sectionCard(page, 'Basic Info');
+      await expect(basicInfo.getByRole('button', { name: 'Edit Basic Info' })).toBeVisible();
+      await expect(basicInfo.getByText(originalDept)).toBeVisible();
+      await expect(basicInfo.getByText(discardedValue)).toHaveCount(0);
+      expect(writes, 'Cancel must not write anything').toEqual([]);
 
       await page.reload();
       await expect(page.getByRole('heading', { name: role.title, level: 1 })).toBeVisible({ timeout: 10000 });
-      const basicInfo = sectionCard(page, 'Basic Info');
-      await expect(basicInfo.getByText(originalDept)).toBeVisible();
-      await expect(basicInfo.getByText(discardedValue)).not.toBeVisible();
+      await expect(sectionCard(page, 'Basic Info').getByText(originalDept)).toBeVisible();
+      await expect(sectionCard(page, 'Basic Info').getByText(discardedValue)).toHaveCount(0);
     });
   });
 });
