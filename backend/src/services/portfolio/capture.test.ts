@@ -80,6 +80,7 @@ describe('classifyLoadFailure', () => {
 });
 
 import { pickExternalCaseStudies } from './capture.js';
+import { expectCpuUnder } from '../../testing/timing.js';
 describe('pickExternalCaseStudies', () => {
   const a = (hrefs: string[]) => hrefs.map(h => ({ href: h, text: 'case study' }));
   it('follows outbound Figma prototypes / Behance projects but not arbitrary sites or platform homepages', () => {
@@ -225,9 +226,8 @@ describe('detectAccessProblem — a bot wall is unreviewable, never "blocked" or
 
   it('the marker scan is bounded: a megabyte of hostile text neither hangs nor matches', () => {
     const hostile = 'access denied '.repeat(80_000);
-    const t0 = performance.now();
-    const verdict = detectAccessProblem(403, 'https://x.com', hostile);
-    expect(performance.now() - t0).toBeLessThan(1000);
+    // CPU time scaled to the machine (testing/timing.ts), not the clock: a quadratic or backtracking scan costs seconds on this input
+    const verdict = expectCpuUnder(1000, () => detectAccessProblem(403, 'https://x.com', hostile), 'marker scan over 1 MB');
     expect(verdict?.kind).toBe('blocked');
     // a marker beyond the scanned head is ignored (a challenge page is short)
     expect(isBotWall(403, `${'.'.repeat(20_000)} just a moment`)).toBe(false);
@@ -282,9 +282,7 @@ describe('detectAccessProblem — a bot wall is unreviewable, never "blocked" or
 
     it('a hostile page of unclosed tags is read in linear time', () => {
       for (const hostile of ['<'.repeat(16_000), '<script'.repeat(2_300), '<style>'.repeat(2_000), `just a moment ${'<a '.repeat(5_000)}`]) {
-        const t0 = performance.now();
-        isBotWall(403, hostile);
-        expect(performance.now() - t0).toBeLessThan(500);
+        expectCpuUnder(500, () => isBotWall(403, hostile), `isBotWall over ${JSON.stringify(hostile.slice(0, 12))}…`);
       }
     });
   });

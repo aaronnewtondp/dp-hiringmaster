@@ -17,16 +17,28 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { formatDistanceToNow } from 'date-fns';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
-import { GENDER_COLUMN_INFO } from '../utils/columnInfo.ts';
+import {
+  GENDER_COLUMN_INFO, FIT_COLUMN_INFO, CTC_COLUMN_INFO, OVER_BUDGET_INFO, IN_BUDGET_FILTER_INFO, APPLICATION_AGE_INFO,
+  lastUpdatedInfo, SLA_FLAG_INFO, NOTICE_PERIOD_INFO, COMPANY_INDUSTRY_INFO, STAGE_COLUMN_INFO,
+} from '../utils/columnInfo.ts';
 
 const UNMATCHED_PAGE_SIZE = 50;
 
 const COLUMN_INFO: Record<string, string> = {
   'Gender': GENDER_COLUMN_INFO,
-  'Fit': "ResumeIQ's score (0-100): the average of its 8 dimensions (Technical, Experience, Industry Fit, Culture Fit, Role Alignment, Trajectory, Leadership, Communication) × 10. The Senior UX/Product Designer and Head of Marketing roles add a ninth, Portfolio, once that review finishes (for Head of Marketing it is left out when there is no work that could be reviewed). Scored automatically when the candidate applies; 75+ also tightens SLA windows to 24h.",
-  'Current CTC → Expected CTC': "Current fixed CTC → expected CTC, both from the candidate's own profile (one figure per candidate, not per role), in ₹ lakhs. 'Over Budget' = expected CTC above the top of the role's CTC band.",
-  'Application Date': 'Days since the candidate applied — not the same as Last Updated.',
-  'Company / Industry': "Current company and industry from the candidate's own profile, shown as one field.",
+  'Fit': FIT_COLUMN_INFO,
+  'Current CTC → Expected CTC': `${CTC_COLUMN_INFO} ${OVER_BUDGET_INFO}`,
+  // Last Updated has no marker of its own (a marker would change that column's width), so its meaning is given here.
+  'Application Date': `${APPLICATION_AGE_INFO} Last Updated is a separate column: ${lastUpdatedInfo(true)}`,
+  'Company / Industry': COMPANY_INDUSTRY_INFO,
+};
+
+// What the headers without an info marker mean, shown when hovering over the header. A marker icon would change the
+// column's width (see the note above the header row), so these are plain hover text; the label stays as it is.
+const HEADER_HOVER: Record<string, string> = {
+  'Stage': STAGE_COLUMN_INFO,
+  'Notice Period': NOTICE_PERIOD_INFO,
+  'Last Updated': lastUpdatedInfo(true),
 };
 
 type SortKey = 'fit' | 'application_date' | 'last_updated';
@@ -334,7 +346,7 @@ export default function Candidates() {
               {filtered.length} applications
               {slaCount > 0 && <span className="ml-2 text-red-500 font-medium font-mono">{slaCount} SLA breached</span>}
             </span>
-            <InfoTooltip align="left" width="w-72" text="Applications in the list right now: highest ResumeIQ score first (newest first when scores tie), up to 100 at a time, so use the search and filters to reach the rest. Rejected and Withdrawn applications are not here; they are in Archived Pipeline. “SLA breached” counts the fetched applications flagged as SLA-breached, before “In-budget only” narrows the list." />
+            <InfoTooltip align="left" width="w-72" text="Applications in the list right now: highest ResumeIQ score first (newest first when scores tie), up to 100 at a time, so use the search and filters to reach the rest. Rejected and Withdrawn applications are not here; they are in Archived Pipeline. Applications on Hold for Future, Joined or Closed are listed too: choose Active in the Status filter to see only live ones (the Dashboard's Active candidates counts Active only). “SLA breached” counts the fetched applications that carry the red SLA tag, before “In-budget only” narrows the list." />
           </p>
         </div>
         {canHR && (
@@ -446,6 +458,7 @@ export default function Candidates() {
         <div className="shrink-0"><MultiSelectFilter label="Role" options={roleOptions} selected={roleIds} onChange={setRoleIds} /></div>
         <button
           onClick={() => setFilterSla(v => !v)}
+          title={`Only applications with the red SLA tag. ${SLA_FLAG_INFO}`}
           className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
             filterSla ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
           }`}
@@ -454,6 +467,7 @@ export default function Candidates() {
         </button>
         <button
           onClick={() => setFilterInBudget(v => !v)}
+          title={IN_BUDGET_FILTER_INFO}
           className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
             filterInBudget ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
           }`}
@@ -519,7 +533,7 @@ export default function Candidates() {
                   // header — except on a header that carries an info marker, whose popover hangs
                   // below the cell and was being clipped to a sliver by it. whitespace-normal
                   // overrides .table-th's nowrap so the label wraps instead of truncating.
-                  <th key={col.label} title={col.label} className={`table-th px-2 tracking-normal whitespace-normal align-bottom leading-tight ${COLUMN_INFO[col.label] ? '' : 'overflow-hidden'} ${col.width}`}>
+                  <th key={col.label} title={HEADER_HOVER[col.label] ? `${col.label}: ${HEADER_HOVER[col.label]}` : col.label} className={`table-th px-2 tracking-normal whitespace-normal align-bottom leading-tight ${COLUMN_INFO[col.label] ? '' : 'overflow-hidden'} ${col.width}`}>
                     <div className="flex items-center gap-1 min-w-0">
                       {col.sortKey ? (
                         // InfoTooltip renders its own <button> internally, so it
@@ -566,7 +580,7 @@ export default function Candidates() {
                         <span className="text-xs text-gray-400">{app.id}</span>
                         <SlaBadge breached={app.sla_breach} />
                         {app.founder_review_flag && (
-                          <span className="text-xs bg-purple-100 text-purple-700 px-1 rounded">Founder</span>
+                          <span className="text-xs bg-purple-100 text-purple-700 px-1 rounded" title="Flagged for Founder Review: Leadership sees this candidate in My Tasks → Ready for Review.">Founder</span>
                         )}
                       </div>
                     </div>
