@@ -102,18 +102,78 @@ export const infoMarkers = (scope: Page | Locator): Locator => scope.getByRole('
 export const markerPopover = (marker: Locator): Locator => marker.locator('xpath=following-sibling::div');
 
 /**
- * Opens one marker the way a mouse user does (hover), returns the popover's text and moves the mouse away again, asserting the popover
- * closes. Throws a descriptive error when no popover opens.
+ * Is the open popover actually REACHABLE, not just present in the DOM? A popover inside a table header that has `overflow-hidden` is in the
+ * DOM, "visible" to Playwright and clipped to a sliver on screen (the bug CLAUDE.md records for Archived Pipeline's last column). Two points of the
+ * popover are hit-tested — its centre and the middle of its bottom edge, both clamped into the viewport — and each must land on the popover itself.
  */
-export async function readMarkerByHover(page: Page, marker: Locator, what: string): Promise<string> {
+export async function popoverReachable(popover: Locator): Promise<{ ok: boolean; detail: string }> {
+  return popover.evaluate(el => {
+    const r = el.getBoundingClientRect();
+    if (r.width < 40 || r.height < 12) return { ok: false, detail: `the popover is only ${Math.round(r.width)}x${Math.round(r.height)}px` };
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (r.right <= 0 || r.left >= vw || r.bottom <= 0 || r.top >= vh) return { ok: false, detail: 'the popover is entirely outside the viewport' };
+    const clamp = (v: number, max: number) => Math.min(Math.max(v, 0), max - 1);
+    const points: Array<[string, number, number]> = [
+      ['centre',        clamp(r.left + r.width / 2, vw), clamp(r.top + r.height / 2, vh)],
+      ['bottom middle', clamp(r.left + r.width / 2, vw), clamp(r.bottom - 4, vh)],
+    ];
+    for (const [name, x, y] of points) {
+      const hit = document.elementFromPoint(x, y);
+      if (!hit || !el.contains(hit)) {
+        const what = hit ? `<${hit.tagName.toLowerCase()} class="${String((hit as HTMLElement).className).slice(0, 60)}">` : 'nothing';
+        return { ok: false, detail: `the ${name} of the popover (${Math.round(x)},${Math.round(y)}) is covered or clipped by ${what}` };
+      }
+    }
+    return { ok: true, detail: '' };
+  });
+}
+
+/**
+ * Opens one marker the way a mouse user does (hover), asserts the popover is reachable on screen, returns its text and moves the mouse away
+ * again, asserting the popover closes. Throws a descriptive error when no popover opens.
+ */
+export async function readMarkerByHover(page: Page, marker: Locator, what: string, opts: { checkReachable?: boolean } = {}): Promise<string> {
   await marker.scrollIntoViewIfNeeded();
   await marker.hover();
   const popover = markerPopover(marker);
   await expect(popover, `${what}: hovering the marker did not open a popover`).toBeVisible();
   const text = await popover.innerText();
+  if (opts.checkReachable !== false) {
+    const reach = await popoverReachable(popover);
+    expect(reach.ok, `${what}: ${reach.detail}`).toBe(true);
+  }
   await page.mouse.move(0, 0);
   await expect(popover, `${what}: the popover stayed open after the mouse left`).toHaveCount(0);
   return text;
+}
+
+/** How many elements `locator` matches once that number has stopped changing for `quietMs` (pages whose sections load one after another). */
+export async function settledCount(locator: Locator, quietMs = 800, timeoutMs = 20_000): Promise<number> {
+  const deadline = Date.now() + timeoutMs;
+  let last = await locator.count();
+  let since = Date.now();
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 150));
+    const now = await locator.count();
+    if (now !== last) { last = now; since = Date.now(); continue; }
+    if (Date.now() - since >= quietMs) return last;
+  }
+  throw new Error(`the number of matches kept changing for ${timeoutMs} ms (last: ${last})`);
+}
+
+// ── Candidates a spec created (direct SQL, local database only) ─────────────────────────────────────────────────────────────────
+/**
+ * Removes candidates and everything that hangs off them. There is no API for it (DELETE /api/candidates/:id refuses a candidate that has an
+ * application). Applications go first (their interview rounds, reference checks, pending actions and portfolio reviews cascade; activity
+ * and notification rows are detached by the schema), then the candidates.
+ */
+export async function purgeCandidates(candidateIds: string[]): Promise<void> {
+  if (!candidateIds.length) return;
+  await withDb(async db => {
+    await db.query('DELETE FROM activity_log WHERE candidate_id = ANY($1::text[])', [candidateIds]);
+    await db.query('DELETE FROM applications WHERE candidate_id = ANY($1::text[])', [candidateIds]);
+    await db.query('DELETE FROM candidates WHERE id = ANY($1::text[])', [candidateIds]);
+  });
 }
 
 // ── Production build vs dev server ──────────────────────────────────────────────────────────────────────────────────────────────
