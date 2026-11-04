@@ -13,11 +13,12 @@
  * Test data: two candidates with an application on the seeded Senior PM role (one active, one on Hold for Future), so Candidates, Archived
  * Pipeline and Ready for Review render their tables with headers; removed in afterAll.
  */
-import { test, expect, Download, Locator, Page } from '@playwright/test';
+import { test, expect, Locator, Page } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 import { FRONTEND_BASE, authed, createCandidate, getToken, uid } from '../helpers/api';
 import { E2EUserKey, expectNoPageErrors, gotoAs } from '../helpers/e2e';
+import { nextDownload } from '../helpers/browser-checks';
 import {
   expectRealText, frontendBuild, infoMarkers, markerPopover, NEEDS_PREVIEW, popoverReachable, purgeCandidates, readMarkerByHover,
   settledCount, waitForServiceWorkerControl,
@@ -162,21 +163,6 @@ test.describe('the guide PDFs are delivered as PDFs (production build)', () => {
   test.beforeEach(() => { test.skip(build !== 'production', NEEDS_PREVIEW); });
 
   const PUBLIC_DIR = path.resolve(__dirname, '../../../frontend/public');
-
-  /** The first download that starts on the page or on any tab it opens (a PDF opened from a target=_blank link has no viewer in headless Chromium). */
-  function nextDownload(page: Page, ms = 20_000): Promise<Download> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        const tabs = page.context().pages().map(p => p.url() || '(blank)').join(', ');
-        reject(new Error(
-          `no download started within ${ms} ms; open tabs: ${tabs}. If a tab ended on the app (/dashboard or /login), the service worker answered the PDF ` +
-          `navigation with the app shell (frontend/vite.config.ts workbox.navigateFallbackDenylist must exclude dotted paths).`));
-      }, ms);
-      const done = (d: Download) => { clearTimeout(timer); resolve(d); };
-      page.once('download', done);
-      page.context().once('page', p => p.once('download', done));
-    });
-  }
 
   for (const [link, file] of [['Open guide', 'DigitalPaani_HMS_User_Access_Guide.pdf'], ['Open SOP', 'DigitalPaani_Hiring_SOP.pdf']] as const) {
     test(`"${link}" opens ${file} as a PDF while the service worker controls the page`, async ({ page }) => {
