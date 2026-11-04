@@ -152,10 +152,13 @@ describe('AuthContext — restoring the session from localStorage', () => {
 });
 
 // ═══ A corrupt stored user ═══════════════════════════════════════════════════════════════════════════
-// KNOWN DEFECT (reported, not fixed here): AuthContext.tsx parses `hms_user` with a bare JSON.parse inside the mount effect, so ANY value that is not valid
-// JSON throws out of the effect and takes the whole tree down (App renders AuthProvider at the root: a white screen that survives reloads until the user
-// clears site data). Two tests: the first pins what happens today, so a change in behaviour cannot go unnoticed; the second states the behaviour we want
-// and is `it.fails`, so it turns red the day the defect is fixed — at which point delete the first test and change `it.fails` to `it`.
+// TWO KNOWN GAPS in how the stored `hms_user` is read (reported, not fixed here). AuthContext.tsx parses it with a bare JSON.parse inside the mount effect:
+//  1. Anything that is not valid JSON throws out of the effect and takes the whole tree down (App renders AuthProvider at the root: a white screen that
+//     survives reloads until the user clears site data).
+//  2. Anything that IS valid JSON is adopted as the user, whatever it is. A string, a number, an array or `true` is truthy, so App's `if (!user)` passes: the
+//     person is treated as signed in, with no persona and so no rights (the signed-in layout opens and every restricted control is hidden).
+// Each gap has a test that pins what happens today, so a change in behaviour cannot go unnoticed, and a WANTED test written as `it.fails`, which turns red the
+// day the gap is closed — at which point delete the TODAY test and change `it.fails` to `it`.
 class Boundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) { return { error }; }
@@ -165,19 +168,21 @@ const mountInBoundary = () => {
   vi.spyOn(console, 'error').mockImplementation(() => {});          // React logs the caught error; the test asserts on it instead
   return render(<Boundary><AuthProvider><Probe /></AuthProvider></Boundary>);
 };
+const NO_RIGHTS = { canHR: false, canLead: false, isSuperAdmin: false };
 
 describe('AuthContext — a corrupt hms_user in localStorage', () => {
-  it.each(['{not json', 'undefined', '', '<html>', '{"id":'])('TODAY: %j throws a SyntaxError out of the provider (the error boundary, not the page, catches it)', corrupt => {
+  it.each(['{not json', 'undefined', '<html>', '{"id":'])('TODAY: %j throws a SyntaxError out of the provider (the error boundary, not the page, catches it)', corrupt => {
     localStorage.setItem('hms_token', 'tok'); localStorage.setItem('hms_user', corrupt);
-    // '' is falsy, so it is "no stored user" and does not reach JSON.parse at all: the one entry here that must NOT crash.
     mountInBoundary();
-    if (corrupt === '') {
-      expect(screen.queryByTestId('crashed')).toBeNull();
-      expect(state()).toBe('out');
-    } else {
-      expect(screen.getByTestId('crashed')).toHaveTextContent('SyntaxError');
-      expect(screen.queryByTestId('probe')).toBeNull();                // the provider's children never rendered
-    }
+    expect(screen.getByTestId('crashed')).toHaveTextContent('SyntaxError');
+    expect(screen.queryByTestId('probe')).toBeNull();                // the provider's children never rendered
+  });
+
+  it('an empty stored user is "no stored user" (it is falsy, so JSON.parse never sees it): signed out, not a crash', () => {
+    localStorage.setItem('hms_token', 'tok'); localStorage.setItem('hms_user', '');
+    mountInBoundary();
+    expect(screen.queryByTestId('crashed')).toBeNull();
+    expect(state()).toBe('out');
   });
 
   it.fails('WANTED: a corrupt hms_user leaves the user signed out instead of crashing the app (fails today — see the note above)', () => {
@@ -186,18 +191,34 @@ describe('AuthContext — a corrupt hms_user in localStorage', () => {
     expect(screen.queryByTestId('crashed')).toBeNull();
     expect(state()).toBe('out');
   });
+});
 
-  it('a stored value that is valid JSON but not a user (null, a string) does not throw; it is adopted as-is, which signs nobody in', () => {
-    // `null` parses to null -> signed out. A bare string parses to a string; it has no `.persona`, so it grants nothing.
-    seed('null'); mountInBoundary();
-    expect(state()).toBe('out');
-    cleanupAndReset();
-    seed('"just a string"'); mountInBoundary();
+describe('AuthContext — a stored hms_user that is valid JSON but not a user', () => {
+  it.each(['null', '0', 'false', '""'])('%s parses to something falsy: nobody is signed in', raw => {
+    seed(raw);
+    mountInBoundary();
     expect(screen.queryByTestId('crashed')).toBeNull();
-    expect({ canHR: latest.canHR, canLead: latest.canLead, isSuperAdmin: latest.isSuperAdmin }).toEqual({ canHR: false, canLead: false, isSuperAdmin: false });
+    expect(state()).toBe('out');
+    expect(latest).toMatchObject(NO_RIGHTS);
+  });
+
+  it.each(['"just a string"', '42', '[]', 'true'])('TODAY: %s is adopted as the user — treated as signed in, with no persona and so no rights', raw => {
+    seed(raw);
+    mountInBoundary();
+    expect(screen.queryByTestId('crashed')).toBeNull();
+    expect(state()).toBe('in:undefined');                            // signed in (App's `!user` check passes) but with no persona at all
+    expect(latest.user).toEqual(JSON.parse(raw));                    // taken as it came, not checked to be a user
+    expect(latest).toMatchObject(NO_RIGHTS);
+    for (const p of PERSONAS) expect(latest.is(p)).toBe(false);
+  });
+
+  it.fails('WANTED: a stored value that is not a user object leaves the user signed out (fails today — see the note above)', () => {
+    seed('"just a string"');
+    mountInBoundary();
+    expect(state()).toBe('out');
+    expect(latest.user).toBeNull();
   });
 });
-function cleanupAndReset() { document.body.innerHTML = ''; localStorage.clear(); }
 
 // ═══ login / loginWithGoogle ═════════════════════════════════════════════════════════════════════════
 describe('AuthContext — login and loginWithGoogle', () => {
