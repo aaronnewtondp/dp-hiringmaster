@@ -299,9 +299,11 @@ start_backend() {
   : > "$STATE/empty.env"
   log "starting the backend from $BACKEND_DIR on :$API_PORT (log: $STATE/backend.log)"
   : > "$STATE/backend.log"
+  # TZ=UTC like the docker-compose backend container and Vercel: node-pg parses a DATE column as LOCAL midnight, so on a host in IST a
+  # `DATE` such as approval_date or offer_sent_date serialises as the PREVIOUS day in JSON (found when 3 api specs failed on an IST laptop).
   launch_detached "$STATE/backend.log" "$BACKEND_DIR" \
     env -i \
-      PATH="$PATH" HOME="${HOME:-/tmp}" TMPDIR="${TMPDIR:-/tmp}" \
+      PATH="$PATH" HOME="${HOME:-/tmp}" TMPDIR="${TMPDIR:-/tmp}" TZ=UTC \
       NODE_ENV=development PORT="$API_PORT" \
       DATABASE_URL="postgresql://$DB_USER:$DB_PASSWORD@127.0.0.1:$DB_PORT/$DB_NAME" \
       FRONTEND_URL="$FE_URL" SOURCING_ENABLED="${STACK_SOURCING_ENABLED:-true}" \

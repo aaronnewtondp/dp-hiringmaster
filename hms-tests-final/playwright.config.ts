@@ -24,12 +24,28 @@ const dbProject: PlaywrightTestProject = {
   testMatch: 'tests/db/**/*.spec.ts',
   use: { baseURL: API_URL },
 };
+// The browser's own time zone is pinned to IST: the app turns a datetime-local value into an instant in the BROWSER's zone, and
+// e2e/06 asserts that exact instant (11:00 -> 05:30Z). Without this the result depends on where the suite runs (a UTC CI runner differs).
+const BROWSER_TIMEZONE = 'Asia/Kolkata';
+
+// The browser never reaches the internet. frontend/index.html loads Google Fonts (a render-blocking stylesheet) and the Google Identity
+// script, and `page.goto` waits for the load event: when either host answered slowly, whole runs stalled for 45-60 s per navigation
+// (seen: 4 of 42 e2e tests timed out at once, then everything passed in under a second each). With this rule every non-local host fails
+// at once with ERR_NAME_NOT_RESOLVED (the page falls back to system fonts; the Google button simply does not render — it needs real Google
+// anyway), so a run does not depend on Google's CDN, the network or the font metrics of the day. localhost (frontend, API) is excluded.
+// Measured: load event 549 ms -> 106 ms. PW_ALLOW_EXTERNAL_HOSTS=1 turns it off for debugging.
+const HERMETIC_BROWSER_ARGS = process.env.PW_ALLOW_EXTERNAL_HOSTS
+  ? []
+  : ['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1'];
+
 const e2eProject: PlaywrightTestProject = {
   name: 'e2e',
   testMatch: 'tests/e2e/**/*.spec.ts',
   use: {
     ...devices['Desktop Chrome'],
     baseURL: FRONTEND_URL,
+    timezoneId: BROWSER_TIMEZONE,
+    launchOptions: { args: HERMETIC_BROWSER_ARGS },
   },
 };
 // Phone / tablet-width browser checks (the sidebar drawer below `lg:`, touch targets, the PWA install surface). Chromium with an
@@ -40,6 +56,8 @@ const e2eMobileProject: PlaywrightTestProject = {
   use: {
     ...devices['Desktop Chrome'],
     baseURL: FRONTEND_URL,
+    timezoneId: BROWSER_TIMEZONE,
+    launchOptions: { args: HERMETIC_BROWSER_ARGS },
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 3,
     isMobile: true,
