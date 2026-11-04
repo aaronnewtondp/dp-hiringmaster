@@ -13,8 +13,8 @@
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
 import { getToken, authed, CRON_SECRET, BASE } from '../helpers/api';
+import { TEST_DB_URL } from '../helpers/db';
 
-const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
 type Req = Parameters<typeof authed>[0];
 type Pending = { id: number; owner_type: string; action_type: string; application_id: string | null; role_id: string | null; responsible_person: string | null };
 type PendingBody = { actions: Pending[]; alerts: Pending[]; hm_roles: { id: string; title: string }[] };
@@ -32,7 +32,7 @@ test.describe('Leadership user who is also a role\'s Hiring Manager', () => {
   let decoyApp = '';
 
   test.beforeAll(async ({ request }) => {
-    client = new Client({ connectionString: LOCAL_DB_URL });
+    client = new Client({ connectionString: TEST_DB_URL });
     await client.connect();
     leaderName = (await client.query(`SELECT name FROM users WHERE email = 'nalin@digitalpaani.com'`)).rows[0].name;
 

@@ -9,14 +9,13 @@
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
 import { getToken, authed, createCandidateWithApp, SEEDED } from '../helpers/api';
-
-const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
+import { TEST_DB_URL } from '../helpers/db';
 
 test.describe('scored_only filter + candidate_industry', () => {
   let client: Client;
 
   test.beforeAll(async () => {
-    client = new Client({ connectionString: LOCAL_DB_URL });
+    client = new Client({ connectionString: TEST_DB_URL });
     await client.connect();
   });
 

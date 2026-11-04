@@ -11,8 +11,8 @@ import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
 import { getToken, authed, CRON_SECRET, BASE, CANDIDATE_INGEST_SECRET, uid } from '../helpers/api';
 import { purgeRolesFast } from '../helpers/sourcing-db';
+import { TEST_DB_URL } from '../helpers/db';
 
-const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
 const SENTINEL = 'SENTINEL-note-must-not-reach-a-hiring-manager';
 const SENTINEL_URL = 'https://example.com/SENTINEL-url';
 
@@ -63,7 +63,7 @@ test.describe('Sourcing module', () => {
   const ymd = (offsetDays: number) => new Date(Date.now() + 5.5 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10);
 
   test.beforeAll(async ({ request }) => {
-    client = new Client({ connectionString: LOCAL_DB_URL });
+    client = new Client({ connectionString: TEST_DB_URL });
     await client.connect();
     const status = await request.get(`${BASE}/api/sourcing/status`, { headers: { Authorization: `Bearer ${await getToken(request, 'hr')}` } });
     enabled = status.ok() && (await status.json()).enabled === true;
