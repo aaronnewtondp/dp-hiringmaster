@@ -187,7 +187,7 @@ describe('Dashboard — what the markers say', () => {
     await screen.findByText('Roles Snapshot');
     // frontend/src/utils/markerFacts.backend.test.ts checks which components really refetch on that interval
     const subtitle = screen.getByText(/Hiring health overview/).textContent!;
-    expect(subtitle).toContain(`refreshes every ${DASHBOARD_REFRESH_MINUTES} minutes, except the Hiring Funnel Snapshot, which updates when you reload the page or return to this tab`);
+    expect(subtitle).toContain(`refreshes every ${DASHBOARD_REFRESH_MINUTES} minutes, except the Hiring Funnel Snapshot, which updates when you reload the page or come back to it`);
     expect(subtitle).toContain(`at most once every ${b.slaCheckThrottleMinutes} minutes on each server`);     // routes/dashboard.ts SLA_CHECK_THROTTLE_MS
     expect(screen.queryByText(/updated live/)).not.toBeInTheDocument();
   });

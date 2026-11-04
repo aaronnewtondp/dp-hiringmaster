@@ -121,7 +121,7 @@ export default function Dashboard() {
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Dashboard</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {`Hiring health overview — refreshes every ${DASHBOARD_REFRESH_MINUTES} minutes, except the Hiring Funnel Snapshot, which updates when you reload the page or return to this tab. ` +
+            {`Hiring health overview — refreshes every ${DASHBOARD_REFRESH_MINUTES} minutes, except the Hiring Funnel Snapshot, which updates when you reload the page or come back to it. ` +
               `SLA breaches are re-checked when the page loads, at most once every ${SLA_CHECK_THROTTLE_MINUTES} minutes on each server.`}
           </p>
         </div>
