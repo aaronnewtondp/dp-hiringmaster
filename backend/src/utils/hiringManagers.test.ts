@@ -3,6 +3,7 @@ import {
   canonicalHiringManagerField, isNamedHiringManager, namedHiringManagerSql, normalizeHiringManagerInput,
   splitHiringManagerNames, MAX_HIRING_MANAGER_FIELD_LENGTH,
 } from './hiringManagers.js';
+import { expectCpuUnder } from '../testing/timing.js';
 
 const NBSP = String.fromCharCode(0xa0);      // no-break space — what Slack/Docs/web pages paste
 const ZWSP = String.fromCharCode(0x200b);     // zero-width space
@@ -55,10 +56,11 @@ describe('splitHiringManagerNames', () => {
 
   it('is linear: a huge run of blanks (the old regex took ~10s on 100k of them) is instant, and so is a huge run of delimiters', () => {
     for (const evil of [' '.repeat(2_000_000), `${NBSP}`.repeat(500_000), ',' .repeat(500_000), ' ,'.repeat(300_000), 'and '.repeat(100_000), 'a' + ' '.repeat(1_000_000) + 'b']) {
-      const t0 = Date.now();
-      splitHiringManagerNames(evil);
-      isNamedHiringManager('Piyush Negi', evil);
-      expect(Date.now() - t0).toBeLessThan(250);
+      // CPU time scaled to the machine (testing/timing.ts), not the clock: the old quadratic regex took ~10 s on 100k blanks, the linear code takes a few ms
+      expectCpuUnder(250, () => {
+        splitHiringManagerNames(evil);
+        isNamedHiringManager('Piyush Negi', evil);
+      }, `hiring-manager split of ${evil.length} characters`);
     }
   });
 });

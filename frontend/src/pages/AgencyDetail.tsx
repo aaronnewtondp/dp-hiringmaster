@@ -5,6 +5,7 @@ import { Agency } from '../types/index.ts';
 import { Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
 import BackButton from '../components/shared/BackButton.tsx';
+import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 
 export default function AgencyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -44,6 +45,7 @@ export default function AgencyDetail() {
             <span className="font-mono">{agency.total_submitted ?? 0} submitted</span>
             <span>·</span>
             <span className="font-mono">{agency.total_hired ?? 0} hired</span>
+            <InfoTooltip align="left" width="w-72" text="Hired: candidates whose Sourcing Agency is this agency and who have an application at Offer Accepted or Joined, counted once per candidate. Submitted: applications linked to this agency in the application's own Agency field (rejected and withdrawn ones are left out). No screen in HMS fills that field in, so Submitted is normally 0 and can be lower than Hired." />
           </div>
         )}
       </div>
@@ -62,6 +64,7 @@ export default function AgencyDetail() {
         />
         <EditableSection
           title="Contract"
+          tooltip="Status is the agency's contract status, for reference. It doesn't block anything in HMS: every agency can still be picked as a candidate's Sourcing Agency."
           data={agency}
           onSave={saveAgencyFields}
           fields={[
@@ -112,7 +115,7 @@ export default function AgencyDetail() {
           data={agency}
           onSave={saveAgencyFields}
           fields={[
-            { key: 'specialisations', label: 'Specialisations', type: 'textarea' },
+            { key: 'specialisations', label: 'Requirement Type', type: 'textarea' },
             { key: 'agreement_drive_link', label: 'Agreement Link', type: 'text', linkify: true },
             { key: 'notes', label: 'Notes', type: 'textarea' },
           ]}

@@ -11,7 +11,7 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { formatDistanceToNow } from 'date-fns';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
-import { GENDER_COLUMN_INFO } from '../utils/columnInfo.ts';
+import { GENDER_COLUMN_INFO, FIT_COLUMN_INFO, CTC_COLUMN_INFO, lastUpdatedInfo, NOTICE_PERIOD_INFO, COMPANY_INDUSTRY_INFO } from '../utils/columnInfo.ts';
 
 type Mode = 'hold_for_future' | 'archived';
 const LIMIT = 50;
@@ -19,14 +19,14 @@ const LIMIT = 50;
 const COLUMN_INFO: Record<string, string> = {
   'Gender': GENDER_COLUMN_INFO,
   'Stage': "The stage this application had reached. Putting it on hold, rejecting or withdrawing it changes its status, not its stage, so this is where it was left.",
-  'Fit': "ResumeIQ's score (0-100) for this application: the average of its 8 dimensions (for the Senior UX/Product Designer and Head of Marketing roles, a Portfolio score is added once its portfolio review finishes; for Head of Marketing it is left out when there is no work that could be reviewed), scored automatically when the candidate applied.",
-  'Current CTC → Expected CTC': "Current fixed CTC → expected CTC from the candidate's own profile, in ₹ lakhs (one figure per candidate, so the same on each of their rows). There is no Over Budget flag here. A dash means not recorded or, for a Hiring Manager, a candidate on none of their roles.",
-  'Notice Period': "Notice period in days, from the candidate's profile.",
-  'Company / Industry': "Current company and industry from the candidate's own profile, shown as one field.",
+  'Fit': FIT_COLUMN_INFO,
+  'Current CTC → Expected CTC': `${CTC_COLUMN_INFO} There is no Over Budget flag here. A dash means not recorded or, for a Hiring Manager, a candidate on none of their roles.`,
+  'Notice Period': NOTICE_PERIOD_INFO,
+  'Company / Industry': COMPANY_INDUSTRY_INFO,
   'Actions': "Reactivate (HR/Admin, Leadership and Super Admin only) links the candidate to a role that is Live – Sourcing and that they haven't applied to yet. It creates a new application at Applied and Screened, scored by ResumeIQ, with the source “Talent Pool Reactivation”; the archived application stays as it is.",
   'Status': "The application's status. A candidate is listed when at least one application is Hold for Future (or, under Archived, Rejected or Withdrawn); all of their applications are shown, each with its own status.",
-  'Application Date': 'Days since the candidate applied to this specific role.',
-  'Last Added': "When this candidate/application pair last had activity — same underlying data as Candidates' Last Updated, just relabeled here.",
+  'Application Date': 'Days since the candidate applied to this specific role. It shows a number of days, not a date.',
+  'Last Updated': lastUpdatedInfo(false),
 };
 
 // One row per (candidate, application) — same flattening Candidates.tsx uses
@@ -166,6 +166,7 @@ export default function TalentPool() {
         </div>
         <input
           placeholder="Tag"
+          title="Exact match, including capital letters, on a tag added under HR Tags on the candidate page. Tags added inside Screening & Risk Notes belong to the application and are not searched."
           value={tag}
           onChange={e => resetAndSet<string>(setTag)(e.target.value)}
           className="input w-36"
@@ -193,9 +194,7 @@ export default function TalentPool() {
       {/* Results — table, same column model as Candidates.tsx (item #8.2):
           Candidate, Role, Stage, Status, Fit, Current CTC → Expected CTC, Notice
           Period, Preferred Location, Company / Industry, Resume Link, Application Date, Last
-          Added (= last_updated, just relabeled since this page reads as
-          "when this candidate's application last moved" rather than "last
-          edited"), Actions. */}
+          Updated (= last_updated; formerly labelled "Last Added", which it never meant), Actions. */}
       {isLoading && offset === 0 ? (
         <div className="flex justify-center p-12"><Spinner size="lg" /></div>
       ) : rows.length === 0 ? (
@@ -226,7 +225,7 @@ export default function TalentPool() {
                   { label: 'Company / Industry', width: 'w-[182px]' },
                   { label: 'Resume Link', width: 'w-[68px]' },
                   { label: 'Application Date', width: 'w-[134px]', sortKey: 'application_date' as const },
-                  { label: 'Last Added', width: 'w-[100px]', sortKey: 'last_added' as const },
+                  { label: 'Last Updated', width: 'w-[108px]', sortKey: 'last_added' as const },
                   // last column: its popover opens leftward, or a centered one runs past the table's right edge
                   { label: 'Actions', width: 'w-[104px]', infoAlign: 'right' as const },
                 ].map(col => (
