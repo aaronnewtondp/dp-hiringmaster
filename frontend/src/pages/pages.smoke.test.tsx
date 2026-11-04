@@ -30,6 +30,9 @@ const h = vi.hoisted(() => {
     selfEditable: false,        // User Management: the signed-in user's own row carries a persona that has buttons
     google: 'ok',               // how POST /auth/google answers: 'ok' | 'invalid' | 'down'
     unmatched: false,           // Candidates: one candidate with no application, in the Unmatched Candidates panel
+    jdSource: 'generated',      // the role's long-form JD: 'generated' by the system, or 'manual' (written outside it)
+    twoApps: false,             // CandidateDetail: the candidate has a second application, on another role
+    secondScreened: false,      // Ready for Review: a second row at Applied and Screened (the first is A9002), so rows can be selected together
   };
   // A plain function that records its arguments and answers asynchronously — a failing answer throws (never a vi.fn() rejection, which vitest reports as unhandled).
   const rec = (name: string, answer: (...a: Call) => unknown) => (...a: Call) => { (calls[name] ||= []).push(a); return Promise.resolve().then(() => answer(...a)); };
@@ -39,7 +42,7 @@ const h = vi.hoisted(() => {
   const role = () => ({
     id: 'R001', title: 'Smoke Test Engineer', priority: 'P1', department: 'Engineering', location: 'Mumbai', num_openings: 1, status: state.roleStatus,
     ctc_band: '18-24 SYNTH-LPA', active_candidate_count: 3, shortlisted_count: 1, hiring_manager_name: state.appHm, jd_drive_link: 'https://drive.example.test/jd',
-    jd_source: 'generated', social_jd_drive_link: null, approval_summary_link: null, created_at: '2026-10-01T00:00:00Z', days_open: 5, days_overdue: 0,
+    jd_source: state.jdSource, social_jd_drive_link: null, approval_summary_link: null, created_at: '2026-10-01T00:00:00Z', days_open: 5, days_overdue: 0,
     aging_alert: 'ok', yoe_required: '3-5 years', qualification_required: 'B.E.', must_have_skills: 'Skill A; Skill B', nice_to_have_skills: 'Skill C',
     job_description: 'Synthetic description', kpi_expectations: '', additional_remarks: '', recruitment_mode: ['LinkedIn'], vacancy_reason: ['Growth'],
     new_or_replacement: 'New Position', employment_type: 'Full-Time / Permanent', target_closure_date: '2026-12-01', start_date: '2026-10-01',
@@ -96,11 +99,15 @@ const h = vi.hoisted(() => {
       unmatched: rec('candidates.unmatched', () => state.unmatched
         ? ({ data: { submissions: [{ candidate_id: 'C9010', full_name: 'Synthetic Unlinked', email: 'unlinked@example.test', submitted_text: 'Synthetic Role Title', created_at: '2026-10-20T00:00:00Z', suggested_role_id: 'R001', suggested_role_title: 'Smoke Test Engineer' }], total: 1 } })
         : ({ data: { submissions: [], total: 0 } })),
-      get: rec('candidates.get', () => ({ data: { candidate: candidate(), applications: [app()] } })),
+      get: rec('candidates.get', () => ({ data: { candidate: candidate(), applications: state.twoApps ? [app(), app({ id: 'A9005', role_id: 'R002', role_title: 'Second Smoke Role' })] : [app()] } })),
       activity: rec('candidates.activity', () => ({ data: { activity: [] } })),
     },
     applicationsApi: {
-      list: rec('applications.list', () => ({ data: { applications: [app(), app({ id: 'A9002', candidate_id: 'C9002', candidate_name: 'Synthetic Candidate Two', score_avg: null, ai_fit_score: null, stage: 'Applied and Screened' })] } })),
+      list: rec('applications.list', () => ({ data: { applications: [
+        app(),
+        app({ id: 'A9002', candidate_id: 'C9002', candidate_name: 'Synthetic Candidate Two', score_avg: null, ai_fit_score: null, stage: 'Applied and Screened' }),
+        ...(state.secondScreened ? [app({ id: 'A9004', candidate_id: 'C9004', candidate_name: 'Synthetic Candidate Four', stage: 'Applied and Screened' })] : []),
+      ] } })),
       advanceStage: rec('applications.advanceStage', () => ({ data: {} })),
       updateStatus: rec('applications.updateStatus', () => ({ data: {} })),
       retryScoring: rec('applications.retryScoring', () => ({ data: {} })),
@@ -202,7 +209,7 @@ const present = (el: HTMLElement | null) => el !== null;
 
 beforeEach(() => {
   for (const k of Object.keys(h.calls)) delete h.calls[k];
-  Object.assign(h.state, { persona: 'hr_recruiter', sourcingOn: false, roleStatus: 'Draft', appStage: 'Interview Round 1', appHm: 'Hm Alpha', selfEditable: false, google: 'ok', unmatched: false });
+  Object.assign(h.state, { persona: 'hr_recruiter', sourcingOn: false, roleStatus: 'Draft', appStage: 'Interview Round 1', appHm: 'Hm Alpha', selfEditable: false, google: 'ok', unmatched: false, jdSource: 'generated', twoApps: false, secondScreened: false });
   localStorage.clear(); sessionStorage.clear();
   vi.mocked(toast.error).mockClear(); vi.mocked(toast.success).mockClear();
   vi.useFakeTimers({ toFake: ['Date'] });                                   // "today" is fixed; timers stay real
@@ -345,6 +352,17 @@ describe.each(PERSONAS)('as %s — detail pages, review and dashboards', persona
     expect(asked('agencies.list')).toHaveLength(who.hr ? 1 : 0);
   });
 
+  it('CandidateDetail with two applications: no Stage/Status pair at the top of the page — each application carries its own, for HR-tier only', async () => {
+    h.state.twoApps = true;
+    mountAs(persona, <CandidateDetail />, { path: '/candidates/C9001', route: '/candidates/:id' });
+    expect(await screen.findByRole('heading', { level: 1, name: 'Synthetic Candidate One' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Applications (2)' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Second Smoke Role' })).toBeInTheDocument();
+    // One pair per application (2), none at the top (a third would be the single-application pair that should have given way).
+    expect(screen.queryAllByRole('button', { name: 'Stage' })).toHaveLength(who.hr ? 2 : 0);
+    expect(screen.queryAllByRole('button', { name: 'Status' })).toHaveLength(who.hr ? 2 : 0);
+  });
+
   // ── RoleDetail ─────────────────────────────────────────────────────────────────────────────────
   it('RoleDetail (Draft): Approve Role, Discard role, Change status, the CTC Band field and the comp benchmark only for HR-tier; approving sends status Approved', async () => {
     h.state.roleStatus = 'Draft';
@@ -383,6 +401,16 @@ describe.each(PERSONAS)('as %s — detail pages, review and dashboards', persona
     expect(screen.queryByRole('button', { name: 'Approve Role' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Discard role' })).toBeNull();
     expect(present(screen.queryByRole('button', { name: 'Regenerate JD' }))).toBe(who.hr);
+    expect(screen.queryByText(/Long-form JD manually provided/)).toBeNull();            // the note belongs to a JD written outside the system only
+  });
+
+  it('RoleDetail (Approved, long-form JD written outside the system): nobody is offered Regenerate JD, and everyone is told why', async () => {
+    h.state.roleStatus = 'Approved';
+    h.state.jdSource = 'manual';
+    mountAs(persona, <RoleDetail />, { path: '/roles/R001', route: '/roles/:id' });
+    await screen.findByRole('heading', { level: 1, name: ROLE_TITLE });
+    expect(screen.getByText(/^Long-form JD manually provided/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Regenerate JD' })).toBeNull();         // not even HR-tier: it would overwrite the hand-written document
   });
 
   it('RoleDetail (Closed – Filled): Download Closure Summary only for HR-tier', async () => {
@@ -393,7 +421,7 @@ describe.each(PERSONAS)('as %s — detail pages, review and dashboards', persona
   });
 
   // ── Ready for Review (ScorecardSummary) ────────────────────────────────────────────────────────
-  it('Ready for Review: everyone can shortlist (straight to Interview Round 1); Retry scoring only for HR-tier; the stage editor only for Leadership and Super Admin — not HR/Admin', async () => {
+  it('Ready for Review: everyone can shortlist a single row (straight to Interview Round 1); Retry scoring only for HR-tier; the stage editor only for Leadership and Super Admin — not HR/Admin', async () => {
     mountAs(persona, <ScorecardSummary />);
     await screen.findByText('Synthetic Candidate Two');
     // A9002 is the only row at Applied and Screened, so it is the only one with row actions.
@@ -407,6 +435,21 @@ describe.each(PERSONAS)('as %s — detail pages, review and dashboards', persona
     fireEvent.click(shortlist[0]);
     await waitFor(() => expect(asked('applications.advanceStage')).toHaveLength(1));
     expect(asked('applications.advanceStage')[0].slice(0, 2)).toEqual(['A9002', 'Interview Round 1']);
+  });
+
+  it('Ready for Review — bulk Shortlist: two selected rows both go straight to Interview Round 1, for every persona', async () => {
+    h.state.secondScreened = true;                                                    // A9002 and A9004 are both at Applied and Screened
+    mountAs(persona, <ScorecardSummary />);
+    await screen.findByText('Synthetic Candidate Four');
+    for (const name of ['Synthetic Candidate Two', 'Synthetic Candidate Four']) {
+      fireEvent.click(within(screen.getByText(name).closest('tr')!).getByRole('checkbox'));
+    }
+    const bar = (await screen.findByText('2 selected')).parentElement!;               // the selection bar: Shortlist, Hold for Future, Reject
+    fireEvent.click(within(bar).getByRole('button', { name: 'Shortlist' }));
+    await waitFor(() => expect(asked('applications.advanceStage')).toHaveLength(2));
+    expect(asked('applications.advanceStage').map(call => call.slice(0, 2)).sort()).toEqual([['A9002', 'Interview Round 1'], ['A9004', 'Interview Round 1']]);
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('2 of 2 shortlisted'));
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   // ── My Tasks ───────────────────────────────────────────────────────────────────────────────────
@@ -633,7 +676,9 @@ describe('Login', () => {
     const view = render(
       <QueryClientProvider client={new QueryClient()}>
         <Provider><MemoryRouter initialEntries={['/login']}><Routes>
-          <Route path="/login" element={<Login />} /><Route path="*" element={<div data-testid="elsewhere" />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/dashboard" element={<div data-testid="dashboard" />} />
+          <Route path="*" element={<div data-testid="elsewhere" />} />
         </Routes></MemoryRouter></Provider>
       </QueryClientProvider>,
     );
@@ -668,7 +713,8 @@ describe('Login', () => {
     gsiLoaded();
     await waitFor(() => expect(gsi).toBeDefined());
     gsi!.callback({ credential: 'google-id-token' });
-    expect(await screen.findByTestId('elsewhere')).toBeInTheDocument();
+    expect(await screen.findByTestId('dashboard')).toBeInTheDocument();                // that exact route, not just "somewhere else"
+    expect(screen.queryByTestId('elsewhere')).toBeNull();
     expect(asked('auth.google')).toEqual([['google-id-token']]);
     expect(localStorage.getItem('hms_token')).toBe('tok-google');
     expect(JSON.parse(localStorage.getItem('hms_user')!)).toMatchObject({ persona: 'hiring_manager' });
@@ -682,6 +728,7 @@ describe('Login', () => {
     await waitFor(() => expect(freshToast.error).toHaveBeenCalledWith('Invalid Google credential'));
     expect(localStorage.getItem('hms_token')).toBeNull();
     expect(screen.queryByTestId('elsewhere')).toBeNull();
+    expect(screen.queryByTestId('dashboard')).toBeNull();
     expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
   });
 
@@ -696,29 +743,35 @@ describe('Login', () => {
 });
 
 // ═══ Forms ═══════════════════════════════════════════════════════════════════════════════════════════
-describe('NewRole — submitting without a CTC band', () => {
-  /** Fills every required field except the CTC band (which a Hiring Manager is never shown) and submits the form. */
-  const submitAllButCtcBand = (container: HTMLElement) => {
-    const type = (el: Element, value: string) => fireEvent.change(el, { target: { value } });
-    type(screen.getByPlaceholderText('e.g. Senior Backend Developer'), 'Synthetic Role');
-    const [department, , , location] = Array.from(container.querySelectorAll('select'));       // Department, Priority, New/Replacement, Location, Employment Type
-    type(department, (department as HTMLSelectElement).options[1].value);
-    type(location, (location as HTMLSelectElement).options[1].value);
-    if (!(screen.getByPlaceholderText('Full name') as HTMLInputElement).value) type(screen.getByPlaceholderText('Full name'), 'Hm Alpha');
-    type(screen.getByPlaceholderText(/^e\.g\. 3.5 years$/), '3-5 years');
-    type(screen.getByPlaceholderText(/^e\.g\. B\.Tech/), 'B.E.');
-    type(container.querySelector('input[type="date"]')!, '2026-12-01');
-    type(screen.getByPlaceholderText('Key responsibilities and expectations'), 'Synthetic description');
-    type(screen.getByPlaceholderText(/^Node\.js; TypeScript/), 'Skill A; Skill B');
-    type(screen.getByPlaceholderText(/^GraphQL; AWS/), 'Skill C');
-    fireEvent.click(screen.getByRole('button', { name: VACANCY_REASONS[0] }));
-    fireEvent.click(screen.getByRole('button', { name: RECRUITMENT_CHANNELS[0] }));
-    fireEvent.submit(container.querySelector('form')!);
-  };
+type NewRoleFill = { ctcBand?: string; vacancyReason?: boolean; recruitmentChannel?: boolean; openings?: string };
+/**
+ * Fills the New Role form and submits it. Everything required is filled unless an option says otherwise: the CTC band only when one is given (a Hiring Manager is
+ * never shown the field), one Vacancy Caused Due To option and one Recruitment Channel unless switched off, and the number of Openings only when one is given.
+ */
+const fillAndSubmitNewRole = (container: HTMLElement, { ctcBand, vacancyReason = true, recruitmentChannel = true, openings }: NewRoleFill = {}) => {
+  const type = (el: Element, value: string) => fireEvent.change(el, { target: { value } });
+  type(screen.getByPlaceholderText('e.g. Senior Backend Developer'), 'Synthetic Role');
+  const [department, , , location] = Array.from(container.querySelectorAll('select'));       // Department, Priority, New/Replacement, Location, Employment Type
+  type(department, (department as HTMLSelectElement).options[1].value);
+  type(location, (location as HTMLSelectElement).options[1].value);
+  if (!(screen.getByPlaceholderText('Full name') as HTMLInputElement).value) type(screen.getByPlaceholderText('Full name'), 'Hm Alpha');
+  type(screen.getByPlaceholderText(/^e\.g\. 3.5 years$/), '3-5 years');
+  type(screen.getByPlaceholderText(/^e\.g\. B\.Tech/), 'B.E.');
+  if (ctcBand !== undefined) type(screen.getByPlaceholderText(/^e\.g\. 18.24 LPA$/), ctcBand);
+  type(container.querySelector('input[type="date"]')!, '2026-12-01');
+  type(screen.getByPlaceholderText('Key responsibilities and expectations'), 'Synthetic description');
+  type(screen.getByPlaceholderText(/^Node\.js; TypeScript/), 'Skill A; Skill B');
+  type(screen.getByPlaceholderText(/^GraphQL; AWS/), 'Skill C');
+  if (openings !== undefined) type(container.querySelector('input[type="number"]')!, openings);
+  if (vacancyReason) fireEvent.click(screen.getByRole('button', { name: VACANCY_REASONS[0] }));
+  if (recruitmentChannel) fireEvent.click(screen.getByRole('button', { name: RECRUITMENT_CHANNELS[0] }));
+  fireEvent.submit(container.querySelector('form')!);
+};
 
+describe('NewRole — submitting without a CTC band', () => {
   it.each(PERSONAS)('%s', async persona => {
     const { container } = mountAs(persona, <NewRole />);
-    submitAllButCtcBand(container);
+    fillAndSubmitNewRole(container);
     if (persona === 'hiring_manager') {
       // Never asked for it, so never refused for lacking it: the request goes through.
       await waitFor(() => expect(asked('roles.create')).toHaveLength(1));
@@ -729,6 +782,42 @@ describe('NewRole — submitting without a CTC band', () => {
       await drain();
       expect(asked('roles.create')).toHaveLength(0);
     }
+  });
+});
+
+// The three required choices that are not plain text boxes. Each is checked after the text fields, so the CTC band is filled for everyone who is shown it:
+// otherwise its own refusal would come first and the check under test would never be reached.
+describe('NewRole — the other required choices', () => {
+  const ctcFor = (persona: Persona) => (persona === 'hiring_manager' ? undefined : 'SYNTH-LPA 10-12');
+  const CASES: Array<[string, NewRoleFill, string]> = [
+    ['no Vacancy Caused Due To option chosen', { vacancyReason: false }, 'Select at least one Vacancy Caused Due To option'],
+    ['no Recruitment Channel chosen', { recruitmentChannel: false }, 'Select at least one Recruitment Channel'],
+    ['0 Openings', { openings: '0' }, 'Openings must be at least 1'],
+    ['a negative number of Openings', { openings: '-2' }, 'Openings must be at least 1'],
+  ];
+
+  describe.each(CASES)('%s', (_label, fill, message) => {
+    it.each(PERSONAS)('%s is refused with that message, once, and nothing is sent', async persona => {
+      const { container } = mountAs(persona, <NewRole />);
+      fillAndSubmitNewRole(container, { ctcBand: ctcFor(persona), ...fill });
+      expect(toast.error).toHaveBeenCalledTimes(1);
+      expect(toast.error).toHaveBeenCalledWith(message);
+      await drain();
+      expect(asked('roles.create')).toHaveLength(0);
+      expect(toast.success).not.toHaveBeenCalled();
+    });
+  });
+
+  // The control for the refusals above: the same fill with every choice made goes through, so none of them was refused for lacking something else.
+  it.each(PERSONAS)('%s: with every choice made (3 Openings), the request is sent as filled in', async persona => {
+    const { container } = mountAs(persona, <NewRole />);
+    fillAndSubmitNewRole(container, { ctcBand: ctcFor(persona), openings: '3' });
+    await waitFor(() => expect(asked('roles.create')).toHaveLength(1));
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(asked('roles.create')[0][0]).toMatchObject({
+      title: 'Synthetic Role', num_openings: 3, vacancy_reason: [VACANCY_REASONS[0]], recruitment_mode: [RECRUITMENT_CHANNELS[0]],
+      ...(persona === 'hiring_manager' ? {} : { ctc_band: 'SYNTH-LPA 10-12' }),
+    });
   });
 });
 
