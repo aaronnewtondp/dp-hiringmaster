@@ -33,24 +33,8 @@
  * than failing confusingly if test 1 didn't get far enough to set them.
  */
 import { test, expect, Page } from '@playwright/test';
-import { BASE, FRONTEND_BASE, USERS, uid, CANDIDATE_INGEST_SECRET } from '../helpers/api';
-
-async function loginViaApi(page: Page, user: keyof typeof USERS = 'hr') {
-  const cred = USERS[user];
-  const res  = await page.request.post(`${BASE}/api/auth/login`, {
-    data: { email: cred.email, password: cred.password },
-  });
-  const { token, user: userBody } = await res.json();
-
-  await page.goto(FRONTEND_BASE);
-  await page.evaluate(({ token, userBody }) => {
-    localStorage.setItem('hms_token', token);
-    localStorage.setItem('hms_user', JSON.stringify(userBody));
-  }, { token, userBody });
-
-  await page.goto(`${FRONTEND_BASE}/dashboard`);
-  await page.waitForURL(/\/dashboard/, { timeout: 15000 });
-}
+import { BASE, FRONTEND_BASE, uid, CANDIDATE_INGEST_SECRET } from '../helpers/api';
+import { loginViaApi } from '../helpers/e2e';
 
 /**
  * Locates a NewRole.tsx field by its exact <label> text (every required

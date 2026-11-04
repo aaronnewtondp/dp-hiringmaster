@@ -9,20 +9,8 @@ import { test, expect, Page, APIRequestContext } from '@playwright/test';
 import { Client } from 'pg';
 import { BASE, FRONTEND_BASE, USERS, uid, CRON_SECRET } from '../helpers/api';
 import { purgeRolesFast } from '../helpers/sourcing-db';
-
-const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
-
-async function loginViaApi(page: Page, user: keyof typeof USERS, path: string) {
-  const res = await page.request.post(`${BASE}/api/auth/login`, { data: { email: USERS[user].email, password: USERS[user].password } });
-  const { token, user: userBody } = await res.json();
-  await page.goto(FRONTEND_BASE);
-  await page.evaluate(({ token, userBody }) => {
-    localStorage.setItem('hms_token', token);
-    localStorage.setItem('hms_user', JSON.stringify(userBody));
-    sessionStorage.clear();
-  }, { token, userBody });
-  await page.goto(`${FRONTEND_BASE}${path}`);
-}
+import { TEST_DB_URL } from '../helpers/db';
+import { loginViaApi } from '../helpers/e2e';
 
 test.describe('Sourcing module (browser)', () => {
   test.setTimeout(90_000);                      // the first dashboard load after idle runs the whole SLA sweep (compute-on-read)
@@ -42,7 +30,7 @@ test.describe('Sourcing module (browser)', () => {
     const s = await request.get(`${BASE}/api/sourcing/status`, { headers: h });
     enabled = s.ok() && (await s.json()).enabled === true;
     if (!enabled) return;
-    db = new Client({ connectionString: LOCAL_DB_URL });
+    db = new Client({ connectionString: TEST_DB_URL });
     await db.connect();
     const mk = async (title: string, priority: string, hiringManager = 'Alex') => (await db.query(
       `INSERT INTO roles (title, department, hiring_manager_name, priority, status, location, employment_type, start_date, approval_date, recruitment_mode)

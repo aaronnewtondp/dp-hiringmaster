@@ -19,14 +19,13 @@
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
 import { getToken, authed, uid } from '../helpers/api';
-
-const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
+import { TEST_DB_URL } from '../helpers/db';
 
 test.describe('Schema integrity (local Postgres, direct connection)', () => {
   let client: Client;
 
   test.beforeAll(async () => {
-    client = new Client({ connectionString: LOCAL_DB_URL });
+    client = new Client({ connectionString: TEST_DB_URL });
     await client.connect();
   });
 
@@ -140,7 +139,7 @@ test.describe('Sourcing module schema (local Postgres, direct connection)', () =
   const TABLES = ['sourcing_settings', 'sourcing_plans', 'sourcing_plan_channels', 'sourcing_commitments', 'sourcing_commitment_log',
                   'sourcing_evidence', 'sourcing_exceptions', 'sourcing_plan_changes'];
 
-  test.beforeAll(async () => { client = new Client({ connectionString: LOCAL_DB_URL }); await client.connect(); });
+  test.beforeAll(async () => { client = new Client({ connectionString: TEST_DB_URL }); await client.connect(); });
   test.afterAll(async () => { await client.end(); });
 
   test('all eight tables exist and every one has row level security enabled', async () => {

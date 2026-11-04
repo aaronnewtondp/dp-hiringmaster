@@ -1,19 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
-import { BASE, FRONTEND_BASE, USERS } from '../helpers/api';
-
-async function loginViaApi(page: Page, user: keyof typeof USERS = 'hr') {
-  const res = await page.request.post(`${BASE}/api/auth/login`, {
-    data: { email: USERS[user].email, password: 'password123' },
-  });
-  const { token, user: userBody } = await res.json();
-  await page.goto(FRONTEND_BASE);
-  await page.evaluate(({ token, userBody }) => {
-    localStorage.setItem('hms_token', token);
-    localStorage.setItem('hms_user', JSON.stringify(userBody));
-  }, { token, userBody });
-  await page.goto(`${FRONTEND_BASE}/dashboard`);
-  await page.waitForURL(/\/dashboard/, { timeout: 15000 });
-}
+import { BASE, USERS } from '../helpers/api';
+import { loginViaApi } from '../helpers/e2e';
 
 test('Dashboard loads without errors', async ({ page }) => {
   await loginViaApi(page);
