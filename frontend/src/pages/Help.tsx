@@ -29,7 +29,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
             the app for an on-the-spot explanation of exactly what it measures.</p>
             <p className="mt-2">Below that, the <strong>Hiring Funnel Snapshot</strong> is an
             interactive chevron strip: click any stage to see which SLA breach types are open
-            there and exactly who's overdue, filterable by owner (HR/Recruiter or Hiring Manager).
+            there and exactly who's overdue, filterable by owner (HR/Admin or Hiring Manager).
             Role isn't a filter local to this section — it inherits the Role filter from the
             master filters above, like every other section.</p>
             <p className="mt-2">Right under it, <strong>SLA breaches by role</strong> shows the
@@ -41,7 +41,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
             for the second level — the stage-by-stage split with each breach type and who owns
             it. The legend highlights one step, and <em>Table</em> shows the same numbers as
             rows. It follows the master filters (not the owner buttons — it always counts both
-            HR and Hiring Manager breaches, and the drill-down shows who owns each), and a
+            HR/Admin and Hiring Manager breaches, and the drill-down shows who owns each), and a
             Hiring Manager sees only their own roles. Breaches on roles that aren't open (closed, cancelled or
             still a draft) aren't drawn; a note under the chart says how many there are.</p>
             <p className="mt-2">Further down: <strong>Aging roles</strong> (every role currently
@@ -49,15 +49,16 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
             Approved or Live – Sourcing role that is far enough past its Close Target gets a
             yellow or red flag, sorted to the top; the days are set out in the role statuses
             question below. On Hold roles are listed for reference but never flagged. A red <strong>!</strong> next to
-            a role's name means no candidate on that role has had any real movement — a stage or status change, feedback — in 3+ days; new applications arriving and automatic scoring don't count toward this, so a role can't look active just because people are still applying
+            a role's name means no candidate on that role has had any real movement — a stage or status change, feedback — in more than 3 days; new applications arriving and automatic scoring don't count toward this, so a role can't look active just because people are still applying
             to it while nobody's actually working the pipeline), the <strong>Hiring
             funnel</strong> chart
             (every stage, broken into Active/Rejected/Withdrawn/Hold for Future so a stage never
             silently disappears just because nobody's currently sitting there; hires are not
             counted in it, so the Joined bar stays at 0), Source Quality (pass rate is the
             share that reached Interview Round 1 or later and hire rate the share that reached Offer
-            Accepted or later; everyone who applied through the Job Application Form is recorded as
-            LinkedIn, so that bar includes all form applicants),
+            Accepted or later; a candidate created by the Job Application Form is recorded with the
+            Source LinkedIn (someone already in HMS keeps the Source they have), so that bar holds
+            most form applicants),
             Low Pipeline Roles (open roles with <strong>fewer than 3 shortlisted candidates and
             fewer than 8 active candidates</strong> in the pipeline — those two columns decide who
             is listed; the scored-above-60 columns beside them are shown for information only),
@@ -95,7 +96,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         question: 'What is Active Candidates, and what are "Unmatched Candidates"?',
         answer: (
           <>
-            <p>Active Candidates lists applications across every role — except Rejected and Withdrawn ones, which live in Archived Pipeline (they never show here, even if you pick them in the Status filter) — highest ResumeIQ score first, up to 100 at a time. Use the search box (name, email or role) and the filters (Stage, Status, Department, Location, Recruitment Mode, Priority, Role, Gender, SLA breached only and In-budget only) to reach the rest; the search looks beyond the 100 shown. Fit is the ResumeIQ average out of 100 — the same number as Average Score out of 10 in Ready for review. Company / Industry is a merged column ("company /
+            <p>Active Candidates lists applications across every role — except Rejected and Withdrawn ones, which live in Archived Pipeline (they never show here, even if you pick them in the Status filter) — the 100 highest-scoring applications first (highest ResumeIQ score at the top). There is no next page, so use the search box (name, email or role) and the filters (Stage, Status, Department, Location, Recruitment Mode, Priority, Role, Gender and SLA breached only) to reach the others; they look beyond the 100 shown. In-budget only just narrows the 100 already on screen. Fit is the ResumeIQ average out of 100 — the same score as Average Score in Ready for review, ten times larger (a Fit of 74 is an Average Score of 7.4). Company / Industry is a merged column ("company /
             industry", both from the candidate's own profile); Application Date shows how many
             days ago the candidate applied. The Last Updated column shows a one-line subtext of
             what actually happened most recently (a stage change, a score, an email sent) — not
@@ -224,7 +225,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         answer: (
           <>
             <p><strong>Resume Shortlist Pending</strong> — a candidate has waited at Applied and Screened beyond the window (the Hiring Manager's item). <strong>HM shortlist review</strong> — a candidate was shortlisted into Interview Round 1; it is a heads-up for the role's Hiring Manager, nothing in the screens completes it, and it clears by itself when the candidate's stage or status next changes. <strong>Interview 1, Interview 2 or Founders Round Not Scheduled</strong> and <strong>Assignment Not Sent</strong> — HR hasn't booked the round with a date or sent the assignment. <strong>Assignment deadline breached</strong> — no submission recorded within 60 hours of sending. <strong>Idle Candidate</strong> — no movement for 48 hours at Reference Check, Pre-Joining Documents, Offer Discussion or Offer Released. <strong>Joining risk — no contact</strong> — a candidate at Offer Accepted with no HR contact on record. <strong>Founder Review</strong> — an application flagged for Leadership. Overdue feedback appears under Feedback Due instead.</p>
-            <p className="mt-2">Leadership Alerts are shown but not counted: <strong>Role aging alert</strong> (a role has reached red), <strong>Compensation change flag</strong> (a role's CTC band was edited) and <strong>Feedback Overdue — Leadership Escalation</strong>.</p>
+            <p className="mt-2">Leadership Alerts are notices of three kinds: <strong>Role aging alert</strong> (a role has reached red), <strong>Compensation change flag</strong> (a role's CTC band was edited) and <strong>Feedback Overdue — Leadership Escalation</strong>. For HR/Admin and Super Admin, and for a Leadership user who is also a role's Hiring Manager, they appear in their own Leadership Alerts panel and are not counted in Other Pending Actions. A Leadership user who is nobody's Hiring Manager has Leadership Alerts as the whole third box, and its count includes them.</p>
           </>
         ),
       },
@@ -232,7 +233,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         id: 'agencies',
         question: 'What is the Agencies page? (HR/Admin, Leadership and Super Admin)',
         answer: (
-          <p>The Agency Repository holds each recruitment agency's contact, contract status, commission tiers, replacement guarantee, billing and payment terms and agreement link, so agency terms are in one place. Each agency also shows two counts: <em>submitted</em> (applications that carry the agency on the application itself and are not Rejected or Withdrawn — an older field that no current screen sets, so it may read 0 for candidates added recently) and <em>hired</em> (candidates the agency sourced who reached Offer Accepted or Joined, counted once per candidate). A candidate counts as sourced by an agency when their own Source field is set to Agency and the agency is chosen on their profile. The Add agency button doesn't open anything yet, so agencies can't be added from this screen today.</p>
+          <p>The Agency Repository holds each recruitment agency's contact, contract status, commission tiers, replacement guarantee, billing and payment terms and agreement link, so agency terms are in one place. The list shows each agency's hires; open an agency to see two counts, <em>submitted</em> (applications that carry the agency on the application itself and are not Rejected or Withdrawn — an older field that no current screen sets, so it may read 0 for candidates added recently) and <em>hired</em> (candidates the agency sourced who reached Offer Accepted or Joined, counted once per candidate — the same number as Hires in the list). A candidate counts as sourced by an agency when their own Source field is set to Agency and the agency is chosen on their profile. The Add agency button doesn't open anything yet, so agencies can't be added from this screen today.</p>
         ),
       },
       {
@@ -250,7 +251,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         id: 'user-management',
         question: 'What is User Management? (Super Admin only)',
         answer: (
-          <p>The only place accounts actually get added, edited, or deactivated — "removing access" deactivates an account rather than deleting it, since a user's past actions (interview feedback, activity log entries) stay attached to their record. Each account has Edit and Deactivate / Reactivate buttons; the roles on offer are HR/Admin, Hiring Manager and Leadership, and you can't change your own role or deactivate yourself. A person can sign in only with a company Google account that has been added here and is active. A user's Name must match what HR writes in a role's Hiring Manager field (whole name, ignoring case), or that person won't get that role's Hiring Manager view. Held by exactly one person at DigitalPaani.</p>
+          <p>The only place accounts actually get added, edited, or deactivated — "removing access" deactivates an account rather than deleting it, since a user's past actions (interview feedback, activity log entries) stay attached to their record. Every account except the Super Admin's own has Edit and Deactivate / Reactivate buttons (the Super Admin's own row shows only a dash, so its role and access can't be changed here); the roles on offer are HR/Admin, Hiring Manager and Leadership. A person can sign in only with a company Google account that has been added here and is active. A user's Name must match what HR writes in a role's Hiring Manager field (whole name, ignoring case), or that person won't get that role's Hiring Manager view. Held by exactly one person at DigitalPaani.</p>
         ),
       },
     ],
@@ -711,8 +712,8 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         id: 'sourcing-dates',
         question: 'How are due dates worked out?',
         answer: (
-          <p>Due dates are counted from the day the plan is activated, in India time. The first task of each
-          channel falls due in working days (Monday to Friday): 1 working day for LinkedIn, Naukri/IIMjobs and
+          <p>The first task of each channel is counted from the day the plan is activated (for a channel added
+          later, from the day it was added), in India time, and falls due in working days (Monday to Friday): 1 working day for LinkedIn, Naukri/IIMjobs and
           Internal Referral, 2 for Agency and Direct Outreach. After that, follow-ups are counted in calendar
           days. With the standard settings, a LinkedIn or Naukri/IIMjobs posting is assumed to stay live for 30
           days, so its renewal falls due 27 days after the posting date and again 27 days after each renewal;

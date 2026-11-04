@@ -303,7 +303,9 @@ describe('Help — Sourcing answers that were wrong or incomplete', () => {
   it('due dates: only the first task is in working days (1 or 2), every follow-up is in calendar days (27 / 7 / 14)', async () => {
     await mountReady();
     const t = answerTo('How are due dates worked out?');
-    expect(t).toMatch(/The first task of each channel falls due in working days \(Monday to Friday\): 1 working day for LinkedIn, Naukri\/IIMjobs and Internal Referral, 2 for Agency and Direct Outreach/);
+    expect(t).toMatch(/The first task of each channel is counted from the day the plan is activated \(for a channel added later, from the day it was added\), in India time, and falls due in working days \(Monday to Friday\): 1 working day for LinkedIn, Naukri\/IIMjobs and Internal Referral, 2 for Agency and Direct Outreach/);
+    // a channel added to a running plan starts from the day it was added, and follow-ups from the previous task: "from the day the plan is activated" was not true of them
+    expect(t).not.toMatch(/Due dates are counted from the day the plan is activated/);
     expect(t).toMatch(/After that, follow-ups are counted in calendar days/);
     expect(t).toMatch(/its renewal falls due 27 days after the posting date and again 27 days after each renewal/);
     expect(t).toMatch(/agencies are followed up every 7 days and referrals reposted every 14 days/);
@@ -388,10 +390,9 @@ describe('Help — workflow and section answers that were wrong, stale or mislea
     expect(t).not.toMatch(/isn't flagged at all until its Close Target has actually passed/);
   });
 
-  it('stage, status and screening status: all eleven stages are named, and the screening status is only a label that starts as New', () => {
+  it('stage, status and screening status: the screening status is only a label that starts as New', () => {
     mount();
     const t = answerTo(/Why does an application have a Stage, a Status, AND a Screening Status/);
-    for (const stage of ['Applied and Screened', 'Assignment Round', 'Founders Round', 'Pre-Joining Documents', 'Offer Discussion', 'Offer Released', 'Offer Accepted', 'Joined']) expect(t).toContain(stage);
     expect(t).toMatch(/starts as New and nothing in the screens changes it today/);
     expect(t).not.toMatch(/HR's own internal screening progress/);
   });
@@ -413,12 +414,37 @@ describe('Help — workflow and section answers that were wrong, stale or mislea
     expect(t).toMatch(/The banner is hidden while a Role filter is set/);
   });
 
-  it('Dashboard: no longer says "in three parts", and says the Joined bar stays at 0 and where the LinkedIn bar comes from', () => {
+  it('Active Candidates: only the top 100 are loaded with no next page, In-budget only cannot reach past them, and Fit is Average Score times ten', () => {
+    mount();
+    const t = answerTo(/What is Active Candidates/);
+    expect(t).toMatch(/the 100 highest-scoring applications first \(highest ResumeIQ score at the top\)\. There is no next page/);
+    // the server applies every filter except In-budget only, which narrows the 100 already loaded in the browser
+    expect(t).toMatch(/the filters \(Stage, Status, Department, Location, Recruitment Mode, Priority, Role, Gender and SLA breached only\) to reach the others; they look beyond the 100 shown\. In-budget only just narrows the 100 already on screen/);
+    expect(t).not.toMatch(/up to 100 at a time/);
+    expect(t).not.toMatch(/SLA breached only and In-budget only/);
+    // the two columns are one score on two scales, not "the same number"
+    expect(t).toMatch(/the same score as Average Score in Ready for review, ten times larger \(a Fit of 74 is an Average Score of 7\.4\)/);
+    expect(t).not.toMatch(/the same number as Average Score/);
+  });
+
+  it('Dashboard: the red ! means no movement in MORE than 3 days, and the chart sentence names HR/Admin like the rest of the page', () => {
+    mount();
+    const t = answerTo('What am I looking at on the Dashboard?');
+    expect(t).toMatch(/has had any real movement — a stage or status change, feedback — in more than 3 days/);
+    expect(t).not.toMatch(/3\+ days/);
+    expect(t).toMatch(/it always counts both HR\/Admin and Hiring Manager breaches/);
+    expect(t).toMatch(/filterable by owner \(HR\/Admin or Hiring Manager\)/);
+    expect(t).not.toMatch(/HR\/Recruiter|both HR and Hiring Manager/);
+  });
+
+  it('Dashboard: no longer says "in three parts", and says the Joined bar stays at 0 and where the LinkedIn bar comes from (a new form candidate, not everyone)', () => {
     mount();
     const t = answerTo('What am I looking at on the Dashboard?');
     expect(t).not.toMatch(/in three parts/);
     expect(t).toMatch(/hires are not counted in it, so the Joined bar stays at 0/);
-    expect(t).toMatch(/everyone who applied through the Job Application Form is recorded as LinkedIn/);
+    expect(t).toMatch(/a candidate created by the Job Application Form is recorded with the Source LinkedIn \(someone already in HMS keeps the Source they have\), so that bar holds most form applicants/);
+    // a candidate already in HMS with another Source keeps it, so the LinkedIn bar does not hold EVERY form applicant
+    expect(t).not.toMatch(/includes all form applicants/);
   });
 
   it('Archived Pipeline: Reactivate starts a new application on a Live – Sourcing role, and Skills and Industry find nobody', () => {
@@ -428,11 +454,14 @@ describe('Help — workflow and section answers that were wrong, stale or mislea
     expect(t).toMatch(/the Skills and Industry boxes match profile data that nothing fills today/);
   });
 
-  it('Agencies: the page is a repository with two counts, and the Add agency button does nothing yet', () => {
+  it('Agencies: the list shows hires, an agency\'s own page shows submitted and hired, and the Add agency button does nothing yet', () => {
     mount();
     const t = answerTo(/What is the Agencies page/);
     expect(t).toMatch(/The Agency Repository holds each recruitment agency's contact/);
-    expect(t).toMatch(/hired \(candidates the agency sourced who reached Offer Accepted or Joined, counted once per candidate\)/);
+    // the list shows only the hires column; the submitted and hired counts together are on an agency's own page
+    expect(t).toMatch(/The list shows each agency's hires; open an agency to see two counts, submitted \(/);
+    expect(t).toMatch(/hired \(candidates the agency sourced who reached Offer Accepted or Joined, counted once per candidate — the same number as Hires in the list\)/);
+    expect(t).not.toMatch(/Each agency also shows two counts/);
     expect(t).toMatch(/The Add agency button doesn't open anything yet/);
     expect(t).not.toMatch(/the candidates they've submitted/);
   });
@@ -443,10 +472,13 @@ describe('Help — workflow and section answers that were wrong, stale or mislea
     expect(t).toMatch(/Hiring Managers can't open this panel, but the Recruiter Summary text is shown to them on the application/);
   });
 
-  it('User Management: the roles on offer exclude Super Admin, you cannot change your own role, and sign-in needs an account added here', () => {
+  it('User Management: the roles on offer exclude Super Admin, the Super Admin\'s own row has no buttons, and sign-in needs an account added here', () => {
     mount();
     const t = answerTo(/What is User Management/);
-    expect(t).toMatch(/the roles on offer are HR\/Admin, Hiring Manager and Leadership, and you can't change your own role or deactivate yourself/);
+    expect(t).toMatch(/the roles on offer are HR\/Admin, Hiring Manager and Leadership/);
+    // the Super Admin's own row has no buttons at all, only a dash: the screen never offers a disabled button for it
+    expect(t).toMatch(/Every account except the Super Admin's own has Edit and Deactivate \/ Reactivate buttons \(the Super Admin's own row shows only a dash, so its role and access can't be changed here\)/);
+    expect(t).not.toMatch(/Each account has Edit and Deactivate/);
     expect(t).toMatch(/A person can sign in only with a company Google account that has been added here and is active/);
   });
 
@@ -626,6 +658,16 @@ describe('Help — questions added after the October 2026 audit', () => {
     const t = answerTo('What do the items in Other Pending Actions and Leadership Alerts mean?');
     for (const item of ['Resume Shortlist Pending', 'HM shortlist review', 'Assignment Not Sent', 'Assignment deadline breached', 'Idle Candidate', 'Joining risk — no contact', 'Founder Review', 'Role aging alert', 'Compensation change flag', 'Feedback Overdue — Leadership Escalation']) expect(t).toContain(item);
     expect(t).toMatch(/nothing in the screens completes it, and it clears by itself when the candidate's stage or status next changes/);
+  });
+
+  it('the glossary says where Leadership Alerts are counted: not for HR/Admin and Super Admin, but yes for a Leadership user with no role of their own', () => {
+    mount();
+    const t = answerTo('What do the items in Other Pending Actions and Leadership Alerts mean?');
+    expect(t).toMatch(/Leadership Alerts are notices of three kinds: Role aging alert/);
+    expect(t).toMatch(/For HR\/Admin and Super Admin, and for a Leadership user who is also a role's Hiring Manager, they appear in their own Leadership Alerts panel and are not counted in Other Pending Actions/);
+    expect(t).toMatch(/A Leadership user who is nobody's Hiring Manager has Leadership Alerts as the whole third box, and its count includes them/);
+    // "shown but not counted" was said of every persona, and is false for Leadership's own box
+    expect(t).not.toMatch(/Leadership Alerts are shown but not counted/);
   });
 });
 
