@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { performance } from 'perf_hooks';
 import { BudgetTracker } from './budget.js';
 import {
   MAX_SCAN_WORK, MAX_SCANNED_STREAM_BYTES, PDF_SLICE_MS, PassAbandonedError, preflightPdf, preflightPdfAsync, preparePdf, runCooperatively,
@@ -9,6 +10,7 @@ import type { PdfReadResult } from './pdfSandbox.js';
 import { MB, OFF_PAGE_BAD, buildPdf, onePage } from './pdf.fixtures.js';
 import { manyStreams, pageWith } from './pdf.cpu.fixtures.js';
 import { deflateSync } from 'zlib';
+import { advancingClock, scaled } from '../../../testing/timing.js';
 
 // The fourth review's finding on the content scan (A3): every UNFILTERED stream span was converted to a string and regex-tested with no charge, so a
 // parseable one-page PDF carrying thousands of stream starts that all end at ONE far "endstream" cost (starts x span) of this thread's CPU: 4,000 starts over
@@ -54,8 +56,10 @@ function cpuOf<T>(work: () => T): { value: T; cpuMs: number } {
 }
 
 const SPAN = 7_800_000;
-// The old code took 10.5 s / 2.8 s for these. Anything near a second would mean the charge is not doing its job; the bound leaves room for a loaded machine.
-const CPU_BOUND_MS = 800;
+// The old code took 10.5 s / 2.8 s for these. Anything near a second would mean the charge is not doing its job. The bound is scaled to how fast this machine runs
+// a fixed reference workload (testing/timing.ts: 1 on the laptop it was written on, never more than 6): the code costs 14-57 ms here, so there is a 14x margin on
+// a machine that is the same speed and the same margin on a slower one.
+const CPU_BOUND_MS = scaled(800);
 
 describe('the content scan charges an unfiltered span BEFORE it reads it (the fourth review\'s 4,000 overlapping stream starts)', () => {
   it('4,000 stream starts over one 7.8 MB span: a small fraction of a second of CPU, and the scan says it cannot vouch for the file', () => {
@@ -182,21 +186,58 @@ describe('runCooperatively honours its deadline: an abandoned pass stops at its 
   });
 
   it('a deadline that passes mid-pass ends it at the next slice with PassAbandonedError, and the generator does no more work afterwards', async () => {
-    const { seen, steps } = counted(2000, 2);     // 4 s of work if left alone
-    const started = Date.now();
-    await expect(runCooperatively(steps, 10, started + 60)).rejects.toBeInstanceOf(PassAbandonedError);
-    const stoppedAt = Date.now() - started;
-    expect(stoppedAt).toBeLessThan(400);          // a slice or two after the deadline, not the 4 s
-    const ranWhenStopped = seen.steps;
-    expect(ranWhenStopped).toBeLessThan(200);
-    await new Promise(r => setTimeout(r, 150));
-    expect(seen.steps).toBe(ranWhenStopped);      // nothing carried on in the background
-    expect(steps.next()).toEqual({ done: true, value: undefined });   // the generator was closed
+    // Virtual time: every step costs exactly 2 "ms" on BOTH clocks the pass reads (performance.now for its slices, Date.now for the deadline), and
+    // nothing else moves them, so where the pass stops does not depend on how fast, or how busy, this machine is.
+    const base = Date.parse('2026-10-29T10:00:00.000Z');
+    let virtual = 0;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(base);
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => virtual);
+    try {
+      const seen = { steps: 0 };
+      function* pass(): Generator<void, string, void> {
+        for (let i = 0; i < 2000; i++) {          // 4,000 virtual ms of work if left alone
+          virtual += 2;
+          vi.setSystemTime(base + virtual);
+          seen.steps++;
+          yield;
+        }
+        return 'finished';
+      }
+      const steps = pass();
+      await expect(runCooperatively(steps, 10, base + 60)).rejects.toBeInstanceOf(PassAbandonedError);
+      // the deadline is 30 steps in; the check is made at the first slice boundary (every 5 steps) that is at or past it: a slice after it at most
+      expect(seen.steps).toBeGreaterThanOrEqual(30);
+      expect(seen.steps).toBeLessThanOrEqual(30 + 5);
+      const ranWhenStopped = seen.steps;
+      await new Promise(r => setImmediate(r));
+      await new Promise(r => setImmediate(r));
+      expect(seen.steps).toBe(ranWhenStopped);      // nothing carried on in the background
+      expect(steps.next()).toEqual({ done: true, value: undefined });   // the generator was closed
+    } finally {
+      nowSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it('a pass that finishes inside one slice never looks at the clock: even a deadline long past does not change the answer for a small pass', async () => {
-    const { steps } = counted(3, 0);
-    expect(await runCooperatively(steps, 1000, Date.now() - 10_000)).toBe('finished');
+    const frozen = advancingClock(0);          // no slice can last any time at all, whatever this machine is doing
+    try {
+      const { steps } = counted(3, 0);
+      expect(await runCooperatively(steps, 1000, Date.now() - 10_000)).toBe('finished');
+    } finally {
+      frozen.restore();
+    }
+  });
+
+  it('...and the same small pass on a clock where every slice is long IS stopped by that deadline (the positive control: the check exists)', async () => {
+    const long = advancingClock(PDF_SLICE_MS + 1);
+    try {
+      const { steps } = counted(3, 0);
+      await expect(runCooperatively(steps, PDF_SLICE_MS, Date.now() - 10_000)).rejects.toBeInstanceOf(PassAbandonedError);
+    } finally {
+      long.restore();
+    }
   });
 
   it('PDF_SLICE_MS is still the slice the real passes use', () => {
@@ -205,32 +246,58 @@ describe('runCooperatively honours its deadline: an abandoned pass stops at its 
 });
 
 describe('the real passes take the deadline', () => {
+  // runCooperatively only looks at the deadline once a slice has lasted PDF_SLICE_MS (20 ms) by the performance clock. Whether a real scan of a few
+  // thousand streams lasts that long depends on the machine (a warm 6,000-stream scan took 12-27 ms: 3 of 8 isolated runs never crossed a slice and
+  // resolved instead of rejecting). So these tests give the passes a clock on which EVERY read is a slice later: the check is then made at the first
+  // slice boundary on any machine, and what is under test is the wiring of the deadline into each pass, not the speed of the host.
+  let clock: ReturnType<typeof advancingClock> | undefined;
+  afterEach(() => { clock?.restore(); clock = undefined; });
+  const everySliceIsLong = () => { clock = advancingClock(PDF_SLICE_MS + 1); return clock; };
+
   // 20,000 tiny Flate streams: the most the pre-flight takes, ~300 ms in total: many slices, so a deadline that has passed is noticed at the first one.
   const heavy = () => manyStreams('/Filter /FlateDecode', deflateSync(Buffer.from('q Q ')), 19_000);
 
   it('preflightPdfAsync with a deadline that has passed stops at its first slice; without one it completes', async () => {
     const bytes = heavy();
     expect((await preflightPdfAsync(bytes)).ok).toBe(true);
+    everySliceIsLong();
     await expect(preflightPdfAsync(bytes, undefined, Date.now() - 1)).rejects.toBeInstanceOf(PassAbandonedError);
+    // long slices alone change nothing: a smaller file of the same kind (every one of its steps now yields, so it stays small), with a deadline still
+    // ahead of it or none, completes with the same verdict
+    const small = manyStreams('/Filter /FlateDecode', deflateSync(Buffer.from('q Q ')), 600);
+    expect((await preflightPdfAsync(small, undefined, Date.now() + 600_000)).ok).toBe(true);
+    expect((await preflightPdfAsync(small)).ok).toBe(true);
   });
 
   it('scanPdfContentStreamsAsync and the cooperative text scan the same', async () => {
     const bytes = manyStreams('/Filter /FlateDecode', deflateSync(Buffer.from('BT (word) Tj ET ')), 6_000);
-    expect(await scanPdfContentStreamsAsync(bytes)).toMatchObject({ hit: null });
-    await expect(scanPdfContentStreamsAsync(bytes, undefined, Date.now() - 1)).rejects.toBeInstanceOf(PassAbandonedError);
     const text = 'a plain sentence about a brand campaign. '.repeat(10_000);     // 410,000 characters: seven windows
+    expect(await scanPdfContentStreamsAsync(bytes)).toMatchObject({ hit: null });
     expect(await scanDocumentTextCooperatively(text)).toBeNull();
+
+    const c = everySliceIsLong();
+    await expect(scanPdfContentStreamsAsync(bytes, undefined, Date.now() - 1)).rejects.toBeInstanceOf(PassAbandonedError);
     await expect(scanDocumentTextCooperatively(text.repeat(2), Date.now() - 1)).rejects.toBeInstanceOf(PassAbandonedError);
+    expect(c.reads()).toBeGreaterThan(0);                                          // the passes really ran on the slow clock
+    // positive controls on the same clock (on smaller input: every step yields now): a deadline that has NOT passed, or none, never stops either
+    // pass, and the answers are unchanged
+    const few = manyStreams('/Filter /FlateDecode', deflateSync(Buffer.from('BT (word) Tj ET ')), 500);
+    expect(await scanPdfContentStreamsAsync(few, undefined, Date.now() + 600_000)).toMatchObject({ hit: null });
+    expect(await scanPdfContentStreamsAsync(few)).toMatchObject({ hit: null });
+    expect(await scanDocumentTextCooperatively(text, Date.now() + 600_000)).toBeNull();
+    expect(await scanDocumentTextCooperatively(text)).toBeNull();
   });
 
   it('preparePdf turns an abandoned pass into the neutral "took too long to read", never a throw (what a direct caller sees; the orchestrator has given up on the item by then)', async () => {
     const bytes = heavy();
+    everySliceIsLong();
     const out = await preparePdf(bytes, 'x.pdf', { deadline: Date.now() - 1, budget: new BudgetTracker() }, { reader: async () => { throw new Error('the sandbox must not be reached'); } });
     expect(out).toMatchObject({ outcome: 'unreviewable', reason: 'This PDF took too long to read' });
     expect(out.media).toEqual([]);
   });
 
   it('an ordinary file is unaffected by a deadline that is already past (it finishes inside one slice): its answer does not depend on the clock', async () => {
+    clock = advancingClock(0);          // a clock that never moves: no slice can ever last 20 ms, so the deadline is never looked at
     const reader = async (): Promise<PdfReadResult> => ({ kind: 'read', total: 1, encrypted: false, pages: [{ num: 1, text: 'A short deck.' }] });
     const out = await preparePdf(onePage(Buffer.from('BT (A short deck.) Tj ET')), 'x.pdf', { deadline: Date.now() - 1, budget: new BudgetTracker() }, { reader });
     expect(out.outcome).toBe('ok');

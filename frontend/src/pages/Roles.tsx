@@ -6,11 +6,18 @@ import { rolesApi } from '../services/api.ts';
 import { Role, PRIORITIES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS } from '../types/index.ts';
 import { PriorityBadge, AgingBadge, StageBadge, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
+import { AGE_COLUMN_INFO } from '../utils/columnInfo.ts';
 
 const COLUMN_INFO: Record<string, string> = {
-  'Age': 'How long the role has been open and, for Approved / Live – Sourcing roles only, how many days it is past its Close Target (yellow, then red; thresholds depend on priority). Nothing is flagged until the Close Target passes; if none is set the flag falls back to days open. Draft, Under Review, On Hold and Closed roles never flag.',
-  'Active Shortlist': 'Active candidates currently at Interview Round 1, Interview Round 2, Assignment Round or Founders Round. Candidates further on (Reference Check onwards) are not counted here — and it is a current figure, not a historical total.',
+  'Age': AGE_COLUMN_INFO,
+  'Active Shortlist': 'Active candidates currently at Interview Round 1, Interview Round 2, Assignment Round or Founders Round. Candidates further on (Reference Check onwards) are not counted here, and it is a current figure, not a historical total. Not the same as Shortlisted on the Dashboard\'s Low pipeline roles table, which counts every Active candidate past Applied and Screened, including Reference Check onwards.',
   'Active Candidates': 'Everyone currently Active in this role\'s pipeline, at any stage — not a lifetime total.',
+};
+
+// Hover text for headers that carry no info marker: the label stays as it is and the explanation shows on hover.
+const HEADER_HOVER: Record<string, string> = {
+  'Priority': 'P0 is the most urgent priority and P3 the least. Priority sets how far past its Close Target an open role can run before it is flagged (see Age).',
+  'Salary Range': "The role's CTC band as written on the requisition (the same field as CTC Band on the role page). The top number is the ceiling used for the Over Budget flag on candidates. Shown to HR/Admin, Leadership and Super Admin only.",
 };
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -117,6 +124,7 @@ export default function Roles() {
                 ].map(h => (
                   <th
                     key={h}
+                    title={HEADER_HOVER[h]}
                     className={`table-th ${h === 'Location' ? 'pr-1' : h === 'Openings' ? 'pl-1' : ''}`}
                   >
                     <span className="inline-flex items-center gap-1">

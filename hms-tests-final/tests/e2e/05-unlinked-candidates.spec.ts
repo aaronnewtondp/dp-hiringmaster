@@ -13,25 +13,9 @@
  * the modal, submitting a link, and the candidate dropping out of the list
  * afterward.
  */
-import { test, expect, Page } from '@playwright/test';
-import { BASE, FRONTEND_BASE, USERS, SEEDED, CANDIDATE_INGEST_SECRET, uid } from '../helpers/api';
-
-async function loginViaApi(page: Page, user: keyof typeof USERS = 'hr') {
-  const cred = USERS[user];
-  const res  = await page.request.post(`${BASE}/api/auth/login`, {
-    data: { email: cred.email, password: cred.password },
-  });
-  const { token, user: userBody } = await res.json();
-
-  await page.goto(FRONTEND_BASE);
-  await page.evaluate(({ token, userBody }) => {
-    localStorage.setItem('hms_token', token);
-    localStorage.setItem('hms_user', JSON.stringify(userBody));
-  }, { token, userBody });
-
-  await page.goto(`${FRONTEND_BASE}/dashboard`);
-  await page.waitForURL(/\/dashboard/, { timeout: 15000 });
-}
+import { test, expect } from '@playwright/test';
+import { BASE, FRONTEND_BASE, SEEDED, CANDIDATE_INGEST_SECRET, uid } from '../helpers/api';
+import { loginViaApi } from '../helpers/e2e';
 
 test.describe('Unmatched Candidates panel + Link to role modal', () => {
 

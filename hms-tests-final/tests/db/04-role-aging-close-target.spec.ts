@@ -28,15 +28,14 @@
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
 import { getToken, authed, CRON_SECRET } from '../helpers/api';
-
-const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
+import { TEST_DB_URL } from '../helpers/db';
 
 test.describe('Role aging alert — target_closure_date driven, not days-open driven', () => {
   let client: Client;
   const createdRoleIds: string[] = [];
 
   test.beforeAll(async () => {
-    client = new Client({ connectionString: LOCAL_DB_URL });
+    client = new Client({ connectionString: TEST_DB_URL });
     await client.connect();
   });
 

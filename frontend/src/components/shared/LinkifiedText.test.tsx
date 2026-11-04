@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
 import LinkifiedText, { safeHttpUrl, splitLinkified } from './LinkifiedText.tsx';
+import { expectLinearCpu } from '../../test/helpers.ts';
 
 const links = (s: string) => splitLinkified(s).filter(p => p.href).map(p => p.href);
 const joined = (s: string) => splitLinkified(s).map(p => p.text).join('');
@@ -90,13 +91,15 @@ describe('splitLinkified', () => {
     ]) expect(joined(s)).toBe(s);
   });
 
-  it('a very long run of closing brackets or punctuation stays fast (no quadratic trimming)', () => {
+  // "Fast" is measured as CPU time that grows at most linearly with the input (see expectLinearCpu), not as a wall-clock limit: the
+  // old 1500 ms / 2000 ms wall bounds failed in 2 of 5 full runs on a busy machine although the code was no slower. A quadratic
+  // trim (the bug this guards against: recounting the brackets for every character trimmed) costs ~8x per unit at 8x the input.
+  it('a very long run of closing brackets or punctuation stays linear (no quadratic trimming)', () => {
     for (const filler of [')', ']', '.', ',']) {
-      const hostile = `https://example.com/${filler.repeat(200_000)}`;
-      const t0 = Date.now();
-      const parts = splitLinkified(hostile);
-      expect(Date.now() - t0).toBeLessThan(1500);
-      expect(parts.map(p => p.text).join('')).toBe(hostile);
+      const build = (n: number) => `https://example.com/${filler.repeat(n)}`;
+      expectLinearCpu(n => splitLinkified(build(n)), 6_250, 50_000, `a run of ${JSON.stringify(filler)}`);
+      const hostile = build(200_000);
+      expect(joined(hostile)).toBe(hostile);
       expect(links(hostile)).toEqual(['https://example.com/']);
     }
   });
@@ -207,17 +210,27 @@ describe('splitLinkified — addresses written without a scheme', () => {
     }
   });
 
-  it('stays fast on hostile input (no quadratic scanning)', () => {
-    const hostile = [
-      'a.'.repeat(200_000), ' a.'.repeat(100_000), 'www.'.repeat(100_000), 'www.a'.repeat(100_000), 'instagram.com'.repeat(50_000),
-      `www.a.com/${','.repeat(200_000)}`, `www.a.com/${'www.a,'.repeat(50_000)}`, '-a.'.repeat(100_000), `x${'.a'.repeat(200_000)} `,
-      'instagram.com/'.repeat(30_000), ' www.a.com'.repeat(30_000), `${'a'.repeat(300_000)}.com`, `drive.google.com/${')'.repeat(200_000)}`,
+  it('stays linear on hostile input (no quadratic scanning)', () => {
+    // [shape, input built from a repeat count, the repeat count the input was first checked at]
+    const hostile: Array<[string, (n: number) => string, number]> = [
+      ['dots', n => 'a.'.repeat(n), 200_000],
+      ['spaced dots', n => ' a.'.repeat(n), 100_000],
+      ['www.', n => 'www.'.repeat(n), 100_000],
+      ['www.a', n => 'www.a'.repeat(n), 100_000],
+      ['instagram.com run', n => 'instagram.com'.repeat(n), 50_000],
+      ['www host, comma run', n => `www.a.com/${','.repeat(n)}`, 200_000],
+      ['www host, comma-separated hosts', n => `www.a.com/${'www.a,'.repeat(n)}`, 50_000],
+      ['dash labels', n => '-a.'.repeat(n), 100_000],
+      ['one long dotted word', n => `x${'.a'.repeat(n)} `, 200_000],
+      ['instagram.com/ run', n => 'instagram.com/'.repeat(n), 30_000],
+      ['spaced www hosts', n => ' www.a.com'.repeat(n), 30_000],
+      ['one 300k-letter label', n => `${'a'.repeat(n)}.com`, 300_000],
+      ['known host, bracket run', n => `drive.google.com/${')'.repeat(n)}`, 200_000],
     ];
-    for (const h of hostile) {
-      const t0 = Date.now();
-      const parts = splitLinkified(h);
-      expect(Date.now() - t0).toBeLessThan(2000);
-      expect(parts.map(p => p.text).join('')).toBe(h);
+    for (const [shape, build, n] of hostile) {
+      expectLinearCpu(k => splitLinkified(build(k)), n / 32, n / 4, shape);
+      const input = build(n);
+      expect(joined(input), shape).toBe(input);
     }
   });
 });

@@ -19,15 +19,14 @@ import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
 import { getToken, authed } from '../helpers/api';
 import { purgeRolesFast } from '../helpers/sourcing-db';
-
-const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
+import { TEST_DB_URL } from '../helpers/db';
 
 test.describe('Aging Roles — no_recent_candidate_activity flag', () => {
   let client: Client;
   const createdRoleIds: string[] = [];
 
   test.beforeAll(async () => {
-    client = new Client({ connectionString: LOCAL_DB_URL });
+    client = new Client({ connectionString: TEST_DB_URL });
     await client.connect();
   });
 

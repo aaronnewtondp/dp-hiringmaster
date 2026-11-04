@@ -8,6 +8,7 @@ import { Role, Application, STAGES, ROLE_STATUSES, LOCATIONS, DEPARTMENTS, EMPLO
 import { PriorityBadge, AgingBadge, StageBadge, FitScore, Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import EditableSection from '../components/shared/EditableSection.tsx';
 import { HIRING_MANAGER_FIELD_HINT } from '../utils/hiringManagers.ts';
+import { SLA_FLAG_INFO } from '../utils/columnInfo.ts';
 import BackButton from '../components/shared/BackButton.tsx';
 import CompBenchmarkPanel from '../components/CompBenchmarkPanel.tsx';
 import { useSourcingPlan, sourcingChip } from '../hooks/useSourcingPlan.ts';
@@ -288,6 +289,7 @@ export default function RoleDetail() {
         />
         <EditableSection
           title="Dates"
+          tooltip="Open Date is set automatically when the role is approved and can't be edited. Close Target is when the role should be filled: the Age flag on the Roles page and the Dashboard counts the days past it, so moving it out clears an alert."
           data={role}
           onSave={saveRoleFields}
           fields={[
@@ -437,7 +439,7 @@ export default function RoleDetail() {
                         <td className="table-td text-xs text-gray-400">{app.recruiter_screening_status}</td>
                         <td className="table-td">
                           {app.sla_breach && (
-                            <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">SLA</span>
+                            <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium" title={SLA_FLAG_INFO}>SLA</span>
                           )}
                         </td>
                         <td className="table-td">

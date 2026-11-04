@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { cpuTimed, scaled } from '../../testing/timing.js';
 import {
   WORK_SAMPLE_QUESTION_RE, findWorkSampleAnswer, isBlankAnswer, extractAnswerUrls, classifyAnswerUrl, pickAnswerLinks, listedProductReason,
 } from './answerLinks.js';
@@ -14,10 +15,12 @@ const answerOf = (answer: string, question = Q1) => [
 
 const DRIVE_ID = '1AbCdEfGhIjKlMnOp';
 
+// CPU time of this process, not the clock: all of this is synchronous work on this thread, so what a "quick" test should measure is the work, and a
+// descheduled process or a slower runner must not fail it. The bounds are compared with scaled(...) (testing/timing.ts), set 50x or more above what the
+// code costs here (TIMING_DEBUG=1 prints every reading), so they catch a quadratic or backtracking pass, which costs seconds on 100 KB.
 function timed<T>(fn: () => T): { result: T; ms: number } {
-  const t0 = performance.now();
-  const result = fn();
-  return { result, ms: performance.now() - t0 };
+  const { value, ms } = cpuTimed(fn);
+  return { result: value, ms };
 }
 
 describe('findWorkSampleAnswer', () => {
@@ -123,7 +126,7 @@ describe('isBlankAnswer', () => {
   it('a 100 KB blob of punctuation is blank and quick', () => {
     const { result, ms } = timed(() => isBlankAnswer('-!?.,;:()[]{}'.repeat(8000)));
     expect(result).toBe(true);
-    expect(ms).toBeLessThan(200);
+    expect(ms).toBeLessThan(scaled(200));
   });
 });
 
@@ -271,7 +274,7 @@ describe('extractAnswerUrls', () => {
   ])('a 100 KB hostile blob (%s) finishes quickly', (_name, make) => {
     const text = make();
     const { ms } = timed(() => extractAnswerUrls(text));
-    expect(ms).toBeLessThan(200);
+    expect(ms).toBeLessThan(scaled(200));
   });
   it('a hostile blob yields no links', () => {
     expect(extractAnswerUrls('(!?,.;:'.repeat(15_000))).toEqual([]);
@@ -469,7 +472,7 @@ describe('classifyAnswerUrl', () => {
   it('returns null, quickly, for a link far longer than any real one', () => {
     const { result, ms } = timed(() => classifyAnswerUrl(`https://janedoe.design/${'a'.repeat(100_000)}`));
     expect(result).toBeNull();
-    expect(ms).toBeLessThan(200);
+    expect(ms).toBeLessThan(scaled(200));
   });
 
   it('strips utm_*, fbclid, gclid, si and igsh from the url and keeps every other parameter', () => {
@@ -824,14 +827,14 @@ describe('pickAnswerLinks', () => {
     for (const blob of ['(!?,.;:'.repeat(15_000), '. '.repeat(50_000), '-'.repeat(100_000)]) {
       const { result, ms } = timed(() => pick(blob));
       expect(result).toEqual(NOT_ANSWERED);
-      expect(ms).toBeLessThan(200);
+      expect(ms).toBeLessThan(scaled(200));
     }
   });
   it('a 1 MB answer is cut, still finds the links at its start, and keeps the claim short', () => {
     const { result, ms } = timed(() => pick(`https://janedoe.design instagram.com/jane ${'I ran brand campaigns. '.repeat(50_000)}`));
     expect(result.links.map(l => l.platform)).toEqual(['custom', 'instagram']);
     expect(result.claimText.length).toBeLessThanOrEqual(1500);
-    expect(ms).toBeLessThan(500);
+    expect(ms).toBeLessThan(scaled(500));
   });
 });
 
@@ -961,7 +964,7 @@ describe('links wrapped in WhatsApp / markdown emphasis, or followed by an emoji
     ])('a hostile answer (%s) finishes quickly', (_n, make) => {
       const text = make();
       const { ms } = timed(() => pickAnswerLinks(answerOf(text)));
-      expect(ms).toBeLessThan(300);
+      expect(ms).toBeLessThan(scaled(300));
     });
   });
 });
@@ -1161,7 +1164,7 @@ describe('claimText', () => {
   ])('a hostile answer (%s) is quick', (_n, make) => {
     const text = `${make()} https://janedoe.design`;
     const { result, ms } = timed(() => claim(text));
-    expect(ms).toBeLessThan(300);
+    expect(ms).toBeLessThan(scaled(300));
     expect(result.length).toBeLessThanOrEqual(1500);
   });
 });
@@ -1502,7 +1505,7 @@ describe('Google Play, Looker Studio and Google Photos links are listed for HR, 
       const { result, ms } = timed(() => [classifyAnswerUrl(long), classifyAnswerUrl(`${long}x`)]);
       expect(result[0]).toBeNull();
       expect(result[1]).toMatchObject({ handler: 'none', url: 'https://photos.google.com/x' });
-      expect(ms).toBeLessThan(300);
+      expect(ms).toBeLessThan(scaled(300));
     });
   });
 
@@ -1609,12 +1612,12 @@ describe('Google Play, Looker Studio and Google Photos links are listed for HR, 
       const { result, ms } = timed(() => pick(urls.join(' ')));
       expect(result.listedNotReviewed.map(l => l.url)).toEqual(urls);
       expect(result.links).toEqual([]);
-      expect(ms).toBeLessThan(300);
+      expect(ms).toBeLessThan(scaled(300));
     });
     it('a hostile address on one of these hosts is quick and never throws', () => {
       for (const u of [`https://play.google.com/${'a'.repeat(100_000)}`, `photos.app.goo.gl/${'%'.repeat(5000)}`, `https://goo.gl/photos/${'/'.repeat(5000)}`]) {
         const { ms } = timed(() => pick(u));
-        expect(ms).toBeLessThan(300);
+        expect(ms).toBeLessThan(scaled(300));
       }
       expect(classifyAnswerUrl(`https://play.google.com/${'a'.repeat(100_000)}`)).toBeNull();
     });

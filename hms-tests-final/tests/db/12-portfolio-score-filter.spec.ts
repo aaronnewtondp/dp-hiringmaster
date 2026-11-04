@@ -9,8 +9,8 @@
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
 import { getToken, authed } from '../helpers/api';
+import { TEST_DB_URL } from '../helpers/db';
 
-const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
 type Req = Parameters<typeof authed>[0];
 
 test.describe('Portfolio score filter (min_portfolio_score)', () => {
@@ -24,7 +24,7 @@ test.describe('Portfolio score filter (min_portfolio_score)', () => {
   const app: Record<string, string> = {};            // label -> application id
 
   test.beforeAll(async () => {
-    client = new Client({ connectionString: LOCAL_DB_URL });
+    client = new Client({ connectionString: TEST_DB_URL });
     await client.connect();
 
     const newRole = async (label: string, portfolio: boolean) => {

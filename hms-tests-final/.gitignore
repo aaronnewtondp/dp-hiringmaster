@@ -1,4 +1,10 @@
 node_modules/
 test-results/
 playwright-report/
-.auth/tokens.json
+# globalSetup writes the cached JWTs and user records here (.auth/.gitkeep keeps the directory in the repo)
+.auth/*
+!.auth/.gitkeep
+# disposable per-index test stacks (scripts/test-stack.sh): pid files, logs, vite cache, production build
+.stack/
+# production smoke-account passwords (see tests/helpers/smoke-env.ts)
+.env.smoke.local
