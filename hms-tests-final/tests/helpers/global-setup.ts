@@ -22,7 +22,7 @@ const BASE = process.env.TEST_API_URL || 'http://localhost:4000';
 
 loadSmokeEnv();
 
-const HEALTH_WAIT_MS = 10_000;     // tolerates a backend that is still starting (tsx takes a few seconds)
+const HEALTH_WAIT_MS = Number(process.env.HMS_PW_HEALTH_WAIT_MS) || 10_000;   // tolerates a backend that is still starting (tsx takes a few seconds); the env override is for the self-test
 const WARM_BUDGET_MS = 120_000;
 
 type Cred = { email: string; password: string };

@@ -7,7 +7,9 @@
  * The browser-side helpers are pinned by tests/e2e/00-test-infrastructure.spec.ts.
  */
 import { test, expect, APIRequestContext } from '@playwright/test';
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
+import http from 'http';
+import type { AddressInfo } from 'net';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -295,5 +297,187 @@ test.describe('playwright.config.ts: the project set, and the live-tag gate', ()
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// helpers/global-setup.ts and the live-login fallback of helpers/api.ts, run FOR REAL in nested Playwright runs against a fake API
+// ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// A nested run gets its own directory under .stack/ (git-ignored; inside hms-tests-final so @playwright/test resolves), its own working
+// directory (globalSetup writes .auth/ relative to the cwd, and must never overwrite THIS run's cached tokens) and its own outputDir. The
+// config spreads the REAL playwright.config.ts and keeps the REAL globalSetup; the target is a throw-away HTTP server in this process
+// (so these tests need neither the backend nor the database). SMOKE_* variables are removed: a developer's production smoke credentials
+// must never reach a nested run.
+test.describe('globalSetup and the live-login fallback, run for real against a fake API', () => {
+  test.describe.configure({ timeout: 180_000 });
+
+  type Hit = { method: string; url: string; auth?: string };
+  type FakeOptions = { loginOk?: boolean; failLoginFor?: string; dashboardDelayMs?: number; unhealthyAnswers?: number };
+
+  async function fakeApi(opts: FakeOptions = {}) {
+    const hits: Hit[] = [];
+    let healthAnswers = 0;
+    const server = http.createServer((req, res) => {
+      hits.push({ method: req.method ?? '', url: req.url ?? '', auth: req.headers.authorization });
+      const json = (code: number, body: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
+      if (req.url === '/health') return json(++healthAnswers <= (opts.unhealthyAnswers ?? 0) ? 503 : 200, { status: 'ok' });   // counted, not timed: a nested run's start-up time depends on the machine
+      if (req.url === '/api/auth/login' && req.method === 'POST') {
+        let raw = '';
+        req.on('data', c => { raw += c; });
+        req.on('end', () => {
+          const { email } = JSON.parse(raw || '{}') as { email: string };
+          if (opts.loginOk === false || email === opts.failLoginFor) return json(401, { error: 'Invalid credentials' });
+          const persona = Object.values(USERS).find(u => u.email === email)?.persona ?? 'hr_recruiter';
+          json(200, { token: `fake-token-${email}`, user: { id: `id-${email}`, name: email.split('@')[0], email, persona } });
+        });
+        return;
+      }
+      if (req.url === '/api/dashboard') { setTimeout(() => json(200, {}), opts.dashboardDelayMs ?? 0); return; }
+      json(404, { error: 'not found' });
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+    return {
+      url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      hits,
+      close: () => new Promise<void>(resolve => server.close(() => resolve())),
+    };
+  }
+
+  /** A port nothing listens on (bound and released a moment ago). */
+  async function closedPort(): Promise<number> {
+    const s = http.createServer();
+    await new Promise<void>(resolve => s.listen(0, '127.0.0.1', () => resolve()));
+    const port = (s.address() as AddressInfo).port;
+    await new Promise<void>(resolve => s.close(() => resolve()));
+    return port;
+  }
+
+  const abs = (...parts: string[]) => path.join(process.cwd(), ...parts).split(path.sep).join('/');
+
+  /** Runs one nested Playwright run in a fresh probe directory; returns its exit code, combined output and the files it left in .auth/. */
+  async function runProbe(opts: { spec: string; globalSetup: boolean; env: Record<string, string> }) {
+    const dir = path.join(process.cwd(), '.stack', `selftest-probe-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
+    fs.mkdirSync(dir, { recursive: true });
+    try {
+      fs.writeFileSync(path.join(dir, 'probe.spec.ts'), opts.spec);
+      fs.writeFileSync(path.join(dir, 'playwright.config.ts'),
+        "import base from '../../playwright.config';\n" +
+        "export default { ...base, testDir: __dirname, outputDir: __dirname + '/out', grepInvert: undefined, reporter: [['line']],\n" +
+        `  globalSetup: ${opts.globalSetup ? `'${abs('tests/helpers/global-setup.ts')}'` : 'undefined'},\n` +
+        "  projects: [{ name: 'probe', testMatch: '*.spec.ts' }] };\n");
+      const env: Record<string, string | undefined> = { ...process.env };
+      for (const k of Object.keys(env)) if (/^(PW_|PLAYWRIGHT_|TEST_|SMOKE_|HMS_PW_|CI$)/.test(k)) delete env[k];
+      Object.assign(env, opts.env);
+      const child = spawn(process.execPath, [require.resolve('@playwright/test/cli'), 'test', '--config', path.join(dir, 'playwright.config.ts'), '--reporter=line'],
+        { cwd: dir, env: env as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      child.stdout.on('data', d => { out += d; });
+      child.stderr.on('data', d => { out += d; });
+      const code = await new Promise<number | null>(resolve => child.on('close', resolve));
+      const readAuth = (file: string) => {
+        const f = path.join(dir, '.auth', file);
+        return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) as Record<string, any> : null;
+      };
+      return { code, out, tokens: readAuth('tokens.json'), users: readAuth('users.json') };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  const TRIVIAL = "import { test } from '@playwright/test';\ntest('probe ran', () => {});\n";
+
+  test('a healthy local API: every seeded user is logged in, tokens AND user records are cached, and /api/dashboard is warmed exactly once with the hr token and a budget well beyond a few seconds', async () => {
+    const api = await fakeApi({ dashboardDelayMs: 2_500 });
+    try {
+      const r = await runProbe({ spec: TRIVIAL, globalSetup: true, env: { TEST_API_URL: api.url, TEST_FRONTEND_URL: 'http://localhost:5173' } });
+      expect(r.code, r.out).toBe(0);
+      expect(r.out).toMatch(/1 passed/);
+      const keys = Object.keys(USERS).sort();
+      expect(Object.keys(r.tokens ?? {}).sort()).toEqual(keys);
+      expect(Object.keys(r.users ?? {}).sort()).toEqual(keys);
+      for (const [key, u] of Object.entries(USERS)) {
+        expect(r.tokens?.[key]).toBe(`fake-token-${u.email}`);
+        expect(r.users?.[key]).toMatchObject({ email: u.email, persona: u.persona });
+      }
+      const logins = api.hits.filter(h => h.method === 'POST' && h.url === '/api/auth/login');
+      expect(logins).toHaveLength(keys.length);
+      const warm = api.hits.filter(h => h.url === '/api/dashboard');
+      expect(warm).toHaveLength(1);
+      expect(warm[0].auth).toBe(`Bearer fake-token-${USERS.hr.email}`);
+      expect(r.out, 'the 2.5 s dashboard answer must be waited for, not abandoned').toMatch(/dashboard warmed \(HTTP 200/);
+      expect(r.out).not.toMatch(/warm-up failed/);
+    } finally { await api.close(); }
+  });
+
+  test('the health check comes first and tolerates a backend that is still starting (503 twice, then 200)', async () => {
+    const api = await fakeApi({ unhealthyAnswers: 2 });
+    try {
+      const r = await runProbe({ spec: TRIVIAL, globalSetup: true, env: { TEST_API_URL: api.url } });
+      expect(r.code, r.out).toBe(0);
+      const health = api.hits.filter(h => h.url === '/health');
+      expect(health.length, 'it must have polled past two 503 answers, not given up on the first').toBe(3);
+      const firstLogin = api.hits.findIndex(h => h.url === '/api/auth/login');
+      expect(api.hits.findIndex(h => h.url === '/health'), 'GET /health precedes every login').toBeLessThan(firstLogin);
+    } finally { await api.close(); }
+  });
+
+  test('an unreachable local API aborts the whole run with a clear message: nothing is run, no login is attempted', async () => {
+    const port = await closedPort();
+    const r = await runProbe({ spec: TRIVIAL, globalSetup: true, env: { TEST_API_URL: `http://127.0.0.1:${port}`, HMS_PW_HEALTH_WAIT_MS: '1500' } });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain(`The API at http://127.0.0.1:${port} is not reachable`);
+    expect(r.out).toMatch(/Nothing was run/);
+    expect(r.out).toMatch(/test-stack\.sh up/);
+    expect(r.out).not.toMatch(/1 passed/);
+    expect(r.tokens, 'no token cache is written for an API that never answered').toBeNull();
+  });
+
+  test('a seeded login that fails THROWS (the database is not the seeded one); it names the user, and no test runs', async () => {
+    const api = await fakeApi({ loginOk: false });
+    try {
+      const r = await runProbe({ spec: TRIVIAL, globalSetup: true, env: { TEST_API_URL: api.url } });
+      expect(r.code).not.toBe(0);
+      expect(r.out).toMatch(new RegExp(`${Object.keys(USERS).length} seeded user\\(s\\) could not sign in`));
+      expect(r.out).not.toMatch(/1 passed/);
+    } finally { await api.close(); }
+
+    const one = await fakeApi({ failLoginFor: USERS.super_admin.email });
+    try {
+      const r = await runProbe({ spec: TRIVIAL, globalSetup: true, env: { TEST_API_URL: one.url } });
+      expect(r.code, 'even ONE failed seeded login is fatal').not.toBe(0);
+      expect(r.out).toMatch(/1 seeded user\(s\) could not sign in/);
+      expect(r.out).toContain('super_admin');
+      expect(r.out).not.toMatch(/1 passed/);
+    } finally { await one.close(); }
+  });
+
+  test('a non-local target without smoke credentials: no health check, no seeded users, and the run throws because no token at all was obtained', async () => {
+    const r = await runProbe({ spec: TRIVIAL, globalSetup: true, env: { TEST_API_URL: 'https://hms-selftest.invalid' } });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/No token was obtained from https:\/\/hms-selftest\.invalid/);
+    expect(r.out).not.toMatch(/not reachable/);
+    expect(r.out).not.toMatch(/seeded user/);
+    expect(r.out).toMatch(/smoke_lead: no credentials configured/);
+  });
+
+  test('without globalSetup the helpers fall back to ONE live login per user, then serve the session from memory', async () => {
+    const api = await fakeApi();
+    try {
+      const spec =
+        "import { test, expect } from '@playwright/test';\n" +
+        `import { getSession, getToken } from '${abs('tests/helpers/api')}';\n` +
+        "test('fallback', async ({ request }) => {\n" +
+        "  const first = await getSession(request, 'hm_alex');\n" +
+        "  expect(first.token).toBe('fake-token-alex@digitalpaani.com');\n" +
+        "  expect(first.user).toMatchObject({ email: 'alex@digitalpaani.com', persona: 'hiring_manager' });\n" +
+        "  expect((await getSession(request, 'hm_alex')).token).toBe(first.token);\n" +
+        "  expect(await getToken(request, 'hm_alex')).toBe(first.token);\n" +
+        "  expect(await getToken(request, 'leadership')).toBe('fake-token-nalin@digitalpaani.com');\n" +
+        "});\n";
+      const r = await runProbe({ spec, globalSetup: false, env: { TEST_API_URL: api.url } });
+      expect(r.code, r.out).toBe(0);
+      const logins = api.hits.filter(h => h.method === 'POST' && h.url === '/api/auth/login');
+      expect(logins, 'one login for alex (session + token share it) and one for nalin').toHaveLength(2);
+    } finally { await api.close(); }
   });
 });
