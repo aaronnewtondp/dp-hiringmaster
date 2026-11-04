@@ -12,20 +12,24 @@ const BOM  = String.fromCharCode(0xfeff);     // byte-order mark
 
 describe('splitHiringManagerNames (frontend mirror)', () => {
   it.each([
-    ['Mandeep Dagar', ['Mandeep Dagar']],
-    ['Mandeep Dagar, Piyush Negi', ['Mandeep Dagar', 'Piyush Negi']],
-    ['Mandeep Dagar;Piyush Negi', ['Mandeep Dagar', 'Piyush Negi']],
-    ['Mandeep Dagar & Piyush Negi', ['Mandeep Dagar', 'Piyush Negi']],
-    ['Mandeep Dagar and Piyush Negi', ['Mandeep Dagar', 'Piyush Negi']],
-    ['Mandeep Dagar AND Piyush Negi', ['Mandeep Dagar', 'Piyush Negi']],
+    ['Test Manager One', ['Test Manager One']],
+    ['Test Manager One, Test Manager Two', ['Test Manager One', 'Test Manager Two']],
+    ['Test Manager One;Test Manager Two', ['Test Manager One', 'Test Manager Two']],
+    ['Test Manager One & Test Manager Two', ['Test Manager One', 'Test Manager Two']],
+    ['Test Manager One and Test Manager Two', ['Test Manager One', 'Test Manager Two']],
+    ['Test Manager One AND Test Manager Two', ['Test Manager One', 'Test Manager Two']],
     ['A, B and C', ['A', 'B', 'C']],
     ['A, B, and C', ['A', 'B', 'C']],
-    ['and Piyush Negi', ['Piyush Negi']],
-    ['Sandeep Anand', ['Sandeep Anand']],
-    ['Anand Kumar', ['Anand Kumar']],
-    ['Mandeep Dagar,, ,Piyush Negi,', ['Mandeep Dagar', 'Piyush Negi']],
-    [`Mandeep${NBSP}Dagar,${NBSP}Piyush Negi`, ['Mandeep Dagar', 'Piyush Negi']],
-    ['Mandeep Dagar,\tPiyush Negi\n', ['Mandeep Dagar', 'Piyush Negi']],
+    ['and Test Manager Two', ['Test Manager Two']],
+    ['Sandy Brand', ['Sandy Brand']],
+    ['Brand Tester', ['Brand Tester']],
+    ['Test Manager One,, ,Test Manager Two,', ['Test Manager One', 'Test Manager Two']],
+    [`Test${NBSP}Manager One,${NBSP}Test Manager Two`, ['Test Manager One', 'Test Manager Two']],
+    // The other invisible blanks people paste from Slack, Docs and web pages: each must read as an ordinary space (the zero-width space is the one \s does NOT cover).
+    [`Test${ZWSP}Manager One,${ZWSP}Test Manager Two`, ['Test Manager One', 'Test Manager Two']],
+    [`Test${IDEO}Manager One,${IDEO}Test Manager Two`, ['Test Manager One', 'Test Manager Two']],
+    [`Test${BOM}Manager One,${BOM}Test Manager Two`, ['Test Manager One', 'Test Manager Two']],
+    ['Test Manager One,\tTest Manager Two\n', ['Test Manager One', 'Test Manager Two']],
     ['', []],
   ])('%j -> %j', (input, expected) => {
     expect(splitHiringManagerNames(input)).toEqual(expected);
@@ -41,30 +45,31 @@ describe('splitHiringManagerNames (frontend mirror)', () => {
   // what it DOES — the names beyond it are invisible — which a slow machine cannot change; the old 250 ms wall-clock bound could.
   it('examines nothing past 1000 characters, so a huge run of blanks costs nothing (this runs in the browser on every role)', () => {
     const blanks = ' '.repeat(2_000_000);
-    expect(splitHiringManagerNames(`${blanks}Piyush Negi`)).toEqual([]);                      // the only name sits beyond the cap
-    expect(isNamedHiringManager('Piyush Negi', `${blanks}Piyush Negi`)).toBe(false);
-    expect(splitHiringManagerNames(`Mandeep Dagar, ${' '.repeat(2_000_000)}, Piyush Negi`)).toEqual(['Mandeep Dagar']);
-    const inside = `Mandeep Dagar,${' '.repeat(900)}Piyush Negi`;                              // the same shape under the cap is read in full
-    expect(splitHiringManagerNames(inside)).toEqual(['Mandeep Dagar', 'Piyush Negi']);
-    expect(isNamedHiringManager('Piyush Negi', inside)).toBe(true);
+    expect(splitHiringManagerNames(`${blanks}Test Manager Two`)).toEqual([]);                      // the only name sits beyond the cap
+    expect(isNamedHiringManager('Test Manager Two', `${blanks}Test Manager Two`)).toBe(false);
+    expect(splitHiringManagerNames(`Test Manager One, ${' '.repeat(2_000_000)}, Test Manager Two`)).toEqual(['Test Manager One']);
+    const inside = `Test Manager One,${' '.repeat(900)}Test Manager Two`;                              // the same shape under the cap is read in full
+    expect(splitHiringManagerNames(inside)).toEqual(['Test Manager One', 'Test Manager Two']);
+    expect(isNamedHiringManager('Test Manager Two', inside)).toBe(true);
   });
 
   it('a huge run of blanks takes a bounded amount of CPU time (not a wall-clock limit)', () => {
     const blanks = ' '.repeat(2_000_000);
-    const spent = cpuMs(() => { splitHiringManagerNames(blanks); isNamedHiringManager('Piyush Negi', blanks); });
+    const spent = cpuMs(() => { splitHiringManagerNames(blanks); isNamedHiringManager('Test Manager Two', blanks); });
     expect(spent).toBeLessThan(CPU_BACKSTOP_MS);                                              // ~1 ms when quiet; the quadratic version took ~10 s on 100k blanks
   });
 });
 
 describe('isNamedHiringManager (frontend mirror)', () => {
   it('whole name, case/whitespace insensitive, any listed person', () => {
-    expect(isNamedHiringManager('piyush negi', 'Mandeep Dagar, Piyush Negi')).toBe(true);
-    expect(isNamedHiringManager(' Mandeep Dagar ', 'Mandeep Dagar, Piyush Negi')).toBe(true);
-    expect(isNamedHiringManager('Piyush Negi', 'Mandeep Dagar, and Piyush Negi')).toBe(true);
-    expect(isNamedHiringManager(`Piyush${NBSP}Negi`, 'Mandeep Dagar, Piyush Negi')).toBe(true);
-    expect(isNamedHiringManager('Amit', 'Amit Gosain')).toBe(false);
-    expect(isNamedHiringManager('Dagar, Mandeep', 'Dagar, Mandeep')).toBe(true);       // the old whole-string rule still holds
-    expect(isNamedHiringManager('', 'Alex')).toBe(false);
-    expect(isNamedHiringManager('Alex', null)).toBe(false);
+    expect(isNamedHiringManager('test manager two', 'Test Manager One, Test Manager Two')).toBe(true);
+    expect(isNamedHiringManager(' Test Manager One ', 'Test Manager One, Test Manager Two')).toBe(true);
+    expect(isNamedHiringManager('Test Manager Two', 'Test Manager One, and Test Manager Two')).toBe(true);
+    expect(isNamedHiringManager(`Test${NBSP}Manager Two`, 'Test Manager One, Test Manager Two')).toBe(true);
+    expect(isNamedHiringManager(`Test${ZWSP}Manager Two`, 'Test Manager One, Test Manager Two')).toBe(true);        // an invisible blank inside the user's own name
+    expect(isNamedHiringManager('Test', 'Test Manager One')).toBe(false);
+    expect(isNamedHiringManager('Manager One, Test', 'Manager One, Test')).toBe(true);       // the old whole-string rule still holds
+    expect(isNamedHiringManager('', 'Test Manager One')).toBe(false);
+    expect(isNamedHiringManager('Test Manager One', null)).toBe(false);
   });
 });
