@@ -195,6 +195,29 @@ test.describe('the user table', () => {
     expect((await userRowByEmail(USERS.hr2.email))!.persona).toBe('hr_recruiter');
     expect(await countUsers()).toBe(before);
   });
+
+  test('the server validates what the UI already checks: required fields (400), a created user answers 201, an unknown id answers 404', async ({ request }) => {
+    const api = authed(request, await getToken(request, 'super_admin'));
+    const before = await countUsers();
+    for (const body of [{ email: emailOf('nf1'), persona: 'leadership' }, { name: 'UM no email', persona: 'leadership' }, { name: 'UM no role', email: emailOf('nf3') }]) {
+      const res = await api.post('/api/users', body);
+      expect(res.status(), JSON.stringify(body)).toBe(400);
+      expect((await res.json()).error).toMatch(/required/i);
+    }
+    expect(await countUsers(), 'a refused create must not leave a row').toBe(before);
+
+    const email = emailOf('status-201');
+    created.push(email);
+    const ok = await api.post('/api/users', { name: 'UM status check', email, persona: 'leadership' });
+    expect(ok.status()).toBe(201);
+    expect((await ok.json()).user.email).toBe(email);
+
+    const missing = await api.patch('/api/users/00000000-0000-0000-0000-000000000000', { name: 'UM nobody' });
+    expect(missing.status()).toBe(404);
+    expect((await missing.json()).error).toMatch(/not found/i);
+    const empty = await api.patch(`/api/users/${(await userRowByEmail(email))!.id}`, {});
+    expect(empty.status()).toBe(400);
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
