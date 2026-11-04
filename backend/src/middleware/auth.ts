@@ -35,9 +35,14 @@ export function isSmokeAccount(email: unknown): boolean {
 export const ACCESS_CACHE_TTL_MS = 15_000;
 export const ACCESS_CACHE_MAX_ENTRIES = 1000;
 const accessCache = new Map<string, { active: boolean; at: number }>();
+// Bumped by every invalidateUserAccess(): a lookup that was already in flight when an invalidation happened may have read the
+// row BEFORE the update committed, so its answer is used for that one request but never cached (it would otherwise put a stale
+// "active" back for a full TTL right after a deactivation).
+let accessEpoch = 0;
 
 /** Forget the cached active/inactive answer for one user, or for everyone when called with no argument. */
 export function invalidateUserAccess(userId?: string): void {
+  accessEpoch++;
   if (userId === undefined) accessCache.clear();
   else accessCache.delete(String(userId));
 }
@@ -46,8 +51,10 @@ async function isUserActive(userId: string): Promise<boolean> {
   const now = Date.now();
   const hit = accessCache.get(userId);
   if (hit && now - hit.at < ACCESS_CACHE_TTL_MS) return hit.active;
+  const epoch = accessEpoch;
   const row = await queryOne<{ is_active: boolean }>('SELECT is_active FROM users WHERE id=$1', [userId]);
   const active = row?.is_active === true;
+  if (epoch !== accessEpoch) return active;
   if (accessCache.size >= ACCESS_CACHE_MAX_ENTRIES && !accessCache.has(userId)) {
     // Hard cap: drop the oldest entry (Map keeps insertion order); entries are re-inserted on refresh so this is oldest-written.
     const oldest = accessCache.keys().next().value;
@@ -79,6 +86,10 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
       return;
     }
 
+    if (typeof payload.userId !== 'string' || !payload.userId) {
+      res.status(401).json({ error: 'Invalid or expired token' });
+      return;
+    }
     req.user = payload;
     // Smoke accounts are refused here, before any database lookup.
     if (isSmokeAccount(payload.email) && !READ_ONLY_METHODS.has(req.method)) {
@@ -88,7 +99,7 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
 
     let active: boolean;
     try {
-      active = await isUserActive(String(payload.userId));
+      active = await isUserActive(payload.userId);
     } catch {
       delete req.user;
       res.status(503).json({ error: 'Could not verify account status' });

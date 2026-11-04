@@ -138,6 +138,27 @@ describe('authenticate — the 15 s cache', () => {
   });
 });
 
+describe('authenticate — an invalidation that lands while a lookup is in flight', () => {
+  it('is not undone by that lookup: its (possibly stale) answer serves its own request but is never cached', async () => {
+    const inFlight = call('U1');                    // the lookup has started and has read "active"
+    invalidateUserAccess('U1');                     // ...the PATCH commits and invalidates before the lookup finishes
+    expect((await inFlight).next).toHaveBeenCalledTimes(1);
+    fakeDb.setUserAccess('U1', 'inactive');
+    const r = await call('U1');                     // must ask again, not read a stale "active" for a full TTL
+    expect(r.status).toEqual([401]);
+    expect(fakeDb.accessLookups).toBe(2);
+  });
+});
+
+describe('authenticate — a token without a usable userId', () => {
+  it.each([[undefined], [''], [42], [{ id: 'U1' }]])('is refused 401 before any lookup (userId=%j)', async (userId) => {
+    const r = await call('U1', 'GET', { ...claims(), userId });
+    expect(r.status).toEqual([401]);
+    expect(r.next).not.toHaveBeenCalled();
+    expect(fakeDb.accessLookups).toBe(0);
+  });
+});
+
 describe('authenticate — smoke accounts are refused before any database lookup', () => {
   it('a smoke POST is 403 and the database is never asked', async () => {
     const r = await call('U9099', 'POST', { ...claims('U9099'), email: 'smoke.hm@hms-smoke.invalid' });
