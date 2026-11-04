@@ -275,3 +275,42 @@ describe('AgencyDetail — saving a section', () => {
     expect(get).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('AgencyDetail — every field is saved under its own column', () => {
+  // [section, the label people read, the key the server column is called, what is typed]. The label is only for people: the key
+  // decides which column is written, so a mistyped key would save a field into the wrong place while every label still looked right.
+  const FIELDS: Array<[string, string, string, string]> = [
+    ['Contact', 'Agency Name', 'name', 'x'], ['Contact', 'Contact Name', 'contact_name', 'x'],
+    ['Contact', 'Contact Email', 'contact_email', 'x'], ['Contact', 'Contact Phone', 'contact_phone', 'x'],
+    ['Contract', 'Status', 'contract_status', 'Inactive'], ['Contract', 'Replacement Guarantee (days)', 'replacement_guarantee_days', '7'],
+    ['Commission Tiers', 'Tier 1 Band', 'tier1_band', 'x'], ['Commission Tiers', 'Tier 1 Rate', 'tier1_rate', 'x'],
+    ['Commission Tiers', 'Tier 2 Band', 'tier2_band', 'x'], ['Commission Tiers', 'Tier 2 Rate', 'tier2_rate', 'x'],
+    ['Commission Tiers', 'Tier 3 Band', 'tier3_band', 'x'], ['Commission Tiers', 'Tier 3 Rate', 'tier3_rate', 'x'],
+    ['Commission Tiers', 'CTC Definition (what the fee is calculated on)', 'ctc_definition', 'x'], ['Commission Tiers', 'Market Positioning', 'market_positioning', 'x'],
+    ['Replacement Policy', 'Triggers (what qualifies)', 'replacement_triggers', 'x'], ['Replacement Policy', 'Exclusions (what doesn\'t)', 'replacement_exclusions', 'x'],
+    ['Replacement Policy', 'Remedy if no replacement', 'replacement_remedy', 'x'], ['Replacement Policy', 'Conditions to stay valid', 'replacement_conditions', 'x'],
+    ['Billing and Payment Terms', 'Invoice Trigger', 'billing_invoice_trigger', 'x'], ['Billing and Payment Terms', 'Invoice Raised', 'billing_invoice_raised', 'x'],
+    ['Billing and Payment Terms', 'Payment Due', 'billing_payment_due', 'x'], ['Billing and Payment Terms', 'Effective Total Window', 'billing_effective_window', 'x'],
+    ['Billing and Payment Terms', 'Late Payment Penalty', 'billing_late_penalty', 'x'],
+    ['Notes & Links', 'Specialisations', 'specialisations', 'x'], ['Notes & Links', 'Agreement Link', 'agreement_drive_link', 'x'], ['Notes & Links', 'Notes', 'notes', 'x'],
+  ];
+
+  it.each(FIELDS)('%s › %s is sent as %s', async (title, label, key, typed) => {
+    mount();
+    await ready();
+    edit(title);
+    change(title, label, typed);
+    save(title);
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    expect(update).toHaveBeenCalledWith('AGN901', { [key]: key === 'replacement_guarantee_days' ? Number(typed) : typed });
+  });
+
+  it('the table above lists every field the page offers, in the page\'s order, so a new field cannot go unchecked', async () => {
+    mount();
+    await ready();
+    const sections = Array.from(new Set(FIELDS.map(f => f[0])));
+    for (const title of sections) edit(title);
+    const offered = sections.flatMap(title => Array.from(section(title).querySelectorAll('label')).map(l => [title, l.textContent]));
+    expect(offered).toEqual(FIELDS.map(([title, label]) => [title, label]));
+  });
+});
