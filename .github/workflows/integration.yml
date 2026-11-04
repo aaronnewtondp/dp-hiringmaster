@@ -1,0 +1,144 @@
+name: Integration (API and database specs)
+
+# The Playwright `api` and `db` projects against a real backend and a real Postgres, with NO credentials. Nightly and on demand,
+# never on a pull request. No repository secret is needed: the ingest and JWT secrets are generated per run.
+#
+# What it runs: every spec in hms-tests-final/tests/api and tests/db EXCEPT the tests listed in EXCLUDE below. Measured on
+# 2026-10-29 in Docker (Linux, Node 22.23.4, fresh database each time): 659 tests pass and 1 skips itself, in 16-21 seconds, in
+# 5 of 5 consecutive runs. Left out on purpose, so a red run here means a real regression and not a missing key:
+#   * browser specs (tests/e2e): need Chromium, the Vite dev server on :5173 and real JD generation. Not attempted here.
+#   * tests/smoke: production-only, read-only checks against the live deployment.
+# The suite's own documentation puts the full local run at ~45 minutes; almost all of that is the browser project and the real
+# Claude / Google calls, not these specs.
+#
+# EXCLUDE (a Playwright --grep-invert regex over the full test title, which includes the file name). Each entry and why:
+#   JD Generation + ResumeIQ scoring (real external calls)      api/10, 2 tests: live Claude and Google Drive
+#   every candidate entry carries application_id                api/19: asserts the funnel snapshot is NON-empty, so it passes
+#                                                                only on a long-lived dev database that already has SLA breaches
+#   falls back to a live AI estimate                            api/30: live Claude (the endpoint answers 500 without a key)
+#   05-aging-roles-no-movement                                  db/05, whole spec: builds candidate e-mails from Date.now() in a tight
+#                                                                loop, so on a fast machine two inserts share a millisecond and collide
+#                                                                on idx_candidates_email. Measured: 2 tests failed in one run, a THIRD in
+#                                                                another, none in a third. Racy by construction.
+#   a candidate with NO readable resume ... / an HR re-run ...  db/07, 3 tests: need a REAL base ResumeIQ score (live Claude)
+#     / a review stuck in "running" ...
+#   a Drive PDF + a website: pending                            db/15, 1 test: matches the @vercel/queue error text with a pattern whose
+#                                                                `.` cannot cross a line break; outside a linked Vercel project that
+#                                                                text spans several lines
+# A second skip is inside api/15 (the one real Google Calendar round trip skips itself without credentials).
+# Remove an entry when its cause is fixed; do not add one without a measured reason.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 20 * * *"   # 20:30 UTC = 02:00 IST
+
+concurrency:
+  group: integration
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NPM_CONFIG_AUDIT: "false"
+  NPM_CONFIG_FUND: "false"
+  NPM_CONFIG_UPDATE_NOTIFIER: "false"
+
+jobs:
+  api-and-db-specs:
+    name: Playwright api + db projects (no credentials)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hms_user
+          POSTGRES_PASSWORD: hms_password   # the db specs hard-code postgresql://hms_user:hms_password@localhost:5432/dp_hms
+          POSTGRES_DB: dp_hms
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hms_user -d dp_hms"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: hms_user
+      PGPASSWORD: hms_password
+      PGDATABASE: dp_hms
+      EXCLUDE: 'JD Generation \+ ResumeIQ scoring \(real external calls\)|every candidate entry carries application_id|falls back to a live AI estimate|05-aging-roles-no-movement|a candidate with NO readable resume gets the base score untouched|an HR re-run on a scored application re-checks the resume|a review stuck in "running" past the function limit|a Drive PDF \+ a website: pending'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            hms-tests-final/package-lock.json
+      - name: Install backend and test dependencies (Playwright browsers are not needed for api and db)
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix hms-tests-final
+      - name: psql client
+        run: |
+          command -v psql >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends postgresql-client; }
+          psql --version
+      - name: Per-run secrets (generated, masked, never stored)
+        run: |
+          for name in JWT_SECRET ROLE_INGEST_SECRET CANDIDATE_INGEST_SECRET CRON_SECRET; do
+            value="$(openssl rand -hex 32)"
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done
+      - name: Build the database (schema.sql, then seed.sql)
+        run: bash .github/ci/apply-db.sh
+      - name: Workaround for the stuck eval-question and comp-benchmark sequences (see the file; delete when fixed)
+        run: psql -v ON_ERROR_STOP=1 -q -f .github/ci/seed-sequence-workaround.sql
+      - name: Start the backend (npx tsx src/server.ts, no Anthropic or Google credentials)
+        working-directory: backend
+        env:
+          NODE_ENV: development   # rate limiters are skipped outside production, as in the local suite
+          PORT: "4000"
+          DATABASE_URL: postgresql://hms_user:hms_password@localhost:5432/dp_hms
+          FRONTEND_URL: http://localhost:5173
+          SOURCING_ENABLED: "true"   # on in production since 2026-10-20; the sourcing specs skip themselves when it is off
+        run: |
+          npx tsx src/server.ts > "$RUNNER_TEMP/backend.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/backend.pid"
+          for _ in $(seq 1 60); do
+            curl -fsS http://localhost:4000/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://localhost:4000/health
+      - name: Playwright (api and db projects)
+        working-directory: hms-tests-final
+        env:
+          TEST_API_URL: http://localhost:4000
+          PLAYWRIGHT_HTML_OPEN: never
+        run: npx playwright test --project=api --project=db --grep-invert "$EXCLUDE" --reporter=list,html
+      - name: Stop the backend
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/backend.pid" ]; then kill "$(cat "$RUNNER_TEMP/backend.pid")" 2>/dev/null || true; fi
+      - name: Keep the Playwright report and the backend log when something failed
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: integration-failure-${{ github.run_id }}
+          path: |
+            hms-tests-final/playwright-report/
+            hms-tests-final/test-results/
+            ${{ runner.temp }}/backend.log
+          retention-days: 7
+          if-no-files-found: warn

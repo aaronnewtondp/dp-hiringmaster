@@ -1,0 +1,21 @@
+{
+  // Type-check of the Playwright suite. Playwright transpiles TypeScript without checking it, so a typo in a helper or a
+  // wrong property name only shows up when that line runs (45 minutes into test:local). This config lives here, not in
+  // hms-tests-final/, so the suite's behaviour cannot change: Playwright reads a tsconfig.json next to the tests.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": true,
+    // Use the suite's own installed @types (it gets @types/node through @types/pg), not a second copy.
+    "typeRoots": ["../../hms-tests-final/node_modules/@types"],
+    "types": ["node"]
+  },
+  "include": ["../../hms-tests-final/**/*.ts"],
+  "exclude": ["../../hms-tests-final/node_modules", "../../hms-tests-final/test-results", "../../hms-tests-final/playwright-report"]
+}
