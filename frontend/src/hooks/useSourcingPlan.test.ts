@@ -3,6 +3,7 @@ import { createElement, type ReactNode } from 'react';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { SourcingAdvice, SourcingException, SourcingPlanResponse, SourcingWorkspaceResponse } from '../types/sourcing.ts';
+import { drain } from '../test/helpers.ts';
 
 // Plain functions behind the mocks, not vi.fn() rejections: a spy re-throws a rejected result on a derived promise, which vitest reports as an unhandled error.
 let planImpl: (id: string) => Promise<unknown> = async () => ({ data: { enabled: false } });
@@ -143,7 +144,7 @@ beforeEach(() => {
 describe('useSourcingPlan', () => {
   it('does not ask the server until there is a role id', async () => {
     const { result, rerender } = renderHook(({ id }: { id?: string }) => useSourcingPlan(id), { wrapper, initialProps: { id: undefined } });
-    await act(async () => { await new Promise(r => setTimeout(r, 10)); });
+    await drain();
     expect(planCalls).toHaveLength(0);
     expect(result.current.fetchStatus).toBe('idle');
     expect(result.current.data).toBeUndefined();
@@ -168,7 +169,7 @@ describe('useSourcingPlan', () => {
     const { result } = renderHook(() => useSourcingPlan('R5'), { wrapper });
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.data).toBeUndefined();
-    await act(async () => { await new Promise(r => setTimeout(r, 30)); });
+    await drain();
     expect(planCalls).toHaveLength(1);
   });
 
@@ -179,7 +180,7 @@ describe('useSourcingPlan', () => {
     expect(qc.getQueryData(['sourcing-plan', 'R5'])).toEqual(first.result.current.data);
     first.unmount();
     renderHook(() => useSourcingPlan('R5'), { wrapper });
-    await act(async () => { await new Promise(r => setTimeout(r, 10)); });
+    await drain();
     expect(planCalls).toEqual(['R5']);
     renderHook(() => useSourcingPlan('R6'), { wrapper });
     await waitFor(() => expect(planCalls).toEqual(['R5', 'R6']));
@@ -206,7 +207,7 @@ describe('useSourcingWorkspace', () => {
     const { result } = renderHook(() => useSourcingWorkspace(), { wrapper });
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.data).toBeUndefined();
-    await act(async () => { await new Promise(r => setTimeout(r, 30)); });
+    await drain();
     expect(workspaceCalls).toHaveLength(1);
   });
 
@@ -224,7 +225,7 @@ describe('useSourcingAdvice', () => {
 
   it('does nothing until it is enabled (a Hiring Manager, a draft or closed plan never asks for advice)', async () => {
     const { result, rerender } = renderHook(({ on }: { on: boolean }) => useSourcingAdvice('R5', on), { wrapper, initialProps: { on: false } });
-    await act(async () => { await new Promise(r => setTimeout(r, 10)); });
+    await drain();
     expect(adviceCalls).toHaveLength(0);
     expect(result.current.fetchStatus).toBe('idle');
     expect(result.current.data).toBeUndefined();
@@ -236,7 +237,7 @@ describe('useSourcingAdvice', () => {
 
   it('does nothing without a role id even when enabled', async () => {
     const { result } = renderHook(() => useSourcingAdvice(undefined, true), { wrapper });
-    await act(async () => { await new Promise(r => setTimeout(r, 10)); });
+    await drain();
     expect(adviceCalls).toHaveLength(0);
     expect(result.current.fetchStatus).toBe('idle');
   });
@@ -253,7 +254,7 @@ describe('useSourcingAdvice', () => {
     const { result } = renderHook(() => useSourcingAdvice('R5', true), { wrapper });
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.data).toBeUndefined();
-    await act(async () => { await new Promise(r => setTimeout(r, 30)); });
+    await drain();
     expect(adviceCalls).toHaveLength(1);
     expect(result.current.refresh.isIdle).toBe(true);
   });

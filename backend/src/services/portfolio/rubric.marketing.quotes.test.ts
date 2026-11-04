@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { enforceEvidenceRules, type EvidenceContext } from './rubric.marketing.js';
 import type { CriterionResult, CriterionVerdict } from './types.js';
+import { cpuTimed, scaled } from '../../testing/timing.js';
 
 // How a model's quote is held to the text it was given (rubric.marketing.ts, rule 8): found verbatim (after folding numbers and
 // symbols), found as a NEAR match (at least 70% of its words in order, every figure, negation and name present: held at partial),
@@ -564,11 +565,8 @@ describe('HELD-OUT corpus, round 3 (written before the number-word fix, not tune
 
 // ─── Hostile text ────────────────────────────────────────────────────────────
 describe('the matcher stays fast on hostile text', () => {
-  const timed = (text: string, quote: string): number => {
-    const t0 = performance.now();
-    enforceEvidenceRules([read(`Says "${quote}"`)], ctxOf(text));
-    return performance.now() - t0;
-  };
+  // CPU time scaled to the machine (testing/timing.ts), not the clock: catastrophic backtracking costs seconds to minutes on these inputs.
+  const timed = (text: string, quote: string): number => cpuTimed(() => enforceEvidenceRules([read(`Says "${quote}"`)], ctxOf(text))).ms;
   const words = 'the campaign grew reach and launched new brand work for water clean river'.split(' ');
   const rep = (n: number, f: (i: number) => string) => Array.from({ length: n }, (_, i) => f(i)).join(' ');
 
@@ -589,6 +587,6 @@ describe('the matcher stays fast on hostile text', () => {
     ['"a " 200,000 times then a magnitude word', 'a '.repeat(200000) + 'thousand', 'grew a thousand reach in months'],
     ['200,000 "nine nine" with a long quote of nines', 'nine nine '.repeat(40000), rep(40, () => 'nine')],
   ])('%s', (_name, text, quote) => {
-    expect(timed(text, quote)).toBeLessThan(2500);
+    expect(timed(text, quote)).toBeLessThan(scaled(2500));
   });
 });

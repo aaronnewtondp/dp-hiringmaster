@@ -7,6 +7,7 @@ import {
 } from './rubric.marketing.js';
 import { blendPortfolioScore } from './rubric.js';
 import type { CriterionResult, CriterionVerdict } from './types.js';
+import { expectCpuUnder } from '../../testing/timing.js';
 
 const IDS = MARKETING_CRITERIA.map(c => c.id);
 const NH_IDS = MARKETING_NICE_TO_HAVES.map(n => n.id);
@@ -901,9 +902,8 @@ describe('enforceEvidenceRules — rule 8: a quote must be real, and strong text
         `a-${'\n'.repeat(150_000)}!`, '-'.repeat(300_000), `${' '.repeat(300_000)}x`, '['.repeat(100_000),
         '[page '.repeat(50_000), '-- 1 of '.repeat(50_000), 'a-\n'.repeat(100_000), `${'a- \n'.repeat(60_000)}!`,
       ];
-      const t0 = Date.now();
-      for (const text of evil) verdictOf('"the quick brown fox"', 'strong', textCtx(text));
-      expect(Date.now() - t0).toBeLessThan(4000);
+      // CPU time scaled to the machine (testing/timing.ts), not the clock: catastrophic backtracking costs seconds to minutes on these inputs
+      expectCpuUnder(4000, () => { for (const text of evil) verdictOf('"the quick brown fox"', 'strong', textCtx(text)); }, 'quote check over hostile text');
     });
   });
 
@@ -2208,8 +2208,6 @@ describe('filterProtectedAttributes — behaviour', () => {
       'a '.repeat(50_000) + '!', `she is ${'very '.repeat(20_000)}`, `likely ${'in '.repeat(20_000)}`, '(('.repeat(50_000),
       'aged '.repeat(20_000), 'a.'.repeat(60_000), `${'a'.repeat(60)}@`.repeat(1_000), '+'.repeat(100_000), '- '.repeat(100_000),
     ];
-    const started = Date.now();
-    for (const h of hostile) filterProtectedAttributes([h]);
-    expect(Date.now() - started).toBeLessThan(3_000);
+    expectCpuUnder(3_000, () => { for (const h of hostile) filterProtectedAttributes([h]); }, 'filterProtectedAttributes over the hostile set');
   });
 });

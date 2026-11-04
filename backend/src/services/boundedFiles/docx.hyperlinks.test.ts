@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DOCX_MAX_LINKS, DOCX_MAX_LINK_CHARS, extractDocxHyperlinks, hyperlinkOfInstruction, hyperlinkRelationships } from './docx.js';
+import { expectCpuUnder } from '../../testing/timing.js';
 
 const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"';
 const doc = (body: string) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NS}><w:body>${body}</w:body></w:document>`;
@@ -39,9 +40,8 @@ describe('hyperlinkRelationships — the destinations of a document\'s external 
 
   it('is linear on a file of a hundred thousand relationships and reads only the first few thousand', () => {
     const xml = rels(...Array.from({ length: 100_000 }, (_, i) => ext(`r${i}`, `https://x.example/${i}`)));
-    const t = performance.now();
-    const map = hyperlinkRelationships(xml);
-    expect(performance.now() - t).toBeLessThan(1500);
+    // CPU time scaled to the machine (testing/timing.ts), not the clock; the same goes for the four "one pass" bounds below
+    const map = expectCpuUnder(1500, () => hyperlinkRelationships(xml), '100,000 relationships');
     expect(map.size).toBe(5000);
   });
 
@@ -158,9 +158,7 @@ describe('extractDocxHyperlinks — the links of a Word body', () => {
 
     it('thousands of unclosed field starts cost one pass, and the stray ends after them do not take another field\'s link', () => {
       const xml = doc(`<w:p>${'<w:r><w:fldChar w:fldCharType="begin"/></w:r>'.repeat(5000)}${'<w:r><w:fldChar w:fldCharType="end"/></w:r>'.repeat(5001)}${field(' HYPERLINK "https://ok.example" ', 'ok')}</w:p>`);
-      const t = performance.now();
-      const links = extractDocxHyperlinks(xml, new Map());
-      expect(performance.now() - t).toBeLessThan(1500);
+      const links = expectCpuUnder(1500, () => extractDocxHyperlinks(xml, new Map()), 'unclosed field starts');
       expect(links).toEqual([{ url: 'https://ok.example', label: 'ok' }]);
     });
   });
@@ -173,17 +171,13 @@ describe('extractDocxHyperlinks — the links of a Word body', () => {
 
   it('keeps at most DOCX_MAX_LINKS links (or the number asked for), and a million of them is one linear pass', () => {
     const many = doc(`<w:p>${'<w:hyperlink r:id="rId1"><w:r><w:t>x</w:t></w:r></w:hyperlink>'.repeat(50_000)}</w:p>`);
-    const t = performance.now();
-    expect(extractDocxHyperlinks(many, targets)).toHaveLength(DOCX_MAX_LINKS);
-    expect(performance.now() - t).toBeLessThan(1500);
+    expect(expectCpuUnder(1500, () => extractDocxHyperlinks(many, targets), '50,000 hyperlinks')).toHaveLength(DOCX_MAX_LINKS);
     expect(extractDocxHyperlinks(many, targets, 3)).toHaveLength(3);
   });
 
   it('unclosed hyperlinks and tags that never end cost one pass and return what was complete', () => {
     const xml = doc(`<w:hyperlink r:id="rId1">${run('closed')}</w:hyperlink>${'<w:hyperlink r:id="rId2"><w:r><w:t>'.repeat(100_000)}`);
-    const t = performance.now();
-    const links = extractDocxHyperlinks(xml, targets);
-    expect(performance.now() - t).toBeLessThan(1500);
+    const links = expectCpuUnder(1500, () => extractDocxHyperlinks(xml, targets), 'unclosed hyperlinks');
     expect(links[0]).toEqual({ url: 'https://janedoe.example/work', label: 'closed' });
   });
 

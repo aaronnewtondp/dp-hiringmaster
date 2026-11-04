@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -88,6 +88,13 @@ function mount(v: unknown, qc = new QueryClient({ defaultOptions: { queries: { r
   impl.plan = ok(v);
   return render(<QueryClientProvider client={qc}><MemoryRouter><SourcingPlanPanel roleId="R5" /></MemoryRouter></QueryClientProvider>);
 }
+
+// "Today" is pinned to local noon on Wed 21 Oct 2026, so the fixtures built with ymd()/Date.now() and the component's own idea of today cannot disagree
+// when local midnight passes during a run, and every date shown is the same whenever the suite runs. Only Date is faked: timers keep working.
+const PINNED_NOW = new Date(2026, 9, 21, 12, 0, 0);
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(PINNED_NOW); });
+afterEach(() => { vi.useRealTimers(); });
+it('runs on the pinned day (the fixtures and the component agree on "today")', () => { expect(ymd(0)).toBe('2026-10-21'); expect(new Date().getHours()).toBe(12); });
 
 beforeEach(() => {
   for (const n of h.NAMES) { spies[n].mockReset(); impl[n] = ok(); }
@@ -316,6 +323,23 @@ describe('SourcingPlanPanel — the qualified-candidate target', () => {
     mount(view({ volume: { ...view().volume!, target_source: 'role', role_target: 5, min: 5 } }));
     fireEvent.mouseEnter(within(await screen.findByTestId('volume')).getByRole('button', { name: 'More info' }));
     expect(screen.getByText(/this role's own/)).toBeInTheDocument();
+  });
+
+  it('the info marker on the target says its "Shortlisted" counts the move out of Applied and Screened in the last 7 days, not who is in a stage now', async () => {
+    mount(view());
+    fireEvent.mouseEnter(within(await screen.findByTestId('volume')).getByRole('button', { name: 'More info' }));
+    const tip = screen.getByText(/Qualified means/).textContent!;
+    expect(tip).toContain('counts the move out of Applied and Screened itself, in the last 7 days');      // utils/sourcingQualified.ts: first Stage Changed away from Applied and Screened
+    expect(tip).toContain('not the same as Shortlisted on the Dashboard or Active Shortlist on the Roles page');
+  });
+
+  it('the Applications by source marker says it is the form answer, not the candidate Source that feeds Source quality on the Dashboard', async () => {
+    mount(view({ output: [{ tag: 'Naukri/IIMjobs', applications: 12, qualified: 5 }] }));
+    const heading = await screen.findByText('Applications by source');
+    fireEvent.mouseEnter(heading.parentElement!.querySelector('[aria-label="More info"]')!);
+    const tip = heading.parentElement!.querySelector('div.absolute')!.textContent!;
+    expect(tip).toContain('so it is what applicants chose, not a measurement');
+    expect(tip).toContain("It is not the candidate's Source field, which is what feeds Source quality on the Dashboard");
   });
 
   it('a role with no target (P2/P3 default) says nothing is flagged and offers "Set a target", which opens Edit plan', async () => {

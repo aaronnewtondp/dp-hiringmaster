@@ -4,6 +4,7 @@ import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-li
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { WorkspaceRole, SourcingWorkspace as Workspace } from '../../types/sourcing.ts';
+import { drain } from '../../test/helpers.ts';
 
 // A plain function, not vi.fn(): the spy re-throws a rejected result on a derived promise, which vitest reports as an unhandled error.
 let workspace: () => Promise<unknown> = async () => ({ data: { enabled: false } });
@@ -402,7 +403,8 @@ describe('SourcingWorkspace — arriving by a link', () => {
   it('does not scroll while it is still loading', async () => {
     workspace = () => new Promise(() => {});
     mount('/dashboard#sourcing-workspace');
-    await new Promise(r => setTimeout(r, 20));
+    await waitFor(() => expect(workspaceCalls).toHaveBeenCalled());                  // the load is under way and never finishes
+    await drain();                                                                      // every effect of the mount (and of the loading render) has run
     expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
@@ -433,7 +435,8 @@ describe('SourcingWorkspace — arriving by a link', () => {
 // (heading shown, scroll into view when you arrive by a link) must stay exactly as it was for anything that still mounts it bare.
 const HEADING = 'Sourcing plans';
 const SUBLINE = /pick a role to see its channels, weekly results, next steps and history/;
-const settle = () => new Promise(r => setTimeout(r, 20));
+// Everything already in flight has run (see `drain`): a scroll nudge, were there one, is an effect of the commit that shows the plans or of the mount.
+const settle = () => drain();
 const sectionHeading = () => screen.queryByRole('heading', { name: HEADING });
 
 describe('SourcingWorkspace — the section heading (heading prop)', () => {
