@@ -5,6 +5,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { STAGES, LOW_PIPELINE_MAX_ACTIVE, LOW_PIPELINE_MAX_SHORTLISTED } from '../types/index.ts';
 import type { DashboardData } from '../types/index.ts';
 
+// The two low-pipeline thresholds are replaced with numbers the real ones are not, so a figure typed into the page by hand
+// (instead of read from the shared constant) cannot pass for it. The test that uses them first checks this replacement is in force.
+vi.mock('../types/index.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../types/index.ts')>()), LOW_PIPELINE_MAX_SHORTLISTED: 11, LOW_PIPELINE_MAX_ACTIVE: 17,
+}));
+
 // The Dashboard apart from its Sourcing section (Dashboard.sourcing.test.tsx has that): the master filters and the exact request
 // they make, the Hiring Manager's lock to their own role, the headline cards, the funnel, the two role tables and the velocity
 // section. The three sections that make their own data calls are stubbed; their props show what filters the page hands them.
@@ -166,6 +172,28 @@ describe('Dashboard — the master filters and what they ask for', () => {
     await ready();
     expect(dashboardGet).toHaveBeenCalledWith({ priority: ['P0'], recruitment_mode: ['LinkedIn'] });
     expect(screen.getByRole('button', { name: 'Clear all' })).toBeInTheDocument();
+  });
+
+  // Each of the five filters lives under its own key. A selection left in any ONE of them must be enough to show "Clear all", to turn the
+  // two figures that cannot be filtered into N/A, and to be emptied by "Clear all": otherwise a view narrowed by that filter alone would
+  // still show the unfiltered "Filled (30D)" and "Unmatched" numbers as if they belonged to it.
+  const FILTER_KEYS: Array<[string, string]> = [
+    ['hms:dashboard.departments', 'Tech/Devs'], ['hms:dashboard.locations', 'Pune'], ['hms:dashboard.modes', 'LinkedIn'],
+    ['hms:dashboard.priorities', 'P0'], ['hms:dashboard.roleIds', 'R9001'],
+  ];
+  it.each(FILTER_KEYS)('a lone selection stored under %s is a filter: "Clear all" shows, both figures read N/A, and "Clear all" empties it', async (key, value) => {
+    sessionStorage.setItem(key, JSON.stringify([value]));
+    mount();
+    await ready();
+    expect(screen.getByRole('button', { name: 'Clear all' })).toBeInTheDocument();
+    expect(sub('Roles Snapshot', 'Filled (30D)')).toBe('N/A');
+    expect(sub('Active candidates', 'Unmatched')).toBe('N/A');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
+    await waitFor(() => expect(lastParams()).toEqual({}));
+    expect(JSON.parse(sessionStorage.getItem(key) as string)).toEqual([]);
+    await ready();                                                       // the unfiltered request has a new key: the page is back once it answers
+    expect(sub('Roles Snapshot', 'Filled (30D)')).toBe('4');
+    expect(sub('Active candidates', 'Unmatched')).toBe('6');
   });
 
   it('with a filter on, the two figures that cannot be filtered read N/A: roles filled in 30 days and unmatched candidates', async () => {
@@ -382,6 +410,17 @@ describe('Dashboard — the hiring funnel', () => {
     expect(barWidth('Joined')).toBe('0%');
   });
 
+  it('rounds each bar to the nearest whole percent of the busiest stage (9 of 24 is 38%, not 37%; 8 of 24 is 33%, not 34%)', async () => {
+    dashboardGet.mockResolvedValue(dashboardData({ hiring_funnel: [
+      { stage: 'Applied and Screened', active: 24, rejected: 0, withdrawn: 0, hold_for_future: 0 },
+      { stage: 'Interview Round 1', active: 9, rejected: 0, withdrawn: 0, hold_for_future: 0 },
+      { stage: 'Interview Round 2', active: 8, rejected: 0, withdrawn: 0, hold_for_future: 0 },
+    ] }));
+    mount();
+    await ready();
+    expect([barWidth('Applied and Screened'), barWidth('Interview Round 1'), barWidth('Interview Round 2')]).toEqual(['100%', '38%', '33%']);
+  });
+
   it('under each bar says how many were rejected, withdrawn or put on hold there, and says nothing when none were', async () => {
     mount();
     await ready();
@@ -474,12 +513,18 @@ describe('Dashboard — Low pipeline roles', () => {
     expect(within(sectionCard('Low pipeline roles')).getByRole('link', { name: 'Thin One' })).toHaveAttribute('href', '/roles/R1');
   });
 
-  it('quotes the two thresholds from the shared constants, not from numbers of its own', async () => {
+  it('quotes the two thresholds from the shared constants in the intro, the two column headers and the info box, not from numbers of its own', async () => {
+    expect([LOW_PIPELINE_MAX_SHORTLISTED, LOW_PIPELINE_MAX_ACTIVE]).toEqual([11, 17]);       // the replacement at the top of this file is in force
+    dashboardGet.mockResolvedValue(dashboardData({ low_pipeline: [lowRow('R1', 'Thin One')] as unknown as DashboardData['low_pipeline'] }));
     mount();
     await ready();
-    const intro = within(sectionCard('Low pipeline roles')).getByText(/^Open roles with fewer than/);
-    expect(intro.textContent).toMatch(new RegExp(`\\b${LOW_PIPELINE_MAX_SHORTLISTED}\\b`));
-    expect(intro.textContent).toMatch(new RegExp(`\\b${LOW_PIPELINE_MAX_ACTIVE}\\b`));
+    const card = within(sectionCard('Low pipeline roles'));
+    expect(card.getByText(/^Open roles with fewer than/).textContent)
+      .toBe('Open roles with fewer than 11 shortlisted candidates and fewer than 17 active candidates in the pipeline');
+    expect(card.getByRole('columnheader', { name: 'Pipeline' })).toHaveAttribute('title', expect.stringMatching(/fewer than 17$/));
+    expect(card.getByRole('columnheader', { name: 'Shortlisted' })).toHaveAttribute('title', expect.stringMatching(/fewer than 11$/));
+    fireEvent.mouseEnter(card.getByRole('button', { name: 'More info' }));
+    expect(card.getByText(/^Open roles \(Approved/).textContent).toMatch(/fewer than 11 shortlisted candidates .* AND fewer than 17 Active candidates/);
   });
 
   it('says there are none, with no table, when no role is low on pipeline', async () => {
@@ -505,6 +550,15 @@ describe('Dashboard — Source quality', () => {
     for (const text of ['50%', '20%', '15%']) expect(within(block('Agency')).getByText(text)).toBeInTheDocument();
   });
 
+  it('draws each source\'s three bars as long as the three percentages beside them: pass rate, hire rate, contribution', async () => {
+    dashboardGet.mockResolvedValue(dashboardData({ source_quality: [{ source_channel: 'LinkedIn', n: 40, pass_rate: 25, hire_rate: 5, contribution_pct: 60 }] }));
+    mount();
+    await ready();
+    const block = within(sectionCard('Source quality')).getByText('LinkedIn').closest('div')!.parentElement as HTMLElement;
+    const width = (bar: string) => (block.querySelector(bar) as HTMLElement).style.width;
+    expect([width('.bg-dp-400'), width('.bg-green-500'), width('.bg-amber-400')]).toEqual(['25%', '5%', '60%']);
+  });
+
   it('says so when nothing has a source yet', async () => {
     mount();
     await ready();
@@ -526,6 +580,16 @@ describe('Dashboard — Operational velocity', () => {
     await ready();
     const rows = Array.from(turnaround().querySelectorAll('span.w-36')).map(s => [s.textContent, s.parentElement?.lastElementChild?.textContent]);
     expect(rows).toEqual([['Offer Discussion', '2.5d'], ['Reference Check', '1.5d'], ['Interview Round 1', '12h'], ['Assignment Round', '2d']]);
+  });
+
+  it('a stage is shown in hours up to just under 24 and in days from exactly 24 (23.5 hours is "23.5h", 24 hours is "1d")', async () => {
+    dashboardGet.mockResolvedValue(dashboardData({ velocity: velocity({ tat_by_stage: [
+      { stage: 'Offer Discussion', avg_hours: 24, n: 2 }, { stage: 'Reference Check', avg_hours: 23.5, n: 2 },
+    ] }) }));
+    mount();
+    await ready();
+    const rows = Array.from(turnaround().querySelectorAll('span.w-36')).map(s => [s.textContent, s.parentElement?.lastElementChild?.textContent]);
+    expect(rows).toEqual([['Offer Discussion', '1d'], ['Reference Check', '23.5h']]);
   });
 
   it('says there is not enough history when no stage has been timed', async () => {
