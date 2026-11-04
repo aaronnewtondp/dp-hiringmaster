@@ -390,12 +390,12 @@ test.describe('Founder flag and screening notes', () => {
     await dialog.getByRole('button', { name: 'Confirm' }).click();
     await expect(toastWith(page, 'Flagged for Founder Review')).toBeVisible();
     await expect(dialog).toHaveCount(0);
-    await expect(page.getByTitle('Clear Founder Review flag')).toBeVisible();   // the star now clears
+    await expect(page.getByTitle(/^Flagged for Founder Review.*Click to clear the flag\./)).toBeVisible();   // the star now clears
     const flagged = await getApp(request, a.appId);
     expect(flagged).toMatchObject({ founder_review_flag: true, founder_review_note: 'E2E: strong profile' });
     expect(await openFounderTasks()).toBe(1);                                   // Leadership has something to review
 
-    await page.getByTitle('Clear Founder Review flag').click();
+    await page.getByTitle(/^Flagged for Founder Review.*Click to clear the flag\./).click();
     const clearDialog = dialogWith(page, 'Clear Founder Review flag');
     await clearDialog.getByRole('button', { name: 'Confirm' }).click();
     await expect(toastWith(page, 'Founder Review flag cleared')).toBeVisible();
@@ -791,7 +791,7 @@ test.describe('Persona differences on the candidate page', () => {
     await expect(page.getByRole('button', { name: 'Add Application' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Schedule round' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: '+ Add HR Screening Notes' })).toHaveCount(0);
-    await expect(page.getByTitle('Clear Founder Review flag')).toHaveCount(0);           // the flag is shown, but not as a control
+    await expect(page.getByTitle(/Click to clear the flag\./)).toHaveCount(0);           // the flag is shown, but not as a control
     await expect(page.getByTitle('Flag for Founder Review')).toHaveCount(0);
     await expect(applicationsCard(page).getByText('Founder', { exact: true })).toBeVisible();
   });
