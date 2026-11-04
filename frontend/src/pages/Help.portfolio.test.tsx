@@ -11,6 +11,15 @@ vi.mock('../contexts/AuthContext.tsx', () => ({
 
 import Help from './Help.tsx';
 
+// The frontend is a browser package and has no @types/node. These three built-ins are used only to READ source files as text (see the
+// last describe block), so they are left untyped instead of adding a dependency.
+// @ts-ignore TS2307 until @types/node is added to the frontend
+import fs from 'node:fs';
+// @ts-ignore TS2307 until @types/node is added to the frontend
+import path from 'node:path';
+// @ts-ignore TS2307 until @types/node is added to the frontend
+import { fileURLToPath } from 'node:url';
+
 function answer(): HTMLElement {
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><Help /></QueryClientProvider>);
   const question = screen.getByRole('button', { name: /How does the Portfolio review work/i });
@@ -99,5 +108,62 @@ describe('Help — the Portfolio review answer', () => {
     const text = flat(answer());
     expect(text).toMatch(/When a review has to open links, it runs in the background/);
     expect(text).toMatch(/If there is nothing to open \(no link in the resume, or a blank or text-only answer\) the result is settled at once/);
+  });
+});
+
+// ─── The figures in the portfolio answers, checked against the code that decides them ─────────────────────────────────
+// Same idea as the last part of Help.test.tsx: the answers quote a score, a count and a threshold, and each is read as text from
+// the file that decides it (the backend is a separate package, so it cannot be imported), so a change there fails here.
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+function grab(rel: string, re: RegExp): string[] {
+  const file = path.join(ROOT, rel);
+  if (!fs.existsSync(file)) throw new Error(`${rel} is missing: these checks compare the Help page with the code that decides each figure, so they need the whole repository checked out.`);
+  const m = re.exec(fs.readFileSync(file, 'utf8'));
+  if (!m) throw new Error(`${rel}: nothing matches ${re}. The code this check reads has moved or changed shape: update the check, do not drop it.`);
+  return m.slice(1);
+}
+/** Opens one question and returns just its own answer as one whitespace-normalised string. */
+function answerOf(question: RegExp): string {
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><Help /></QueryClientProvider>);
+  const button = screen.getByRole('button', { name: question });
+  fireEvent.click(button);
+  const body = button.parentElement!.querySelector('.leading-relaxed');
+  expect(body, `no answer opened for ${String(question)}`).not.toBeNull();
+  return (body!.textContent ?? '').replace(/\s+/g, ' ').trim();
+}
+function said(text: string, re: RegExp): number {
+  const m = re.exec(text);
+  expect(m, `the answer no longer says ${re}`).not.toBeNull();
+  return Number(m![1]);
+}
+
+describe('Help — the portfolio figures are the ones the review and the screens use', () => {
+  it('a designer portfolio that is only a PDF or slide deck gets the score the review gives it', () => {
+    const score = Number(grab('backend/src/services/portfolio/run.ts', /score: onlyFiles \? (\d+) : \d+,/)[0]);
+    expect(said(answerOf(/How does the Portfolio review work/i), /it gets a low score of (\d+) and a flag/)).toBe(score);
+  });
+
+  it('the designer review judges as many criteria as the rubric has', () => {
+    const block = grab('backend/src/services/portfolio/rubric.ts', /export const DESIGNER_CRITERIA[^=]*=\s*\[([\s\S]*?)\n\] as const;/)[0];
+    const criteria = [...block.matchAll(/\{ id: '/g)].length;
+    expect(criteria).toBeGreaterThan(0);
+    expect(said(answerOf(/How does the Portfolio review work/i), /the hiring manager's (\d+) criteria/)).toBe(criteria);
+  });
+
+  it('Portfolio is the ninth dimension because the Scorecard Summary has eight ResumeIQ ones', () => {
+    const block = grab('frontend/src/pages/ScorecardSummary.tsx', /const DIMENSIONS[^=]*=\s*\[([\s\S]*?)\n\];/)[0];
+    const base = [...block.matchAll(/label: '/g)].length;
+    const ORDINAL: Record<number, string> = { 9: 'ninth' };
+    expect(ORDINAL[base + 1], `add the word for dimension ${base + 1} to this test`).toBeDefined();
+    expect(answerOf(/How does the Portfolio review work/i)).toContain(`get a ${ORDINAL[base + 1]} ResumeIQ dimension`);
+  });
+
+  it('the Portfolio filter button quotes the threshold the screen applies, and "8 or more" follows from whole-number scores', () => {
+    const min = Number(grab('frontend/src/pages/ScorecardSummary.tsx', /const PORTFOLIO_SCORE_FILTER_MIN = ([\d.]+);/)[0]);
+    grab('backend/src/db/schema.sql', /score_portfolio\s+INTEGER/);   // the score is stored as a whole number, which is why 7.5 means 8 or more
+    const t = answerOf(/What is My Tasks, and what is the Scorecard Summary table/i);
+    expect(said(t, /Portfolio ≥ ([\d.]+)/)).toBe(min);
+    expect(said(t, /scored ([\d.]+) or higher/)).toBe(min);
+    expect(said(t, /so that means (\d+) or more/)).toBe(Math.ceil(min));
   });
 });

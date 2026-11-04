@@ -10,6 +10,21 @@ vi.mock('../contexts/AuthContext.tsx', () => ({
 }));
 
 import Help from './Help.tsx';
+import {
+  STAGES, ROLE_STATUSES, APPLICATION_STATUSES, PERSONAS, OVER_BUDGET_SHORTLIST_REASONS,
+  LOW_PIPELINE_MAX_SHORTLISTED, LOW_PIPELINE_MAX_ACTIVE,
+} from '../types/index.ts';
+import { OVER_BUDGET_TOLERANCE, isOverBudget, isSeverelyOverBudget, isWithinBudgetOrNear } from '../utils/budget.ts';
+import { SLA_STAGE_BUCKETS } from '../utils/slaStageBuckets.ts';
+
+// The frontend is a browser package and has no @types/node. These three built-ins are used only to READ source files as text (see the
+// last part of this file), so they are left untyped instead of adding a dependency.
+// @ts-ignore TS2307 until @types/node is added to the frontend
+import fs from 'node:fs';
+// @ts-ignore TS2307 until @types/node is added to the frontend
+import path from 'node:path';
+// @ts-ignore TS2307 until @types/node is added to the frontend
+import { fileURLToPath } from 'node:url';
 
 let qc: QueryClient;
 function mount() {
@@ -682,5 +697,358 @@ describe('Help — wording rules for the whole page', () => {
     expect(everything).not.toMatch(/HR-tier/);
     // a snake_case word is a database column or a code constant (sla_breach, hiring_manager_name, ...), never user wording
     expect(everything).not.toMatch(/\b[a-z]{2,}_[a-z_]+\b/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Everything above pins what the Help page SAYS. What follows pins it to the code that DECIDES each figure or rule, so a
+// later change to a threshold, a limit or a list fails here instead of leaving Help quietly out of date (which is how the
+// page drifted in the first place). Figures the frontend already exports are imported; figures that only exist in the
+// backend (or in a screen's own literal) are READ AS TEXT from the source file, in the style of the backend's
+// crossPackageTwins.test.ts. Every reader throws when it cannot find what it looks for, so a check can never pass by
+// comparing nothing.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+function source(rel: string): string {
+  const file = path.join(ROOT, rel);
+  if (!fs.existsSync(file)) throw new Error(`${rel} is missing: these checks compare the Help page with the code that decides each figure, so they need the whole repository checked out.`);
+  return fs.readFileSync(file, 'utf8');
+}
+/** The capture groups of the first match of `re` in a source file. */
+function grab(rel: string, re: RegExp): string[] {
+  const m = re.exec(source(rel));
+  if (!m) throw new Error(`${rel}: nothing matches ${re}. The code this check reads has moved or changed shape: update the check, do not drop it.`);
+  return m.slice(1);
+}
+function arithmetic(expr: string, where: string): number {
+  if (!/^[\d_.\s*/+()-]+$/.test(expr)) throw new Error(`${where}: "${expr}" is not plain arithmetic, so this check cannot read it`);
+  return Function(`"use strict"; return (${expr.replace(/_/g, '')});`)() as number;
+}
+/** `const NAME = <number or plain arithmetic>;` anywhere in a source file (exported or not). */
+const constant = (rel: string, name: string): number =>
+  arithmetic(grab(rel, new RegExp(`\\bconst ${name}\\b[^=\\n]*=\\s*([^;\\n]+?)\\s*;`))[0], `${rel} ${name}`);
+const numberIn = (rel: string, re: RegExp): number => Number(grab(rel, re)[0]);
+const quotedList = (text: string): string[] => [...text.matchAll(/'((?:[^'\\]|\\.)*)'/g)].map(m => m[1]);
+const BACKEND = {
+  types:     'backend/src/types/index.ts',
+  sla:       'backend/src/jobs/slaChecker.ts',
+  interviews: 'backend/src/routes/interviews.ts',
+  dashboard: 'backend/src/routes/dashboard.ts',
+  resume:    'backend/src/services/pdfSandbox/resume.ts',
+  advisor:   'backend/src/services/sourcingAdvisor.ts',
+  config:    'backend/src/utils/sourcingConfig.ts',
+  templates: 'backend/src/utils/sourcingTemplates.ts',
+  plans:     'backend/src/services/sourcingPlans.ts',
+  settings:  'backend/src/services/sourcingSettings.ts',
+  qualified: 'backend/src/utils/sourcingQualified.ts',
+} as const;
+
+/** The number a sentence of an answer quotes (first capture group); fails if the sentence is gone. */
+function said(answer: string, re: RegExp): number {
+  const m = re.exec(answer);
+  expect(m, `the answer no longer says ${re}`).not.toBeNull();
+  return Number(m![1]);
+}
+/** Every number the sentences matching a global regex quote (first capture group). */
+const saidEverywhere = (answer: string, re: RegExp): number[] => [...answer.matchAll(re)].map(m => Number(m[1]));
+const inWords = (list: readonly string[]): string => `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+
+describe('Help — the names and figures in the answers are the ones the screens use', () => {
+  beforeEach(() => answers({ data: { enabled: false } }));
+  const WORD: Record<number, string> = { 4: 'four', 5: 'five' };
+
+  it('names every pipeline stage in STAGES, in pipeline order', () => {
+    mount();
+    const t = answerTo(/Why does an application have a Stage, a Status, AND a Screening Status/);
+    const bullet = t.slice(t.indexOf('Stage —'), t.indexOf('Status —'));
+    for (const stage of STAGES) expect(bullet, stage).toContain(stage);
+    const at = STAGES.map(stage => bullet.indexOf(stage));
+    expect(at).toEqual([...at].sort((a, b) => a - b));
+  });
+
+  it('names every status a person can set (all but the unused "Closed") and every role status, in order', () => {
+    mount();
+    const t = answerTo(/Why does an application have a Stage, a Status, AND a Screening Status/);
+    const bullet = t.slice(t.indexOf('Status —'), t.indexOf('Recruiter Screening Status'));
+    // 'Closed' is allowed by the database and listed by the Status filter, but nothing in HMS ever sets it
+    for (const status of APPLICATION_STATUSES.filter(s => s !== 'Closed')) expect(bullet, status).toContain(status);
+    const roles = answerTo(/What do the role statuses mean/);
+    for (const status of ROLE_STATUSES) expect(roles, status).toContain(status);
+    const at = ROLE_STATUSES.map(status => roles.indexOf(status));
+    expect(at).toEqual([...at].sort((a, b) => a - b));
+  });
+
+  it('says there are as many personas as the app has, and names each by the label the screens show', () => {
+    mount();
+    const t = answerTo('What can each role/persona do?');
+    const n = Object.keys(PERSONAS).length;
+    expect(WORD[n], `add the word for ${n} personas to this test`).toBeDefined();
+    expect(t).toContain(`There are ${WORD[n]} personas`);
+    for (const label of Object.values(PERSONAS)) expect(t, label).toContain(label);
+  });
+
+  it('lists the over-budget reasons exactly as the reason picker offers them', () => {
+    mount();
+    const t = answerTo('Why was I asked for a reason before shortlisting a candidate?');
+    const reasons = [...OVER_BUDGET_SHORTLIST_REASONS];
+    expect(t).toContain(`The choices are ${reasons.slice(0, -1).join(', ')}, or ${reasons[reasons.length - 1]}`);
+  });
+
+  it('quotes the over-budget tolerance in every answer that mentions it, and describes the rules the budget helpers apply', () => {
+    mount();
+    const pct = Math.round((OVER_BUDGET_TOLERANCE - 1) * 100);
+    const asked = answerTo('Why was I asked for a reason before shortlisting a candidate?');
+    const moves = answerTo(/Why can't I move a candidate to another stage/);
+    const scorecard = answerTo(/What is My Tasks, and what is the Scorecard Summary table/i);
+    for (const [name, text] of Object.entries({ asked, moves, scorecard })) {
+      const found = saidEverywhere(text, /(\d+)% (?:or more )?above the top of the (?:role's )?band/g);
+      expect(found.length, `${name} no longer quotes the tolerance`).toBeGreaterThan(0);
+      expect(found, name).toEqual(found.map(() => pct));
+    }
+    // "15% or more above the top of the band" asks for a reason; "more than 15% above" is what In-budget only hides; "above the top" is the red badge
+    const band = '10-20 LPA', top = 20, edge = top * OVER_BUDGET_TOLERANCE;
+    expect(asked).toMatch(/is above the top of the role's stated compensation band gets a red Over Budget badge/);
+    expect(isOverBudget(top + 0.01, band)).toBe(true);
+    expect(isOverBudget(top, band)).toBe(false);
+    expect(asked).toMatch(/If it is 15% or more above the top of the band/);
+    expect(isSeverelyOverBudget(edge, band)).toBe(true);
+    expect(isSeverelyOverBudget(edge - 0.01, band)).toBe(false);
+    expect(asked).toMatch(/The In-budget only filter hides only candidates more than 15% above the top of the band/);
+    expect(isWithinBudgetOrNear(edge, band)).toBe(true);
+    expect(isWithinBudgetOrNear(edge + 0.01, band)).toBe(false);
+    expect(asked).toMatch(/If the band or the expected CTC isn't recorded, no reason is asked for/);
+    for (const [expected, ctcBand] of [[null, band], [edge * 2, null], [null, null]] as const) {
+      expect(isSeverelyOverBudget(expected, ctcBand)).toBe(false);
+      expect(isWithinBudgetOrNear(expected, ctcBand)).toBe(true);
+    }
+  });
+
+  it('quotes the Low Pipeline Roles limits from the constants the Dashboard uses', () => {
+    mount();
+    const t = answerTo('What am I looking at on the Dashboard?');
+    expect(t).toContain(`fewer than ${LOW_PIPELINE_MAX_SHORTLISTED} shortlisted candidates and fewer than ${LOW_PIPELINE_MAX_ACTIVE} active candidates`);
+  });
+
+  it('describes the SLA-by-role chart as the funnel steps SLA_STAGE_BUCKETS defines', () => {
+    mount();
+    const t = answerTo('What am I looking at on the Dashboard?');
+    expect(WORD[SLA_STAGE_BUCKETS.length], `add the word for ${SLA_STAGE_BUCKETS.length} steps to this test`).toBeDefined();
+    expect(t).toContain(`${WORD[SLA_STAGE_BUCKETS.length]} steps, from ${SLA_STAGE_BUCKETS[0].label} through ${SLA_STAGE_BUCKETS[SLA_STAGE_BUCKETS.length - 1].label}`);
+  });
+
+  it('names the eight ResumeIQ dimensions as the Scorecard Summary columns', () => {
+    const block = grab('frontend/src/pages/ScorecardSummary.tsx', /const DIMENSIONS[^=]*=\s*\[([\s\S]*?)\n\];/)[0];
+    const labels = [...block.matchAll(/label: '([^']+)'/g)].map(m => m[1]);
+    expect(labels.length).toBeGreaterThan(0);
+    mount();
+    const t = answerTo('What is ResumeIQ, and when does it run?');
+    expect(t).toContain(`It scores ${labels.length} dimensions — ${labels.join(', ')} —`);
+  });
+
+  it('says Active Candidates loads 100 applications and Ready for review up to 500, as the screens request them', () => {
+    const active = numberIn('frontend/src/pages/Candidates.tsx', /const params: Record<string, string \| string\[\]> = \{ limit: '(\d+)'/);
+    const ready = numberIn('frontend/src/pages/ScorecardSummary.tsx', /limit: '(\d+)', scored_only: 'true'/);
+    mount();
+    expect(said(answerTo(/What is Active Candidates/), /the (\d+) highest-scoring applications/)).toBe(active);
+    expect(said(answerTo(/What is My Tasks, and what is the Scorecard Summary table/i), /Ready for review is separate and shows up to (\d+) candidates/)).toBe(ready);
+  });
+});
+
+describe('Help — the figures the backend decides are the ones the backend uses', () => {
+  beforeEach(() => answers({ data: { enabled: false } }));
+
+  it('the aging days per priority are AGING_THRESHOLDS', () => {
+    const block = grab(BACKEND.types, /export const AGING_THRESHOLDS[^=]*=\s*\{([\s\S]*?)\};/)[0];
+    const table: Record<string, number[]> = {};
+    for (const m of block.matchAll(/(P\d):\s*\{\s*yellow:\s*(\d+),\s*red:\s*(\d+)\s*\}/g)) table[m[1]] = [Number(m[2]), Number(m[3])];
+    expect(Object.keys(table)).toEqual(['P0', 'P1', 'P2', 'P3']);
+    mount();
+    const t = answerTo(/What do the role statuses mean/);
+    for (const [priority, days] of Object.entries(table)) {
+      const m = new RegExp(`${priority} after (\\d+) and (\\d+)`).exec(t);
+      expect(m, `${priority} is missing from the answer`).not.toBeNull();
+      expect([Number(m![1]), Number(m![2])], priority).toEqual(days);
+    }
+  });
+
+  it('the SLA windows are the slaChecker hours: 48h standard, 24h from fit 75, 48h idle, 96h assignment feedback, 96h before the Leadership escalation', () => {
+    const standard = constant(BACKEND.sla, 'BREACH_STANDARD_HOURS'), high = constant(BACKEND.sla, 'BREACH_HIGH_SCORE_HOURS');
+    const threshold = constant(BACKEND.sla, 'HIGH_SCORE_THRESHOLD'), idle = constant(BACKEND.sla, 'BREACH_IDLE_HOURS');
+    const assignmentFeedback = constant(BACKEND.sla, 'BREACH_ASSIGNMENT_FEEDBACK_HOURS'), escalation = constant(BACKEND.sla, 'LEADERSHIP_ESCALATION_HOURS');
+    // the window is chosen by "fit score >= HIGH_SCORE_THRESHOLD", so "75+" is right and "above 75" would not be
+    grab(BACKEND.sla, /aiFitScore >= HIGH_SCORE_THRESHOLD \? BREACH_HIGH_SCORE_HOURS : BREACH_STANDARD_HOURS/);
+    mount();
+    const t = answerTo('What triggers a "pending action" or an "SLA breach"?');
+    expect(said(t, /Idle Candidate \((\d+)h\+ at/)).toBe(idle);
+    expect(said(t, /ResumeIQ fit score (\d+)\+\) gets a tighter \d+h window/)).toBe(threshold);
+    expect(said(t, /gets a tighter (\d+)h window instead of the standard/)).toBe(high);
+    expect(said(t, /instead of the standard (\d+)h/)).toBe(standard);
+    expect(said(t, /Assignment Feedback Due \((\d+)h\) are untouched/)).toBe(assignmentFeedback);
+    expect(said(t, /still open (\d+)h after the interview/)).toBe(escalation);
+    const ai = answerTo('What does the AI see about a candidate, and who makes the decision?');
+    expect(said(ai, /a ResumeIQ fit of (\d+) or more gives a tighter \d+-hour window/)).toBe(threshold);
+    expect(said(ai, /a ResumeIQ fit of \d+ or more gives a tighter (\d+)-hour window/)).toBe(high);
+  });
+
+  it('Idle Candidate covers the stages the checker lists, after the hours it waits', () => {
+    const idle = constant(BACKEND.sla, 'BREACH_IDLE_HOURS');
+    const stages = quotedList(grab(BACKEND.sla, /stages: \[([^\]]+)\], actionType: 'Idle Candidate'/)[0]);
+    expect(stages.length).toBeGreaterThan(0);
+    mount();
+    const sla = answerTo('What triggers a "pending action" or an "SLA breach"?');
+    expect(sla).toContain(`(${idle}h+ at ${stages.slice(0, -1).join(', ')} or ${stages[stages.length - 1]})`);
+    const glossary = answerTo('What do the items in Other Pending Actions and Leadership Alerts mean?');
+    expect(glossary).toContain(`Idle Candidate — no movement for ${idle} hours at ${stages.slice(0, -1).join(', ')} or ${stages[stages.length - 1]}`);
+  });
+
+  it('the assignment deadline is the 60 hours the send route stores, and the breach is raised from that stored deadline', () => {
+    const hours = arithmetic(grab(BACKEND.interviews, /const deadline = new Date\(Date\.now\(\) \+ ([\d\s*]+)\);/)[0], 'assignment deadline') / 3_600_000;
+    grab(BACKEND.sla, /ir\.assignment_deadline < NOW\(\)/);
+    mount();
+    const sla = answerTo('What triggers a "pending action" or an "SLA breach"?');
+    expect(said(sla, /within (\d+)h of the assignment being sent/)).toBe(hours);
+    const glossary = answerTo('What do the items in Other Pending Actions and Leadership Alerts mean?');
+    expect(said(glossary, /Assignment deadline breached — no submission recorded within (\d+) hours of sending/)).toBe(hours);
+    const round = answerTo('How does an Assignment round work, from sending to outcome?');
+    expect(said(round, /The (\d+)-hour submission deadline starts when the email goes out/)).toBe(hours);
+    expect(said(round, /Assignment deadline breached is raised once (\d+) hours have passed/)).toBe(hours);
+  });
+
+  it('automatic advance needs a score above 2.5 for both an interview and an assignment, as the feedback route checks', () => {
+    const interview = numberIn(BACKEND.interviews, /overall_round_score != null && overall_round_score > ([\d.]+)/);
+    const assignment = numberIn(BACKEND.interviews, /assignment_overall_score != null && assignment_overall_score > ([\d.]+)/);
+    expect(interview).toBe(assignment);
+    mount();
+    const t = answerTo('Can a candidate move to the next stage automatically?');
+    expect(said(t, /with an average score above ([\d.]+) out of 5/)).toBe(interview);
+    expect(said(t, /with a weighted score above ([\d.]+) out of 5/)).toBe(assignment);
+  });
+
+  it('the assignment score areas carry the weights the route multiplies them by', () => {
+    const w = grab(BACKEND.interviews, /score_technical_accuracy \* ([\d.]+) \+ score_problem_solving \* ([\d.]+) \+\s*score_clarity \* ([\d.]+) \+ score_practical_thinking \* ([\d.]+) \+ score_completeness \* ([\d.]+)/).map(x => Math.round(Number(x) * 100));
+    mount();
+    const t = answerTo('How does an Assignment round work, from sending to outcome?');
+    const m = /Technical Accuracy \((\d+)%\), Problem Solving \((\d+)%\), Clarity & Structure \((\d+)%\), Practical Thinking \((\d+)%\) and Completeness \((\d+)%\)/.exec(t);
+    expect(m, 'the weights sentence is gone').not.toBeNull();
+    expect(m!.slice(1).map(Number)).toEqual(w);
+    expect(w.reduce((a, b) => a + b, 0)).toBe(100);
+  });
+
+  it('the red ! on the Dashboard means no movement for MORE than NO_MOVEMENT_DAYS, as the comparison is written', () => {
+    const days = constant(BACKEND.dashboard, 'NO_MOVEMENT_DAYS');
+    grab(BACKEND.dashboard, /getTime\(\)\) > NO_MOVEMENT_DAYS \* 86400000/);   // strictly greater: "3+ days" would be wrong
+    mount();
+    expect(said(answerTo('What am I looking at on the Dashboard?'), /in more than (\d+) days/)).toBe(days);
+  });
+
+  it('My Tasks lists share one window of the size the pending query returns', () => {
+    const window = numberIn(BACKEND.dashboard, /ORDER BY pa\.priority_level DESC, pa\.created_at ASC LIMIT (\d+)/);
+    mount();
+    const t = answerTo(/What is My Tasks, and what is the Scorecard Summary table/i);
+    expect(said(t, /one shared list of the (\d+) highest-priority/)).toBe(window);
+    expect(said(t, /with a separate list of (\d+) for it/)).toBe(window);
+  });
+
+  it('ResumeIQ reads resumes up to RESUME_MAX_BYTES and the first RESUME_MAX_PAGES pages of a PDF', () => {
+    const megabytes = constant(BACKEND.resume, 'RESUME_MAX_BYTES') / (1024 * 1024);
+    const pages = constant(BACKEND.resume, 'RESUME_MAX_PAGES');
+    mount();
+    const t = answerTo('What is ResumeIQ, and when does it run?');
+    expect(said(t, /up to (\d+) MB, and the first \d+ pages of a PDF/)).toBe(megabytes);
+    expect(said(t, /up to \d+ MB, and the first (\d+) pages of a PDF/)).toBe(pages);
+    expect(said(t, /a file over (\d+) MB — is not a failure/)).toBe(megabytes);
+  });
+});
+
+describe('Help — the Sourcing figures are the ones the module uses', () => {
+  beforeEach(() => answers({ data: { enabled: true } }));
+  const mountReady = async () => { mount(); await screen.findByText(SOURCING_TITLE); };
+  const DEFAULTS = (key: string) => numberIn(BACKEND.config, new RegExp(`\\b${key}: (\\d+),`));
+
+  it('names the channels the plan can use, and the three that have a weekly tracker', async () => {
+    const channels = quotedList(grab(BACKEND.config, /export const SOURCING_CHANNELS = \[([^\]]*)\]/)[0]);
+    const tracked = quotedList(grab(BACKEND.config, /export const TRACKED_CHANNELS[^=]*=\s*\[([^\]]*)\]/)[0]);
+    await mountReady();
+    expect(answerTo('What is Sourcing execution, and where do I find it?')).toContain(`(${channels.join(', ')})`);
+    expect(screen.getByRole('button', { name: `How does the weekly tracker work for ${inWords(tracked)}?` })).toBeInTheDocument();
+  });
+
+  it('due dates: 1 or 2 working days for the first task of each channel, as activationSpec sets them', async () => {
+    const days = (channelBranch: RegExp) => numberIn(BACKEND.templates, channelBranch);
+    const portal = days(/PORTAL_CHANNELS\.includes\(channel\)\) \{[\s\S]*?addWorkingDays\(activationDate, (\d+)/);
+    const portals = quotedList(grab(BACKEND.config, /export const PORTAL_CHANNELS[^=]*=\s*\[([^\]]*)\]/)[0]);
+    const code: Record<string, number> = {};
+    for (const channel of portals) code[channel] = portal;
+    code['Agency'] = days(/channel === 'Agency'\) \{[\s\S]*?addWorkingDays\(activationDate, (\d+)/);
+    code['Internal Referral'] = days(/channel === 'Internal Referral'\) \{[\s\S]*?addWorkingDays\(activationDate, (\d+)/);
+    code['Direct Outreach'] = days(/channel === 'Direct Outreach'\) \{[\s\S]*?addWorkingDays\(activationDate, (\d+)/);
+    await mountReady();
+    const t = answerTo('How are due dates worked out?');
+    const m = /\(Monday to Friday\): (\d+) working days? for (.+?), (\d+) for (.+?)\. After that/.exec(t);
+    expect(m, 'the first-task sentence is gone').not.toBeNull();
+    const names = (list: string) => list.split(/, | and /);
+    const quoted: Record<string, number> = {};
+    for (const channel of names(m![2])) quoted[channel] = Number(m![1]);
+    for (const channel of names(m![4])) quoted[channel] = Number(m![3]);
+    expect(quoted).toEqual(code);
+  });
+
+  it('due dates: a portal posting stays live 30 days and renews 27 days after, agencies every 7 days and referrals every 14, as the settings and the follow-on formula say', async () => {
+    const [linkedin, naukri] = grab(BACKEND.config, /portal_expiry_days: \{ 'LinkedIn': (\d+), 'Naukri\/IIMjobs': (\d+) \}/).map(Number);
+    const lead = DEFAULTS('renew_lead_days');
+    // the renewal falls due live − lead days after the posting, and after each renewal
+    grab(BACKEND.templates, /addCalendarDays\(start, Math\.max\(1, live - lead\)\)/);
+    grab(BACKEND.templates, /Math\.max\(1, cadenceDays - leadDays\)/);
+    expect(linkedin).toBe(naukri);   // one sentence covers both portals
+    await mountReady();
+    const t = answerTo('How are due dates worked out?');
+    const m = /stay live for (\d+) days, so its renewal falls due (\d+) days after the posting date and again (\d+) days after each renewal; agencies are followed up every (\d+) days and referrals reposted every (\d+) days/.exec(t);
+    expect(m, 'the follow-up sentence is gone').not.toBeNull();
+    expect(m!.slice(1).map(Number)).toEqual([linkedin, linkedin - lead, linkedin - lead, DEFAULTS('agency_followup_days'), DEFAULTS('referral_repost_days')]);
+  });
+
+  it('the qualified target: 1 to 500, default 5 for P0 and P1 only, over the last 7 days on each of the last 5 working days', async () => {
+    const min = constant(BACKEND.config, 'MIN_QUALIFIED_TARGET'), max = constant(BACKEND.config, 'MAX_QUALIFIED_TARGET');
+    grab(BACKEND.plans, /priority === 'P0' \|\| priority === 'P1' \? settings\.volume_min_qualified : null/);
+    const [target, window, gap] = [DEFAULTS('volume_min_qualified'), DEFAULTS('volume_window_days'), DEFAULTS('volume_gap_working_days')];
+    await mountReady();
+    const t = answerTo('Can the qualified-candidate target differ by role?');
+    expect(t).toContain(`(${min}–${max})`);
+    expect(said(t, /default is (\d+) for P0 and P1 roles; a P2 or P3 role has no target/)).toBe(target);
+    expect(said(t, /qualified in the last (\d+) days/)).toBe(window);
+    const exception = answerTo(/What is an exception, and how do I resolve one/);
+    expect(said(exception, /in the last (\d+) days on each of the last \d+ working days/)).toBe(window);
+    expect(said(exception, /in the last \d+ days on each of the last (\d+) working days/)).toBe(gap);
+  });
+
+  it('resolving an exception: a catch-up date within 14 days and a blocker deadline within 60 days, as the route enforces', async () => {
+    const catchUp = numberIn(BACKEND.plans, /s > addCalendarDays\(today, (\d+)\)\) throw new SourcingError\(400, 'Pick a catch-up date/);
+    const blocker = numberIn(BACKEND.plans, /due > addCalendarDays\(today, (\d+)\)\) throw new SourcingError\(400, 'A blocker needs/);
+    await mountReady();
+    const t = answerTo(/What is an exception, and how do I resolve one/);
+    expect(said(t, /a reason and a date within (\d+) days/)).toBe(catchUp);
+    expect(said(t, /a deadline within (\d+) days/)).toBe(blocker);
+  });
+
+  it('"Provisional" lasts the number of weeks the first engine run stamps, and "qualified" means a ResumeIQ score above the one the queries use', async () => {
+    const weeks = constant(BACKEND.settings, 'DEFAULT_SHADOW_DAYS') / 7;
+    const scored = numberIn(BACKEND.qualified, /ai_fit_score > (\d+) THEN/);
+    const dashboardScored = numberIn(BACKEND.dashboard, /ai_fit_score > (\d+)\) AS scored_above_60_count/);
+    expect(dashboardScored).toBe(scored);
+    await mountReady();
+    expect(said(answerTo(/What does "Provisional" mean/), /first (\d+) weeks/)).toBe(weeks);
+    expect(said(answerTo('Can the qualified-candidate target differ by role?'), /scored above (\d+) by ResumeIQ/)).toBe(scored);
+    expect(said(answerTo('Where do the recommended next steps come from?'), /how many scored above (\d+) and so on/)).toBe(scored);
+  });
+
+  it('the next-steps answer: reused for up to ADVICE_TTL_MS, rewritten after ADVICE_CHANGED_MIN_AGE_MS, Refresh once per ADVICE_REFRESH_COOLDOWN_MS', async () => {
+    const ttl = constant(BACKEND.advisor, 'ADVICE_TTL_MS'), changed = constant(BACKEND.advisor, 'ADVICE_CHANGED_MIN_AGE_MS'), cooldown = constant(BACKEND.advisor, 'ADVICE_REFRESH_COOLDOWN_MS');
+    await mountReady();
+    const t = answerTo('Where do the recommended next steps come from?');
+    expect(ttl, 'the answer says "up to a day"').toBe(24 * 60 * 60 * 1000);
+    expect(t).toMatch(/reused for up to a day while the numbers are the same/);
+    expect(said(t, /once the saved ones are at least (\d+) minutes old/) * 60 * 1000).toBe(changed);
+    expect(cooldown, 'the answer says "at most once a minute"').toBe(60 * 1000);
+    expect(t).toMatch(/\(at most once a minute\)/);
   });
 });
