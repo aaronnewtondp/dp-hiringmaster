@@ -632,6 +632,66 @@ test.describe('Schema replay: schema.sql + seed.sql on an empty database', () =>
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // The drift test below is only worth anything if the comparison can SEE a difference. Each kind of structural change is made in a transaction on
+  // the replay (DDL rolls back), must show up under its own heading, and must be gone again afterwards; data changes must not show up at all.
+  test.describe('the structure comparison notices what differs (and ignores data)', () => {
+    const cases: Array<{ heading: string; ddl: string; expectLine: RegExp }> = [
+      { heading: 'tables',      ddl: `CREATE TABLE pw_probe_table (x int)`,                               expectLine: /^\[tables\] only in changed: pw_probe_table$/ },
+      { heading: 'columns',     ddl: `ALTER TABLE roles ADD COLUMN pw_probe int`,                         expectLine: /^\[columns\] only in changed: roles\.pw_probe integer$/ },
+      { heading: 'columns',     ddl: `ALTER TABLE roles ALTER COLUMN priority SET DEFAULT 'P0'`,          expectLine: /^\[columns\] only in (changed|baseline): roles\.priority text NOT NULL DEFAULT 'P[01]'::text$/ },
+      { heading: 'columns',     ddl: `ALTER TABLE roles ALTER COLUMN title DROP NOT NULL`,                expectLine: /^\[columns\] only in (changed|baseline): roles\.title text( NOT NULL)?$/ },
+      { heading: 'constraints', ddl: `ALTER TABLE applications DROP CONSTRAINT applications_status_check`, expectLine: /^\[constraints\] only in baseline: applications\.applications_status_check CHECK/ },
+      { heading: 'indexes',     ddl: `CREATE INDEX pw_probe_idx ON roles (title)`,                        expectLine: /^\[indexes\] only in changed: pw_probe_idx :: CREATE INDEX pw_probe_idx ON public\.roles/ },
+      { heading: 'indexes',     ddl: `DROP INDEX idx_roles_status`,                                       expectLine: /^\[indexes\] only in baseline: idx_roles_status :: / },
+      { heading: 'functions',   ddl: `CREATE OR REPLACE FUNCTION format_seq_id(seq regclass, prefix TEXT, pad_width INT) RETURNS TEXT AS $$ SELECT prefix || LPAD(nextval(seq)::TEXT, pad_width, '0') $$ LANGUAGE SQL`, expectLine: /^\[functions\] only in (changed|baseline): format_seq_id\(seq regclass, prefix text, pad_width integer\) md5:[0-9a-f]{32}$/ },
+      { heading: 'triggers',    ddl: `DROP TRIGGER roles_updated_at ON roles`,                            expectLine: /^\[triggers\] only in baseline: roles\.roles_updated_at :: / },
+      { heading: 'sequences',   ddl: `ALTER SEQUENCE seq_role INCREMENT BY 2`,                            expectLine: /^\[sequences\] only in (changed|baseline): seq_role start=8 inc=[12] / },
+      { heading: 'rowSecurity', ddl: `ALTER TABLE sourcing_plans DISABLE ROW LEVEL SECURITY`,             expectLine: /^\[rowSecurity\] only in (changed|baseline): sourcing_plans rls=(true|false)$/ },
+      { heading: 'policies',    ddl: `CREATE POLICY pw_probe ON roles USING (true)`,                      expectLine: /^\[policies\] only in changed: roles\.pw_probe$/ },
+    ];
+
+    for (const c of cases) {
+      test(`a ${c.heading} change is reported: ${c.ddl.slice(0, 70)}`, async () => {
+        const baseline = await schemaFingerprint(db);
+        await db.query('BEGIN');
+        let changed: Awaited<ReturnType<typeof schemaFingerprint>>;
+        try {
+          await db.query(c.ddl);
+          changed = await schemaFingerprint(db);
+        } finally {
+          await db.query('ROLLBACK');
+        }
+        const diff = diffFingerprints(baseline, changed, ['baseline', 'changed']);
+        expect(diff.length, diff.join('\n')).toBeGreaterThanOrEqual(1);
+        expect(diff.some(l => c.expectLine.test(l)), `expected a line like ${c.expectLine} in:\n${diff.join('\n')}`).toBe(true);
+        const allowed = c.heading === 'tables' ? ['tables', 'columns', 'rowSecurity'] : [c.heading];      // a new table brings its columns and its RLS flag
+        expect(diff.every(l => allowed.some(h => l.startsWith(`[${h}]`))), `only ${allowed.join(', ')} may differ:\n${diff.join('\n')}`).toBe(true);
+        expect(diffFingerprints(baseline, await schemaFingerprint(db), ['baseline', 'after rollback'])).toEqual([]);
+      });
+    }
+
+    test('rows and sequence positions are NOT structure: inserting data and moving a sequence changes nothing in the fingerprint', async () => {
+      const baseline = await schemaFingerprint(db);
+      await db.query('BEGIN');
+      try {
+        await db.query(`INSERT INTO agencies (name) VALUES ('Fingerprint probe')`);
+        await db.query(`SELECT setval('seq_agency', (SELECT last_value FROM seq_agency) + 5)`);
+        expect(diffFingerprints(baseline, await schemaFingerprint(db))).toEqual([]);
+      } finally {
+        await db.query('ROLLBACK');
+      }
+    });
+
+    test('diffFingerprints names which side has the line, in the order the labels were given, and is empty for identical input', async () => {
+      const a = await schemaFingerprint(db);
+      const b = { ...a, columns: [...a.columns, 'zzz.extra integer'], tables: a.tables.filter(t => t !== 'users') };
+      expect(diffFingerprints(a, a)).toEqual([]);
+      expect(diffFingerprints(a, b, ['left', 'right'])).toEqual(['[tables] only in left: users', '[columns] only in right: zzz.extra integer']);
+      expect(diffFingerprints(b, a, ['x', 'y'])).toEqual(['[tables] only in y: users', '[columns] only in x: zzz.extra integer']);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
   test.describe('three-place drift: the database under test against the replay', () => {
     test('the structure of the live test database equals the structure schema.sql produces (columns, constraints, indexes, functions, triggers, sequences, RLS)', async () => {
       const live = await schemaFingerprint(admin);

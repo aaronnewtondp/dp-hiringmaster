@@ -22,8 +22,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
-import { getToken, authed, createCandidateWithApp } from '../helpers/api';
+import { getToken, authed, uid } from '../helpers/api';
+import { purgeRolesFast } from '../helpers/sourcing-db';
 import { TEST_DB_URL } from '../helpers/db';
+
+// Every candidate this file makes has an address like db01+<id>@example.com, so afterAll (and the start of the next run, after a killed one) removes
+// them with their applications and log rows. They used to stay behind — three rejected / withdrawn applications on R006 per run, one of them
+// backdated 91 days — and accumulated in every Archived Pipeline view and count.
+const EMAIL_LIKE = 'db01+%@example.com';
 
 test.describe('Talent Pool Archival — immediate, no age threshold (local Postgres, direct connection)', () => {
   let client: Client;
@@ -31,11 +37,23 @@ test.describe('Talent Pool Archival — immediate, no age threshold (local Postg
   test.beforeAll(async () => {
     client = new Client({ connectionString: TEST_DB_URL });
     await client.connect();
+    await purgeRolesFast(client, [], [EMAIL_LIKE]);
   });
 
   test.afterAll(async () => {
-    await client.end();
+    test.setTimeout(120_000);
+    try { await purgeRolesFast(client, [], [EMAIL_LIKE]); } finally { await client.end(); }
   });
+
+  // A candidate + application on the seeded role R006 through the real API (helpers/api.ts createCandidateWithApp, with an address the clean-up can find).
+  async function createCandidateWithApp(request: Parameters<typeof authed>[0], token: string) {
+    const res = await authed(request, token).post('/api/candidates', {
+      full_name: `DB01 Candidate ${uid()}`, email: `db01+${uid()}@example.com`, role_id: 'R006',
+    });
+    expect(res.status()).toBe(201);
+    const body = await res.json();
+    return { candidate: body.candidate, application: body.application };
+  }
 
   test('a Rejected application backdated past 90 days is excluded from the default pipeline view but reachable via archived=true', async ({ request }) => {
     const token = await getToken(request, 'hr');
