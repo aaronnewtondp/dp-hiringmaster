@@ -4,6 +4,7 @@ import {
   isGoogleId, parseFolderListing, parseGoogleUrl, quotaReason, rankFolderFiles,
 } from './google.js';
 import type { FolderEntry, GoogleKind } from './google.js';
+import { expectCpuUnder } from '../../../testing/timing.js';
 
 const ID = 'AbCdEfGhIj-_0123456789xyzXYZ_abcdefg';   // 36 characters, like a real Drive id
 const id = (c: string, n = 33) => c.repeat(n);
@@ -118,15 +119,16 @@ describe('parseGoogleUrl — every shape of Drive / Docs link', () => {
     });
 
     it('is linear on a hostile path of thousands of account segments', () => {
-      const started = Date.now();
-      for (const prefix of ['/u/0'.repeat(30_000), '/a/x'.repeat(30_000), '/u/0/a/x'.repeat(15_000)]) {
-        expect(parse(`https://drive.google.com${prefix}/uc?id=${ID}`)).toEqual(target('file'));
-        expect(parse(`https://drive.google.com${prefix}/zzz?id=${ID}`).ok).toBe(false);
-        expect(parse(`https://docs.google.com${prefix}/document/d/${ID}/edit`)).toEqual(target('doc'));
-        expect(parse(`https://docs.google.com${prefix}/nothing`).ok).toBe(false);
-      }
-      expect(parse(`https://drive.google.com/open${'/'.repeat(100_000)}?id=${ID}`)).toEqual(target('file'));
-      expect(Date.now() - started).toBeLessThan(1500);
+      // CPU time scaled to the machine (testing/timing.ts), not the clock: a quadratic prefix reader costs minutes on these paths
+      expectCpuUnder(1500, () => {
+        for (const prefix of ['/u/0'.repeat(30_000), '/a/x'.repeat(30_000), '/u/0/a/x'.repeat(15_000)]) {
+          expect(parse(`https://drive.google.com${prefix}/uc?id=${ID}`)).toEqual(target('file'));
+          expect(parse(`https://drive.google.com${prefix}/zzz?id=${ID}`).ok).toBe(false);
+          expect(parse(`https://docs.google.com${prefix}/document/d/${ID}/edit`)).toEqual(target('doc'));
+          expect(parse(`https://docs.google.com${prefix}/nothing`).ok).toBe(false);
+        }
+        expect(parse(`https://drive.google.com/open${'/'.repeat(100_000)}?id=${ID}`)).toEqual(target('file'));
+      }, 'hostile account prefixes');
     });
   });
 
@@ -404,11 +406,11 @@ describe('parseFolderListing', () => {
   });
 
   it('survives hostile markup in bounded time: tens of thousands of unclosed anchors, a huge attribute', () => {
-    const t0 = Date.now();
-    parseFolderListing(`<a href="https://drive.google.com/file/d/${id('a')}/view">`.repeat(8_000));
-    parseFolderListing(`<a ${'x '.repeat(100_000)} href="https://drive.google.com/file/d/${id('a')}/view">no end`);
-    parseFolderListing(`id="entry-${id('a')}" `.repeat(10_000));
-    expect(Date.now() - t0).toBeLessThan(3000);
+    expectCpuUnder(3000, () => {
+      parseFolderListing(`<a href="https://drive.google.com/file/d/${id('a')}/view">`.repeat(8_000));
+      parseFolderListing(`<a ${'x '.repeat(100_000)} href="https://drive.google.com/file/d/${id('a')}/view">no end`);
+      parseFolderListing(`id="entry-${id('a')}" `.repeat(10_000));
+    }, 'hostile folder listing');
   });
 });
 
