@@ -7,10 +7,16 @@ import { Spinner, EmptyState } from '../components/shared/Badges.tsx';
 import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 
 const COLUMN_INFO: Record<string, string> = {
-  'Hires': "Candidates sourced through this agency (their Source is Agency) who have an application at Offer Accepted or Joined — counted once per candidate. A lifetime count, not scoped to any date range.",
+  'Hires': "Candidates sourced through this agency (their Source is Agency) who have an application at Offer Accepted or Joined — counted once per candidate. The test is the application's stage, so a candidate who accepted and later withdrew still counts. A lifetime count, not scoped to any date range.",
   'Commission Tiers': "This agency's fee tiers by CTC band — e.g. a lower-band placement billed at one rate, a higher-band placement at another.",
   'Replacement': "The window (in days) during which this agency will re-source a replacement at no extra cost if a placed hire doesn't work out, plus what triggers that guarantee.",
   'Billing and Payment terms': "When this agency expects payment relative to a candidate's joining date, and any stated penalty for late payment.",
+};
+
+// Hover text for headers that carry no info marker: the label stays as it is and the explanation shows on hover.
+const HEADER_HOVER: Record<string, string> = {
+  'Status': "The agency's contract status, for reference. It doesn't block anything in HMS: every agency can still be picked as a candidate's Sourcing Agency.",
+  'Requirement Type': "The kinds of roles this agency specialises in, as written on the agency page (Requirement Type).",
 };
 
 export default function Agencies() {
@@ -52,7 +58,7 @@ export default function Agencies() {
                   ['Billing and Payment terms', 'w-[15%]'],
                   ['Agreement Link', 'w-[9%]'],
                 ].map(([h, w]) => (
-                  <th key={h} className={`table-th ${w} px-2 whitespace-normal align-bottom`}>
+                  <th key={h} title={HEADER_HOVER[h]} className={`table-th ${w} px-2 whitespace-normal align-bottom`}>
                     <span className="inline-flex items-center gap-1">
                       {h}
                       {COLUMN_INFO[h] && <InfoTooltip text={COLUMN_INFO[h]} width="w-60" />}

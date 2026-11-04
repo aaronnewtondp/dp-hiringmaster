@@ -325,6 +325,23 @@ describe('SourcingPlanPanel — the qualified-candidate target', () => {
     expect(screen.getByText(/this role's own/)).toBeInTheDocument();
   });
 
+  it('the info marker on the target says its "Shortlisted" counts the move out of Applied and Screened in the last 7 days, not who is in a stage now', async () => {
+    mount(view());
+    fireEvent.mouseEnter(within(await screen.findByTestId('volume')).getByRole('button', { name: 'More info' }));
+    const tip = screen.getByText(/Qualified means/).textContent!;
+    expect(tip).toContain('counts the move out of Applied and Screened itself, in the last 7 days');      // utils/sourcingQualified.ts: first Stage Changed away from Applied and Screened
+    expect(tip).toContain('not the same as Shortlisted on the Dashboard or Active Shortlist on the Roles page');
+  });
+
+  it('the Applications by source marker says it is the form answer, not the candidate Source that feeds Source quality on the Dashboard', async () => {
+    mount(view({ output: [{ tag: 'Naukri/IIMjobs', applications: 12, qualified: 5 }] }));
+    const heading = await screen.findByText('Applications by source');
+    fireEvent.mouseEnter(heading.parentElement!.querySelector('[aria-label="More info"]')!);
+    const tip = heading.parentElement!.querySelector('div.absolute')!.textContent!;
+    expect(tip).toContain('so it is what applicants chose, not a measurement');
+    expect(tip).toContain("It is not the candidate's Source field, which is what feeds Source quality on the Dashboard");
+  });
+
   it('a role with no target (P2/P3 default) says nothing is flagged and offers "Set a target", which opens Edit plan', async () => {
     mount(view({
       role: { ...view().role!, priority: 'P2' },

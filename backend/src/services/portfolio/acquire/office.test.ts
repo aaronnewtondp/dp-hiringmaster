@@ -10,6 +10,7 @@ import { BUDGET_REASON, INJECTION_REASON } from './pdf.js';
 import type { AcquireContext } from './types.js';
 import { BAD_ZIP_REASON, TOO_BIG_REASON, TOO_MANY_ENTRIES_REASON, ZIP_MAX_ENTRIES, ZipGuardError } from './zip.js';
 import { buildZip, forgedDirectory, patchDeclaredSizes, zipOf } from './zip.fixtures.js';
+import { assertLinearOn, cpuTimed, cpuTimedAsync, scaled } from '../../../testing/timing.js';
 
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -86,11 +87,25 @@ function buildPptx(slides: Record<number, string>, media: Record<string, Buffer>
 
 const words = (n: number) => Array.from({ length: n }, (_, i) => `word${i}`).join(' ');
 
-/** Times `fn`; returns how many milliseconds it took. */
+/**
+ * Times `fn`; returns how many milliseconds of this process's CPU it used. CPU time, not the clock: every function timed here is synchronous on this thread, so
+ * what counts is the work it does, and being descheduled on a loaded or slower machine costs none of it (the 16 MB cases failed at 2.41 s against 2.0 s with no
+ * regression). Callers compare the result with `scaled(bound)` (testing/timing.ts): the bounds were set at 5x to 70x what the code costs on the machine they were
+ * written on, to catch a quadratic or backtracking walk, which costs seconds to minutes on these inputs.
+ */
 function timed(fn: () => void): number {
-  const started = Date.now();
-  fn();
-  return Date.now() - started;
+  return cpuTimed(fn).ms;
+}
+
+/**
+ * "This stays linear": `fn` is run on `make(small)` and on `make(big)` (built BEFORE anything is measured) and the big one may cost no more CPU than linear scaling
+ * from the small one allows (assertLinear), whatever the speed of the machine; a walk that restarts its search from each tag costs `big / small` times too much.
+ * The absolute `scaled(backstopMs)` on the big input is the second guard, for a code path that is linear but a hundred times slower than it was.
+ * (A fixed millisecond bound alone is blind to a quadratic walk made of native searches: restarting the ">" search at every tag of 150,000 unclosed ones costs
+ * 0.9 s here, under the old 1,000 ms.)
+ */
+function linearOn<I>(label: string, make: (n: number) => I, fn: (input: I) => unknown, small: number, big: number, backstopMs = 1000, runs = 3) {
+  return assertLinearOn(label, make, fn, small, big, { backstopMs, runs });
 }
 
 // ─── what is this file ───────────────────────────────────────────────────────
@@ -169,17 +184,15 @@ describe('extractDocxContent', () => {
 
   it('is linear on a hostile part made of unclosed tags (100,000 unclosed <w:t, <w:p and <a:blip)', () => {
     for (const unit of ['<w:t ', '<w:t', '<w:p', '<a:blip r:embed="', '<w:t><w:t>', '<', '<w:t x=">']) {
-      const xml = unit.repeat(100_000);
-      let result: ReturnType<typeof extractDocxContent> | undefined;
-      expect(timed(() => { result = extractDocxContent(xml); })).toBeLessThan(1000);
-      expect(result!.text.length).toBeLessThan(2_000_000);
-      expect(result!.pictureIds.length).toBeLessThanOrEqual(200);
+      linearOn(`unclosed ${JSON.stringify(unit)}`, n => unit.repeat(n), extractDocxContent, 12_500, 100_000);
+      const result = extractDocxContent(unit.repeat(100_000));
+      expect(result.text.length).toBeLessThan(2_000_000);
+      expect(result.pictureIds.length).toBeLessThanOrEqual(200);
     }
   });
 
   it('is linear when every tag is closed except one far away (the search for ">" must not restart from each "<")', () => {
-    const xml = `${'<w:t '.repeat(150_000)}>x</w:t>`;
-    expect(timed(() => extractDocxContent(xml))).toBeLessThan(1000);
+    linearOn('every tag unclosed but one far away', n => `${'<w:t '.repeat(n)}>x</w:t>`, extractDocxContent, 18_750, 150_000);
   });
 });
 
@@ -215,10 +228,9 @@ describe('the Word body cap (16 MB) and the text cap (2,000,000 characters)', { 
     ['nested open tags', (n: number) => body(repeat('<w:p><w:r>', n))],
     ['one giant attribute', (n: number) => body(`<w:t a="${'x'.repeat(n)}">y</w:t>`)],
     ['CDATA', (n: number) => body(repeat('<w:t><![CDATA[text]]></w:t>', n))],
-  ])('16 MB of %s is walked in well under two seconds, and the text kept never passes the cap', (_name, build) => {
-    const xml = build(16 * MB);
-    let result: ReturnType<typeof extractDocxContent> | undefined;
-    expect(timed(() => { result = extractDocxContent(xml); })).toBeLessThan(2000);
+  ])('16 MB of %s is walked in time linear in its size (and well under two seconds), and the text kept never passes the cap', (_name, build) => {
+    let result: ReturnType<typeof extractDocxContent> | undefined;       // the last run is the 16 MB one
+    linearOn(`16 MB of ${_name}`, build, input => (result = extractDocxContent(input)), 2 * MB, 16 * MB, 2000, 2);
     expect(result!.text.length).toBeLessThanOrEqual(DOCX_MAX_TEXT_CHARS + 16);
   });
 
@@ -274,11 +286,12 @@ describe('imageRelationships', () => {
   it('the first definition of an id wins, and a hostile file of unclosed tags is read in linear time', () => {
     const xml = rels(`<Relationship Id="a" Type="${IMAGE_REL}" Target="media/one.png"/>`, `<Relationship Id="a" Type="${IMAGE_REL}" Target="media/two.png"/>`);
     expect(imageRelationships(xml, 'word/').get('a')).toBe('word/media/one.png');
-    expect(timed(() => imageRelationships('<Relationship Id="'.repeat(100_000), 'word/'))).toBeLessThan(1000);
-    expect(timed(() => imageRelationships('<Relationship Id=" Target=" Type="'.repeat(60_000), 'word/'))).toBeLessThan(1000);
+    const relsOf = (input: string) => imageRelationships(input, 'word/');
+    linearOn('unclosed Relationship Id', n => '<Relationship Id="'.repeat(n), relsOf, 12_500, 100_000);
+    linearOn('unclosed Relationship attributes', n => '<Relationship Id=" Target=" Type="'.repeat(n), relsOf, 7_500, 60_000);
     // One enormous tag made of quote-less and unclosed attributes: the attribute reader must not rescan per '='.
-    expect(timed(() => imageRelationships(`${'<Relationship Id=" Target=" Type="'.repeat(60_000)}/>`, 'word/'))).toBeLessThan(1000);
-    expect(timed(() => imageRelationships(`<Relationship ${'a=b '.repeat(200_000)}/>`, 'word/'))).toBeLessThan(1000);
+    linearOn('one enormous tag of unclosed attributes', n => `${'<Relationship Id=" Target=" Type="'.repeat(n)}/>`, relsOf, 7_500, 60_000);
+    linearOn('one enormous tag of bare a=b pairs', n => `<Relationship ${'a=b '.repeat(n)}/>`, relsOf, 25_000, 200_000);
   });
 });
 
@@ -495,9 +508,9 @@ describe('prepareDocx', () => {
       // The same archive lying about its size is stopped by its own claim, never by running to the cap.
       const lying = buildZip([{ name: 'word/document.xml', rawCompressed: bomb, rawSize: 40 * MB, declaredSize: 5000 }]);
       const rss = process.memoryUsage().rss;
-      const started = Date.now();
-      expect(await prepareDocx(lying, 'f', ctxFor())).toMatchObject({ outcome: 'unreviewable', reason: BAD_ZIP_REASON });
-      expect(Date.now() - started).toBeLessThan(1000);
+      const { value: refused, ms } = await cpuTimedAsync(() => prepareDocx(lying, 'f', ctxFor()));
+      expect(refused).toMatchObject({ outcome: 'unreviewable', reason: BAD_ZIP_REASON });
+      expect(ms).toBeLessThan(scaled(1000));
       expect((spy.mock.calls[0][1] as { maxOutputLength: number }).maxOutputLength).toBeLessThanOrEqual(DOCX_MAX_XML_BYTES);
       expect(process.memoryUsage().rss - rss).toBeLessThan(DOCX_MAX_XML_BYTES * 3);
     });
@@ -505,18 +518,16 @@ describe('prepareDocx', () => {
     it('100,000 unclosed <w:t tags in a document.xml is read in well under a second and gives a bounded result', async () => {
       const xml = `<w:document ${WORD_NS}><w:body>${'<w:t '.repeat(100_000)}</w:body></w:document>`;
       const docx = zipOf({ 'word/document.xml': xml });
-      const started = Date.now();
-      const r = await prepareDocx(docx, 'f', ctxFor());
-      expect(Date.now() - started).toBeLessThan(1000);
+      const { value: r, ms } = await cpuTimedAsync(() => prepareDocx(docx, 'f', ctxFor()));
+      expect(ms).toBeLessThan(scaled(1000));
       expect(r.text.length).toBeLessThanOrEqual(BUDGET.maxCharsPerItem);
       expect(r.outcome).toBe('unreviewable');   // no text, no pictures
     });
 
     it('a deliberately slow shape for a backtracking parser (a tag opened and never closed, 4 MB of it) is just as fast', async () => {
       const xml = `<w:document ${WORD_NS}><w:body>${'<w:t x="'.repeat(400_000)}`.slice(0, DOCX_MAX_XML_BYTES);
-      const started = Date.now();
-      await prepareDocx(zipOf({ 'word/document.xml': xml }), 'f', ctxFor());
-      expect(Date.now() - started).toBeLessThan(1500);
+      const { ms } = await cpuTimedAsync(() => prepareDocx(zipOf({ 'word/document.xml': xml }), 'f', ctxFor()));
+      expect(ms).toBeLessThan(scaled(1500));
     });
   });
 });
@@ -545,15 +556,14 @@ describe('extractSlideText', () => {
   it('is linear on a hostile slide made of unclosed tags (a lazy paragraph regex, or an attribute run that crosses "<", would be quadratic)', () => {
     for (const unit of ['<a:p>', '<a:t>x', '<a:t ', '<a:t x', '<a:t <a:t ', '<a:t x="', '<']) {
       let out = '';
-      expect(timed(() => { out = extractSlideText(unit.repeat(100_000)); })).toBeLessThan(1000);
+      linearOn(`slide of ${JSON.stringify(unit)}`, n => unit.repeat(n), input => (out = extractSlideText(input)), 12_500, 100_000);
       expect(out.length).toBeLessThanOrEqual(1_000_000);
     }
-    expect(timed(() => extractSlideText(`${'<a:t '.repeat(150_000)}>x</a:t>`))).toBeLessThan(1000);
+    linearOn('slide: every tag unclosed but one far away', n => `${'<a:t '.repeat(n)}>x</a:t>`, extractSlideText, 18_750, 150_000);
   });
 
   it('a 1 MB slide of "<a:t " repeated (the old pattern took minutes on this) is read in well under a second', () => {
-    const xml = '<a:t '.repeat(Math.floor(PPTX_MAX_SLIDE_XML_BYTES / 5));
-    expect(timed(() => extractSlideText(xml))).toBeLessThan(1000);
+    linearOn('a 1 MB slide of "<a:t "', n => '<a:t '.repeat(n), extractSlideText, Math.floor(PPTX_MAX_SLIDE_XML_BYTES / 40), Math.floor(PPTX_MAX_SLIDE_XML_BYTES / 5));
   });
 });
 
@@ -732,9 +742,8 @@ describe('preparePptx', () => {
       const slide = `<?xml version="1.0"?><p:sld ${SLIDE_NS}><p:cSld><p:spTree>${'<a:t '.repeat(100_000)}</p:spTree></p:cSld></p:sld>`;
       const pptx = zipOf({ '[Content_Types].xml': '<Types/>', 'ppt/presentation.xml': '<p:presentation/>', 'ppt/slides/slide1.xml': slide });
       expect(pptx.length).toBeLessThan(10_000);
-      const started = Date.now();
-      const r = await preparePptx(pptx, 'f', ctxFor());
-      expect(Date.now() - started).toBeLessThan(1000);
+      const { value: r, ms } = await cpuTimedAsync(() => preparePptx(pptx, 'f', ctxFor()));
+      expect(ms).toBeLessThan(scaled(1000));
       expect(r.text.length).toBeLessThanOrEqual(BUDGET.maxCharsPerItem);
       expect(r.outcome).toBe('unreviewable');
     });
