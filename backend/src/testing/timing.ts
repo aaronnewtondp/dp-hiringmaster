@@ -141,11 +141,11 @@ export function assertLinearOn<I>(
   run: (input: I) => unknown,
   small: number,
   big: number,
-  opts: { backstopMs?: number; runs?: number; factor?: number } = {},
+  opts: { backstopMs?: number; runs?: number; factor?: number; floorMs?: number } = {},
 ): { smallMs: number; bigMs: number; allowedMs: number } {
-  const { backstopMs = 1000, runs = 3, factor } = opts;
+  const { backstopMs = 1000, runs = 3, factor, floorMs } = opts;
   const inputs = new Map<number, I>([[small, make(small)], [big, make(big)]]);
-  const r = assertLinear(label, size => run(inputs.get(size) as I), small, big, { runs, factor });
+  const r = assertLinear(label, size => run(inputs.get(size) as I), small, big, { runs, factor, floorMs });
   expect(r.bigMs, `${label}: the big input alone`).toBeLessThan(scaled(backstopMs));
   return r;
 }

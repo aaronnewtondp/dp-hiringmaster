@@ -35,6 +35,7 @@ interface Handler {
 }
 
 const collapse = (sql: string) => String(sql).replace(/\s+/g, ' ').trim();
+const ACCESS_SQL = 'SELECT is_active FROM users WHERE id=$1';
 const WRITE_RE = /^(INSERT|UPDATE|DELETE|TRUNCATE|ALTER|DROP|CREATE)\b/i;
 
 export class FakeDb {
@@ -46,6 +47,8 @@ export class FakeDb {
   reset(): void {
     this.calls = [];
     this.handlers = [];
+    this.accessLookups = 0;
+    this.userAccess.clear();
     this.tx = { started: 0, committed: 0, rolledBack: 0 };
   }
 
@@ -71,9 +74,27 @@ export class FakeDb {
     return this.when(pattern, () => { throw new Error(message); });
   }
 
+  /**
+   * What authenticate()'s live account check (`SELECT is_active FROM users WHERE id=$1`) sees. By default every user is active.
+   * That lookup is answered here BEFORE the call log and the programmed replies, so it never shows up in `calls` /
+   * `untouched()` / `statements()` and never consumes a `whenOnce` reply — tests written before the check keep proving what
+   * they proved. Override per user with `setUserAccess`; `accessLookups` counts them. (authenticate() caches the answer for
+   * 15 s: call `invalidateUserAccess()` after changing it mid-file.)
+   */
+  accessLookups = 0;
+  private userAccess = new Map<string, 'active' | 'inactive' | 'missing' | 'error'>();
+  setUserAccess(userId: string, state: 'active' | 'inactive' | 'missing' | 'error'): this { this.userAccess.set(userId, state); return this; }
+
   private async run(via: RecordedCall['via'], text: string, params: unknown[] | undefined, inTransaction: boolean): Promise<Rows> {
     const sql = collapse(text);
     const bound = params ?? [];
+    if (sql === ACCESS_SQL) {
+      this.accessLookups++;
+      const state = this.userAccess.get(String(bound[0])) ?? 'active';
+      if (state === 'error') throw new Error('simulated database failure');
+      if (state === 'missing') return [];
+      return [{ is_active: state === 'active' }];
+    }
     this.calls.push({ via, sql, params: bound, inTransaction });
     for (let i = this.handlers.length - 1; i >= 0; i--) {
       const h = this.handlers[i];

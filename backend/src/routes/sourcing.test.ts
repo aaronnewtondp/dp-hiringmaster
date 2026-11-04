@@ -14,7 +14,16 @@ const h = vi.hoisted(() => ({
   loadSettings: vi.fn(), saveSettings: vi.fn(), getAdvice: vi.fn(), getWorkspace: vi.fn(), maybeRunSourcingCheck: vi.fn(),
 }));
 
-vi.mock('../db/index.js', () => ({ query: (...a: unknown[]) => h.query(...a), queryOne: (...a: unknown[]) => h.queryOne(...a), transaction: vi.fn(), pool: {} }));
+// authenticate()'s live is_active lookup is answered here, ahead of h.query / h.queryOne, so it neither shows up in what the
+// route queried nor consumes a programmed reply (see src/test/accessLookup.ts).
+vi.mock('../db/index.js', async () => {
+  const { isAccessLookup, ACTIVE_ACCOUNT_ROWS } = await import('../test/accessLookup.js');
+  return {
+    query: async (...a: unknown[]) => (isAccessLookup(a[0]) ? ACTIVE_ACCOUNT_ROWS : h.query(...a)),
+    queryOne: async (...a: unknown[]) => (isAccessLookup(a[0]) ? ACTIVE_ACCOUNT_ROWS[0] : h.queryOne(...a)),
+    transaction: vi.fn(), pool: {},
+  };
+});
 vi.mock('../services/sourcingPlans.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../services/sourcingPlans.js')>();
   return {
