@@ -10,7 +10,7 @@
  * mailing anyone. Candidate addresses used for assignments are on the reserved `.invalid` TLD for the same reason.
  */
 import { expect, test as base, APIRequestContext, Locator, Page, Request } from '@playwright/test';
-import { authed, getToken, uid } from './api';
+import { authed, getToken, uid, CRON_SECRET } from './api';
 import { withDb } from './db';
 import { expectNoPageErrors, PageErrorWatch } from './e2e';
 import { purgeRolesFast } from './sourcing-db';
@@ -129,6 +129,35 @@ export async function markAssignmentSent(roundId: string): Promise<void> {
   await withDb(c => c.query(
     `UPDATE interview_rounds SET assignment_send_date = NOW(), assignment_deadline = NOW() + interval '60 hours', assignment_email_error = NULL WHERE id = $1`,
     [roundId]));
+}
+
+/**
+ * Real SLA breaches of this spec's own: a role that counts as open (Live – Sourcing) with `count` candidates parked at `stage` for `hours`
+ * (stage_entry_time moved back by SQL — the only way to age an application — then the engine run on demand with the cron secret, the way
+ * tests/db/09-sla-by-role.spec.ts does it). Asserts through the API that the breaches exist, so a broken seed fails loudly instead of letting
+ * the dashboard tests below it pass on an empty chart.
+ */
+export async function seedSlaBreaches(
+  request: APIRequestContext, cleanup: Cleanup, { count = 3, stage = 'Applied and Screened', hours = 50 }: { count?: number; stage?: string; hours?: number } = {},
+): Promise<{ role: Json & { id: string; title: string }; people: Applicant[] }> {
+  const role = await createRole(request, { title: `E2E SLA ${uid()}`, status: 'Live – Sourcing' });
+  cleanup.role(role.id);
+  const people: Applicant[] = [];
+  for (let i = 0; i < count; i++) {
+    const a = await createApplicant(request, role.id, { full_name: `Sla Cand ${uid()}` });
+    cleanup.email(a.email);
+    if (stage !== 'Applied and Screened') await moveToStage(request, a.application.id, stage);
+    people.push(a);
+  }
+  await withDb(c => c.query(
+    `UPDATE applications SET stage_entry_time = NOW() - ($2 || ' hours')::interval WHERE id = ANY($1::text[])`,
+    [people.map(p => p.application.id), String(hours)]));
+  const sweep = await authed(request, CRON_SECRET).post('/api/cron/sla-check', {});
+  expect(sweep.status(), 'the SLA sweep').toBe(200);
+  const chart = await (await (await hrApi(request)).get('/api/dashboard/sla-by-role')).json();
+  const bar = (chart.roles as Json[]).find(r => r.role_id === role.id);
+  expect(bar?.total, 'the seeded breaches must be on the chart').toBe(count);
+  return { role, people };
 }
 
 // ── cleanup ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

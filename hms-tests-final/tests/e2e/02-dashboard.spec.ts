@@ -1,16 +1,17 @@
 import { test, expect, Page } from '@playwright/test';
-import { BASE, USERS } from '../helpers/api';
-import { loginViaApi } from '../helpers/e2e';
+import { BASE, getToken } from '../helpers/api';
+import { loginViaApi, expectNoPageErrors } from '../helpers/e2e';
+import { Cleanup, seedSlaBreaches, escapeRe, Applicant } from '../helpers/e2e-candidates';
 
 test('Dashboard loads without errors', async ({ page }) => {
+  // The listener goes on BEFORE the first navigation: one added after the page has loaded never sees what the load threw.
+  const watch = expectNoPageErrors(page);
   await loginViaApi(page);
-  // No console errors should crash the page
-  const errors: string[] = [];
-  page.on('pageerror', e => errors.push(e.message));
-  await page.waitForTimeout(2000);
-  // Filter out known browser extension noise
-  const realErrors = errors.filter(e => !e.includes('FrameDoesNotExistError') && !e.includes('extension'));
-  expect(realErrors).toHaveLength(0);
+  // Wait for the page to have really rendered its data, not for a clock: the heading, the funnel snapshot's first stage and the SLA chart.
+  await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('button[title="Applied and Screened"]')).toBeVisible({ timeout: 45000 });
+  await expect(page.getByRole('heading', { name: 'SLA breaches by role' })).toBeVisible({ timeout: 45000 });
+  watch.check();
 });
 
 test('Dashboard shows role count metric', async ({ page }) => {
@@ -51,7 +52,9 @@ test.describe('Hiring Funnel Snapshot', () => {
     expect(bgBefore.applied).not.toBe(bgBefore.interview1);
 
     await applied.click();
-    await page.waitForTimeout(300); // style transition/re-render settle
+    // Wait for the re-render to land (the selected chevron's fill changes, and so does every other one's) by polling the computed style.
+    await expect.poll(() => applied.evaluate(el => (el as HTMLElement).style.background)).not.toBe(bgBefore.applied);
+    await expect.poll(() => interview1.evaluate(el => (el as HTMLElement).style.background)).not.toBe(bgBefore.interview1);
 
     const bgAfter = {
       applied: await applied.evaluate(el => (el as HTMLElement).style.background),
@@ -89,18 +92,33 @@ test.describe('Hiring Funnel Snapshot', () => {
   });
 
   // "SLA breaches by role" — a stacked bar per open role, under the funnel snapshot.
-  // The data is the live local dataset (breaches come and go as the engine runs), so
-  // what is asserted is structure and agreement with the API, not particular roles.
+  // The breaches are this describe's OWN (seedSlaBreaches: three candidates parked 50 h at Applied and Screened on a role of its own, the
+  // engine run on demand), so every test below has real data to look at and none can pass on an empty chart. What is asserted about the
+  // rest of the chart is structure and agreement with the API, never particular other roles.
   test.describe('SLA breaches by role chart', () => {
-    const escapeRe = (t: string) => t.replace(/[.*+?^$\{}()|[\]\\]/g, '\\$&');
+    test.describe.configure({ mode: 'serial' });          // they share one set of seeded breaches
+    const cleanup = new Cleanup();
+    let seeded: { role: { id: string; title: string }; people: Applicant[] };
+
+    test.beforeAll(async ({ playwright }) => {
+      const ctx = await playwright.request.newContext();
+      try { seeded = await seedSlaBreaches(ctx, cleanup, { count: 3 }); } finally { await ctx.dispose(); }
+    });
+    test.afterAll(() => cleanup.purge());
 
     async function apiPayload(page: Page) {
-      const { token } = await (await page.request.post(`${BASE}/api/auth/login`, {
-        data: { email: USERS.hr.email, password: 'password123' },
-      })).json();
+      const token = await getToken(page.request, 'hr');
       return (await page.request.get(`${BASE}/api/dashboard/sla-by-role`, { headers: { Authorization: `Bearer ${token}` } })).json() as Promise<{
         roles: { role_id: string; role_title: string; total: number }[]; total_breaches: number;
       }>;
+    }
+
+    /** The seeded role's bar; the chart shows the top 8 roles, so open the full list first when it is longer than that. */
+    async function seededBar(page: Page) {
+      const bar = page.getByRole('button', { name: new RegExp(`^${escapeRe(seeded.role.title)}: 3 open SLA breaches`) });
+      const showAll = page.getByRole('button', { name: /^Show all \d+ roles$/ });
+      if (!(await bar.count()) && (await showAll.count())) await showAll.click();
+      return bar;
     }
 
     test('is rendered under the funnel snapshot, with one bar per role (top 8) matching the API', async ({ page }) => {
@@ -113,37 +131,41 @@ test.describe('Hiring Funnel Snapshot', () => {
       expect((await heading.boundingBox())!.y).toBeGreaterThan(funnelY);
 
       const api = await apiPayload(page);
-      if (api.roles.length === 0) {
-        await expect(page.getByText('No SLA breaches on open roles')).toBeVisible();
-        return;
-      }
+      expect(api.roles.length, 'the seeded role is on the chart, so it is not empty').toBeGreaterThan(0);
+      expect(api.roles.find(r => r.role_id === seeded.role.id)?.total).toBe(3);
+      await expect(page.getByText('No SLA breaches on open roles')).toHaveCount(0);
       const bars = page.getByRole('button', { name: /open SLA breaches/ });
       await expect(bars).toHaveCount(Math.min(api.roles.length, 8));
       // the busiest role is first, and its label carries the API's own count
       await expect(bars.first()).toHaveAttribute('aria-label', new RegExp(`^${escapeRe(api.roles[0].role_title)}: ${api.roles[0].total} open SLA breaches`));
+      // the seeded role's bar carries its three breaches
+      await expect(await seededBar(page)).toBeVisible();
     });
 
     test('clicking a bar opens the stage-by-stage breakdown, and clicking again closes it', async ({ page }) => {
       await loginViaApi(page);
       await expect(page.getByRole('heading', { name: 'SLA breaches by role' })).toBeVisible({ timeout: 20000 });
-      const bars = page.getByRole('button', { name: /open SLA breaches/ });
-      test.skip((await bars.count()) === 0, 'No open-role SLA breaches right now — nothing to drill into.');
-
-      const first = bars.first();
-      await expect(first).toHaveAttribute('aria-expanded', 'false');
-      await first.click();
-      await expect(first).toHaveAttribute('aria-expanded', 'true');
-      await expect(page.getByRole('region', { name: /breaches by stage$/ })).toBeVisible();
-      await first.click();
-      await expect(first).toHaveAttribute('aria-expanded', 'false');
-      await expect(page.getByRole('region', { name: /breaches by stage$/ })).toHaveCount(0);
+      const bar = await seededBar(page);
+      await expect(bar).toBeVisible();
+      await expect(bar).toHaveAttribute('aria-expanded', 'false');
+      await bar.click();
+      await expect(bar).toHaveAttribute('aria-expanded', 'true');
+      const region = page.getByRole('region', { name: `${seeded.role.title} — breaches by stage` });
+      await expect(region).toBeVisible();
+      await expect(region).toContainText('3 open breaches');
+      await expect(region.getByRole('listitem').filter({ hasText: 'Applied and Screened' }).first()).toContainText('3');   // the stage and its count
+      await expect(region).toContainText('Resume Shortlist Pending');                                                      // the breach type ...
+      await expect(region).toContainText('Hiring Manager');                                                                // ... and who owns it
+      await bar.click();
+      await expect(bar).toHaveAttribute('aria-expanded', 'false');
+      await expect(region).toHaveCount(0);
     });
 
     test('the table view lists every role with a breach, with the same total as the API', async ({ page }) => {
       await loginViaApi(page);
       await expect(page.getByRole('heading', { name: 'SLA breaches by role' })).toBeVisible({ timeout: 20000 });
       const api = await apiPayload(page);
-      test.skip(api.roles.length === 0, 'No open-role SLA breaches right now.');
+      expect(api.roles.length).toBeGreaterThan(0);
 
       await page.getByRole('button', { name: 'Table', exact: true }).click();
       await expect(page.getByRole('button', { name: 'Table', exact: true })).toHaveAttribute('aria-pressed', 'true');
@@ -154,38 +176,31 @@ test.describe('Hiring Funnel Snapshot', () => {
         await expect(rows.nth(i)).toContainText(r.role_title);
         await expect(rows.nth(i).getByRole('cell').last()).toHaveText(r.total.toLocaleString('en-IN'));
       }
+      // the seeded role's row, wherever it sits
+      const mine = rows.filter({ hasText: seeded.role.title });
+      await expect(mine).toHaveCount(1);
+      await expect(mine.getByRole('cell').last()).toHaveText('3');
     });
   });
 
   test('clicking a candidate breach tile navigates to that candidate\'s detail page', async ({ page }) => {
-    // Prime with ground truth from the API first — the breach data changes
-    // over time as the SLA engine runs, so don't hardcode a stage/type name;
-    // find whichever real, resolved candidate_id exists right now.
-    const loginRes = await page.request.post(`${BASE}/api/auth/login`, {
-      data: { email: USERS.hr.email, password: 'password123' },
-    });
-    const { token } = await loginRes.json();
-    const dashRes = await page.request.get(`${BASE}/api/dashboard`, { headers: { Authorization: `Bearer ${token}` } });
-    const { hiring_funnel_snapshot } = await dashRes.json();
+    // The breach is this test's own, so it does not depend on what other tests left behind (or on the describe above having run).
+    const cleanup = new Cleanup();
+    const { people } = await seedSlaBreaches(page.request, cleanup, { count: 1 });
+    try {
+      const target = people[0];
+      await loginViaApi(page);
+      await page.locator('button[title="Applied and Screened"]').click();
+      await page.locator('button', { hasText: 'Resume Shortlist Pending' }).click();
 
-    let target: { stage: string; type: string; candidateId: string; candidateName: string } | null = null;
-    outer: for (const s of hiring_funnel_snapshot) {
-      for (const bt of s.breach_types) {
-        const withId = bt.candidates.find((c: { candidate_id: string | null }) => c.candidate_id);
-        if (withId) { target = { stage: s.stage, type: bt.type, candidateId: withId.candidate_id, candidateName: withId.candidate_name }; break outer; }
-      }
+      const card = page.locator(`a[href="/candidates/${target.candidate.id}"]`).first();
+      await expect(card).toBeVisible({ timeout: 10000 });
+      await expect(card).toContainText(target.name);
+      await card.click();
+      await page.waitForURL(new RegExp(`/candidates/${target.candidate.id}`), { timeout: 10000 });
+      await expect(page.getByRole('heading', { name: target.name, level: 1 })).toBeVisible({ timeout: 15000 });
+    } finally {
+      await cleanup.purge();
     }
-    test.skip(!target, 'No SLA breach with a resolvable candidate_id exists right now — nothing to click through.');
-    if (!target) return;
-
-    await loginViaApi(page);
-    await page.locator(`button[title="${target.stage}"]`).click();
-    await page.locator('button', { hasText: target.type }).click();
-
-    const card = page.locator(`a[href="/candidates/${target.candidateId}"]`).first();
-    await expect(card).toBeVisible({ timeout: 5000 });
-    await card.click();
-    await page.waitForURL(new RegExp(`/candidates/${target.candidateId}`), { timeout: 10000 });
-    expect(page.url()).toContain(`/candidates/${target.candidateId}`);
   });
 });
