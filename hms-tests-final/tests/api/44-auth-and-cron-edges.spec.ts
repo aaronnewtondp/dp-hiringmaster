@@ -110,6 +110,14 @@ test.describe('the JWT gate (authenticate middleware)', () => {
 
 test.describe('POST /api/auth/login — edges', () => {
 
+  test('an e-mail or a password missing from the body is 400 "Email and password required" (never a 401, never a lookup)', async ({ request }) => {
+    for (const data of [{}, { email: USERS.hr.email }, { password: USERS.hr.password }, { email: '', password: '' }]) {
+      const res = await request.post(`${BASE}/api/auth/login`, { data });
+      expect(res.status(), JSON.stringify(data)).toBe(400);
+      expect(await res.json()).toEqual({ error: 'Email and password required' });
+    }
+  });
+
   test('an unknown e-mail and a wrong password answer identically (401, same body): no account enumeration', async ({ request }) => {
     const unknown = await request.post(`${BASE}/api/auth/login`, { data: { email: `nobody+${uid()}@digitalpaani.com`, password: 'password123' } });
     const wrong = await request.post(`${BASE}/api/auth/login`, { data: { email: USERS.hr.email, password: 'definitely-wrong' } });

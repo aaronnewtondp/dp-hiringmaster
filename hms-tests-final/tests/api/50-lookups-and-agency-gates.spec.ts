@@ -10,15 +10,17 @@
 // SQL where there is not (comp_benchmarks), and deleted again in afterAll — the seeded benchmarks are read by other specs and must not move.
 // ─────────────────────────────────────────────────────────────────────────────
 import { test, expect } from '@playwright/test';
-import { authed, getSession, getToken, uid } from '../helpers/api';
-import { HR_TIER_USERS, rawStatus } from '../helpers/api-specs';
+import { authed, createCandidate, getSession, getToken, uid } from '../helpers/api';
+import { HR_TIER_USERS, rawStatus, retireTrackedApplications, trackApplication } from '../helpers/api-specs';
 import { withDb } from '../helpers/db';
 
 const tag = uid();
 const HR_ACCESS = 'HR access required';
 
 test.afterAll(async () => {
+  await retireTrackedApplications();
   await withDb(async c => {
+    await c.query(`UPDATE candidates SET sourced_by_agency_id = NULL WHERE sourced_by_agency_id IN (SELECT id FROM agencies WHERE name LIKE $1)`, [`Gate Agency ${tag}%`]);
     await c.query(`DELETE FROM agencies WHERE name LIKE $1`, [`Gate Agency ${tag}%`]);                 // agency_edit_log cascades
     await c.query(`DELETE FROM eval_questions WHERE evaluation_area LIKE $1`, [`Gate Area ${tag}%`]);
     await c.query(`DELETE FROM assignment_repo WHERE name LIKE $1`, [`Gate Assignment ${tag}%`]);
@@ -212,6 +214,27 @@ test.describe('/api/agencies', () => {
     expect((await res.json()).error).toBe('name required');
   });
 
+  test('total_hired counts a candidate only from Offer Accepted: Offer Released is not a hire yet (list and single agree)', async ({ request }) => {
+    const hr = await getToken(request, 'hr');
+    const api = authed(request, hr);
+    const created = await api.post('/api/agencies', { name: `Gate Agency ${tag} hires` });
+    expect(created.status()).toBe(201);
+    const agencyId = (await created.json()).agency.id;
+    const hires = async () => {
+      const list = (await (await api.get('/api/agencies')).json()).agencies.find((a: { id: string }) => a.id === agencyId);
+      const one = (await (await api.get(`/api/agencies/${agencyId}`)).json()).agency;
+      return [Number(list.total_hired), Number(one.total_hired)];
+    };
+    const { res } = await createCandidate(request, hr, { source: 'Agency', sourced_by_agency_id: agencyId, role_id: 'R006' });
+    const { application } = await res.json();
+    trackApplication(application.id);
+    expect(await hires()).toEqual([0, 0]);
+    expect((await api.post(`/api/applications/${application.id}/stage`, { new_stage: 'Offer Released' })).status()).toBe(200);
+    expect(await hires()).toEqual([0, 0]);
+    expect((await api.post(`/api/applications/${application.id}/stage`, { new_stage: 'Offer Accepted' })).status()).toBe(200);
+    expect(await hires()).toEqual([1, 1]);
+  });
+
   test('an unknown id is 404: GET "Agency not found", PATCH "Not found"', async ({ request }) => {
     const api = authed(request, await getToken(request, 'hr'));
     const get = await api.get(`/api/agencies/AGN-NOPE-${uid()}`);
@@ -318,6 +341,19 @@ test.describe('/api/assignment-repo', () => {
       expect(res.status(), JSON.stringify(body)).toBe(400);
       expect((await res.json()).error).toBe('name and problem_statement are required');
     }
+  });
+
+  test('the list is ordered by times_used (most used first), then newest first', async ({ request }) => {
+    const api = authed(request, await getToken(request, 'hr'));
+    const oldUsed = await addAssignment(api, 'order-old-used');
+    const mid     = await addAssignment(api, 'order-mid');
+    const newest  = await addAssignment(api, 'order-newest');
+    // times_used is not writable through the API (the PATCH whitelist drops it), so the most-used row is set by SQL.
+    await withDb(c => c.query('UPDATE assignment_repo SET times_used = 7 WHERE id = $1', [oldUsed.id]));
+    const list = await api.get('/api/assignment-repo');
+    expect(list.status()).toBe(200);
+    const mine = (await list.json()).assignments.filter((x: { name: string }) => x.name.startsWith(`Gate Assignment ${tag} order-`));
+    expect(mine.map((x: { id: string }) => x.id)).toEqual([oldUsed.id, newest.id, mid.id]);
   });
 
   test('the GETs are open to every signed-in user (a Hiring Manager reads the list and one item; an unknown id is 404 "Not found"); anonymous is 401', async ({ request }) => {
