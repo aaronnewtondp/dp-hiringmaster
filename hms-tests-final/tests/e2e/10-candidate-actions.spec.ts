@@ -157,6 +157,17 @@ test.describe('Stage modal', () => {
     expect((await getApp(request, a.appId)).budget_exception_reason_cat).toBeFalsy();
   });
 
+  test('a candidate exactly on the 15% line (23 LPA against a 10-20 band) is already asked for a reason', async ({ page, request }) => {
+    const a = await arrange(request, { candidate: { expected_ctc: 23 } });
+    await open(page, 'hr', a);
+    await expect(page.getByText('Over Budget')).toBeVisible();
+    await stageButton(page).click();
+    const dialog = dialogWith(page, 'Update stage');
+    await dialog.getByRole('combobox').first().selectOption('Interview Round 1');
+    await expect(dialog.getByRole('combobox')).toHaveCount(2);
+    await expect(dialog.getByRole('button', { name: 'Update', exact: true })).toBeDisabled();
+  });
+
   test('TODAY the Stage modal has no skip-reason control: a move blocked by pending feedback shows the server\'s reason and waits for the feedback', async ({ page, request }) => {
     const a = await arrange(request, { stage: 'Interview Round 1' });
     const round = await createStandardRound(request, a.appId, { round_name: `Pending Round ${a.role.id}` });
@@ -825,6 +836,32 @@ test.describe('Persona differences on the candidate page', () => {
     await expect(toastWith(page, 'Failed to update Identity')).toBeVisible();
     const res = await authed(request, await getToken(request, 'hr')).get(`/api/candidates/${a.candidate.id}`);
     expect((await res.json()).candidate.phone).toBe('+91 91111 11111');
+  });
+
+  test('the server refuses what the Hiring Manager page hides: founder flag, notes and a status change after Applied and Screened are 403, and an HR reject without a reason is 400', async ({ request }) => {
+    const a = await arrange(request, { stage: 'Interview Round 1' });
+    const hm = authed(request, await getToken(request, 'hm_alex'));
+    const hr = await hrApi(request);
+
+    const flag = await hm.post(`/api/applications/${a.appId}/founder-flag`, { set: true, note: 'E2E' });
+    expect(flag.status(), await flag.text()).toBe(403);
+    const notes = await hm.patch(`/api/applications/${a.appId}/notes`, { hr_recruiter_summary: 'E2E not allowed' });
+    expect(notes.status(), await notes.text()).toBe(403);
+    const reject = await hm.post(`/api/applications/${a.appId}/status`, { new_status: 'Rejected', rejection_reason_cat: 'Skills mismatch' });
+    expect(reject.status(), await reject.text()).toBe(403);
+
+    // The same three calls change nothing for HR's view of the record.
+    const record = await getApp(request, a.appId);
+    expect(record.status).toBe('Active');
+    expect(record.founder_flag).toBeFalsy();
+    expect(record.hr_recruiter_summary ?? null).toBeNull();
+
+    // HR itself cannot reject or withdraw without a reason, whatever the page does.
+    for (const new_status of ['Rejected', 'Withdrawn']) {
+      const res = await hr.post(`/api/applications/${a.appId}/status`, { new_status });
+      expect(res.status(), `${new_status}: ${await res.text()}`).toBe(400);
+    }
+    expect((await getApp(request, a.appId)).status).toBe('Active');
   });
 
   test('Leadership has every HR control on the candidate page', async ({ page, request }) => {
