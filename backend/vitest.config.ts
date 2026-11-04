@@ -11,5 +11,10 @@ export default defineConfig({
     // and still ends a real hang quickly. A describe or test that needs more sets its own, as pdf.cpu, sandbox and the hostile-file suites do.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Lets a CI job cap the workers with the one flag it would naturally write, `vitest run --maxWorkers=2`. Without a minimum, vitest 2.1.9 defaults the
+    // pool's minimum to (cores - 1) and tinypool refuses a maximum below it ("options.minThreads and options.maxThreads must not conflict"): the run then
+    // finds NO tests (0 files, 0 tests, one error) and a JSON reporter still writes success:true. Every file runs in a fresh process either way (isolation
+    // is on), so a lower minimum changes nothing about a normal run. The maximum is deliberately NOT set here: it stays "cores - 1" locally, and a flag wins.
+    poolOptions: { forks: { minForks: 1 } },
   },
 });

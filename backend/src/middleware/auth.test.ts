@@ -171,7 +171,7 @@ describe('authenticate — smoke-test accounts are read-only', () => {
 describe('authenticate — a token that is not valid is refused with 401 and never reaches next()', () => {
   const SECRET = 'unit-test-secret';
   const SMOKE = 'smoke.leadership@hms-smoke.invalid';
-  const claims = { userId: 'u1', email: 'aaron.newton@digitalpaani.com', persona: 'hr_recruiter', name: 'Unit Test' };
+  const claims = { userId: 'u1', email: 'hr.user@example.test', persona: 'hr_recruiter', name: 'Unit Test' };
   let saved: string | undefined;
   beforeEach(() => { saved = process.env.JWT_SECRET; process.env.JWT_SECRET = SECRET; });
   afterEach(() => { vi.useRealTimers(); if (saved === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = saved; });
