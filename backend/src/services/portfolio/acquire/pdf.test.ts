@@ -772,7 +772,7 @@ describe('pdfTextStrings - a linear tokenizer, not a regex', () => {
     // memory effects, so the ratio is taken below that point: from 0.5 to 5 MB a perfectly linear tokenizer measured 44x for 10x the input.)
     const big = make(5 * MB);
     expectCpuUnder(3000, () => pdfTextStrings(big, 400_000), `${_name}`);
-    assertLinearOn(_name, make, (content: string) => pdfTextStrings(content, 400_000), MB / 4, 2 * MB, { backstopMs: 1000 });
+    assertLinearOn(_name, make, (content: string) => pdfTextStrings(content, 400_000), MB / 4, 2 * MB, { backstopMs: 1000, floorMs: 60 });   // floorMs 60: a 1-2 ms baseline at 0.25 MB cannot absorb the memory effects at 2 MB (64 ms vs 57 allowed failed on a CI runner); a quadratic tokenizer is still caught by the absolute backstop
   });
 });
 
