@@ -1367,24 +1367,47 @@ describe('PortfolioReviewCard — could not be queued', () => {
   });
 
   describe('polling', () => {
-    beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); });
+    // A fully fake clock: nothing but advanceTimersByTimeAsync moves time, so the counts below are exact and cannot pick up real milliseconds from a busy machine.
+    // (Testing Library's waitFor/findBy cannot be used under it, so the settling is done by hand: advancing by 0 runs every promise reaction and zero-delay timer.)
+    beforeEach(() => { vi.useFakeTimers(); });
     afterEach(() => { vi.useRealTimers(); });
+    const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 
-    it('a queued review is polled every 15 s', async () => {
+    it('a queued review is polled every 15 s, no sooner and no later', async () => {
       portfolioReview.mockResolvedValue({ data: { kind: 'marketing_work', status: 'pending', score: null, message: null, urls: [], analysis: null } });
       renderCard('pending');
-      await screen.findByText(/Work-sample review queued/);
+      await advance(0);
+      expect(screen.getByText(/Work-sample review queued/)).toBeInTheDocument();      // the first answer is in, and says "queued": that is what starts the polling
       expect(portfolioReview).toHaveBeenCalledTimes(1);
-      await act(async () => { await vi.advanceTimersByTimeAsync(15_500); });
-      expect(portfolioReview.mock.calls.length).toBeGreaterThanOrEqual(2);
+      await advance(14_999);
+      expect(portfolioReview).toHaveBeenCalledTimes(1);                                 // not one millisecond early
+      await advance(1);
+      expect(portfolioReview).toHaveBeenCalledTimes(2);                                 // exactly one poll at 15 s
+      await advance(14_999);
+      expect(portfolioReview).toHaveBeenCalledTimes(2);                                 // and not a second one in the same window
+      await advance(1);
+      expect(portfolioReview).toHaveBeenCalledTimes(3);                                 // then every 15 s again
+    });
+
+    it('stops polling by itself once the review settles', async () => {
+      portfolioReview.mockResolvedValueOnce({ data: { kind: 'marketing_work', status: 'pending', score: null, message: null, urls: [], analysis: null } });
+      portfolioReview.mockResolvedValue({ data: { kind: 'marketing_work', status: 'no_portfolio', score: null, message: 'No work samples provided; this dimension is not applied', urls: [], analysis: null } });
+      renderCard('pending');
+      await advance(0);
+      expect(portfolioReview).toHaveBeenCalledTimes(1);
+      await advance(15_000);
+      expect(portfolioReview).toHaveBeenCalledTimes(2);                                 // the poll that found it settled
+      await advance(120_000);
+      expect(portfolioReview).toHaveBeenCalledTimes(2);                                 // nothing after that
     });
 
     it('a review that could not be queued is not polled: nothing will change on its own', async () => {
       portfolioReview.mockResolvedValue({ data: { kind: 'marketing_work', status: 'pending', score: null, message: QUEUE_ERROR, urls: [], analysis: null } });
       renderCard('pending');
-      await screen.findByText('Not queued');
+      await advance(0);
+      expect(screen.getByText('Not queued')).toBeInTheDocument();
       expect(portfolioReview).toHaveBeenCalledTimes(1);
-      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      await advance(60_000);
       expect(portfolioReview).toHaveBeenCalledTimes(1);
     });
   });
