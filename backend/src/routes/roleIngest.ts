@@ -5,7 +5,7 @@ import { canonicalHiringManagerField } from '../utils/hiringManagers.js';
 
 const router = Router();
 
-function mapPriority(raw?: string): string {
+export function mapPriority(raw?: string): string {
   const p = (raw || '').trim().toUpperCase();
   if (['P0', 'P1', 'P2', 'P3'].includes(p)) return p;
   return 'P1';
@@ -18,7 +18,7 @@ function mapPriority(raw?: string): string {
 // roles.vacancy_reason (now TEXT[]) already split on. Mirrors that split
 // exactly so a live submission and the backfilled historical rows parse
 // identically.
-function parseVacancyReason(raw: unknown): string[] | null {
+export function parseVacancyReason(raw: unknown): string[] | null {
   if (!raw) return null;
   if (Array.isArray(raw)) return raw.map(String);
   const s = String(raw).trim();

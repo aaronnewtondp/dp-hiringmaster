@@ -67,9 +67,9 @@ async function resolveOrphanedActions(): Promise<void> {
 // stage's breach-type set is exhaustive and mutually exclusive by
 // construction — "Idle Candidate" only ever appears for a stage with no
 // other breach type defined for it, never as a runtime fallback race.
-const BREACH_IDLE_HOURS = 48;
-const BREACH_STANDARD_HOURS = 48;              // Applied / Not-Scheduled / Feedback-Due
-const BREACH_ASSIGNMENT_FEEDBACK_HOURS = 96;
+export const BREACH_IDLE_HOURS = 48;
+export const BREACH_STANDARD_HOURS = 48;              // Applied / Not-Scheduled / Feedback-Due
+export const BREACH_ASSIGNMENT_FEEDBACK_HOURS = 96;
 
 // Hiring SOP v2.1 (2026-09-18): a high-scored candidate (ai_fit_score >= 75)
 // gets the standard 48h SLA halved to 24h at five named stages — Applied
@@ -83,8 +83,8 @@ const BREACH_ASSIGNMENT_FEEDBACK_HOURS = 96;
 // BREACH_IDLE_HOURS (Idle Candidate) or BREACH_ASSIGNMENT_FEEDBACK_HOURS
 // (Assignment Feedback Due, 96h) — the SOP frames this as "48h -> 24h" for
 // five named stages, not a general halving of every threshold.
-const HIGH_SCORE_THRESHOLD = 75;
-const BREACH_HIGH_SCORE_HOURS = 24;
+export const HIGH_SCORE_THRESHOLD = 75;
+export const BREACH_HIGH_SCORE_HOURS = 24;
 
 export function tieredStandardHours(aiFitScore: number | null): number {
   return aiFitScore != null && aiFitScore >= HIGH_SCORE_THRESHOLD ? BREACH_HIGH_SCORE_HOURS : BREACH_STANDARD_HOURS;
@@ -171,7 +171,7 @@ async function applyBreachBatch(
 // Scheduled" below (NOT_YET_ACTIONED_STAGES) already covers exactly the
 // same "no round booked yet" condition; keeping both would have been two
 // breach types firing for the same thing.
-const FLAT_STAGE_CHECKS: Array<{ stages: string[]; actionType: string; owner: Owner }> = [
+export const FLAT_STAGE_CHECKS: Array<{ stages: string[]; actionType: string; owner: Owner }> = [
   { stages: ['Reference Check', 'Pre-Joining Documents', 'Offer Discussion', 'Offer Released'], actionType: 'Idle Candidate', owner: 'HR / Recruiter' },
   { stages: ['Applied and Screened'], actionType: 'Resume Shortlist Pending', owner: 'Hiring Manager' },
 ];
@@ -212,7 +212,7 @@ type NotYetActionedConfig = {
   stage: string; roundType: 'Standard' | 'Assignment';
   anchorColumn: 'scheduled_date' | 'assignment_send_date'; actionType: string;
 };
-const NOT_YET_ACTIONED_STAGES: NotYetActionedConfig[] = [
+export const NOT_YET_ACTIONED_STAGES: NotYetActionedConfig[] = [
   { stage: 'Interview Round 1', roundType: 'Standard', anchorColumn: 'scheduled_date', actionType: 'Interview 1 Not Scheduled' },
   { stage: 'Interview Round 2', roundType: 'Standard', anchorColumn: 'scheduled_date', actionType: 'Interview 2 Not Scheduled' },
   { stage: 'Founders Round', roundType: 'Standard', anchorColumn: 'scheduled_date', actionType: 'Founders Round Not Scheduled' },
@@ -266,7 +266,7 @@ type FeedbackDueConfig = {
   // the SOP names this rule as being about "interview feedback."
   scoreTiered: boolean;
 };
-const FEEDBACK_DUE_STAGES: FeedbackDueConfig[] = [
+export const FEEDBACK_DUE_STAGES: FeedbackDueConfig[] = [
   { stage: 'Interview Round 1', roundType: 'Standard', anchorColumn: 'scheduled_date', thresholdHours: BREACH_STANDARD_HOURS, actionType: 'Interview 1 Feedback Due', scoreTiered: true },
   { stage: 'Interview Round 2', roundType: 'Standard', anchorColumn: 'scheduled_date', thresholdHours: BREACH_STANDARD_HOURS, actionType: 'Interview 2 Feedback Due', scoreTiered: true },
   { stage: 'Founders Round', roundType: 'Standard', anchorColumn: 'scheduled_date', thresholdHours: BREACH_STANDARD_HOURS, actionType: 'Founders Round Feedback Due', scoreTiered: true },
@@ -279,7 +279,7 @@ const FEEDBACK_DUE_STAGES: FeedbackDueConfig[] = [
 // Leadership-owned flag — visibility, not a replacement for the original
 // Hiring-Manager-owned action, which stays open until feedback is actually
 // submitted.
-const LEADERSHIP_ESCALATION_HOURS = 96;
+export const LEADERSHIP_ESCALATION_HOURS = 96;
 const LEADERSHIP_ESCALATION_ACTION_TYPE = 'Feedback Overdue — Leadership Escalation';
 export const LEADERSHIP_ESCALATION_ACTION_TYPES = [LEADERSHIP_ESCALATION_ACTION_TYPE] as const;
 
@@ -457,12 +457,12 @@ export const EXTERNAL_ACTION_TYPES = ['Founder Review', 'HM shortlist review', '
 // The full universe of action_type values ANY current code path can
 // produce today. Used only by resolveUnknownActionTypes() below — nothing
 // else needs "every type that exists" in one place.
-const ALL_KNOWN_ACTION_TYPES = [...ALL_BREACH_ACTION_TYPES, ...NON_ACTIONABLE_ALERT_TYPES, ...EXTERNAL_ACTION_TYPES];
+export const ALL_KNOWN_ACTION_TYPES = [...ALL_BREACH_ACTION_TYPES, ...NON_ACTIONABLE_ALERT_TYPES, ...EXTERNAL_ACTION_TYPES];
 
 // Reverse-indexed from the check configs above: which stage(s) each
 // stage-keyed breach action_type is actually valid for right now. Feeds
 // resolveStaleStageActionTypes() below.
-const VALID_STAGES_BY_ACTION_TYPE: Record<string, string[]> = {};
+export const VALID_STAGES_BY_ACTION_TYPE: Record<string, string[]> = {};
 for (const cfg of FLAT_STAGE_CHECKS) VALID_STAGES_BY_ACTION_TYPE[cfg.actionType] = cfg.stages;
 for (const cfg of NOT_YET_ACTIONED_STAGES) VALID_STAGES_BY_ACTION_TYPE[cfg.actionType] = [cfg.stage];
 for (const cfg of FEEDBACK_DUE_STAGES) VALID_STAGES_BY_ACTION_TYPE[cfg.actionType] = [cfg.stage];
