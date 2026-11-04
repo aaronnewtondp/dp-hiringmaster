@@ -145,6 +145,9 @@ test.describe('where the drawer stops: lg is 1024 px', () => {
       await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
       await expect(hamburger(page)).toBeVisible();
       await expect(aside(page)).not.toBeInViewport();
+      const main = await page.locator('main').boundingBox();                                  // a closed drawer is out of the flow: it reserves no column
+      expect(main!.x, `${width} px: main starts at the left edge`).toBeLessThanOrEqual(1);
+      expect(main!.width, `${width} px: main spans the whole viewport`).toBeGreaterThanOrEqual(width - 1);
     });
   }
 
