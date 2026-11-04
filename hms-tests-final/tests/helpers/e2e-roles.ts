@@ -144,6 +144,11 @@ export class Fixtures {
 
   /** A Standard interview round scheduled `hoursAgo` hours ago with feedback still pending (what "Feedback Due" is made of). */
   async round(app: CreatedApp, o: { interviewerEmails: string[]; hoursAgo: number; name?: string }): Promise<string> {
+    // The API hands out interview-round ids as MAX(id)+1 (routes/interviews.ts), NOT from seq_interview, so after any API-created round the
+    // sequence is behind the table and a DEFAULT id here collides on interview_rounds_pkey. Move the sequence past the table first.
+    await this.db.query(
+      `SELECT setval('seq_interview', GREATEST((SELECT COALESCE(MAX(substring(id from '[0-9]+')::int), 0) FROM interview_rounds),
+                                               (SELECT last_value FROM seq_interview), 1))`);
     const { rows } = await this.db.query(
       `INSERT INTO interview_rounds (application_id, round_name, round_type, round_number, scheduled_date, feedback_status, interviewer_emails)
        VALUES ($1, $2, 'Standard', 1, NOW() - make_interval(hours => $3::int), 'Pending', $4::text[]) RETURNING id`,
