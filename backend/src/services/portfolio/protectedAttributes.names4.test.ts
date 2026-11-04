@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { candidateNameSignal, maskNameTokens, nameTokens } from './protectedAttributes.js';
+import { cpuTimed, minCpu, scaled } from '../../testing/timing.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Fix round 4 (E3A), the name findings of the third review:
@@ -9,12 +10,8 @@ import { candidateNameSignal, maskNameTokens, nameTokens } from './protectedAttr
 //       300 characters are matched; a text/name pair that is still too large is "unknown", never "unlikely".
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-const cpuMs = (fn: () => void): number => {
-  const before = process.cpuUsage();
-  fn();
-  const used = process.cpuUsage(before);
-  return (used.user + used.system) / 1000;
-};
+// CPU time of this process (testing/timing.ts), not the clock; the smallest of a few runs where two costs are compared with each other.
+const cpuMs = (fn: () => void): number => cpuTimed(fn).ms;
 const signal = (name: string, text: string) => candidateNameSignal(name, { text, hasSearchableText: true });
 
 describe('G11: the mask covers every full-name match the signal finds', () => {
@@ -88,10 +85,15 @@ describe('G7: the form name is bounded', () => {
     expect(nameTokens('Priya Kumari Sharma')).toEqual(['priya', 'kumari', 'sharma']);
   });
   it('a 3,000-token name costs the same as a short one (signal and mask over 36 KB)', () => {
-    const ms = (name: string) => cpuMs(() => { candidateNameSignal(name, { text: TEXT, hasSearchableText: true }); maskNameTokens(TEXT, name); });
+    // The claim is RELATIVE, like the title says: a long name costs about what a short one does, so the speed and the load of the machine cancel out. The
+    // quadratic code this guards took 10 minutes for 3,000 tokens (about 1,000x a short name), so 3x plus a small floor for noise leaves a huge gap.
+    const ms = (name: string) => minCpu(() => { candidateNameSignal(name, { text: TEXT, hasSearchableText: true }); maskNameTokens(TEXT, name); }, 3).ms;
     ms('Priya Sharma');   // warm up
+    const short = ms('Priya Sharma');
+    expect(short).toBeGreaterThan(0);
     for (const n of [2, 20, 200, 1000, 3000]) {
-      expect(ms(mkName(n)), `${n} tokens`).toBeLessThan(400);
+      const cost = ms(mkName(n));
+      expect(cost, `${n} tokens: ${cost.toFixed(1)} ms of CPU against ${short.toFixed(1)} ms for a two-token name`).toBeLessThanOrEqual(3 * short + scaled(40));
     }
   });
   it('the first tokens of a very long name still match', () => {
@@ -101,8 +103,8 @@ describe('G7: the form name is bounded', () => {
   });
   it('a text in which two tokens of the name both match tens of thousands of words costs a few checks per word, not a product', () => {
     const t = cpuMs(() => { expect(signal('Ann Anne Annie Anna', 'Ann '.repeat(20_000))).toBe('likely'); });
-    expect(t).toBeLessThan(500);
-    expect(cpuMs(() => { maskNameTokens('Ann Anne '.repeat(10_000), 'Ann Anne Annie Anna'); })).toBeLessThan(800);
+    expect(t).toBeLessThan(scaled(500));
+    expect(cpuMs(() => { maskNameTokens('Ann Anne '.repeat(10_000), 'Ann Anne Annie Anna'); })).toBeLessThan(scaled(800));
   });
   it('past the work budget the answer is "unknown", never "unlikely": 8 name tokens against 30,000 words', () => {
     const words = Array.from({ length: 30_000 }, (_, i) => `word${'abcdefghijklmnopqrstuvwxyz'[i % 26]}${i % 7}`).join(' ');

@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { SourcingDashboard, SourcingDashboardRow } from '../../types/sourcing.ts';
+import { backendFacts } from '../../test/backendSource.ts';
 
 const dashboard = vi.fn();
 vi.mock('../../services/api.ts', () => ({ sourcingApi: { dashboard: (p: unknown) => dashboard(p) } }));
@@ -105,5 +106,17 @@ describe('Dashboard → Sourcing execution', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={qc}><MemoryRouter><SourcingExecution masterFilterParams={{}} /></MemoryRouter></QueryClientProvider>);
     expect(await screen.findByRole('alert')).toHaveTextContent(/Couldn't load sourcing execution/);
+  });
+});
+
+describe('Dashboard → Sourcing execution — the marker', () => {
+  it('the "done on time" window is the number of days the backend counts (routes/dashboard.ts), in the label and in the marker', async () => {
+    mount(payload());
+    const days = backendFacts().sourcingDoneWindowDays;
+    const label = await screen.findByText(`Done on time (${days}d)`);
+    expect(label).toBeInTheDocument();
+    const card = label.closest('.card')!;
+    fireEvent.mouseEnter(card.querySelector('[aria-label="More info"]')!);
+    expect(card.querySelector('div.absolute')!.textContent).toContain(`share of tasks finished in the last ${days} days by their due date`);
   });
 });

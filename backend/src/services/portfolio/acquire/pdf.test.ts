@@ -13,6 +13,10 @@ import { readPdfInSandbox } from './pdfSandbox.js';
 import type { PdfReader, PdfReadResult } from './pdfSandbox.js';
 import { MB, ascii85, asciiHex, flateZeros, pages, pdfkitPdf, rawPdf, rawPdfOfSize, sentence, storedBlock, withRawObject, withStream } from './pdf.fixtures.js';
 import type { AcquireContext } from './types.js';
+// The speed bounds in this file (expectCpuUnder) are CPU time of this process scaled to the machine, not wall-clock readings: all of them time synchronous
+// work, so what counts is the work, and a descheduled process or a slower runner must not fail them. They sit 5x or more above what the code costs and
+// catch a quadratic or backtracking pass, which costs seconds to minutes on these inputs. TIMING_DEBUG=1 prints every reading.
+import { assertLinearOn, expectCpuUnder } from '../../../testing/timing.js';
 
 // Real pdf-parse over real (hand-built) PDFs, inside the real child process, for nearly everything. The failures a real file cannot
 // produce on demand (a parser that reports a page count of zero, or throws a given error) are produced by a reader that behaves
@@ -370,9 +374,9 @@ describe('scanPdfContentStreams — text a parser does not return', { timeout: 3
   it('a Flate bomb is capped, not inflated, and the file is not vouched for', () => {
     const bomb = deflateSync(Buffer.alloc(40 * 1024 * 1024));
     expect(bomb.length).toBeLessThan(100_000);
-    const t0 = Date.now();
-    expect(scanPdfContentStreams(rawPdf(pages(1), 0, { extraObjects: [{ dict: '/Filter /FlateDecode', data: bomb }] }))).toEqual({ hit: null, complete: false });
-    expect(Date.now() - t0).toBeLessThan(3000);
+    expectCpuUnder(3000, () => {
+      expect(scanPdfContentStreams(rawPdf(pages(1), 0, { extraObjects: [{ dict: '/Filter /FlateDecode', data: bomb }] }))).toEqual({ hit: null, complete: false });
+    });
   });
 
   it('an instruction hidden behind more padding than the scan will inflate is not "clean": the scan reports it could not look', () => {
@@ -407,9 +411,9 @@ describe('scanPdfContentStreams — text a parser does not return', { timeout: 3
 
   it('is bounded on a file made of thousands of streams, and says it did not read them all', () => {
     const many = (n: number) => Array.from({ length: n }, () => ({ dict: '', data: Buffer.from('BT (x) Tj ET') }));
-    const t0 = Date.now();
-    expect(scanPdfContentStreams(rawPdf(pages(1), 0, { extraObjects: many(5000) }))).toEqual({ hit: null, complete: false });
-    expect(Date.now() - t0).toBeLessThan(3000);
+    expectCpuUnder(3000, () => {
+      expect(scanPdfContentStreams(rawPdf(pages(1), 0, { extraObjects: many(5000) }))).toEqual({ hit: null, complete: false });
+    });
     expect(scanPdfContentStreams(rawPdf(pages(1), 0, { extraObjects: many(3900) })).complete).toBe(true);   // 3900 + the page's own stream: under the 4000 cap
   });
 
@@ -490,9 +494,7 @@ describe('preflightPdf - a bounded look at every stream BEFORE pdfjs sees the fi
     const pdf = withStream('/Filter /FlateDecode', bomb);
     const reader = vi.fn();
 
-    const started = Date.now();
-    const flight = preflightPdf(pdf);
-    expect(Date.now() - started).toBeLessThan(1000);
+    const flight = expectCpuUnder(1000, () => preflightPdf(pdf), 'preflight of a 0.5 MB file that inflates to 500 MB');
     expect(flight).toEqual({ ok: false, why: 'complex' });
 
     const r = await preparePdf(pdf, 'bomb.pdf', ctxFor(), { reader });
@@ -610,9 +612,9 @@ describe('preflightPdf - a bounded look at every stream BEFORE pdfjs sees the fi
     });
 
     it('the decoding itself is bounded: a run of "z" (four zero bytes per character) cannot be made to produce a huge buffer', () => {
-      const started = Date.now();
-      expect(preflightPdf(withStream('/Filter /ASCII85Decode', Buffer.from(`${'z'.repeat(7 * MB)}~>`)))).toEqual({ ok: false, why: 'complex' });   // 28 MB of zeros
-      expect(Date.now() - started).toBeLessThan(2000);
+      expectCpuUnder(2000, () => {
+        expect(preflightPdf(withStream('/Filter /ASCII85Decode', Buffer.from(`${'z'.repeat(7 * MB)}~>`)))).toEqual({ ok: false, why: 'complex' });   // 28 MB of zeros
+      });
       expect(preflightPdf(withStream('/Filter /ASCII85Decode', Buffer.from(`${'z'.repeat(1000)}~>`)))).toMatchObject({ ok: true });
     });
 
@@ -627,9 +629,9 @@ describe('preflightPdf - a bounded look at every stream BEFORE pdfjs sees the fi
       const unit = Buffer.from('7 0 obj\n<< /Filter /ASCII85Decode >>\nstream\n' + 'A'.repeat(300));
       const overlapping = Buffer.concat([Buffer.from('%PDF-1.4\n'), ...Array.from({ length: 20_000 }, () => unit)]);
       expect(overlapping.length).toBeGreaterThan(6 * MB);
-      const started = Date.now();
-      expect(preflightPdf(overlapping)).toEqual({ ok: false, why: 'complex' });
-      expect(Date.now() - started).toBeLessThan(1500);
+      expectCpuUnder(1500, () => {
+        expect(preflightPdf(overlapping)).toEqual({ ok: false, why: 'complex' });
+      });
     });
 
     it('a corrupt Flate stream inside the chain is refused like any other', () => {
@@ -638,26 +640,26 @@ describe('preflightPdf - a bounded look at every stream BEFORE pdfjs sees the fi
 
     it('thousands of small ASCII85 streams cost no allocation each (the decoder stops at the data\'s own "~", not at the end of the file)', () => {
       const streams = Array.from({ length: 3000 }, () => ({ dict: '/Filter /ASCII85Decode', data: Buffer.from('87cURD]i,"Ebo80~>') }));
-      const started = Date.now();
-      expect(preflightPdf(rawPdf(pages(1), 0, { extraObjects: streams }))).toMatchObject({ ok: true });
-      expect(Date.now() - started).toBeLessThan(2000);
+      expectCpuUnder(2000, () => {
+        expect(preflightPdf(rawPdf(pages(1), 0, { extraObjects: streams }))).toMatchObject({ ok: true });
+      });
     });
   });
 
   it(`refuses more than ${MAX_PDF_STREAMS} streams and more than ${MAX_OBJECT_STREAMS} object streams, quickly`, () => {
     const tiny = (n: number, dict = '') => Array.from({ length: n }, () => ({ dict, data: Buffer.from('x') }));
-    const started = Date.now();
-    expect(preflightPdf(rawPdf(pages(1), 0, { extraObjects: tiny(MAX_PDF_STREAMS + 5) }))).toEqual({ ok: false, why: 'complex' });
-    expect(preflightPdf(rawPdf(pages(1), 0, { extraObjects: tiny(MAX_OBJECT_STREAMS + 1, '/Type /ObjStm /N 1 /First 5') }))).toEqual({ ok: false, why: 'complex' });
-    expect(preflightPdf(rawPdf(pages(1), 0, { extraObjects: tiny(MAX_OBJECT_STREAMS, '/Type /ObjStm /N 1 /First 5') }))).toMatchObject({ ok: true });
-    expect(Date.now() - started).toBeLessThan(3000);
+    expectCpuUnder(3000, () => {
+      expect(preflightPdf(rawPdf(pages(1), 0, { extraObjects: tiny(MAX_PDF_STREAMS + 5) }))).toEqual({ ok: false, why: 'complex' });
+      expect(preflightPdf(rawPdf(pages(1), 0, { extraObjects: tiny(MAX_OBJECT_STREAMS + 1, '/Type /ObjStm /N 1 /First 5') }))).toEqual({ ok: false, why: 'complex' });
+      expect(preflightPdf(rawPdf(pages(1), 0, { extraObjects: tiny(MAX_OBJECT_STREAMS, '/Type /ObjStm /N 1 /First 5') }))).toMatchObject({ ok: true });
+    });
   });
 
   it('a file full of "stream" followed by line breaks (a hostile shape for a naive scan) is read in linear time', () => {
     const junk = Buffer.from('stream\n'.repeat(15_000) + 'stream\r\n'.repeat(1000));
-    const started = Date.now();
-    expect(preflightPdf(Buffer.concat([Buffer.from('%PDF-1.4\n'), junk]))).toMatchObject({ ok: true });
-    expect(Date.now() - started).toBeLessThan(1000);
+    expectCpuUnder(1000, () => {
+      expect(preflightPdf(Buffer.concat([Buffer.from('%PDF-1.4\n'), junk]))).toMatchObject({ ok: true });
+    });
   });
 
   it('an encrypted file is reported as such, and "/EncryptMetadata" or the word in prose is not mistaken for encryption', () => {
@@ -757,16 +759,20 @@ describe('pdfTextStrings - a linear tokenizer, not a regex', () => {
   });
 
   it.each([
-    ['5 MB of "(\\" pairs', 'BT ' + '(\\'.repeat(2_500_000)],
-    ['5 MB of "(\\(\\(" runs', 'BT ' + '(\\(\\('.repeat(1_000_000)],
-    ['5 MB of open parentheses', '('.repeat(5 * MB)],
-    ['5 MB of "<" and hex digits that never close', '<0a'.repeat(1_700_000)],
-    ['5 MB of "<<" and ">"', '<<>'.repeat(1_700_000)],
-    ['5 MB of backslashes', '\\'.repeat(5 * MB)],
-  ])('is linear on %s (the old regex took ~2 ms per KB: a 24 KB file blocked the worker for ~53 s)', (_name, content) => {
-    const started = Date.now();
-    pdfTextStrings(content, 400_000);
-    expect(Date.now() - started).toBeLessThan(1000);
+    ['5 MB of "(\\" pairs', (n: number) => 'BT ' + '(\\'.repeat(Math.floor(n / 2))],
+    ['5 MB of "(\\(\\(" runs', (n: number) => 'BT ' + '(\\(\\('.repeat(Math.floor(n / 5))],
+    ['5 MB of open parentheses', (n: number) => '('.repeat(n)],
+    ['5 MB of "<" and hex digits that never close', (n: number) => '<0a'.repeat(Math.floor(n / 3))],
+    ['5 MB of "<<" and ">"', (n: number) => '<<>'.repeat(Math.floor(n / 3))],
+    ['5 MB of backslashes', (n: number) => '\\'.repeat(n)],
+  ])('is linear on %s (the old regex took ~2 ms per KB: a 24 KB file blocked the worker for ~53 s)', (_name, make) => {
+    // Two checks, both on CPU time. (1) The claim as it was written: 5 MB costs well under 3 s at most (it costs 0.1-0.4 s here; the old regex took minutes, so a
+    // regression is 30x over this), scaled to the machine. (2) The same shape at 0.25 MB and at 2 MB (8x): the big one may cost no more than linear scaling from the
+    // small one allows, so a quadratic tokenizer, which costs 8x too much on that step, fails whatever the machine. (Past ~2 MB the cost per character rises by itself,
+    // memory effects, so the ratio is taken below that point: from 0.5 to 5 MB a perfectly linear tokenizer measured 44x for 10x the input.)
+    const big = make(5 * MB);
+    expectCpuUnder(3000, () => pdfTextStrings(big, 400_000), `${_name}`);
+    assertLinearOn(_name, make, (content: string) => pdfTextStrings(content, 400_000), MB / 4, 2 * MB, { backstopMs: 1000 });
   });
 });
 
@@ -779,9 +785,7 @@ describe('scanPdfContentStreams - hostile content streams cannot stall the worke
     ['(\\(\\( runs', 'BT /F1 12 Tf ' + '(\\(\\('.repeat(1_000_000)],
   ])('a 5 MB content stream of %s is scanned in under a second, and the file is not vouched for', (_n, content) => {
     for (const pdf of [compressed(content), plain(content)]) {
-      const started = Date.now();
-      const scan = scanPdfContentStreams(pdf);
-      expect(Date.now() - started).toBeLessThan(1000);
+      const scan = expectCpuUnder(1000, () => scanPdfContentStreams(pdf), 'content scan of a 5 MB stream');
       expect(scan).toMatchObject({ hit: null, complete: false });
     }
   });
@@ -790,9 +794,9 @@ describe('scanPdfContentStreams - hostile content streams cannot stall the worke
     const content = 'BT /F1 12 Tf ' + '(\\('.repeat(Math.floor((23 * MB) / 3));
     const pdf = compressed(content);
     expect(pdf.length).toBeLessThan(80_000);
-    const started = Date.now();
-    expect(scanPdfContentStreams(pdf).complete).toBe(false);
-    expect(Date.now() - started).toBeLessThan(1000);
+    expectCpuUnder(1000, () => {
+      expect(scanPdfContentStreams(pdf).complete).toBe(false);
+    });
   });
 
   it('a stream that inflates past the scan\'s cap (what the pre-flight lets a stream inflate to: 24 MB) is not read at all, and the scan says it could not vouch for the file; one under it is read to its end', () => {
@@ -912,9 +916,9 @@ describe('text helpers', () => {
   });
 
   it('cleanText is linear on a hostile run of spaces (a /[ \\t]+$/ pass would not be)', () => {
-    const t0 = Date.now();
-    cleanText(`${' '.repeat(300_000)}x\n${'\t'.repeat(300_000)}y`);
-    expect(Date.now() - t0).toBeLessThan(1000);
+    expectCpuUnder(1000, () => {
+      cleanText(`${' '.repeat(300_000)}x\n${'\t'.repeat(300_000)}y`);
+    });
   });
 
   it('decodeEntities handles named, decimal and hex references and leaves the rest as written', () => {

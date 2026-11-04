@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { extractAnswerUrls, pickAnswerLinks } from './answerLinks.js';
+import { expectCpuUnder } from '../../testing/timing.js';
 
 // A held-out set for the punctuation a pasted answer really carries (Word / Docs / iOS smart quotes, Hindi and Hinglish
 // punctuation, CJK brackets and stops, markdown, emoji, lists, parentheses, "... is my portfolio"). Written AFTER the fix for
@@ -237,9 +238,11 @@ describe('hostile answers made of the new punctuation still finish quickly', () 
     ['invisible marks', () => `https://a.com/${(ch(0x200f) + ch(0xfe0f) + ch(0x2068)).repeat(12_000)}x`],
   ])('%s', (_n, make) => {
     const text = make();
-    const t0 = performance.now();
-    pickAnswerLinks([{ question: Q, answer: text }]);
-    extractAnswerUrls(text);
-    expect(performance.now() - t0).toBeLessThan(300);
+    // CPU time scaled to the machine (testing/timing.ts), not the clock: this catches a quadratic or backtracking pass (seconds on these inputs), and a
+    // descheduled process or a slower runner cannot fail it.
+    expectCpuUnder(300, () => {
+      pickAnswerLinks([{ question: Q, answer: text }]);
+      extractAnswerUrls(text);
+    }, _n);
   });
 });

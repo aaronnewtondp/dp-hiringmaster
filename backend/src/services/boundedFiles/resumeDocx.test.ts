@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import zlib from 'zlib';
 import { RESUME_DOCX_MAX_CHARS, RESUME_DOCX_MAX_XML_BYTES, readResumeDocx } from './resumeDocx.js';
 import { buildZip, forgedDirectory, patchDeclaredSizes, zipOf } from '../portfolio/acquire/zip.fixtures.js';
+import { expectCpuUnder } from '../../testing/timing.js';
 
 const MB = 1024 * 1024;
 const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
@@ -129,9 +130,8 @@ describe('readResumeDocx — hostile archives are refused, and nothing larger th
     const docxBytes = archiveWith(bombOf(megabytes), megabytes * MB);
     expect(docxBytes.length).toBeLessThan(500_000);
     const spy = vi.spyOn(zlib, 'inflateRawSync');
-    const t = performance.now();
-    const r = readResumeDocx(docxBytes, { withLinks: true });
-    expect(performance.now() - t).toBeLessThan(500);
+    // CPU time scaled to the machine (testing/timing.ts), not the clock: refusing from the directory's claim costs well under a millisecond, inflating costs seconds
+    const r = expectCpuUnder(500, () => readResumeDocx(docxBytes, { withLinks: true }), `${megabytes} MB bomb`);
     expect(r).toEqual({ kind: 'unreadable', why: 'too-complex' });
     expect(spy).not.toHaveBeenCalled();             // the directory's claim alone is over the cap: not one byte is inflated
     spy.mockRestore();
@@ -193,11 +193,9 @@ describe('readResumeDocx — hostile archives are refused, and nothing larger th
     it.each(shapes)('%s', (_n, build) => {
       const xml = (bodyXml('') .replace('</w:body></w:document>', '') + build()).slice(0, RESUME_DOCX_MAX_XML_BYTES - 16) + '</w:body></w:document>';
       const bytes = zipOf({ 'word/document.xml': xml, 'word/_rels/document.xml.rels': relsXml(ext('rId1', 'https://x.example')) });
-      const t = performance.now();
-      const r = readResumeDocx(bytes, { withLinks: true });
-      const ms = performance.now() - t;
+      // CPU time scaled to the machine, not the clock (the walk is synchronous: a slow runner must not fail it, a quadratic walk costs minutes)
+      const r = expectCpuUnder(2500, () => readResumeDocx(bytes, { withLinks: true }), _n);
       expect(['read', 'unreadable']).toContain(r.kind);
-      expect(ms, `${ms.toFixed(0)} ms`).toBeLessThan(2500);
     });
   });
 });

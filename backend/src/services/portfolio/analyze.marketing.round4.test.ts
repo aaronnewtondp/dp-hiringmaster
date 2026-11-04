@@ -3,6 +3,7 @@ import type { Candidate, Role } from '../../types/index.js';
 import { addressForText, fromCaptured } from './acquire/index.js';
 import type { Acquired } from './acquire/types.js';
 import type { CapturedPortfolio } from './capture.js';
+import { minCpuAsync, scaled } from '../../testing/timing.js';
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Fix round 4 (E3A): the analyzer-level findings of the third review, through the REAL analyzer with only the Anthropic SDK replaced.
@@ -140,21 +141,25 @@ describe('G7: a huge form name does not pin the worker', () => {
   const para = 'Brand deck: campaign reach 2.1M, 38% uplift in enquiries versus the previous quarter. We launched six campaigns across fourteen cities with a team of four and a modest budget. ';
   const text = para.repeat(Math.floor(30_000 / para.length));
   const items = () => Array.from({ length: 5 }, (_, i) => site({ ref: `L${i + 1}`, text, link: mkLink(`https://site${i}.example/work`) }));
-  const timed = async (name: string): Promise<number> => {
-    const t0 = performance.now();
-    await run(name, items(), modelJson({ links: [] }));
-    return performance.now() - t0;
-  };
+  // CPU time of this process (not wall time: a descheduled test is not a slow analyzer), the smallest of three runs (a garbage-collection pause or a cold
+  // regular expression only ever ADDS time). The claim is RELATIVE, like the test names say: the cost with a huge name is about the cost with a normal one,
+  // so the speed and the load of the machine cancel out. The quadratic code this guards took 10.2 s for a 150-token name and ten minutes for 3,000.
+  const cpuOf = async (name: string): Promise<number> => (await minCpuAsync(() => run(name, items(), modelJson({ links: [] })), 3)).ms;
+  // the normal-name cost is measured once, by whichever of the two tests below asks first (the first of its three runs also warms the regular expressions up)
+  let normalCost: Promise<number> | undefined;
+  const normalMs = (): Promise<number> => (normalCost ??= cpuOf('Priya Sharma'));
 
   it('analyzeMarketing over 5 items x 30 KB with a 3,000-token name takes about as long as with a normal one (it was minutes)', async () => {
-    const normal = await timed('Priya Sharma');   // also warms the regular expressions up
-    const huge = await timed(mkName(3000));
+    const normal = await normalMs();
+    const huge = await cpuOf(mkName(3000));
     expect(normal).toBeGreaterThan(0);
-    expect(huge).toBeLessThan(1000);
+    // 3x the normal run plus a small floor for noise: a flat answer passes whatever the machine, 10 s or 10 minutes (25x or 1,500x) cannot
+    expect(huge, `normal name ${normal.toFixed(1)} ms of CPU, 3,000-token name ${huge.toFixed(1)} ms`).toBeLessThanOrEqual(3 * normal + scaled(75));
   });
   it('a 300-token name over the same input stays flat too', async () => {
-    const t = await timed(mkName(300));
-    expect(t).toBeLessThan(1500);
+    const normal = await normalMs();
+    const t = await cpuOf(mkName(300));
+    expect(t, `normal name ${normal.toFixed(1)} ms of CPU, 300-token name ${t.toFixed(1)} ms`).toBeLessThanOrEqual(3 * normal + scaled(75));
   });
 });
 
