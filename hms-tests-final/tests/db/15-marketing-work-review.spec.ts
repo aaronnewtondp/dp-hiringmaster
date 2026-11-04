@@ -50,7 +50,11 @@ const driveId = (n: number) => `1AbCdEfGhIjKlMnOpQrStUvWxYz0123${String(n).padSt
 const driveFile = (n: number) => `https://drive.google.com/file/d/${driveId(n)}/view?usp=sharing`;
 
 const WRITTEN_ONLY = 'I led brand and content for a climate-tech startup for five years and ran a dozen campaigns across LinkedIn, events and video; happy to walk you through them in an interview.';
-const NOT_QUEUED = /could not be queued.*use re-run to retry/i;
+// The note is "Could not be queued (<the queue client's own message>). Use Re-run to retry." and outside a linked Vercel project that message spans
+// several lines ("Failed to get OIDC token for local development.\nTo fix this, pull your environment variables ...\nCause: ..."), so the text between
+// the parentheses must be able to span a line break: `.` does not match one, `[\s\S]` does. The prefix and the closing sentence are what is pinned
+// (the UI keys on "Could not be queued", enqueue.ts builds the whole note); the queue client's wording in between is not ours and is never asserted.
+const NOT_QUEUED = /^Could not be queued \([\s\S]*\)\. Use Re-run to retry\.$/;
 
 // The score-related state a no-evidence outcome must leave exactly as it found it.
 const SCORE_COLS = `score_avg, ai_fit_score, ai_priority_bucket, score_summary, score_red_flags, sla_hours,
