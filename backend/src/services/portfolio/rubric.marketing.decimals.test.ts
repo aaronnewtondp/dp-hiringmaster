@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { enforceEvidenceRules, type EvidenceContext } from './rubric.marketing.js';
 import type { CriterionResult, CriterionVerdict } from './types.js';
+import { cpuTimed, scaled } from '../../testing/timing.js';
 
 // Fix round 5, B1 (fourth review, review4-fairness-rubric): the quote matcher accepted a DROPPED OR MOVED DECIMAL POINT as an exact verbatim quote.
 // wordKey turned every non-alphanumeric run into a space, so "3.5" became the two words "3" and "5"; the run-together reading (the one that
@@ -275,11 +276,8 @@ describe('the run-together reading joins broken words, never two numbers', () =>
 
 // ─── Hostile text ────────────────────────────────────────────────────────────
 describe('the decimal-point rule stays linear on hostile text', () => {
-  const timed = (text: string, quote: string): number => {
-    const t0 = performance.now();
-    enforceEvidenceRules([read(`Says "${quote}"`)], ctxOf(text));
-    return performance.now() - t0;
-  };
+  // CPU time scaled to the machine (testing/timing.ts), not the clock: catastrophic backtracking costs seconds to minutes on these inputs.
+  const timed = (text: string, quote: string): number => cpuTimed(() => enforceEvidenceRules([read(`Says "${quote}"`)], ctxOf(text))).ms;
   const rep = (n: number, f: (i: number) => string) => Array.from({ length: n }, (_, i) => f(i)).join(' ');
   it.each([
     ['200,000 "1." pairs', '1.'.repeat(200000), 'grew reach from 1.1 to 1.1.1 in six months'],
@@ -289,6 +287,6 @@ describe('the decimal-point rule stays linear on hostile text', () => {
     ['100,000 "1.1." groups against 40 decimals', '1.1.'.repeat(100000), rep(40, i => `${i}.5`)],
     ['60,000 words with decimals against 40 decimals', rep(60000, i => ['the', 'campaign', 'grew', 'reach', 'and', '3.5', 'launched'][i % 7]), rep(40, i => ['campaign', 'grew', '3.5', 'reach'][i % 4])],
   ])('%s', (_name, text, quote) => {
-    expect(timed(text, quote)).toBeLessThan(2500);
+    expect(timed(text, quote)).toBeLessThan(scaled(2500));
   });
 });

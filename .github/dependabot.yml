@@ -1,0 +1,138 @@
+# Dependabot version updates. Weekly, one grouped PR per package for minor+patch; majors arrive one PR each, ungrouped, so a
+# human decides them. Security updates are a separate repository setting (Settings > Code security), not this file.
+#
+# Every update PR runs the full CI (.github/workflows/ci.yml), including the Node 22.11 load check that catches an
+# ES-module-only bump, and the dependency-review workflow.
+#
+# IGNORE RULES. The packages below are pinned on purpose. They are ignored with `update-types`, not by name alone: a
+# name-only ignore expands to "all versions" and (per Dependabot's documented behaviour for ignore conditions) can also
+# suppress the security-update PR for that package, which is the one PR you would want. NOTE: whether update-types ignores
+# leave security PRs alone is described by third-party write-ups, not stated on GitHub's options page. Check the first
+# security PR for any of these packages; if it does not arrive, handle that advisory by hand.
+#
+# COOLDOWN. A new release is not proposed until it has been public for a few days (3 / 7 / 14 for patch / minor / major;
+# GitHub Actions supports only a single default-days). Most compromised npm releases are pulled within days, and nothing
+# here needs a release on its first day. Cooldown applies to version updates only; security updates are never delayed.
+
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "Deps (backend)"
+    cooldown:
+      default-days: 3
+      semver-patch-days: 3
+      semver-minor-days: 7
+      semver-major-days: 14
+    groups:
+      backend-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # puppeteer-core and @sparticuz/chromium are exact-pinned (24.32.0 and 143.0.4) and must move TOGETHER, as a matched
+      # pair on the same Chrome major, and only after the Lambda-image check in docs/MarketingWorkSampleReview_Runbook.md
+      # (step 0). The first versions tried (puppeteer-core 25, @sparticuz/chromium 153) are ESM-only, which breaks `require()`
+      # on Vercel's older Node 22.x (backend/src/services/portfolio/browserPackages.test.ts fails the build if either is
+      # bumped to an ESM-only release, and the backend-compat job in ci.yml loads both on Node 22.11).
+      - dependency-name: puppeteer-core
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "@sparticuz/chromium"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      # @anthropic-ai/sdk stays on 0.24.x on purpose: document-block PDF input is sent as an untyped cast that the
+      # 2026-10-22 smoke test verified against this SDK (analyze.ts, analyze.marketing.ts). In 0.x every 0.N bump is "minor",
+      # so ignoring minor+major freezes the line; patch releases of 0.24 stay allowed.
+      - dependency-name: "@anthropic-ai/sdk"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # pdf-parse is on the v2 API (the PDFParse class), and the PDF sandbox's thresholds were measured against its bundled
+      # pdfjs; vercel.json also names files inside its dist/ layout (includeFiles). Majors change the API shape and a minor
+      # can move pdfjs or the layout, so both are deliberate upgrades with the measurements re-run. Patches stay allowed.
+      - dependency-name: pdf-parse
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # Production runs Node 22 (engines: 22.x). @types/node must track that line, not the newest Node.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "Deps (frontend)"
+    cooldown:
+      default-days: 3
+      semver-patch-days: 3
+      semver-minor-days: 7
+      semver-major-days: 14
+    groups:
+      frontend-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /hms-tests-final
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "Deps (tests)"
+    cooldown:
+      default-days: 3
+      semver-patch-days: 3
+      semver-minor-days: 7
+      semver-major-days: 14
+    groups:
+      tests-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /tools/ci-lint
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "Deps (ci-lint)"
+    cooldown:
+      default-days: 3
+      semver-patch-days: 3
+      semver-minor-days: 7
+      semver-major-days: 14
+    groups:
+      ci-lint-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # typescript-eslint 8.x supports TypeScript below 6.1 (peer range), and npm's latest TypeScript is 7.x.
+      # Keep TypeScript on the 5.x line used by backend/package-lock.json until typescript-eslint supports the next one.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "Deps (actions)"
+    cooldown:
+      default-days: 7
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]

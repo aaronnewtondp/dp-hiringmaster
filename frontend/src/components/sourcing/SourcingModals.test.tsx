@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
@@ -35,6 +35,13 @@ const onClose = vi.fn();
 const onDone = vi.fn();
 const wrap = (el: ReactElement) => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{el}</QueryClientProvider>);
 const dialog = () => within(screen.getByRole('dialog'));
+
+// "Today" is pinned to local noon on Wed 21 Oct 2026, so the fixtures built with ymd()/Date.now() and the component's own idea of today cannot disagree
+// when local midnight passes during a run, and every date shown is the same whenever the suite runs. Only Date is faked: timers keep working.
+const PINNED_NOW = new Date(2026, 9, 21, 12, 0, 0);
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(PINNED_NOW); });
+afterEach(() => { vi.useRealTimers(); });
+it('runs on the pinned day (the fixtures and the component agree on "today")', () => { expect(ymd(0)).toBe('2026-10-21'); expect(new Date().getHours()).toBe(12); });
 
 beforeEach(() => {
   for (const n of h.NAMES) { spies[n].mockReset(); impl[n] = ok(); }

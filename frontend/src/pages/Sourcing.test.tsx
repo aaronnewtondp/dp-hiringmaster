@@ -4,6 +4,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { WorkspaceRole, SourcingWorkspace as Workspace } from '../types/sourcing.ts';
+import { drain } from '../test/helpers.ts';
 
 // The Sourcing page is not persona-aware (the workspace endpoint decides what each persona gets), so AuthContext is deliberately NOT mocked
 // here: if the page ever called useAuth() this file would throw "useAuth must be used within AuthProvider".
@@ -62,6 +63,13 @@ function mount(entry = '/sourcing') {
 const answers = (s: unknown, w: unknown = ws()) => { status = async () => s; workspace = async () => w; };
 const never = () => new Promise<never>(() => {});
 const scrollIntoView = vi.fn();
+// The scroll nudge (were it on) is a passive effect of the commit that shows the plans, and the pills are on screen before passive effects have necessarily
+// run. The workspace's other effect in that commit — "a role arrived at by link becomes the remembered one" — writes sessionStorage, and effects of one
+// commit run together, so seeing that write is a positive signal that the nudge's effect has had its turn; `drain` then follows anything it started.
+const effectsOfThisLoadHaveRun = async (linkedRole: string) => {
+  await waitFor(() => expect(sessionStorage.getItem('hms:sourcing.role')).toBe(JSON.stringify(linkedRole)));
+  await drain();
+};
 
 beforeEach(() => {
   statusCalls.mockReset(); workspaceCalls.mockReset(); workspaceProps.mockReset(); workspaceMounted.mockReset(); scrollIntoView.mockReset();
@@ -251,14 +259,14 @@ describe('Sourcing page — module on', () => {
     await screen.findByTestId('role-pill-R2');
     expect(screen.getByTestId('role-pill-R2')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('plan-panel')).toHaveTextContent('Plan of R2');
-    await new Promise(r => setTimeout(r, 20));
+    await effectsOfThisLoadHaveRun('R2');
     expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
   it('does not scroll for the legacy #sourcing-workspace hash either', async () => {
     mount('/sourcing?sourcing_role=R2#sourcing-workspace');
     await screen.findByTestId('role-pill-R2');
-    await new Promise(r => setTimeout(r, 20));
+    await effectsOfThisLoadHaveRun('R2');
     expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
