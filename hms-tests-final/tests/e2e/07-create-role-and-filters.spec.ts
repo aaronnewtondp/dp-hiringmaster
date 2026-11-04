@@ -97,7 +97,7 @@ function sectionCard(page: Page, sectionTitle: string) {
  * one of those is the only way to actually reach — and test — handleSubmit's
  * own required-selection checks.
  */
-async function fillRequiredFields(page: Page, { title, skipVacancyReason = false }: { title: string; skipVacancyReason?: boolean }) {
+async function fillRequiredFields(page: Page, { title, skipVacancyReason = false, skipChannel = false }: { title: string; skipVacancyReason?: boolean; skipChannel?: boolean }) {
   await newRoleField(page, 'Role Title *').fill(title);
   await newRoleField(page, 'Department *', 'select').selectOption('Tech/Devs');
   await newRoleField(page, 'Hiring Manager *').fill('E2E Hiring Manager');
@@ -113,7 +113,9 @@ async function fillRequiredFields(page: Page, { title, skipVacancyReason = false
   if (!skipVacancyReason) {
     await page.getByRole('button', { name: 'Resignation', exact: true }).click();
   }
-  await page.getByRole('button', { name: 'LinkedIn', exact: true }).click();
+  if (!skipChannel) {
+    await page.getByRole('button', { name: 'LinkedIn', exact: true }).click();
+  }
 }
 
 /** Signs in as HR, fills the real Create Role form and submits it. Returns the new role (the app navigates to /roles/<id> on success). */
@@ -198,6 +200,19 @@ test.describe('Create Role form + RoleDetail parity + master filters', () => {
     expect(stored.rowCount).toBe(0);
   });
 
+  test('Create Role form: leaving Recruitment Channel unselected is blocked client-side with a toast and no request to create a role', async ({ page }) => {
+    const creates = recordRequests(page, r => r.method === 'POST' && new URL(r.url).pathname === '/api/roles');
+    await loginViaApi(page, 'hr', '/roles/new');
+    await page.waitForURL(/\/roles\/new/, { timeout: 10000 });
+    await fillRequiredFields(page, { title: `E2E No Channel Role ${RUN}`, skipChannel: true });
+    await page.getByRole('button', { name: 'Create role' }).click();
+    await expect(page.getByText('Select at least one Recruitment Channel')).toBeVisible({ timeout: 5000 });
+    await page.waitForLoadState('networkidle');
+    expect(creates, 'a role was created although no channel was chosen').toEqual([]);
+    await expect(page).toHaveURL(/\/roles\/new/);
+    expect((await db.query(`SELECT 1 FROM roles WHERE title = $1`, [`E2E No Channel Role ${RUN}`])).rowCount).toBe(0);
+  });
+
   test('Dashboard Department master filter shows a count badge, and Clear all resets it', async ({ page }) => {
     await loginViaApi(page, 'hr');
     await page.goto(`${FRONTEND_BASE}/dashboard`);
@@ -255,7 +270,9 @@ test.describe('Create Role form + RoleDetail parity + master filters', () => {
     // No DOM-level click, no forcing: this is what a person does (scroll, tick).
     const option = panel.getByLabel(role.title, { exact: true });
     await option.scrollIntoViewIfNeeded();
+    const filteredList = page.waitForRequest(r => r.url().includes('/api/applications') && new RegExp(`role_id(\\[\\])?=${role.id}(&|$)`).test(decodeURIComponent(new URL(r.url()).search.slice(1))));
     await option.check();
+    await filteredList;                                                                                      // the list is asked for this role only
 
     await expect(page.getByRole('heading', { name: /Unmatched Candidates/ })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^Role\s*1$/ })).toBeVisible();
@@ -269,7 +286,7 @@ test.describe('Create Role form + RoleDetail parity + master filters', () => {
     const live  = await fxList.role('live',  { status: 'Live – Sourcing', department: 'Tech/Devs',    priority: 'P1' });
     const draft = await fxList.role('draft', { status: 'Draft',           department: 'Tech/Devs',    priority: 'P2' });
     const hold  = await fxList.role('hold',  { status: 'On Hold',         department: 'CSM/Service',  priority: 'P2' });
-    const appr  = await fxList.role('appr',  { status: 'Approved',        department: 'CSM/Service',  priority: 'P3' });
+    const appr  = await fxList.role('appr',  { status: 'Approved',        department: 'CSM/Service',  priority: 'P3', hm: `Zorba${fxList.run}` });
     const link = (r: { title: string }) => page.getByRole('link', { name: r.title, exact: true });
 
     await loginViaApi(page, 'hr', '/roles');
@@ -302,6 +319,11 @@ test.describe('Create Role form + RoleDetail parity + master filters', () => {
     await expect(page.getByText(/^1 roles? shown/)).toBeVisible();
     await expect(link(appr)).toBeVisible();
     await expect(link(hold)).toHaveCount(0);
+
+    // the search also looks at the Hiring Manager's name (it is not in any title): only the Approved role names this one
+    await page.getByPlaceholder(/^Search by title/).fill(`Zorba${fxList.run}`);
+    await expect(page.getByText(/^1 roles? shown/)).toBeVisible();
+    await expect(link(appr)).toBeVisible();
 
     // a search that matches nothing says so
     await page.getByPlaceholder(/^Search by title/).fill(`${fxList.run}-no-such-role`);

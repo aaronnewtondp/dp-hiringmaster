@@ -581,6 +581,31 @@ test.describe('Leadership user who is also a role\'s Hiring Manager', () => {
     await expectBoxCount(page, 'Ready for Review', 3);
   });
 
+  test('when the window is capped, Founder-flagged candidates win it over a better-scored candidate of their own role (or_role_id ranks flagged rows first)', async ({ page }) => {
+    // Ready for Review sends limit=500; this is the same request with a window of one, narrowed to this group by name.
+    const strong = await fxL.app(await fxL.candidate('own-strong'), own, { score: 9 });                          // unflagged, the best score
+    const weakFlagged = await fxL.app(await fxL.candidate('weak-flagged'), other, { score: 2, founderFlag: true }); // flagged, the worst score
+    try {
+      const api = authed(page.request, await getToken(page.request, 'leadership'));
+      const res = await api.get(`/api/applications?founder_flag=true&or_role_id=${own.id}&q=${encodeURIComponent(fxL.run)}&limit=1`);
+      expect(res.status()).toBe(200);
+      const rows = (await res.json()).applications as { id: string; founder_review_flag: boolean }[];
+      expect(rows).toHaveLength(1);
+      expect(rows[0].founder_review_flag, 'a flagged candidate fills the one slot, not the score-9 unflagged one').toBe(true);
+      expect(rows[0].id).not.toBe(strong.id);
+      // and without the union the flag alone decides: only flagged rows come back
+      const flaggedOnly = await (await api.get(`/api/applications?founder_flag=true&q=${encodeURIComponent(fxL.run)}&limit=50`)).json();
+      expect((flaggedOnly.applications as { id: string }[]).map(a => a.id)).not.toContain(strong.id);
+      expect((flaggedOnly.applications as { id: string }[]).map(a => a.id)).toContain(weakFlagged.id);
+    } finally {
+      for (const a of [strong, weakFlagged]) {
+        await db.query(`DELETE FROM activity_log WHERE application_id = $1`, [a.id]);
+        await db.query(`DELETE FROM applications WHERE id = $1`, [a.id]);
+        fxL.appIds.splice(fxL.appIds.indexOf(a.id), 1);
+      }
+    }
+  });
+
   test('it is not a persona switch: no role lock and no comp hiding for them, and HR sees neither the note nor the role-scoped queue', async ({ page }) => {
     const me = await (await authed(page.request, await getToken(page.request, 'leadership')).get('/api/auth/me')).json();
     expect((me.user ?? me).persona).toBe('leadership');
@@ -664,6 +689,24 @@ test.describe('A role with two Hiring Managers', () => {
       await expect(page.getByRole('link', { name: neitherApp.candidateName, exact: true })).toHaveCount(0);
     });
   }
+
+  test('an ampersand separates Hiring Managers too: a role written "Nalin & Alex" is Alex\'s (not Satyadev\'s) in Ready for Review', async ({ page }) => {
+    const fxA = group('CoHMAmp');
+    const amp = await fxA.role('amp', { hm: 'Nalin & Alex', priority: 'P1' });
+    const ampApp = await fxA.app(await fxA.candidate('on-amp'), amp, { score: 7 });
+    await gotoAs(page, 'hm_alex', '/my-tasks');
+    await searchFor(page, fxA.run);
+    await expect(scorecardRow(page, ampApp)).toBeVisible();
+    await gotoAs(page, 'hm_satyadev', '/my-tasks');
+    await searchFor(page, fxA.run);
+    await expect(page.getByRole('button', { name: /^Ready for Review/ })).toBeVisible();
+    await expect(scorecardRow(page, ampApp)).toHaveCount(0);
+    // the server applies the same rule: the compensation of the role is Alex's to see, not Satyadev's
+    const band = async (who: 'hm_alex' | 'hm_satyadev') =>
+      ((await (await authed(page.request, await getToken(page.request, who)).get(`/api/roles/${amp.id}`)).json()).role as { ctc_band?: string }).ctc_band;
+    expect(await band('hm_alex')).toBe('20-25 LPA');
+    expect(await band('hm_satyadev')).toBeUndefined();
+  });
 
   test('TODAY: the queue (unlike Ready for Review and the role page) matches a name as a SUBSTRING of the row\'s Hiring Manager text, so both Alex and Satyadev also get the task of the look-alike role', async ({ page }) => {
     // Documented and left alone (CLAUDE.md, "Pre-existing and left alone"): GET /dashboard/pending uses position(name IN responsible_person).

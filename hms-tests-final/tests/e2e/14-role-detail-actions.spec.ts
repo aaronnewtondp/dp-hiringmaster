@@ -214,6 +214,14 @@ test.describe('Discarding a Draft role', () => {
     expect(res.status()).toBe(403);
     expect(await roleRow(draft.id)).toBeTruthy();
   });
+
+  test('the server discards Drafts only: HR deleting a live role through the API is refused (400) and the role stays', async ({ page }) => {
+    const live = await fx.role('live-api-delete');
+    const res = await authed(page.request, await getToken(page.request, 'hr')).delete(`/api/roles/${live.id}`);
+    expect(res.status()).toBe(400);
+    expect((await res.json()).error).toMatch(/Only Draft roles can be discarded/);
+    expect((await roleRow(live.id)).status).toBe('Live – Sourcing');
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -475,6 +483,21 @@ test.describe('Compensation: HR versus a Hiring Manager', () => {
     await openRole(page, 'hm_satyadev', spm);
     await expect(page.getByText('18-25 LPA')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Internal Compensation Benchmarking' })).toHaveCount(0);
+  });
+
+  test('compensation of a candidate is hidden from a Hiring Manager of ANOTHER role in the applications API, and shown to the named one and to HR', async ({ page }) => {
+    const cand = await fx.candidate('comp-cand', { expectedCtc: 22, currentCtc: 18 });
+    const app = await fx.app(cand, spm, { score: 7 });
+    const as = async (who: 'hr' | 'hm_alex' | 'hm_satyadev') =>
+      (await (await authed(page.request, await getToken(page.request, who)).get(`/api/applications?q=${encodeURIComponent(RUN)}&limit=50`)).json()).applications as Record<string, unknown>[];
+    for (const who of ['hr', 'hm_alex'] as const) {
+      const row = (await as(who)).find(a => a.id === app.id)!;
+      expect(row.role_ctc_band, `${who} sees the band`).toBe('18-25 LPA');
+      expect(Number(row.candidate_expected_ctc), `${who} sees the expectation`).toBe(22);
+    }
+    const hidden = (await as('hm_satyadev')).find(a => a.id === app.id)!;
+    expect(hidden, 'the application itself is listed').toBeTruthy();
+    for (const f of ['role_ctc_band', 'candidate_expected_ctc', 'candidate_ctc_fixed']) expect(hidden, `field ${f} is stripped`).not.toHaveProperty(f);
   });
 
   test('@live a role with no internal benchmark gets an AI estimate, labelled as one', async ({ page }) => {
