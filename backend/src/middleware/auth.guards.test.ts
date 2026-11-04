@@ -3,8 +3,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import jwt from 'jsonwebtoken';
 import type { NextFunction, Request, Response } from 'express';
-import { authenticate, requireAuth, requireHR, requireLeadership, requireSuperAdmin, stripRestrictedFields } from './auth.js';
+import { authenticate, invalidateUserAccess, requireAuth, requireHR, requireLeadership, requireSuperAdmin, stripRestrictedFields } from './auth.js';
 import type { JwtPayload, Persona } from '../types/index.js';
+import { fakeDb } from '../test/fakeDb.js';
+
+// authenticate() now also asks the database whether the account is still active; the shared fake answers "active" by default.
+vi.mock('../db/index.js', async () => (await import('../test/fakeDb.js')).dbModule());
 
 // The four guards every router mounts (requireHR, requireLeadership, requireSuperAdmin, requireAuth) and authenticate's
 // every way of saying no. middleware/auth.test.ts covers isHRTier, the comp helpers, stripRestrictedFields and the
@@ -16,13 +20,23 @@ const SECRET = 'guards-test-secret';
 const PERSONAS: Persona[] = ['hr_recruiter', 'hiring_manager', 'leadership', 'super_admin'];
 const USER: JwtPayload = { userId: 'U9001', email: 'person@example.test', name: 'Test Person', persona: 'hr_recruiter' };
 
+/** authenticate() is async (live account lookup): await it, then read what it did. */
+async function runAuth(req: Partial<Request>) {
+  const r = runWith(authenticate, req);
+  await r.done;
+  return r;
+}
 function run(guard: (req: Request, res: Response, next: NextFunction) => void, req: Partial<Request>) {
+  return runWith(guard, req);
+}
+function runWith(guard: (req: Request, res: Response, next: NextFunction) => unknown, req: Partial<Request>) {
   const json = vi.fn();
   const status = vi.fn().mockReturnValue({ json });
   const next = vi.fn();
   const full = { method: 'GET', headers: {}, ...req } as Request;
-  guard(full, { status } as unknown as Response, next);
+  const done = Promise.resolve(guard(full, { status } as unknown as Response, next));
   return {
+    done,
     req: full,
     next,
     status: status.mock.calls[0]?.[0] as number | undefined,
@@ -33,15 +47,15 @@ function run(guard: (req: Request, res: Response, next: NextFunction) => void, r
 const withUser = (persona: string): Partial<Request> => ({ user: { ...USER, persona: persona as Persona } });
 
 let savedSecret: string | undefined;
-beforeEach(() => { savedSecret = process.env.JWT_SECRET; process.env.JWT_SECRET = SECRET; });
+beforeEach(() => { fakeDb.reset(); invalidateUserAccess(); savedSecret = process.env.JWT_SECRET; process.env.JWT_SECRET = SECRET; });
 afterEach(() => { if (savedSecret === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = savedSecret; });
 
 describe('authenticate — every way of being refused', () => {
   const bearer = (token: string) => ({ headers: { authorization: `Bearer ${token}` } });
   const sign = (payload: object = USER, secret: string = SECRET, options: jwt.SignOptions = {}) => jwt.sign({ ...payload }, secret, options);
 
-  it('accepts a valid token, attaches the decoded payload as req.user, and calls next exactly once without answering', () => {
-    const r = run(authenticate, bearer(sign(USER, SECRET, { expiresIn: '1h' })) as Partial<Request>);
+  it('accepts a valid token, attaches the decoded payload as req.user, and calls next exactly once without answering', async () => {
+    const r = await runAuth(bearer(sign(USER, SECRET, { expiresIn: '1h' })) as Partial<Request>);
     expect(r.next).toHaveBeenCalledTimes(1);
     expect(r.responded).toBe(false);
     expect(r.req.user).toMatchObject(USER);
@@ -54,8 +68,8 @@ describe('authenticate — every way of being refused', () => {
     ['the Basic scheme', { authorization: `Basic ${sign()}` }],
     ['a bare token with no scheme', { authorization: sign() }],
     ['a lower-case "bearer" (the scheme is matched exactly)', { authorization: `bearer ${sign()}` }],
-  ])('%s → 401 "No token provided", and next is not called', (_name, headers) => {
-    const r = run(authenticate, { headers });
+  ])('%s → 401 "No token provided", and next is not called', async (_name, headers) => {
+    const r = await runAuth({ headers });
     expect([r.status, r.body]).toEqual([401, { error: 'No token provided' }]);
     expect(r.next).not.toHaveBeenCalled();
   });
@@ -70,37 +84,37 @@ describe('authenticate — every way of being refused', () => {
       return bearer(`${h}.${Buffer.from(JSON.stringify({ ...USER, persona: 'super_admin' })).toString('base64url')}.${s}`);
     })()],
     ['a token that is not yet valid (nbf in the future)', bearer(sign(USER, SECRET, { notBefore: 3600 }))],
-  ])('%s → 401 "Invalid or expired token", and next is not called', (_name, req) => {
-    const r = run(authenticate, req as Partial<Request>);
+  ])('%s → 401 "Invalid or expired token", and next is not called', async (_name, req) => {
+    const r = await runAuth(req as Partial<Request>);
     expect([r.status, r.body]).toEqual([401, { error: 'Invalid or expired token' }]);
     expect(r.next).not.toHaveBeenCalled();
   });
 
-  it('with JWT_SECRET unset on the server even a token signed with the usual secret is refused: it fails closed (401), it never lets a request through unchecked', () => {
+  it('with JWT_SECRET unset on the server even a token signed with the usual secret is refused: it fails closed (401), it never lets a request through unchecked', async () => {
     const token = sign();
     delete process.env.JWT_SECRET;
-    const r = run(authenticate, bearer(token) as Partial<Request>);
+    const r = await runAuth(bearer(token) as Partial<Request>);
     expect([r.status, r.body]).toEqual([401, { error: 'Invalid or expired token' }]);
     expect(r.next).not.toHaveBeenCalled();
   });
 
-  it('with JWT_SECRET set to the empty string the guard also refuses (an empty secret is "not configured", not a key anyone can sign with)', () => {
+  it('with JWT_SECRET set to the empty string the guard also refuses (an empty secret is "not configured", not a key anyone can sign with)', async () => {
     const token = jwt.sign({ ...USER }, 'x');
     process.env.JWT_SECRET = '';
-    const r = run(authenticate, bearer(token) as Partial<Request>);
+    const r = await runAuth(bearer(token) as Partial<Request>);
     expect(r.status).toBe(401);
     expect(r.next).not.toHaveBeenCalled();
   });
 
-  it('reads the secret on every call, not once at import (so a rotated secret takes effect without a restart)', () => {
+  it('reads the secret on every call, not once at import (so a rotated secret takes effect without a restart)', async () => {
     const token = sign(USER, 'rotated-secret');
-    expect(run(authenticate, bearer(token) as Partial<Request>).status).toBe(401);
+    expect((await runAuth(bearer(token) as Partial<Request>)).status).toBe(401);
     process.env.JWT_SECRET = 'rotated-secret';
-    expect(run(authenticate, bearer(token) as Partial<Request>).next).toHaveBeenCalledTimes(1);
+    expect((await runAuth(bearer(token) as Partial<Request>)).next).toHaveBeenCalledTimes(1);
   });
 
-  it('does not look at the persona inside the token: an unknown persona authenticates (and is then never HR-tier, below)', () => {
-    const r = run(authenticate, bearer(sign({ ...USER, persona: 'interviewer' })) as Partial<Request>);
+  it('does not look at the persona inside the token: an unknown persona authenticates (and is then never HR-tier, below)', async () => {
+    const r = await runAuth(bearer(sign({ ...USER, persona: 'interviewer' })) as Partial<Request>);
     expect(r.next).toHaveBeenCalledTimes(1);
   });
 });
@@ -197,34 +211,36 @@ describe('requireAuth', () => {
 });
 
 describe('the guards in the order the routers mount them (authenticate, then a persona guard)', () => {
-  const chain = (guards: Array<(req: Request, res: Response, next: NextFunction) => void>, req: Partial<Request>) => {
+  const chain = async (guards: Array<(req: Request, res: Response, next: NextFunction) => unknown>, req: Partial<Request>) => {
     // Express runs the next guard only when the previous one called next(); mirror that.
     const full = { method: 'GET', headers: {}, ...req } as Request;
     const json = vi.fn();
     const status = vi.fn().mockReturnValue({ json });
     const res = { status } as unknown as Response;
     let reached = 0;
-    const step = (i: number): void => {
+    const step = async (i: number): Promise<void> => {
       if (i >= guards.length) { reached = i; return; }
-      guards[i](full, res, () => step(i + 1));
+      let advance: Promise<void> = Promise.resolve();
+      await guards[i](full, res, () => { advance = step(i + 1); });
+      await advance;
     };
-    step(0);
+    await step(0);
     return { reached, status: status.mock.calls[0]?.[0] as number | undefined, body: json.mock.calls[0]?.[0] as { error?: string } | undefined, user: full.user };
   };
   const token = (persona: string) => jwt.sign({ ...USER, persona }, SECRET, { expiresIn: '1h' });
 
-  it('users.ts: authenticate then requireSuperAdmin — an hr_recruiter token is stopped at the second guard with the persona decoded from the token', () => {
-    const r = chain([authenticate, requireSuperAdmin], { headers: { authorization: `Bearer ${token('hr_recruiter')}` } });
+  it('users.ts: authenticate then requireSuperAdmin — an hr_recruiter token is stopped at the second guard with the persona decoded from the token', async () => {
+    const r = await chain([authenticate, requireSuperAdmin], { headers: { authorization: `Bearer ${token('hr_recruiter')}` } });
     expect([r.status, r.body, r.user?.persona]).toEqual([403, { error: 'Super-Admin access required' }, 'hr_recruiter']);
   });
 
-  it('a super_admin token passes both', () => {
-    const r = chain([authenticate, requireSuperAdmin], { headers: { authorization: `Bearer ${token('super_admin')}` } });
+  it('a super_admin token passes both', async () => {
+    const r = await chain([authenticate, requireSuperAdmin], { headers: { authorization: `Bearer ${token('super_admin')}` } });
     expect([r.reached, r.status]).toEqual([2, undefined]);
   });
 
-  it('without a token the FIRST guard answers (401), so a persona guard never runs on an anonymous request', () => {
-    const r = chain([authenticate, requireHR], {});
+  it('without a token the FIRST guard answers (401), so a persona guard never runs on an anonymous request', async () => {
+    const r = await chain([authenticate, requireHR], {});
     expect([r.status, r.body]).toEqual([401, { error: 'No token provided' }]);
   });
 });
