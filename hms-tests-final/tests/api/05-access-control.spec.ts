@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { BASE, getToken, authed, createCandidateWithApp, SEEDED, uid } from '../helpers/api';
+import { BASE, getToken, getSession, authed, createCandidateWithApp, SEEDED, uid } from '../helpers/api';
 
 test.describe('Access Control — restricted field enforcement', () => {
 
@@ -87,19 +87,25 @@ test.describe('Access Control — restricted field enforcement', () => {
       expect(res.status()).toBe(403);
     });
 
-    test('CAN update recruiter screening status (HM shortlist)', async ({ request }) => {
+    // The rule is deterministic (applications.ts POST /:id/screening): a Hiring Manager may set exactly 'HM Shortlisted'. The old version of
+    // this test accepted 200, 403 or 500, i.e. it passed when the route crashed. The full rule matrix is tests/api/46-screening-persona-rules.
+    test('CAN update recruiter screening status (HM shortlist): 200, and the new status is stored', async ({ request }) => {
       const hrToken = await getToken(request, 'hr');
       const { application } = await createCandidateWithApp(request, hrToken);
-      // HM can set HM Shortlisted
       const hmToken = await getToken(request, 'hm_alex');
       const res = await authed(request, hmToken).post(`/api/applications/${application.id}/screening`, {
         new_screening_status: 'HM Shortlisted',
       });
-      // May be 200 or 403 depending on PRD — assert the status is defined
-      expect([200, 403, 500]).toContain(res.status());
+      expect(res.status()).toBe(200);
+      expect(await res.json()).toEqual({ success: true, new_screening_status: 'HM Shortlisted' });
+      const stored = await (await authed(request, hrToken).get(`/api/applications/${application.id}`)).json();
+      expect(stored.application.recruiter_screening_status).toBe('HM Shortlisted');
     });
 
-    test('CAN submit interview feedback (not restricted to HR)', async ({ request }) => {
+    // The round lists no interviewer_emails, so nobody is "assigned" and the route must let any persona submit (interviews.ts:
+    // feedback authorization). The old version accepted [200, 403]. The 403 branch (a round that DOES list someone else) is
+    // tests/api/42-feedback-authorization.
+    test('CAN submit interview feedback (not restricted to HR): 200 on a round that lists no interviewer, recorded as the Hiring Manager', async ({ request }) => {
       const hrToken = await getToken(request, 'hr');
       const { application } = await createCandidateWithApp(request, hrToken);
       await authed(request, hrToken).post(`/api/applications/${application.id}/stage`, {
@@ -110,14 +116,20 @@ test.describe('Access Control — restricted field enforcement', () => {
         round_name:     'Round 1',
         round_number:   1,
       });
+      expect(irRes.status()).toBe(201);
       const { round } = await irRes.json();
-      const hmToken = await getToken(request, 'hm_alex');
-      const fbRes = await authed(request, hmToken).patch(`/api/interviews/${round.id}/feedback`, {
+      expect(round.interviewer_emails == null).toBe(true);
+      const alex = await getSession(request, 'hm_alex');
+      const fbRes = await authed(request, alex.token).patch(`/api/interviews/${round.id}/feedback`, {
         overall_assessment: 'Positive',
         round_recommendation: 'Proceed',
         strengths_observed: 'Good communication',
       });
-      expect([200, 403]).toContain(fbRes.status());
+      expect(fbRes.status()).toBe(200);
+      const body = await fbRes.json();
+      expect(body.round.feedback_status).toBe('Submitted');
+      expect(body.round.entered_by).toBe(alex.user.id);
+      expect(body.round.strengths_observed).toBe('Good communication');
     });
   });
 

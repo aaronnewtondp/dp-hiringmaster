@@ -54,13 +54,15 @@ test.describe('GET /api/roles/:id/comp-benchmark', () => {
   // A freshly-created role with a uid()-suffixed title is guaranteed to
   // never equal any seeded comp_benchmarks.role_category, so
   // getCompBenchmark's `rows` array comes back empty and it falls through
-  // to the live Anthropic API call. This is a REAL network call to Claude —
-  // no mocking — so this test genuinely takes several seconds; that's
-  // expected, not a hang. No timeout override here: Playwright's default
-  // test timeout comfortably covers it.
+  // to the live Anthropic API call. The first test is a REAL network call to
+  // Claude — no mocking — so it is tagged @live (needs ANTHROPIC_API_KEY on
+  // the backend; `npm run test:live`). The second asserts the same fall-through
+  // OFFLINE: where the backend cannot reach the model, the route must fail
+  // closed rather than invent a range.
   test.describe('ai_estimate path — no comp_benchmarks row matches the role title', () => {
 
-    test('brand-new role with a unique title falls back to a live AI estimate, no benchmark_id', async ({ request }) => {
+    test('@live brand-new role with a unique title falls back to a live AI estimate, no benchmark_id', async ({ request }) => {
+      test.setTimeout(60_000);
       const hrToken = await getToken(request, 'hr');
 
       const roleRes = await authed(request, hrToken).post('/api/roles', {
@@ -88,6 +90,21 @@ test.describe('GET /api/roles/:id/comp-benchmark', () => {
       // just falsy (a stray empty string would pass a falsy check but is
       // still the wrong shape per CompBenchmarkResult's optional field).
       expect(benchmark.benchmark_id).toBeUndefined();
+    });
+
+    test('with no internal row and no reachable model the route fails closed: 500 with the fixed message, never a made-up range', async ({ request }) => {
+      const hrToken = await getToken(request, 'hr');
+      const roleRes = await authed(request, hrToken).post('/api/roles', {
+        title: `Unbenchmarked Offline Role ${uid()}`, priority: 'P2', yoe_required: '4-6 years',
+      });
+      expect(roleRes.status()).toBe(201);
+      const { role } = await roleRes.json();
+
+      const res = await authed(request, hrToken).get(`/api/roles/${role.id}/comp-benchmark`);
+      // A backend that holds a model key answers 200 with an estimate: that is the @live test above, not this one.
+      test.skip(res.status() === 200, 'this backend can reach the model: see the @live ai_estimate test');
+      expect(res.status()).toBe(500);
+      expect(await res.json()).toEqual({ error: 'Compensation benchmarking failed — please try again' });
     });
   });
 

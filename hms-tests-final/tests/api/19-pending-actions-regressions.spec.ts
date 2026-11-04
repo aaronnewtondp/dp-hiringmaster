@@ -68,13 +68,26 @@ test.describe('SLA breach engine — stage/breach-type table regressions', () =>
       // sweep (dashboard.ts's maybeRunSlaCheck, throttled to once per 3
       // minutes per instance — see CLAUDE.md's "compute-on-read, not cron"
       // note) whenever this is the first dashboard load outside that
-      // window. Against this suite's large, long-accumulated local dataset
-      // that sweep alone has been observed taking 25-30s — right at (or
-      // over) Playwright's 30s default — so give this generous headroom
-      // rather than risk a flaky timeout depending on suite/test ordering.
-      test.setTimeout(60_000);
+      // window; the project's 60 s test timeout (playwright.config.ts) covers
+      // it, and globalSetup has already warmed it.
       const hrToken = await getToken(request, 'hr');
+      // This test's OWN breach: it used to assert `length > 0` over whatever earlier runs had left behind, so it failed on a fresh database
+      // and passed only on leftovers. A fresh application, 50 h in Applied and Screened, is a guaranteed 'Resume Shortlist Pending' entry.
+      const { application, candidate } = await createCandidateWithApp(request, hrToken, 'R006');
+      await client.query(`UPDATE applications SET stage_entry_time = NOW() - INTERVAL '50 hours' WHERE id = $1`, [application.id]);
+      await runCronSlaCheck(request);
+
       const snapshot = await getSnapshot(request, hrToken);
+      const own = findCandidate(snapshot, 'Applied and Screened', application.id);
+      expect(own, 'the backdated application must be in the snapshot').toBeDefined();
+      expect(own).toMatchObject({
+        application_id: application.id, candidate_id: candidate.id, candidate_name: candidate.full_name,
+        role_id: 'R006', stage: 'Applied and Screened', owner: 'Hiring Manager', type: 'Resume Shortlist Pending',
+      });
+      expect(typeof own!.role_title).toBe('string');
+      expect(Number(own!.overdue_hours)).toBeGreaterThan(0);
+
+      // The shape contract holds for EVERY entry in the snapshot, not just this one.
       const allCandidates = snapshot.flatMap(s => s.breach_types.flatMap(bt => bt.candidates));
       expect(allCandidates.length).toBeGreaterThan(0);
       for (const c of allCandidates) {

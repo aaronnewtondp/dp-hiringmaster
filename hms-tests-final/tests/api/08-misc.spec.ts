@@ -59,14 +59,22 @@ test.describe('PATCH /api/applications/:id/notes', () => {
     expect(body).toBeTruthy();
   });
 
-  test('HR priority override requires a reason', async ({ request }) => {
+  // The old title said "requires a reason" and the old test accepted 200 OR 400 ("backend may not validate this yet") — it could never fail.
+  // The backend does NOT enforce it (applications.ts PATCH /:id/notes: hr_priority_override_reason is just another optional field), so this
+  // pins what the code does today. If the rule is ever enforced, this test fails: change it to expect 400 and rename it.
+  test('TODAY: an HR priority override WITHOUT a reason is accepted (200); the reason is stored empty and the activity log records an empty reason', async ({ request }) => {
     const token = await getToken(request, 'hr');
     const { application } = await createCandidateWithApp(request, token);
     const res = await authed(request, token).patch(`/api/applications/${application.id}/notes`, {
       hr_priority_override: 'Critical',
       // No reason provided
     });
-    expect([400, 200]).toContain(res.status()); // backend may not validate this yet
+    expect(res.status()).toBe(200);
+    const body = await (await authed(request, token).get(`/api/applications/${application.id}`)).json();
+    expect(body.application.hr_priority_override).toBe('Critical');
+    expect(body.application.hr_priority_override_reason).toBeNull();
+    const event = body.activity.find((a: { event_type: string }) => a.event_type === 'Priority Override Set');
+    expect(event).toMatchObject({ event_detail: 'HR Priority → Critical: ', new_value: 'Critical' });
   });
 
   test('HR priority override WITH reason succeeds', async ({ request }) => {
