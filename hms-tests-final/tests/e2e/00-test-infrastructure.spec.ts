@@ -53,11 +53,22 @@ test.describe('loginViaApi / gotoAs', () => {
     expect(await page.evaluate(() => sessionStorage.getItem('hms:selftest'))).toBe('kept');
   });
 
-  test('waitForUrl: an explicit pattern is awaited, false is not', async ({ page }) => {
+  test('waitForUrl: an explicit pattern is awaited (and a pattern that never matches fails the helper after waitTimeoutMs), false is not', async ({ page }) => {
     await loginViaApi(page, 'hr', { path: '/candidates', waitForUrl: /\/candidates$/ });
     await expect(page).toHaveURL(/\/candidates$/);
     await loginViaApi(page, 'hr', { path: '/roles', waitForUrl: false });
     await expect(page).toHaveURL(/\/roles$/);
+
+    const started = Date.now();
+    await expect(loginViaApi(page, 'hr', { path: '/roles', waitForUrl: /\/never-there$/, waitTimeoutMs: 800 })).rejects.toThrow();
+    expect(Date.now() - started, 'the wait is bounded by waitTimeoutMs, not the 15 s default').toBeLessThan(12_000);
+  });
+
+  test('gotoAs never waits for a URL: a path that does not end on /dashboard returns at once', async ({ page }) => {
+    const started = Date.now();
+    await gotoAs(page, 'super_admin', '/users');
+    await expect(page).toHaveURL(/\/users$/);
+    expect(Date.now() - started, 'a wait for /dashboard would have burnt the 15 s default').toBeLessThan(12_000);
   });
 });
 

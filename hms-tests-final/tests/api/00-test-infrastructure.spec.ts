@@ -16,7 +16,8 @@ import {
   USERS, authed, getSession, getToken, isConnectionError, withConnectionRetry,
 } from '../helpers/api';
 import { futureDateOnly, futureIso, futureLocalDateTime, pastDateOnly, pastIso } from '../helpers/dates';
-import { DEFAULT_TEST_DB_URL, TEST_DB_URL, resolveTestDbUrl } from '../helpers/db';
+import { DEFAULT_TEST_DB_URL, TEST_DB_URL, newClient, resolveTestDbUrl, withDb } from '../helpers/db';
+import playwrightConfig from '../../playwright.config';
 
 const DAY = 86_400_000;
 const near = (a: number, b: number, ms = 5_000) => Math.abs(a - b) <= ms;
@@ -127,6 +128,30 @@ test.describe('date helpers (helpers/dates.ts) are computed from the real clock'
     expect(futureLocalDateTime(1)).toMatch(/T10:00$/);
     expect(() => futureIso(1, { hour: 1, offset: 'IST' })).toThrow(/offset/);
   });
+
+  test('with the clock pinned, every helper lands on the exact day and wall clock (zone arithmetic is deterministic, not a coincidence of the hour the suite runs)', () => {
+    const realNow = Date.now;
+    const at = (iso: string) => { Date.now = () => Date.parse(iso); };
+    try {
+      at('2026-06-15T18:45:00Z');                                     // 00:15 on the 16th in IST, 13:45 on the 15th at -05:00
+      expect(futureDateOnly(0)).toBe('2026-06-15');
+      expect(futureDateOnly(0, { offset: '+05:30' })).toBe('2026-06-16');
+      expect(futureDateOnly(0, { offset: '+05:00' })).toBe('2026-06-15');   // the 30 minutes matter: 18:45Z is already tomorrow only at +05:30
+      expect(futureDateOnly(0, { offset: '-05:00' })).toBe('2026-06-15');
+      expect(futureDateOnly(30, { offset: '+05:30' })).toBe('2026-07-16');
+      expect(pastDateOnly(15)).toBe('2026-05-31');
+      expect(futureIso(30, { hour: 10, offset: '+05:30' })).toBe('2026-07-16T10:00:00+05:30');
+      expect(futureIso(0, { hour: 9, minute: 5 })).toBe('2026-06-15T09:05:00Z');
+      expect(pastIso(1, { hour: 23, minute: 59, offset: '-05:00' })).toBe('2026-06-14T23:59:00-05:00');
+      expect(futureIso(30)).toBe('2026-07-15T18:45:00.000Z');
+      expect(pastIso(3)).toBe('2026-06-12T18:45:00.000Z');
+      at('2026-06-15T03:00:00Z');                                     // 22:00 on the 14th at -05:00
+      expect(futureDateOnly(0, { offset: '-05:00' })).toBe('2026-06-14');
+      expect(futureDateOnly(0, { offset: '+05:30' })).toBe('2026-06-15');
+    } finally {
+      Date.now = realNow;
+    }
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -154,6 +179,23 @@ test.describe('database URL guards (helpers/db.ts)', () => {
 
   test('the URL the specs actually use is TEST_DB_URL from the environment', () => {
     expect(TEST_DB_URL).toBe(process.env.TEST_DB_URL || DEFAULT_TEST_DB_URL);
+  });
+
+  test('newClient() and withDb() connect through TEST_DB_URL, hand back the callback\'s value, and always close the connection (also when the callback throws)', async () => {
+    const want = new URL(TEST_DB_URL);
+    const fresh = newClient();
+    expect(fresh.port).toBe(Number(want.port));
+    expect(fresh.host).toBe(want.hostname);
+    expect(fresh.database).toBe(want.pathname.slice(1));
+
+    let seen: ReturnType<typeof newClient> | undefined;
+    const roles = await withDb(async c => { seen = c; return Number((await c.query('SELECT count(*) AS n FROM roles')).rows[0].n); });
+    expect(roles).toBeGreaterThanOrEqual(7);
+    await expect(seen!.query('SELECT 1'), 'the client must be closed after a normal return').rejects.toThrow();
+
+    let thrown: ReturnType<typeof newClient> | undefined;
+    await expect(withDb(async c => { thrown = c; throw new Error('boom from the callback'); })).rejects.toThrow('boom from the callback');
+    await expect(thrown!.query('SELECT 1'), 'the client must be closed after a throw').rejects.toThrow();
   });
 });
 
@@ -190,6 +232,14 @@ test.describe('seeded users and the session cache written by globalSetup', () =>
       expect((await authed(request, await getToken(request, who)).get('/api/users')).status(), who).toBe(403);
     }
   });
+
+  test('the backend this suite talks to runs in UTC: a DATE column is serialised as UTC midnight of the SAME calendar day (a host in IST turned 2026-04-27 into 2026-04-26T18:30Z)', async ({ request }) => {
+    const { id, day } = await withDb(async c => (await c.query(
+      `SELECT id, to_char(start_date, 'YYYY-MM-DD') AS day FROM roles WHERE start_date IS NOT NULL ORDER BY id LIMIT 1`)).rows[0]);
+    expect(id, 'the seed holds a role with a start_date').toBeTruthy();
+    const role = (await (await authed(request, await getToken(request, 'hr')).get(`/api/roles/${id}`)).json()).role;
+    expect(String(role.start_date), 'start the stack with scripts/test-stack.sh (TZ=UTC), or run the backend with TZ=UTC').toBe(`${day}T00:00:00.000Z`);
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -225,6 +275,43 @@ test.describe('scripts/test-stack.sh: argument validation and the port plan (no 
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+test.describe('playwright.config.ts: settings every other spec relies on', () => {
+  const project = (name: string) => playwrightConfig.projects?.find(p => p.name === name);
+
+  test('serial on purpose (one worker, no retries), generous timeouts, forbidOnly in CI, an outputDir, and the live-tag gate', () => {
+    expect(playwrightConfig.workers).toBe(1);
+    expect(playwrightConfig.fullyParallel).toBe(false);
+    expect(playwrightConfig.retries).toBe(0);
+    expect(playwrightConfig.timeout).toBe(60_000);
+    expect(playwrightConfig.expect?.timeout).toBe(10_000);
+    expect(playwrightConfig.forbidOnly).toBe(!!process.env.CI);
+    expect(playwrightConfig.globalSetup).toMatch(/tests[\\/]helpers[\\/]global-setup\.ts$/);
+    expect(playwrightConfig.outputDir).toBe(process.env.PW_OUTPUT_DIR || 'test-results');
+    if (process.env.TEST_LIVE) expect(playwrightConfig.grepInvert).toBeUndefined();
+    else expect(String((playwrightConfig.grepInvert as RegExp)?.source)).toBe('@live');
+  });
+
+  test('the smoke project (it runs against production) never records a trace, a video or a screenshot', () => {
+    expect(project('smoke')?.use).toMatchObject({ trace: 'off', video: 'off', screenshot: 'off' });
+    for (const name of ['api', 'db', 'e2e']) expect(project(name)?.use?.trace, name).not.toBe('off');
+    expect(playwrightConfig.use).toMatchObject({ trace: 'retain-on-failure', video: 'retain-on-failure', screenshot: 'only-on-failure' });
+  });
+
+  test('e2e and e2e-mobile: the browser runs in Asia/Kolkata and never reaches the internet; e2e-mobile is a phone viewport with touch', () => {
+    for (const name of ['e2e', 'e2e-mobile']) {
+      const use = project(name)?.use;
+      expect(use?.timezoneId, name).toBe('Asia/Kolkata');
+      if (!process.env.PW_ALLOW_EXTERNAL_HOSTS) {
+        expect((use?.launchOptions?.args ?? []).join(' '), name).toContain('--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1');
+      }
+    }
+    expect(project('e2e')?.testMatch).toBe('tests/e2e/**/*.spec.ts');
+    const mobile = project('e2e-mobile');
+    expect(mobile?.testMatch).toBe('tests/e2e-mobile/**/*.spec.ts');
+    expect(mobile?.use).toMatchObject({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  });
+});
+
 test.describe('playwright.config.ts: the project set, and the live-tag gate', () => {
   test.describe.configure({ timeout: 120_000 });   // each nested `playwright test --list` loads ~70 spec files: ~2.5 s idle, several times that under load
 
@@ -473,11 +560,28 @@ test.describe('globalSetup and the live-login fallback, run for real against a f
         "  expect((await getSession(request, 'hm_alex')).token).toBe(first.token);\n" +
         "  expect(await getToken(request, 'hm_alex')).toBe(first.token);\n" +
         "  expect(await getToken(request, 'leadership')).toBe('fake-token-nalin@digitalpaani.com');\n" +
+        "  expect(await getToken(request, 'leadership')).toBe('fake-token-nalin@digitalpaani.com');\n" +
         "});\n";
       const r = await runProbe({ spec, globalSetup: false, env: { TEST_API_URL: api.url } });
       expect(r.code, r.out).toBe(0);
       const logins = api.hits.filter(h => h.method === 'POST' && h.url === '/api/auth/login');
       expect(logins, 'one login for alex (session + token share it) and one for nalin').toHaveLength(2);
     } finally { await api.close(); }
+  });
+
+  test('under CI=1 the config forbids test.only and reports through list, github, junit (test-results/junit.xml) and html', async () => {
+    const spec =
+      "import { test, expect } from '@playwright/test';\n" +
+      `import cfg from '${abs('playwright.config')}';\n` +
+      "test('ci settings', () => {\n" +
+      "  expect(cfg.forbidOnly).toBe(true);\n" +
+      "  const reporters = cfg.reporter as unknown as [string, any?][];\n" +
+      "  expect(reporters.map(r => r[0]).sort()).toEqual(['github', 'html', 'junit', 'list']);\n" +
+      "  expect(reporters.find(r => r[0] === 'junit')![1].outputFile).toBe('test-results/junit.xml');\n" +
+      "  expect(reporters.find(r => r[0] === 'html')![1]).toMatchObject({ open: 'never' });\n" +
+      "});\n";
+    const r = await runProbe({ spec, globalSetup: false, env: { CI: '1', TEST_API_URL: 'http://localhost:4000' } });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/1 passed/);
   });
 });

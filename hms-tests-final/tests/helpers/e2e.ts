@@ -27,6 +27,8 @@ export interface LoginOptions {
    * redirect by design: a Hiring Manager on /users, the old /dashboard?sourcing_role links). `false` never waits.
    */
   waitForUrl?: RegExp | false;
+  /** How long to wait for `waitForUrl`. Default 15 s. */
+  waitTimeoutMs?: number;
   /** Clear sessionStorage too, as a fresh sign-in has none (the Sourcing page remembers its role there). Default true. */
   clearSessionStorage?: boolean;
 }
@@ -49,7 +51,7 @@ export async function loginViaApi(page: Page, userKey: E2EUserKey = 'hr', opts: 
 
   await page.goto(`${FRONTEND_BASE}${path}`);
   const wait = o.waitForUrl === undefined ? (path === '/dashboard' ? /\/dashboard/ : false) : o.waitForUrl;
-  if (wait) await page.waitForURL(wait, { timeout: 15_000 });
+  if (wait) await page.waitForURL(wait, { timeout: o.waitTimeoutMs ?? 15_000 });
 }
 
 /** Sign in as `userKey` and open `path`. Never waits for a particular URL: the app may redirect (persona gates, legacy links). */
