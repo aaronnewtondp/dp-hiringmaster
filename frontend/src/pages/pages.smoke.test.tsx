@@ -342,7 +342,7 @@ describe.each(PERSONAS)('as %s — detail pages, review and dashboards', persona
     expect(present(screen.queryByRole('button', { name: 'Status' }))).toBe(who.hr);
     expect(present(screen.queryByRole('button', { name: /Add Application/ }))).toBe(who.hr);
     expect(present(screen.queryByRole('button', { name: /Schedule round/ }))).toBe(who.hr);          // the application is at Interview Round 1
-    expect(present(screen.queryByTitle('Flag for Founder Review'))).toBe(who.hr);
+    expect(present(screen.queryByTitle(/^Flag for Founder Review/))).toBe(who.hr);
     // Internal risk notes: an editable section for HR-tier; not in the page at all for anyone else, whatever the server sent.
     expect(present(screen.queryByText('SYNTH-RISK-NOTE'))).toBe(who.hr);
     expect(present(screen.queryByText('Screening & Risk Notes'))).toBe(who.hr);
