@@ -35,6 +35,34 @@ export async function pollUntil<T>(
   return last!;
 }
 
+// ─── Connection-level retry ───────────────────────────────────────────────────
+// The backend may restart under a running suite (`tsx watch` when backend/src changes; a stack restart between runs), and a connection
+// can be reset at that moment. That is the ONLY failure retried here: ECONNRESET, ECONNREFUSED and "socket hang up", up to 3 times with a
+// short growing backoff. An HTTP status is never retried (a 500 is an answer, and a retried POST would hide a duplicate-write bug), and
+// neither is a timeout. Note that a reset can arrive AFTER the server has acted on a POST; with the stack's non-watching backend that only
+// happens when someone restarts it mid-run.
+const CONNECTION_ERROR = /ECONNRESET|ECONNREFUSED|socket hang up/i;
+
+export function isConnectionError(err: unknown): boolean {
+  const e = err as { message?: unknown; code?: unknown; cause?: { message?: unknown; code?: unknown } } | null | undefined;
+  const text = [e?.message, e?.code, e?.cause?.message, e?.cause?.code].filter(v => typeof v === 'string').join(' ');
+  return CONNECTION_ERROR.test(text);
+}
+
+export async function withConnectionRetry<T>(
+  fn: () => Promise<T>,
+  { retries = 3, backoffMs = 250 }: { retries?: number; backoffMs?: number } = {}
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt >= retries || !isConnectionError(err)) throw err;
+      await new Promise(r => setTimeout(r, backoffMs * 2 ** attempt));
+    }
+  }
+}
+
 // ─── Credential map ──────────────────────────────────────────────────────────
 export const USERS = {
   // seed.sql is the source of truth: aaron.newton@ is seeded as
@@ -51,6 +79,9 @@ export const USERS = {
   hm_alex:     { email: 'alex@digitalpaani.com',         password: 'password123', persona: 'hiring_manager'  },
   hm_satyadev: { email: 'satyadev@digitalpaani.com',     password: 'password123', persona: 'hiring_manager'  },
   leadership:  { email: 'nalin@digitalpaani.com',        password: 'password123', persona: 'leadership'      },
+  // seed.sql:17-25 — a distinct local fixture, deliberately NOT aaron.newton@ (that identity is the fixed 'hr' persona everywhere in the
+  // suite). The only user who can reach the super_admin-gated routes (/api/users, User Management). Never a selectable role in the product.
+  super_admin: { email: 'superadmin@digitalpaani.com',    password: 'password123', persona: 'super_admin'     },
 };
 
 // Production smoke accounts (read-only; see helpers/smoke-env.ts). Kept OUT of USERS on purpose: tests iterate USERS expecting the
@@ -88,9 +119,9 @@ export async function getToken(
 
   // Fallback: live login (will count against rate limiter in production)
   const cred = (USERS as Record<string, { email: string; password: string }>)[user] ?? (SMOKE_USERS as Record<string, { email: string; password: string }>)[user];
-  const res  = await request.post(`${BASE}/api/auth/login`, {
+  const res  = await withConnectionRetry(() => request.post(`${BASE}/api/auth/login`, {
     data: { email: cred.email, password: cred.password },
-  });
+  }));
   const text = await res.text();
   let body: { token?: string };
   try   { body = JSON.parse(text); }
@@ -101,13 +132,57 @@ export async function getToken(
   return body.token;
 }
 
+// ─── Token + user record: what the app keeps in localStorage after a sign-in ───
+// globalSetup caches the `user` object of each login next to the token (.auth/users.json) so a browser session can be built without
+// another login. Falls back to one live login when the cache has no entry for this user.
+export type SessionUser = {
+  id: string; name: string; email: string; persona: string; department?: string | null; avatar_url?: string | null;
+};
+function loadCachedUsers(): Record<string, SessionUser> {
+  try {
+    const p = path.join(process.cwd(), '.auth', 'users.json');
+    if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8'));
+  } catch {}
+  return {};
+}
+const _userCache: Partial<Record<UserKey, SessionUser>> = {};
+
+export async function getSession(
+  request: APIRequestContext,
+  user: UserKey
+): Promise<{ token: string; user: SessionUser }> {
+  if (_userCache[user]) return { token: await getToken(request, user), user: _userCache[user]! };
+
+  const cachedUser = loadCachedUsers()[user];
+  if (cachedUser) {
+    _userCache[user] = cachedUser;
+    return { token: await getToken(request, user), user: cachedUser };
+  }
+
+  const cred = (USERS as Record<string, { email: string; password: string }>)[user] ?? (SMOKE_USERS as Record<string, { email: string; password: string }>)[user];
+  const res  = await withConnectionRetry(() => request.post(`${BASE}/api/auth/login`, {
+    data: { email: cred.email, password: cred.password },
+  }));
+  const text = await res.text();
+  let body: { token?: string; user?: SessionUser };
+  try   { body = JSON.parse(text); }
+  catch { throw new Error(`Login parse failed for ${cred.email}: ${text.slice(0, 200)}`); }
+  if (!body.token || !body.user) throw new Error(`No session for ${cred.email}: ${text.slice(0, 200)}`);
+
+  _memCache[user] = body.token;
+  _userCache[user] = body.user;
+  return { token: body.token, user: body.user };
+}
+
 // ─── Authed request helpers ───────────────────────────────────────────────────
 export function authed(request: APIRequestContext, token: string) {
   const h = { Authorization: `Bearer ${token}` };
   return {
-    get:   (path: string)               => request.get(`${BASE}${path}`,   { headers: h }),
-    post:  (path: string, data: object) => request.post(`${BASE}${path}`,  { headers: h, data }),
-    patch: (path: string, data: object) => request.patch(`${BASE}${path}`, { headers: h, data }),
+    get:    (path: string)               => withConnectionRetry(() => request.get(`${BASE}${path}`,    { headers: h })),
+    post:   (path: string, data: object) => withConnectionRetry(() => request.post(`${BASE}${path}`,   { headers: h, data })),
+    patch:  (path: string, data: object) => withConnectionRetry(() => request.patch(`${BASE}${path}`,  { headers: h, data })),
+    put:    (path: string, data: object) => withConnectionRetry(() => request.put(`${BASE}${path}`,    { headers: h, data })),
+    delete: (path: string)               => withConnectionRetry(() => request.delete(`${BASE}${path}`, { headers: h })),
   };
 }
 

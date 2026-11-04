@@ -17,12 +17,11 @@
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
 import { getToken, authed, uid, BASE, ROLE_INGEST_SECRET } from '../helpers/api';
-
-const LOCAL_DB_URL = 'postgresql://hms_user:hms_password@localhost:5432/dp_hms';
+import { TEST_DB_URL } from '../helpers/db';
 
 test.describe('Portfolio review (local Postgres + API)', () => {
   let db: Client;
-  test.beforeAll(async () => { db = new Client({ connectionString: LOCAL_DB_URL }); await db.connect(); });
+  test.beforeAll(async () => { db = new Client({ connectionString: TEST_DB_URL }); await db.connect(); });
   test.afterAll(async () => { await db.end(); });
 
   test.describe('schema', () => {
