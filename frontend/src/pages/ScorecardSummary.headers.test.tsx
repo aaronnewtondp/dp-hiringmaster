@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { backendFacts, overBudgetPercent } from '../test/backendSource.ts';
 
 // The Ready for Review table's column headers: every name is written out in full (they used to be
 // "Tech", "Exp", "Ind", "Cult", "Traj", "Lead", "Comm", "Port", "Avg", "App. Age" — several clipped, and
@@ -30,7 +31,7 @@ const row = (id: string, portfolioStatus: string | null) => ({
 const labels = () =>
   screen.getAllByRole('columnheader').map(h => h.querySelector('span')?.textContent).filter((t): t is string => !!t);
 
-const BEFORE_SCORES = ['#', 'Candidate', 'Gender', 'Role', 'Stage', 'Current CTC → Expected CTC', 'Notice Period', 'Preferred Location', 'Company / Industry', 'Resume'];
+const BEFORE_SCORES = ['#', 'Candidate', 'Gender', 'Role', 'Stage', 'Current CTC → Expected CTC', 'Notice Period', 'Preferred Location', 'Company / Industry', 'Resume Link'];
 const SCORES = ['Technical', 'Experience', 'Industry Fit', 'Culture Fit', 'Role Alignment', 'Trajectory', 'Leadership', 'Communication'];
 const AFTER_SCORES = ['Average Score', 'Verdict', 'Application Age', 'Actions'];
 
@@ -83,7 +84,63 @@ describe('Ready for Review — column headers', () => {
       // A popover hangs below its marker; overflow-hidden on the cell would cut it to a sliver.
       if (th.querySelector('[aria-label="More info"]')) expect(th.className).not.toContain('overflow-hidden');
     }
-    // the two cells that carry a marker, so the loop above is known to have exercised that branch
+    // the two cells that carry a marker, so the loop above is known to have exercised that branch.
+    // No other header gets a marker icon: it would change that column's width (see the width note in the component).
     expect(screen.getAllByLabelText('More info')).toHaveLength(2);
+  });
+
+  it('explains the columns that have no marker icon in a hover on the header, led by its own label', async () => {
+    mount();
+    await screen.findByText('Candidate A1');
+    const hover = (label: string) =>
+      screen.getAllByRole('columnheader').find(h => h.querySelector('span')?.textContent === label)!.getAttribute('title')!;
+    expect(hover('Average Score')).toContain("ResumeIQ's mean of its 8 ratings, each from 0 to 10");
+    expect(hover('Average Score')).toContain('× 10');                           // the Fit column on the other two lists
+    expect(hover('Verdict')).toContain('not calculated from the Average Score');
+    expect(hover('Verdict')).toContain('does not change when a Portfolio review is added later');
+    expect(hover('Technical')).toMatch(/^Technical: One of ResumeIQ's eight ratings/);
+    expect(hover('Technical')).toContain('8 and above is green, 6 to 7 blue, 4 to 5 amber and below 4 red');
+    expect(hover('Application Age')).toContain('number of days, not a date');
+    expect(hover('Actions')).toContain('Only for candidates at Applied and Screened');
+    expect(hover('Actions')).toContain('Interview Round 1');
+    // a reason is asked first at the backend's severe-over-budget line (utils/budget.ts isSeverelyOverBudget: at or above band top x tolerance)
+    expect(hover('Actions')).toContain(`expected CTC is ${overBudgetPercent(backendFacts())}% or more over the role's CTC band`);
+    expect(hover('#')).toContain('not a saved rank');
+    expect(hover('Stage')).toContain('changes its status, not its stage');
+    expect(hover('Notice Period')).toContain('Notice period in days');          // same words as the marker on the other two lists
+    expect(hover('Company / Industry')).toContain("Current company and industry from the candidate's own profile");
+    expect(hover('Candidate')).toBe('Candidate');                               // no explanation: just the label, as before
+  });
+
+  it('explains the Portfolio column when it is shown', async () => {
+    list.mockResolvedValue({ data: { applications: [row('A1', null), row('A2', 'completed')] } });
+    mount();
+    await screen.findByText('Candidate A2');
+    const th = screen.getAllByRole('columnheader').find(h => h.querySelector('span')?.textContent === 'Portfolio')!;
+    expect(th.getAttribute('title')).toContain('only for roles that have a portfolio or work-sample review');
+    expect(th.getAttribute('title')).toContain('a dash means there is no score');
+    expect(th.getAttribute('title')).toContain('no review has been run for this candidate');
+  });
+});
+
+describe('Ready for Review — filter and CTC explanations', () => {
+  it('"In-budget only" says the band plus the backend tolerance still shows (the Over Budget tag is stricter)', async () => {
+    mount();
+    await screen.findByText('Candidate A1');
+    const tip = screen.getByRole('button', { name: 'In-budget only' }).getAttribute('title')!;
+    const pct = overBudgetPercent(backendFacts());                                 // backend/src/utils/budget.ts OVER_BUDGET_TOLERANCE, read from the source
+    expect(tip).toContain(`more than ${pct}% above the top of the role's CTC band`);
+    expect(tip).toContain('still show, with the red Over Budget tag');
+  });
+
+  it('the CTC marker says the current figure may include variable pay, same as on the other two lists', async () => {
+    mount();
+    await screen.findByText('Candidate A1');
+    const th = screen.getAllByRole('columnheader').find(h => h.querySelector('span')?.textContent === 'Current CTC → Expected CTC')!;
+    fireEvent.mouseEnter(th.querySelector('[aria-label="More info"]')!);
+    const tip = th.querySelector('div.absolute')!.textContent!;
+    expect(tip).toContain('Current CTC (Fixed and Variable breakup) in LPA');
+    expect(tip).toContain('can include variable pay');
+    expect(tip).not.toContain('Current fixed CTC');
   });
 });

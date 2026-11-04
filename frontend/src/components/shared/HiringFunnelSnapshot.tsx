@@ -6,6 +6,8 @@ import { dashboardApi } from '../../services/api.ts';
 import { HiringFunnelSnapshotStage } from '../../types/index.ts';
 import { EmptyState } from './Badges.tsx';
 import InfoTooltip from './InfoTooltip.tsx';
+import { ownerLabel } from '../../utils/ownerLabel.ts';
+import { SLA_JOINING_RISK_DAYS } from '../../utils/columnInfo.ts';
 import { STAGE_COLORS, UNLIT_BG, shade, glossyFill } from './PipelineProgress.tsx';
 
 // ─── Chevron geometry — same interlocking-arrow shape/overlap as the
@@ -93,7 +95,7 @@ export default function HiringFunnelSnapshot({
       <div className="px-5 py-4 border-b border-gray-100">
         <div className="flex items-center gap-1.5">
           <h2 className="text-sm font-semibold text-gray-900">Hiring Funnel Snapshot</h2>
-          <InfoTooltip align="left" width="w-80" text="Each chevron counts open SLA breaches at that stage (one per overdue task, not a headcount). Click a stage to see the breach types, who owns each and how far past its SLA limit each one is — 'Overdue' counts from the limit, not from entering the stage." />
+          <InfoTooltip align="left" width="w-80" text={`Each chevron counts open SLA breaches at that stage (one per overdue task, not a headcount). Click a stage to see the breach types, who owns each and how far past its SLA limit each one was when HMS last checked — 'Overdue' counts from the limit, not from entering the stage. Two types are the exception: 'Joining risk — no contact' always shows ${SLA_JOINING_RISK_DAYS}D, and 'Assignment deadline breached' shows how late it was when it was first flagged.`} />
         </div>
         <p className="text-xs text-gray-400 mt-0.5">SLA breaches across the pipeline — click a stage to see what's overdue and who owns it</p>
       </div>
@@ -102,7 +104,7 @@ export default function HiringFunnelSnapshot({
       <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
         <button className={toggleBtnClass(owner === null)} onClick={() => setOwner(null)}>All owners</button>
         {OWNER_OPTIONS.map(o => (
-          <button key={o} className={toggleBtnClass(owner === o)} onClick={() => setOwner(o)}>{o}</button>
+          <button key={o} className={toggleBtnClass(owner === o)} onClick={() => setOwner(o)}>{ownerLabel(o)}</button>
         ))}
       </div>
 
@@ -201,7 +203,7 @@ export default function HiringFunnelSnapshot({
                             <span className="flex items-center gap-2 text-xs">
                               <span className="font-medium text-gray-800">{bt.type}</span>
                               <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${bt.owner === 'Hiring Manager' ? 'bg-amber-100 text-amber-700' : 'bg-dp-100 text-dp-700'}`}>
-                                {bt.owner}
+                                {ownerLabel(bt.owner)}
                               </span>
                             </span>
                             <span className="flex items-center gap-2">
@@ -223,7 +225,7 @@ export default function HiringFunnelSnapshot({
                                         <span className="font-mono font-semibold text-red-600 shrink-0">Overdue {overdueDays(c.overdue_hours)}D</span>
                                       </div>
                                       <div className="text-gray-400 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-                                        <span>SLA Owner: {c.owner}</span>
+                                        <span>SLA Owner: {ownerLabel(c.owner)}</span>
                                         <span>Role: {c.role_title}</span>
                                         <span>Stage: {c.stage}</span>
                                       </div>

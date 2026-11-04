@@ -1,0 +1,241 @@
+name: CI
+
+# Runs everything on every pull request and on every push to main. There are deliberately no path filters: a filtered
+# workflow that does not run leaves a required status "pending" forever, and the whole run is free on a public repository.
+#
+# What is NOT here: the Playwright suite (needs a running stack and, for several specs, real Anthropic/Google credentials:
+# see integration.yml) and Vercel's own build (Vercel posts that status itself).
+#
+# Branch protection, when you turn it on, needs ONE required check: "CI passed" (the last job). It waits for the others, so
+# renaming or adding a job above never leaves a stale required check behind.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash   # bash -eo pipefail: a failing command in a pipeline fails the step
+
+env:
+  # npm ci is the install; the advisory check is its own workflow (audit.yml) and must not slow or flake every build.
+  NPM_CONFIG_AUDIT: "false"
+  NPM_CONFIG_FUND: "false"
+  NPM_CONFIG_UPDATE_NOTIFIER: "false"
+
+jobs:
+  backend:
+    name: Backend (type-check, unit tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.x   # backend/package.json engines; Vercel runs an unpinned 22.x
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: vercel.json includeFiles still resolve
+        run: node --no-warnings ../.github/ci/check-vercel-includes.mjs
+      - name: Type-check (tsc --noEmit)
+        run: npx tsc --noEmit
+      - name: Unit tests (vitest)
+        run: npm test
+
+  backend-compat:
+    name: Backend loads on Node 22.11 (Vercel's older 22.x)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.11.0   # the last 22.x that cannot require() an ES-module-only package (22.12 can)
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Compile (dist/ is git-ignored)
+        run: npx tsc --outDir dist
+      - name: Load the compiled server and the lazily-loaded packages with require()
+        run: node ../.github/ci/boot-smoke.cjs
+
+  frontend:
+    name: Frontend (type-check, unit tests, production build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Type-check (tsc --noEmit); the production build below is vite build and does not type-check
+        run: npx tsc --noEmit
+      - name: Unit tests (vitest, jsdom)
+        run: npm test
+      - name: Production build (what Vercel runs)
+        run: npm run build
+      - name: Build produced the app shell and the PWA files
+        run: |
+          for f in dist/index.html dist/sw.js dist/manifest.webmanifest; do
+            test -s "$f" || { echo "::error::$f is missing or empty after vite build"; exit 1; }
+          done
+
+  tests-typecheck:
+    name: Playwright suite type-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: |
+            hms-tests-final/package-lock.json
+            tools/ci-lint/package-lock.json
+      - name: Install the suite's dependencies (for its types) and the checker
+        run: |
+          npm ci --prefix hms-tests-final
+          npm ci --prefix tools/ci-lint
+      # Playwright transpiles TypeScript without checking it. The tsconfig lives in tools/ci-lint so the suite is untouched.
+      - name: Type-check hms-tests-final
+        run: tools/ci-lint/node_modules/.bin/tsc --project tools/ci-lint/tsconfig.playwright.json
+
+  lint-async:
+    name: Async-promise lint (findings are reported, not blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            tools/ci-lint/package-lock.json
+      - name: Install (the type-aware rules read types from backend's node_modules)
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix tools/ci-lint
+      # Findings do not fail this job: 2 are known, both in backend/src/jobs/scheduler.ts (dead code, try/catch bodies).
+      # ESLint itself failing (exit 2, or no report) DOES fail it, so a broken config cannot pass as "no findings".
+      # To make findings blocking, add --fail to the summarize step once those two are resolved.
+      - name: ESLint (no-floating-promises, await-thenable, no-misused-promises, no setImmediate(async))
+        run: |
+          report="$RUNNER_TEMP/eslint.json"
+          rc=0
+          tools/ci-lint/node_modules/.bin/eslint --config tools/ci-lint/eslint.config.mjs --format json --output-file "$report" backend/src || rc=$?
+          if [ "$rc" -ge 2 ] || [ ! -s "$report" ]; then
+            echo "::error::ESLint itself failed (exit $rc); this is a tooling failure, not a finding"
+            exit 1
+          fi
+          node tools/ci-lint/summarize-eslint.mjs "$report"
+
+  database:
+    name: Database (schema, seed, id-sequence guards)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hms_user
+          POSTGRES_PASSWORD: ci_only_password   # throwaway service container, not a secret
+          POSTGRES_DB: dp_hms
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hms_user -d dp_hms"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: hms_user
+      PGPASSWORD: ci_only_password
+      PGDATABASE: dp_hms
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: psql client
+        run: |
+          command -v psql >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends postgresql-client; }
+          psql --version
+      - name: Build the database (schema.sql, then seed.sql)
+        run: bash .github/ci/apply-db.sh
+      - name: Guards (format_seq_id, every prefixed-id sequence ahead of its table, no shared sequences)
+        run: bash .github/ci/check-db.sh
+
+  workflow-lint:
+    name: Workflow lint (actionlint, shellcheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install actionlint (pinned, checksum-verified)
+        run: |
+          version=1.7.12
+          sha256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8   # actionlint_1.7.12_linux_amd64.tar.gz
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/actionlint.tar.gz" "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz"
+          echo "${sha256}  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+      - name: shellcheck available (actionlint runs it over every shell block)
+        run: |
+          command -v shellcheck >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends shellcheck; }
+          shellcheck --version
+      - name: actionlint
+        run: |
+          "$RUNNER_TEMP/actionlint" -color
+      - name: shellcheck the scripts CI itself runs
+        run: shellcheck --severity=warning .github/ci/apply-db.sh .github/ci/check-db.sh
+
+  ci-ok:
+    name: CI passed
+    if: always()
+    needs: [backend, backend-compat, frontend, tests-typecheck, lint-async, database, workflow-lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every job above succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'all(.[]; .result == "success")' >/dev/null

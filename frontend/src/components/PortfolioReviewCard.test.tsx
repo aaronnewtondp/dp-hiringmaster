@@ -866,6 +866,10 @@ describe('PortfolioReviewCard — designer reviews are unchanged', () => {
     renderCard('completed');
     fireEvent.click(await screen.findByRole('button', { name: 'More info' }));
     expect(screen.getByText(/reviewed page by page against the JD and the hiring manager's 15 criteria/)).toBeInTheDocument();
+    // the designer review scores a missing or dead portfolio and counts it, unlike the work-sample review
+    expect(screen.getByText(/A resume with no portfolio link scores 0, and a link that is private or cannot be reached scores 1/)).toBeInTheDocument();
+    expect(screen.getByText(/these low scores count in the average/)).toBeInTheDocument();
+    expect(screen.getByText(/A site that blocks automated access, or a resume that could not be read, is not scored/)).toBeInTheDocument();
   });
 
   it('a stored review that names itself as a designer review is one, whatever the response says', async () => {

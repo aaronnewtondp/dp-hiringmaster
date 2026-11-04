@@ -414,7 +414,7 @@ async function startChannel(
   await upsertCommitment(client, channelId, activationSpec(channel, istDate(anchor), calOf(settings)));
 }
 
-function validUrl(u: unknown): string | null {
+export function validUrl(u: unknown): string | null {
   if (typeof u !== 'string') return null;
   const t = u.trim();
   if (!t || t.length > 500) return null;

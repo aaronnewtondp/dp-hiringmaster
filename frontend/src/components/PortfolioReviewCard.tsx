@@ -58,7 +58,7 @@ interface Copy {
 
 const COPY: Record<PortfolioReviewKind, Copy> = {
   design_portfolio: {
-    tooltip: "The candidate's portfolio site(s) are opened in a browser and reviewed page by page against the JD and the hiring manager's 15 criteria. The result is scored 0-10 as the ninth ResumeIQ dimension and included in the overall score. It runs a few minutes after the resume is scored.",
+    tooltip: "The candidate's portfolio site(s) are opened in a browser and reviewed page by page against the JD and the hiring manager's 15 criteria. The result is scored 0-10 as the ninth ResumeIQ dimension and included in the overall score. A resume with no portfolio link scores 0, and a link that is private or cannot be reached scores 1 (3 when the only link is a file or slide deck); these low scores count in the average. A site that blocks automated access, or a resume that could not be read, is not scored. It runs a few minutes after the resume is scored.",
     inProgress: s => `${s === 'running' ? 'Reviewing the portfolio now' : 'Portfolio review queued'} — the overall score shown is provisional and will update when it finishes (usually a few minutes).`,
     failedLead: 'The portfolio review could not be completed.',
     failedKeptScore: score => `The overall score still includes the previous review (${score}/10).`,
