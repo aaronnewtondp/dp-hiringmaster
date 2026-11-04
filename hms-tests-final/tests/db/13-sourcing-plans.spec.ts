@@ -11,6 +11,7 @@ import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
 import { getToken, authed, CRON_SECRET, BASE, CANDIDATE_INGEST_SECRET, uid } from '../helpers/api';
 import { purgeRolesFast } from '../helpers/sourcing-db';
+import { healSourcingPlansTable, snapshotSourcingSettings, restoreSourcingSettings, setSourcingSetting } from '../helpers/db-specs';
 import { TEST_DB_URL } from '../helpers/db';
 
 const SENTINEL = 'SENTINEL-note-must-not-reach-a-hiring-manager';
@@ -30,7 +31,6 @@ test.describe('Sourcing module', () => {
   const candidateEmails: string[] = [];
   let hr: string, hr2: string, alex: string, satyadev: string, lead: string;
   let aaronId = '';
-  let savedSettings: Array<{ key: string; value: unknown }> = [];
 
   // Primary throwaway role: P1, Alex is the named Hiring Manager, LinkedIn + Agency seeded from recruitment_mode.
   let roleId = '', planId = '';
@@ -65,16 +65,20 @@ test.describe('Sourcing module', () => {
   test.beforeAll(async ({ request }) => {
     client = new Client({ connectionString: TEST_DB_URL });
     await client.connect();
+    // Self-healing: this file renames the real sourcing_plans table (for one request) and pins sourcing_settings. A run killed in the middle left
+    // the table missing and/or the go-live date pinned a long way ahead; put both back before anything else touches them.
+    await healSourcingPlansTable(client);
     const status = await request.get(`${BASE}/api/sourcing/status`, { headers: { Authorization: `Bearer ${await getToken(request, 'hr')}` } });
     enabled = status.ok() && (await status.json()).enabled === true;
     if (!enabled) return;
     hr = await getToken(request, 'hr'); hr2 = await getToken(request, 'hr2'); alex = await getToken(request, 'hm_alex');
     satyadev = await getToken(request, 'hm_satyadev'); lead = await getToken(request, 'leadership');
     aaronId = (await client.query(`SELECT id FROM users WHERE email='aaron.newton@digitalpaani.com'`)).rows[0].id;
-    savedSettings = (await client.query(`SELECT key, value FROM sourcing_settings`)).rows;
-    // The local database is in real use now (the engine has stamped a go-live date in the past), which would make every throwaway draft
-    // role raise PLAN_NOT_ACTIVATED. Pin the go-live date to the future for the run; afterAll puts the saved value back.
-    await client.query(`INSERT INTO sourcing_settings (key, value) VALUES ('go_live_date', $1::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify(ymd(60))]);
+    // The local database may be in real use (the engine has stamped a go-live date in the past), which would make every throwaway draft
+    // role raise PLAN_NOT_ACTIVATED. Pin the go-live date to the future for the run. The WHOLE settings table is snapshotted first (inside the table
+    // itself, so it survives a killed run — see helpers/db-specs.ts) and afterAll puts it back exactly.
+    await snapshotSourcingSettings(client);
+    await setSourcingSetting(client, 'go_live_date', ymd(60));
     roleId = await newRole();
   });
 
@@ -82,16 +86,16 @@ test.describe('Sourcing module', () => {
 
   test.afterAll(async () => {
     if (!client) return;
-    try { await client.query(`ALTER TABLE IF EXISTS sourcing_plans_tmp RENAME TO sourcing_plans`); } catch { /* already restored */ }
-    if (enabled) {
-      await client.query(`DELETE FROM sourcing_settings WHERE key = ANY($1)`, [['shadow_until', 'go_live_date', 'qualified_rule', 'digest_recipients', 'daily_digest_enabled']]);
-      for (const s of savedSettings.filter(s => ['shadow_until', 'go_live_date', 'qualified_rule'].includes(s.key))) {
-        await client.query(`INSERT INTO sourcing_settings (key, value) VALUES ($1, $2::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [s.key, JSON.stringify(s.value)]);
+    try {
+      await healSourcingPlansTable(client);                          // always: never leave the shared database without its sourcing_plans table
+      if (enabled) {
+        await restoreSourcingSettings(client);                       // always: sourcing_settings exactly as it was before this file pinned it
+        // one transaction without per-row foreign-key scans of the (huge) pending_actions table — see helpers/sourcing-db.ts
+        await purgeRolesFast(client, roleIds, candidateEmails);
       }
-      // one transaction without per-row foreign-key scans of the (huge) pending_actions table — see helpers/sourcing-db.ts
-      await purgeRolesFast(client, roleIds, candidateEmails);
+    } finally {
+      await client.end();
     }
-    await client.end();
   });
 
   // ── Seeding & access ────────────────────────────────────────────────────────────────────────────

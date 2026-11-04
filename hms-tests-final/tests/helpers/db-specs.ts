@@ -4,7 +4,7 @@
  *   splitSqlStatements / runStatements / runAsOneQuery   apply backend/src/db/schema.sql and seed.sql statement by statement, collecting errors
  *   schemaFingerprint / diffFingerprints                 a comparable description of a database's structure (db/16 replays schema.sql and compares)
  *   createReplayDatabase / dropReplayDatabases           throw-away databases on the SAME Postgres server (never the one under test)
- *   healSourcingPlansTable                               undo the one table rename db/13 performs, if a killed run left it behind
+ *   healSourcingPlansTable / healSharedState             undo the one table rename db/13 performs (and every other leftover), if a killed run left it behind
  *   snapshotSourcingSettings / restoreSourcingSettings   put sourcing_settings back EXACTLY as it was, even after a killed run
  *   setBaseScores                                        the eight base ResumeIQ scores + average, set by SQL (no model call)
  *   purgeByTitlePrefix                                   remove every role (and what hangs off it) whose title starts with a spec's own prefix
@@ -317,6 +317,21 @@ export async function setSourcingSetting(client: PgClient, key: string, value: u
   await client.query(
     `INSERT INTO sourcing_settings (key, value) VALUES ($1, $2::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
     [key, JSON.stringify(value)]);
+}
+
+/**
+ * Everything a killed run can leave behind in the shared database, undone in one call: the renamed sourcing_plans table, a pinned
+ * sourcing_settings (restored from the snapshot row) and leftover replay databases. Safe to call at any time (a no-op when nothing is wrong).
+ * Returns what it repaired, one line each. The first db spec (00) calls it; a globalSetup that did the same would cover every project.
+ */
+export async function healSharedState(client: PgClient): Promise<string[]> {
+  const healed: string[] = [];
+  if (await healSourcingPlansTable(client)) healed.push('renamed sourcing_plans_tmp back to sourcing_plans');
+  const { rows } = await client.query(`SELECT to_regclass('public.sourcing_settings') AS t`);
+  if (rows[0].t !== null && await restoreSourcingSettings(client)) healed.push('restored sourcing_settings from the snapshot a killed run left');
+  const dropped = await dropReplayDatabases(client);
+  if (dropped.length) healed.push(`dropped replay databases: ${dropped.join(', ')}`);
+  return healed;
 }
 
 // ─── ResumeIQ base scores without the model ─────────────────────────────────────────────────────────────────────────────────────────

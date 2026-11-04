@@ -31,7 +31,8 @@ import { newClient } from '../helpers/db';
 import {
   schemaSql, seedSql, splitSqlStatements, splitSchemaSql, runStatements, runAsOneQuery,
   schemaFingerprint, diffFingerprints, createReplayDatabase, dropReplayDatabase, dropReplayDatabases, connectTo,
-  REPLAY_DB_PREFIX,
+  healSourcingPlansTable, healSharedState, snapshotSourcingSettings, restoreSourcingSettings, setSourcingSetting, purgeByTitlePrefix,
+  REPLAY_DB_PREFIX, SETTINGS_BACKUP_KEY,
 } from '../helpers/db-specs';
 
 // What the stack script and the CI job apply after seed.sql (see the TODAY note above). Same two statements.
@@ -474,6 +475,159 @@ test.describe('Schema replay: schema.sql + seed.sql on an empty database', () =>
       } finally {
         await db.query('ROLLBACK');
       }
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // The helpers the OTHER db specs use to clean up after themselves and to undo what a killed run left behind (the renamed sourcing_plans table,
+  // a pinned sourcing_settings, leftover replay databases, a spec's own roles). They are proven here on the throw-away database, where breaking
+  // things on purpose costs nothing, so that no spec has to damage the shared database to show that the repair works.
+  test.describe('the self-healing helpers (run on this replay database, never on the shared one)', () => {
+    const settingRows = async () => (await db.query(`SELECT key, value FROM sourcing_settings ORDER BY key`)).rows;
+
+    test('healSourcingPlansTable puts a renamed sourcing_plans back with its rows and foreign keys, and leaves a healthy or ambiguous state alone', async () => {
+      expect(await healSourcingPlansTable(db)).toBe(false);                                      // healthy: nothing to do
+      const role = await scalar(`INSERT INTO roles (title, priority) VALUES ('Heal probe', 'P2') RETURNING id`);
+      const plan = await scalar(`INSERT INTO sourcing_plans (role_id) VALUES ($1) RETURNING id`, [role.id]);
+      await db.query(`INSERT INTO sourcing_plan_channels (plan_id, channel) VALUES ($1, 'LinkedIn')`, [plan.id]);
+
+      await db.query(`ALTER TABLE sourcing_plans RENAME TO sourcing_plans_tmp`);                 // what a killed db/13 leaves
+      expect((await scalar(`SELECT to_regclass('public.sourcing_plans') AS t`)).t).toBeNull();
+      expect(await healSourcingPlansTable(db)).toBe(true);
+      expect((await scalar(`SELECT to_regclass('public.sourcing_plans_tmp') AS t`)).t).toBeNull();
+      expect((await scalar(`SELECT count(*)::int AS n FROM sourcing_plans WHERE role_id = $1`, [role.id])).n).toBe(1);
+      expect((await scalar(`SELECT count(*)::int AS n FROM sourcing_plan_channels WHERE plan_id = $1`, [plan.id])).n).toBe(1);
+      await expect(db.query(`INSERT INTO sourcing_plan_channels (plan_id, channel) VALUES (999999, 'x')`)).rejects.toThrow(/foreign key/);   // the FK followed the table
+
+      // both names present: ambiguous, so it must not touch either (a rename would fail or hide data)
+      await db.query(`CREATE TABLE sourcing_plans_tmp (x int)`);
+      expect(await healSourcingPlansTable(db)).toBe(false);
+      expect((await scalar(`SELECT to_regclass('public.sourcing_plans') AS a, to_regclass('public.sourcing_plans_tmp') AS b`))).toEqual({ a: 'sourcing_plans', b: 'sourcing_plans_tmp' });
+      await db.query(`DROP TABLE sourcing_plans_tmp`);
+
+      await db.query(`DELETE FROM sourcing_plan_channels WHERE plan_id = $1`, [plan.id]);
+      await db.query(`DELETE FROM sourcing_plans WHERE id = $1`, [plan.id]);
+      await db.query(`DELETE FROM roles WHERE id = $1`, [role.id]);
+    });
+
+    test('snapshot / restore put sourcing_settings back EXACTLY: changed rows reset, added rows removed, removed rows returned, the snapshot row gone', async () => {
+      await db.query(`DELETE FROM sourcing_settings`);
+      await db.query(`INSERT INTO sourcing_settings (key, value) VALUES ('go_live_date', '"2026-01-01"'), ('qualified_rule', '"either"'), ('volume_min_qualified', '5')`);
+      const original = await settingRows();
+
+      await snapshotSourcingSettings(db);
+      expect((await scalar(`SELECT count(*)::int AS n FROM sourcing_settings WHERE key = $1`, [SETTINGS_BACKUP_KEY])).n).toBe(1);
+      await setSourcingSetting(db, 'go_live_date', '2099-12-31');                                // pinned a long way ahead
+      await setSourcingSetting(db, 'qualified_rule', 'shortlisted');                             // changed
+      await db.query(`DELETE FROM sourcing_settings WHERE key = 'volume_min_qualified'`);        // removed
+      await db.query(`INSERT INTO sourcing_settings (key, value) VALUES ('digest_recipients', '["a@digitalpaani.com"]')`);   // added
+
+      expect(await restoreSourcingSettings(db)).toBe(true);
+      expect(await settingRows()).toEqual(original);
+      expect(await restoreSourcingSettings(db)).toBe(false);                                     // nothing left to restore
+    });
+
+    test('a snapshot taken after a killed run (pin still in place) first restores the real state and snapshots THAT, never the pin', async () => {
+      await db.query(`DELETE FROM sourcing_settings`);
+      await db.query(`INSERT INTO sourcing_settings (key, value) VALUES ('go_live_date', '"2026-01-01"')`);
+      const original = await settingRows();
+
+      await snapshotSourcingSettings(db);                                                        // run 1 ...
+      await setSourcingSetting(db, 'go_live_date', '2099-12-31');                                // ... is killed here, before its afterAll
+      await snapshotSourcingSettings(db);                                                        // run 2 starts
+      expect((await scalar(`SELECT value->'rows' AS rows FROM sourcing_settings WHERE key = $1`, [SETTINGS_BACKUP_KEY])).rows)
+        .toEqual([expect.objectContaining({ key: 'go_live_date', value: '2026-01-01' })]);       // the real value, not 2099-12-31
+      await setSourcingSetting(db, 'go_live_date', '2099-12-31');
+      expect(await restoreSourcingSettings(db)).toBe(true);
+      expect(await settingRows()).toEqual(original);
+    });
+
+    test('an EMPTY sourcing_settings (a fresh database) is restored to empty — the engine stamps its own go-live date again later', async () => {
+      await db.query(`DELETE FROM sourcing_settings`);
+      await snapshotSourcingSettings(db);
+      await setSourcingSetting(db, 'go_live_date', '2099-12-31');
+      await setSourcingSetting(db, 'shadow_until', '2099-12-31');
+      expect(await restoreSourcingSettings(db)).toBe(true);
+      expect(await settingRows()).toEqual([]);
+    });
+
+    test('the snapshot row is an unknown key to the backend (mergeSettings has no case for it), so loading the settings never sees it', async () => {
+      const known = ['go_live_date', 'shadow_until', 'digest_recipients', 'daily_digest_enabled', 'qualified_rule', 'portal_expiry_days', 'renew_lead_days',
+        'agency_followup_days', 'referral_repost_days', 'weekly_baseline_weeks', 'volume_min_qualified', 'volume_window_days', 'volume_gap_working_days', 'referral_audience_email'];
+      expect(known).not.toContain(SETTINGS_BACKUP_KEY);
+      expect(SETTINGS_BACKUP_KEY).toMatch(/^zz_pw_/);
+    });
+
+    test('healSharedState repairs both at once and reports each repair; with nothing wrong it reports nothing', async () => {
+      expect(await healSharedState(db)).toEqual([]);
+      await db.query(`DELETE FROM sourcing_settings`);
+      await snapshotSourcingSettings(db);
+      await setSourcingSetting(db, 'go_live_date', '2099-12-31');
+      await db.query(`ALTER TABLE sourcing_plans RENAME TO sourcing_plans_tmp`);
+      expect(await healSharedState(db)).toEqual([
+        'renamed sourcing_plans_tmp back to sourcing_plans',
+        'restored sourcing_settings from the snapshot a killed run left',
+      ]);
+      expect(await settingRows()).toEqual([]);
+      expect((await scalar(`SELECT to_regclass('public.sourcing_plans') AS t`)).t).toBe('sourcing_plans');
+      expect(await healSharedState(db)).toEqual([]);
+    });
+
+    test('dropReplayDatabases drops a leftover replay database nobody uses and leaves one that is in use alone', async () => {
+      const leftover = await createReplayDatabase(admin);                                        // a run that was killed before its afterAll: no connection to it
+      created.push(leftover.name);
+      const inUse = await createReplayDatabase(admin);
+      created.push(inUse.name);
+      const holder = await connectTo(inUse.url);                                                 // a live run keeps its connection open
+      try {
+        const dropped = await dropReplayDatabases(admin);
+        expect(dropped).toContain(leftover.name);
+        expect(dropped).not.toContain(inUse.name);
+        expect(dropped).not.toContain(replayName);                                               // this spec's own database is connected, so it is safe too
+        const left = (await admin.query(`SELECT datname FROM pg_database WHERE datname LIKE $1`, [`${REPLAY_DB_PREFIX}%`])).rows.map(r => r.datname);
+        expect(left).toEqual(expect.arrayContaining([inUse.name, replayName]));
+        expect(left).not.toContain(leftover.name);
+      } finally {
+        await holder.end();
+        await dropReplayDatabase(admin, inUse.name);
+        created.splice(created.indexOf(inUse.name), 1);
+        created.splice(created.indexOf(leftover.name), 1);
+      }
+      await expect(dropReplayDatabase(admin, 'dp_hms')).rejects.toThrow(/not a replay database/);   // the guard: only replay databases can ever be dropped
+    });
+
+    test('purgeByTitlePrefix removes the roles with that prefix and everything hanging off them, plus the matching candidates — and nothing else (LIKE wildcards are literal)', async () => {
+      const mk = async (title: string, email: string) => {
+        const role = await scalar(`INSERT INTO roles (title, priority) VALUES ($1, 'P2') RETURNING id`, [title]);
+        const cand = await scalar(`INSERT INTO candidates (full_name, email) VALUES ($1, $2) RETURNING id`, [`Purge ${title}`, email]);
+        const app = await scalar(`INSERT INTO applications (candidate_id, role_id) VALUES ($1, $2) RETURNING id`, [cand.id, role.id]);
+        await db.query(`INSERT INTO pending_actions (owner_type, action_type, description, application_id, role_id) VALUES ('HR', 'x', 'x', $1, $2)`, [app.id, role.id]);
+        await db.query(`INSERT INTO activity_log (application_id, candidate_id, role_id, event_type) VALUES ($1, $2, $3, 'Probe')`, [app.id, cand.id, role.id]);
+        return { role: role.id, cand: cand.id, app: app.id };
+      };
+      const mine1 = await mk('PWPURGE_100% role one', 'purge1@example.com');
+      const mine2 = await mk('PWPURGE_100% role two', 'purge2@example.com');
+      const lookalike = await mk('PWPURGEX100Y not mine', 'purge3@example.com');                // matches only if '_' / '%' were wildcards
+      const other = await mk('Somebody else', 'someone@example.com');
+
+      const removed = await purgeByTitlePrefix(db, 'PWPURGE_100%', ['purge1@example.com']);
+      expect(removed).toBe(2);
+      const left = async (t: string, col: string, ids: string[]) => (await scalar(`SELECT count(*)::int AS n FROM ${t} WHERE ${col} = ANY($1::text[])`, [ids])).n;
+      for (const m of [mine1, mine2]) {
+        expect(await left('roles', 'id', [m.role])).toBe(0);
+        expect(await left('applications', 'id', [m.app])).toBe(0);
+        expect(await left('pending_actions', 'application_id', [m.app])).toBe(0);
+        expect(await left('activity_log', 'application_id', [m.app])).toBe(0);
+      }
+      expect(await left('candidates', 'id', [mine1.cand])).toBe(0);                              // matched by its address
+      expect(await left('candidates', 'id', [mine2.cand])).toBe(1);                              // no address pattern given for it: kept (its application is gone)
+      for (const m of [lookalike, other]) {
+        expect(await left('roles', 'id', [m.role])).toBe(1);
+        expect(await left('applications', 'id', [m.app])).toBe(1);
+        expect(await left('pending_actions', 'application_id', [m.app])).toBe(1);
+        expect(await left('candidates', 'id', [m.cand])).toBe(1);
+      }
+      expect(await purgeByTitlePrefix(db, 'PWPURGE_100%')).toBe(0);                              // idempotent
     });
   });
 

@@ -20,6 +20,7 @@ import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
 import { getToken, authed, uid } from '../helpers/api';
 import { TEST_DB_URL } from '../helpers/db';
+import { healSharedState } from '../helpers/db-specs';
 
 test.describe('Schema integrity (local Postgres, direct connection)', () => {
   let client: Client;
@@ -27,6 +28,10 @@ test.describe('Schema integrity (local Postgres, direct connection)', () => {
   test.beforeAll(async () => {
     client = new Client({ connectionString: TEST_DB_URL });
     await client.connect();
+    // First db spec to run: undo what a killed earlier run can leave in the shared database (the renamed sourcing_plans table of db/13, a pinned
+    // sourcing_settings of db/13 / db/14, a leftover replay database of db/16), so no later spec fails on a mess it did not make.
+    const healed = await healSharedState(client);
+    if (healed.length) console.warn(`[00-schema-integrity] healed leftovers of a killed run:\n  - ${healed.join('\n  - ')}`);
   });
 
   test.afterAll(async () => {
