@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 // The add-candidate form: each required field blocks the submit with its own message, the Agency source needs an agency (and
 // drops it again when the source changes), the numbers go out as numbers and the empty optional strings as null, a duplicate
 // is named, and only HR-tier loads the agency list. A control is found through the label it sits under (labels are not wired up).
+// The persona is hoisted so each test can switch it; the flags come from src/test/authMock.ts, the one place the page tests derive them.
 const create = vi.fn();
 const rolesList = vi.fn();
 const agenciesList = vi.fn();
@@ -18,14 +19,9 @@ vi.mock('../services/api.ts', () => ({
 vi.mock('react-hot-toast', () => ({ default: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 const auth = vi.hoisted(() => ({ persona: 'hr_recruiter' as string }));
-vi.mock('../contexts/AuthContext.tsx', () => ({
-  useAuth: () => {
-    const p = auth.persona;
-    return { user: { id: 'u-test', name: 'Test Person', email: 'test.person@example.test', persona: p },
-             canHR: p === 'hr_recruiter' || p === 'leadership' || p === 'super_admin' };
-  },
-}));
+vi.mock('../contexts/AuthContext.tsx', () => ({ useAuth: () => authContextValue(auth.persona) }));
 
+import { authContextValue } from '../test/authMock.ts';
 import NewCandidate from './NewCandidate.tsx';
 
 const toastError = vi.mocked(toast.error);

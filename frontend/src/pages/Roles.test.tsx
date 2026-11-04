@@ -5,8 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // The Roles list: what it asks the server for (default status filter, one parameter per filter), what the client-side search
 // does with the rows it already has, which persona sees the Salary Range column and which wording the create button gets.
-// The persona is hoisted so each test can switch it; the flags are derived the way AuthContext derives them
-// (hr_recruiter, leadership and super_admin are HR-tier; AuthContext's own table is pinned in its own test).
+// The persona is hoisted so each test can switch it; the flags come from src/test/authMock.ts, the one place the page tests derive them
+// (hr_recruiter, leadership and super_admin are HR-tier), which authMock.test.tsx checks against the real AuthContext.
 const list = vi.fn();
 const filterOptions = vi.fn();
 vi.mock('../services/api.ts', () => ({
@@ -14,19 +14,9 @@ vi.mock('../services/api.ts', () => ({
 }));
 
 const auth = vi.hoisted(() => ({ persona: 'hr_recruiter' as string }));
-vi.mock('../contexts/AuthContext.tsx', () => ({
-  useAuth: () => {
-    const p = auth.persona;
-    const isSuperAdmin = p === 'super_admin';
-    return {
-      user: { id: 'u-test', name: 'Test Person', email: 'test.person@example.test', persona: p },
-      canHR: p === 'hr_recruiter' || p === 'leadership' || isSuperAdmin,
-      canLead: p === 'leadership' || isSuperAdmin,
-      isSuperAdmin,
-    };
-  },
-}));
+vi.mock('../contexts/AuthContext.tsx', () => ({ useAuth: () => authContextValue(auth.persona) }));
 
+import { authContextValue } from '../test/authMock.ts';
 import Roles from './Roles.tsx';
 
 const DEFAULT_STATUSES = ['Approved', 'Live – Sourcing'];

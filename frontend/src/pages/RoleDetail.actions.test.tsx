@@ -9,8 +9,8 @@ import { HIRING_MANAGER_FIELD_HINT } from '../utils/hiringManagers.ts';
 // RoleDetail apart from its Sourcing plan (RoleDetail.sourcing.test.tsx has that): who may approve, change the status of, discard or
 // regenerate the JD of a role, what a Hiring Manager is never shown (the CTC band, the benchmark panel), the toasts each outcome of a
 // status change / JD generation / save makes, the 10-second poll while the JD is being generated, the closure-summary download, and the
-// plain read-only parts (header, pipeline, approval card, activity). The persona is hoisted so each test can switch it; the flags are
-// derived the way AuthContext derives them (hr_recruiter, leadership and super_admin are HR-tier).
+// plain read-only parts (header, pipeline, approval card, activity). The persona is hoisted so each test can switch it; the flags come
+// from src/test/authMock.ts, the one place the page tests derive them (hr_recruiter, leadership and super_admin are HR-tier).
 const rolesGet = vi.fn();
 const rolesUpdate = vi.fn();
 const rolesRemove = vi.fn();
@@ -37,19 +37,9 @@ vi.mock('../components/CompBenchmarkPanel.tsx', () => ({
 }));
 
 const auth = vi.hoisted(() => ({ persona: 'hr_recruiter' as string, name: 'Test Person' }));
-vi.mock('../contexts/AuthContext.tsx', () => ({
-  useAuth: () => {
-    const p = auth.persona;
-    const isSuperAdmin = p === 'super_admin';
-    return {
-      user: { id: 'u-test', name: auth.name, email: 'test.person@example.test', persona: p },
-      canHR: p === 'hr_recruiter' || p === 'leadership' || isSuperAdmin,
-      canLead: p === 'leadership' || isSuperAdmin,
-      isSuperAdmin,
-    };
-  },
-}));
+vi.mock('../contexts/AuthContext.tsx', () => ({ useAuth: () => authContextValue(auth.persona, { name: auth.name }) }));
 
+import { authContextValue } from '../test/authMock.ts';
 import RoleDetail from './RoleDetail.tsx';
 
 const ID = 'R9001';
