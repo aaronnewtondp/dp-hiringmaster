@@ -361,7 +361,7 @@ export default function Candidates() {
           (always empty) once a Role filter is active — hide it rather than
           show a confusing "0", same as before the merge). */}
       {roleIds.length === 0 && (unmatchedTotal > 0 || unmatchedLoading) && (
-        <div className="card overflow-hidden border-amber-200">
+        <div className="card border-amber-200">
           <div
             role="button"
             tabIndex={0}

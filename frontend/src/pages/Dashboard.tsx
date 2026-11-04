@@ -393,8 +393,8 @@ export default function Dashboard() {
           <span className="text-xs text-gray-400">— where time and candidates are being lost</span>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Turnaround time by stage */}
-          <div className="card overflow-hidden lg:col-span-2">
+          {/* Turnaround time by stage. No overflow-hidden on the card: its info tooltip is long and the card is short when empty. */}
+          <div className="card lg:col-span-2">
             <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
               <Gauge className="w-4 h-4 text-gray-400" />
               <h2 className="text-sm font-semibold text-gray-900">Turnaround time by stage</h2>
