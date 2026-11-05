@@ -17,9 +17,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
-import { getToken, authed } from '../helpers/api';
+import { getToken, authed, uid } from '../helpers/api';
 import { purgeRolesFast } from '../helpers/sourcing-db';
 import { TEST_DB_URL } from '../helpers/db';
+
+// Every candidate e-mail is unique by construction: a per-run id plus a counter. (The first version built the address from Date.now() alone in
+// a tight loop, so on a fast machine two inserts could share a millisecond and collide on idx_candidates_email — "racy by construction".)
+const RUN = uid();
+let seq = 0;
+const nextId = () => `${RUN}-${++seq}`;
 
 test.describe('Aging Roles — no_recent_candidate_activity flag', () => {
   let client: Client;
@@ -42,7 +48,7 @@ test.describe('Aging Roles — no_recent_candidate_activity flag', () => {
       `INSERT INTO roles (title, department, hiring_manager_name, priority, status, location, employment_type, start_date)
        VALUES ($1, 'Tech/Devs', 'Test HM', 'P1', $2, 'Gurgaon', 'Full-Time / Permanent', CURRENT_DATE - 30)
        RETURNING id`,
-      [`No-Movement Test Role ${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, status]
+      [`No-Movement Test Role ${nextId()}`, status]
     );
     const id = rows[0].id;
     createdRoleIds.push(id);
@@ -50,9 +56,10 @@ test.describe('Aging Roles — no_recent_candidate_activity flag', () => {
   }
 
   async function createApplication(roleId: string) {
+    const id = nextId();
     const { rows: candRows } = await client.query(
       `INSERT INTO candidates (full_name, email) VALUES ($1, $2) RETURNING id`,
-      [`No-Movement Test Candidate ${Date.now()}`, `nomovement+${Date.now()}@example.com`]
+      [`No-Movement Test Candidate ${id}`, `nomovement+${id}@example.com`]
     );
     const candidateId = candRows[0].id;
 

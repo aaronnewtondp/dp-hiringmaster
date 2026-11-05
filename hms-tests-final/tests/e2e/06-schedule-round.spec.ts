@@ -14,16 +14,22 @@
  * way to actually regression-test it is to drive the real datetime-local
  * input through the real browser and confirm what lands in the DB.
  *
- * This suite also drives a REAL Google Calendar sync (local Docker has real
- * service-account credentials + working domain-wide delegation for
- * calendar.events — see tests/helpers/calendar.ts), so the timezone test
- * cleans up any real event it creates in a `finally` block, same as
- * tests/api/15-calendar-integration.spec.ts.
+ * Where the backend HAS Google service-account credentials with working
+ * domain-wide delegation for calendar.events (see tests/helpers/calendar.ts)
+ * the scheduling below also creates a REAL Calendar event, so the timezone
+ * test cleans it up in a `finally` block, same as
+ * tests/api/15-calendar-integration.spec.ts. On a stack without credentials
+ * (scripts/test-stack.sh) the sync fails, the round is still created and
+ * `calendar_sync_error` records why: nothing here depends on either outcome.
+ *
+ * Dates are computed from the clock at run time (helpers/dates.ts), never
+ * fixed, so no test turns stale when a hard-coded date passes.
  */
 import { test, expect, Page } from '@playwright/test';
 import { FRONTEND_BASE, USERS, getToken, authed, createCandidateWithApp, SEEDED, uid } from '../helpers/api';
 import { deleteCalendarEvent } from '../helpers/calendar';
 import { loginViaApi } from '../helpers/e2e';
+import { futureLocalDateTime } from '../helpers/dates';
 
 // ─── Fresh, isolated test data — created directly via API so each test drives
 // its own application rather than seeded data other tests might also touch,
@@ -86,18 +92,23 @@ test.describe('Schedule Round Modal E2E', () => {
     await page.getByRole('button', { name: 'Schedule round' }).click();
 
     const roundName = `E2E Timezone Round ${uid()}`;
+    // Native datetime-local value shape: "YYYY-MM-DDTHH:mm", no seconds, no offset. 11:00 AM, a month ahead, so it can never collide with a
+    // real calendar event on the organizer's actual calendar and never becomes "the past".
+    const typed = futureLocalDateTime(30, { hour: 11 });
+    const typedDate = typed.slice(0, 10);
     await fillScheduleModal(page, {
       roundName,
       interviewerEmails: `e2e-test-interviewer+${uid()}@example.com`,
-      // Native datetime-local value shape: "YYYY-MM-DDTHH:mm", no seconds, no
-      // offset. 11:00 AM, far-future so it can never collide with a real
-      // calendar event on the organizer's actual calendar.
-      scheduledDate: '2027-02-10T11:00',
+      scheduledDate: typed,
     });
+    const created = page.waitForRequest(r => r.method() === 'POST' && r.url().endsWith('/api/interviews'));
     // Meeting mode / duration left at their defaults (Video / 60).
     await page.getByRole('button', { name: 'Schedule', exact: true }).click();
 
     await expect(page.getByText(`${roundName} scheduled`)).toBeVisible({ timeout: 10000 });
+    // What the browser sent: the typed wall-clock time with IST made explicit (ScheduleRoundModal appends "+05:30" itself; it does not
+    // use the browser's time zone, so this does not vary with where the suite runs).
+    expect((await created).postDataJSON().scheduled_date).toBe(`${typed}:00+05:30`);
 
     const token = await getToken(page.request, 'hr');
     const res   = await authed(page.request, token).get(`/api/interviews?application_id=${application.id}`);
@@ -107,13 +118,10 @@ test.describe('Schedule Round Modal E2E', () => {
     expect(round).toBeDefined();
 
     try {
-      // The correct UTC-equivalent of 11:00 AM IST (UTC+5:30). If the old bug
-      // were still present — datetime-local's naive value sent with no
-      // offset, defaulting to UTC — this would instead read
-      // '2027-02-10T11:00:00.000Z', 5.5 hours later than intended (the exact
-      // shape of the real production bug: a 9:15pm booking landing at
-      // 2:41am the next day).
-      expect(round.scheduled_date).toBe('2027-02-10T05:30:00.000Z');
+      // The correct UTC-equivalent of 11:00 AM IST (UTC+5:30): 05:30 UTC on the same calendar date. If the old bug were still present —
+      // datetime-local's naive value sent with no offset, defaulting to UTC — this would instead read `${typedDate}T11:00:00.000Z`,
+      // 5.5 hours later than intended (the exact shape of the real production bug: a 9:15pm booking landing at 2:41am the next day).
+      expect(round.scheduled_date).toBe(`${typedDate}T05:30:00.000Z`);
     } finally {
       // Clean up the real Calendar event this test just created on
       // aaron.newton@digitalpaani.com's actual calendar, if sync succeeded.
@@ -141,7 +149,7 @@ test.describe('Schedule Round Modal E2E', () => {
     // actually means to exercise. A far-future placeholder value is enough:
     // the invalid email still blocks handleSubmit() before interviewsApi.
     // schedule() is ever called, so no real round/Calendar event is created.
-    await fillScheduleModal(page, { roundName, interviewerEmails: 'not-an-email', scheduledDate: '2027-03-15T14:00' });
+    await fillScheduleModal(page, { roundName, interviewerEmails: 'not-an-email', scheduledDate: futureLocalDateTime(60, { hour: 14 }) });
     await page.getByRole('button', { name: 'Schedule', exact: true }).click();
 
     // Client-side EMAIL_RE check in ScheduleRoundModal.tsx fires before the

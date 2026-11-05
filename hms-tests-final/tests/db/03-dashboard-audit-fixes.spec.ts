@@ -27,8 +27,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
-import { getToken, authed, createCandidateWithApp, CRON_SECRET } from '../helpers/api';
+import { getToken, authed, uid, CRON_SECRET } from '../helpers/api';
+import { purgeRolesFast } from '../helpers/sourcing-db';
 import { TEST_DB_URL } from '../helpers/db';
+
+// Every candidate this file makes has an address like db03+<id>@example.com, so afterAll (and the start of the next run, after a killed one)
+// removes them and their applications, pending actions and log rows by that pattern. Without it the applications stayed behind on the seeded role
+// R006 — some backdated, some Offer Accepted with an open "Joining risk" action — and every later SLA sweep counted them.
+const EMAIL_LIKE = 'db03+%@example.com';
 
 test.describe('Dashboard audit fixes — SLA race, orphan sweep, funnel shape, status write-paths', () => {
   let client: Client;
@@ -36,11 +42,24 @@ test.describe('Dashboard audit fixes — SLA race, orphan sweep, funnel shape, s
   test.beforeAll(async () => {
     client = new Client({ connectionString: TEST_DB_URL });
     await client.connect();
+    await purgeRolesFast(client, [], [EMAIL_LIKE]);
   });
 
   test.afterAll(async () => {
-    await client.end();
+    test.setTimeout(120_000);
+    try { await purgeRolesFast(client, [], [EMAIL_LIKE]); } finally { await client.end(); }
   });
+
+  // A candidate + application on a seeded role, through the real API (same as helpers/api.ts createCandidateWithApp, but with an address the
+  // clean-up above can find).
+  async function createCandidateWithApp(request: Parameters<typeof authed>[0], token: string, roleId = 'R006') {
+    const res = await authed(request, token).post('/api/candidates', {
+      full_name: `DB03 Candidate ${uid()}`, email: `db03+${uid()}@example.com`, role_id: roleId,
+    });
+    expect(res.status()).toBe(201);
+    const body = await res.json();
+    return { candidate: body.candidate, application: body.application };
+  }
 
   async function runCronSlaCheck(request: Parameters<typeof authed>[0]) {
     const res = await authed(request, CRON_SECRET).post('/api/cron/sla-check', {});
@@ -189,7 +208,7 @@ test.describe('Dashboard audit fixes — SLA race, orphan sweep, funnel shape, s
     const api = authed(request, hrToken);
     const createRes = await api.post('/api/candidates', {
       full_name: 'Empty Source Test Candidate',
-      email: `emptysource+${Date.now()}@example.com`,
+      email: `db03+emptysource${uid()}@example.com`,
       role_id: 'R006',
       source_channel: '',
     });
@@ -211,7 +230,7 @@ test.describe('Dashboard audit fixes — SLA race, orphan sweep, funnel shape, s
     const api = authed(request, hrToken);
     const createRes = await api.post('/api/candidates', {
       full_name: 'Empty Source Test Candidate',
-      email: `emptysource+${Date.now()}@example.com`,
+      email: `db03+emptysource${uid()}@example.com`,
       role_id: 'R006',
       source: '',
     });

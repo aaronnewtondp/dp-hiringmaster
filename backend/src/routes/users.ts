@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne } from '../db/index.js';
-import { authenticate, requireSuperAdmin } from '../middleware/auth.js';
+import { authenticate, requireSuperAdmin, invalidateUserAccess } from '../middleware/auth.js';
 import { User, Persona } from '../types/index.js';
 
 const router = Router();
@@ -49,6 +49,7 @@ router.post('/', async (req: Request, res: Response) => {
      VALUES ($1,$2,$3,$4) RETURNING id, name, email, persona, department, is_active, auth_provider, created_at, last_login`,
     [name, normEmail, persona, department || null]
   );
+  invalidateUserAccess(user ? String(user.id) : undefined);
   res.status(201).json({ user });
 });
 
@@ -86,6 +87,8 @@ router.patch('/:id', async (req: Request, res: Response) => {
     values
   );
   if (!user) { res.status(404).json({ error: 'User not found' }); return; }
+  // Make a deactivation (or reactivation) visible at once on this instance; see middleware/auth.ts for the TTL on others.
+  invalidateUserAccess(String(req.params.id));
   res.json({ user });
 });
 

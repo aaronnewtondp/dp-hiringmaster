@@ -1,8 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import jwt from 'jsonwebtoken';
 import type { Request, Response } from 'express';
-import { authenticate, isHRTier, isSmokeAccount, canSeeCompForRole, stripRestrictedFields } from './auth.js';
+import { authenticate, invalidateUserAccess, isHRTier, isSmokeAccount, canSeeCompForRole, stripRestrictedFields } from './auth.js';
 import { Persona } from '../types/index.js';
+import { fakeDb } from '../test/fakeDb.js';
+
+// authenticate() now also asks the database whether the account is still active; the shared fake answers "active" by default.
+// (The active-check behaviour itself is in auth.activeCheck.test.ts.)
+vi.mock('../db/index.js', async () => (await import('../test/fakeDb.js')).dbModule());
+beforeEach(() => { fakeDb.reset(); invalidateUserAccess(); });
 
 describe('isHRTier', () => {
   it('is true for hr_recruiter, leadership, and super_admin', () => {
@@ -132,38 +138,38 @@ describe('isSmokeAccount', () => {
 
 describe('authenticate — smoke-test accounts are read-only', () => {
   const SECRET = 'unit-test-secret';
-  const run = (email: string, method: string) => {
+  const run = async (email: string, method: string) => {
     process.env.JWT_SECRET = SECRET;
     const token = jwt.sign({ userId: 'u1', email, persona: 'leadership', name: 'Smoke' }, SECRET);
     const req = { headers: { authorization: `Bearer ${token}` }, method } as unknown as Request;
     const json = vi.fn();
     const res = { status: vi.fn().mockReturnValue({ json }) } as unknown as Response;
     const next = vi.fn();
-    authenticate(req, res, next);
+    await authenticate(req, res, next);
     return { next, status: (res.status as ReturnType<typeof vi.fn>).mock.calls[0]?.[0], body: json.mock.calls[0]?.[0] };
   };
 
-  it('lets a smoke account read', () => {
-    for (const m of ['GET', 'HEAD', 'OPTIONS']) expect(run('smoke.hm@hms-smoke.invalid', m).next).toHaveBeenCalledTimes(1);
+  it('lets a smoke account read', async () => {
+    for (const m of ['GET', 'HEAD', 'OPTIONS']) expect((await run('smoke.hm@hms-smoke.invalid', m)).next).toHaveBeenCalledTimes(1);
   });
 
-  it('refuses every method that could change data, with a 403 that says why', () => {
+  it('refuses every method that could change data, with a 403 that says why', async () => {
     for (const m of ['POST', 'PATCH', 'PUT', 'DELETE']) {
-      const r = run('smoke.leadership@hms-smoke.invalid', m);
+      const r = await run('smoke.leadership@hms-smoke.invalid', m);
       expect(r.next, m).not.toHaveBeenCalled();
       expect(r.status, m).toBe(403);
       expect(r.body.error).toMatch(/read-only/i);
     }
   });
 
-  it('does not touch anyone else — a real user can still write', () => {
-    for (const m of ['GET', 'POST', 'PATCH', 'DELETE']) expect(run('aaron.newton@digitalpaani.com', m).next, m).toHaveBeenCalledTimes(1);
+  it('does not touch anyone else — a real user can still write', async () => {
+    for (const m of ['GET', 'POST', 'PATCH', 'DELETE']) expect((await run('aaron.newton@digitalpaani.com', m)).next, m).toHaveBeenCalledTimes(1);
   });
 
-  it('still answers 401 for a missing or invalid token (the guard runs only after the token is verified)', () => {
+  it('still answers 401 for a missing or invalid token (the guard runs only after the token is verified)', async () => {
     const json = vi.fn();
     const res = { status: vi.fn().mockReturnValue({ json }) } as unknown as Response;
-    authenticate({ headers: {}, method: 'POST' } as unknown as Request, res, vi.fn());
+    await authenticate({ headers: {}, method: 'POST' } as unknown as Request, res, vi.fn());
     expect((res.status as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(401);
   });
 });
@@ -177,52 +183,52 @@ describe('authenticate — a token that is not valid is refused with 401 and nev
   afterEach(() => { vi.useRealTimers(); if (saved === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = saved; });
 
   /** Calls authenticate() with `authorization` and returns what the middleware did. */
-  function call(authorization: string | undefined, method = 'GET') {
+  async function call(authorization: string | undefined, method = 'GET') {
     const json = vi.fn();
     const res = { status: vi.fn().mockReturnValue({ json }) } as unknown as Response;
     const req = { headers: authorization === undefined ? {} : { authorization }, method } as unknown as Request;
     const next = vi.fn();
-    authenticate(req, res, next);
+    await authenticate(req, res, next);
     return { next, req, status: (res.status as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]), body: json.mock.calls.map(c => c[0]) };
   }
-  const refused = (r: ReturnType<typeof call>, message: RegExp) => {
+  const refused = (r: Awaited<ReturnType<typeof call>>, message: RegExp) => {
     expect(r.next).not.toHaveBeenCalled();
     expect(r.status).toEqual([401]);                   // exactly one answer, and it is a 401
     expect(r.body[0].error).toMatch(message);
     expect(r.req.user).toBeUndefined();                // nothing from a refused token is trusted
   };
 
-  it('control: a well-formed token signed with the right secret is accepted and its claims are attached to the request', () => {
-    const r = call(`Bearer ${jwt.sign(claims, SECRET)}`);
+  it('control: a well-formed token signed with the right secret is accepted and its claims are attached to the request', async () => {
+    const r = await call(`Bearer ${jwt.sign(claims, SECRET)}`);
     expect(r.next).toHaveBeenCalledTimes(1);
     expect(r.status).toEqual([]);
     expect(r.req.user).toMatchObject({ userId: 'u1', persona: 'hr_recruiter' });
   });
 
-  it('a token signed with a different secret (bad signature) is refused', () => {
-    refused(call(`Bearer ${jwt.sign(claims, 'some-other-secret')}`), /invalid or expired/i);
+  it('a token signed with a different secret (bad signature) is refused', async () => {
+    refused(await call(`Bearer ${jwt.sign(claims, 'some-other-secret')}`), /invalid or expired/i);
   });
 
-  it('a token whose payload was edited after signing (persona escalated, signature kept) is refused', () => {
+  it('a token whose payload was edited after signing (persona escalated, signature kept) is refused', async () => {
     const [header, , signature] = jwt.sign(claims, SECRET).split('.');
     const forged = Buffer.from(JSON.stringify({ ...claims, persona: 'super_admin' })).toString('base64url');
-    refused(call(`Bearer ${header}.${forged}.${signature}`), /invalid or expired/i);
+    refused(await call(`Bearer ${header}.${forged}.${signature}`), /invalid or expired/i);
   });
 
-  it('an expired token is refused, and the same token is accepted a moment before it expires (the clock is faked, not slept)', () => {
+  it('an expired token is refused, and the same token is accepted a moment before it expires (the clock is faked, not slept)', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-15T10:00:00Z'));
     const token = jwt.sign(claims, SECRET, { expiresIn: 60 });
     vi.setSystemTime(new Date('2026-03-15T10:00:59Z'));
-    expect(call(`Bearer ${token}`).next).toHaveBeenCalledTimes(1);
+    expect((await call(`Bearer ${token}`)).next).toHaveBeenCalledTimes(1);
     vi.setSystemTime(new Date('2026-03-15T10:01:01Z'));
-    refused(call(`Bearer ${token}`), /invalid or expired/i);
+    refused(await call(`Bearer ${token}`), /invalid or expired/i);
   });
 
-  it('a token that is not yet valid (nbf in the future) is refused', () => {
+  it('a token that is not yet valid (nbf in the future) is refused', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-15T10:00:00Z'));
-    refused(call(`Bearer ${jwt.sign(claims, SECRET, { notBefore: 3600 })}`), /invalid or expired/i);
+    refused(await call(`Bearer ${jwt.sign(claims, SECRET, { notBefore: 3600 })}`), /invalid or expired/i);
   });
 
   it.each([
@@ -232,24 +238,24 @@ describe('authenticate — a token that is not valid is refused with 401 and nev
     ['three empty segments', '..'],
     ['segments that are not base64 JSON', 'aaa.bbb.ccc'],
     ['whitespace', '   '],
-  ])('a malformed token (%s) is refused', (_name, token) => {
-    refused(call(`Bearer ${token}`), /invalid or expired|no token/i);
+  ])('a malformed token (%s) is refused', async (_name, token) => {
+    refused(await call(`Bearer ${token}`), /invalid or expired|no token/i);
   });
 
-  it('an unsigned token (alg "none") is refused', () => {
+  it('an unsigned token (alg "none") is refused', async () => {
     const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
-    refused(call(`Bearer ${b64({ alg: 'none', typ: 'JWT' })}.${b64(claims)}.`), /invalid or expired/i);
+    refused(await call(`Bearer ${b64({ alg: 'none', typ: 'JWT' })}.${b64(claims)}.`), /invalid or expired/i);
   });
 
-  it('every HMAC variant is accepted only with the right secret', () => {
-    expect(call(`Bearer ${jwt.sign(claims, SECRET, { algorithm: 'HS512' })}`).next).toHaveBeenCalledTimes(1);
-    refused(call(`Bearer ${jwt.sign(claims, 'wrong', { algorithm: 'HS512' })}`), /invalid or expired/i);
+  it('every HMAC variant is accepted only with the right secret', async () => {
+    expect((await call(`Bearer ${jwt.sign(claims, SECRET, { algorithm: 'HS512' })}`)).next).toHaveBeenCalledTimes(1);
+    refused(await call(`Bearer ${jwt.sign(claims, 'wrong', { algorithm: 'HS512' })}`), /invalid or expired/i);
   });
 
-  it('with JWT_SECRET missing from the environment every token is refused (a server that lost its secret fails closed, never open)', () => {
+  it('with JWT_SECRET missing from the environment every token is refused (a server that lost its secret fails closed, never open)', async () => {
     const token = jwt.sign(claims, SECRET);
     delete process.env.JWT_SECRET;
-    refused(call(`Bearer ${token}`), /invalid or expired/i);
+    refused(await call(`Bearer ${token}`), /invalid or expired/i);
   });
 
   it.each([
@@ -258,13 +264,13 @@ describe('authenticate — a token that is not valid is refused with 401 and nev
     ['a scheme other than Bearer', 'Basic dXNlcjpwYXNz'],
     ['a lower-case scheme', 'bearer abc'],
     ['the bare token without a scheme', 'abc.def.ghi'],
-  ])('%s is answered "no token" with 401', (_name, header) => {
-    refused(call(header), /no token provided/i);
+  ])('%s is answered "no token" with 401', async (_name, header) => {
+    refused(await call(header), /no token provided/i);
   });
 
-  it('a smoke-test account with a BAD token is refused with 401, not 403 (the read-only guard runs only after the token verifies)', () => {
+  it('a smoke-test account with a BAD token is refused with 401, not 403 (the read-only guard runs only after the token verifies)', async () => {
     for (const method of ['GET', 'POST', 'DELETE']) {
-      refused(call(`Bearer ${jwt.sign({ ...claims, email: SMOKE }, 'some-other-secret')}`, method), /invalid or expired/i);
+      refused(await call(`Bearer ${jwt.sign({ ...claims, email: SMOKE }, 'some-other-secret')}`, method), /invalid or expired/i);
     }
   });
 });

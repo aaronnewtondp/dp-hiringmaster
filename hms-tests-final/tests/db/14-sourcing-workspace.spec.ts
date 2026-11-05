@@ -19,6 +19,7 @@ import { test, expect } from '@playwright/test';
 import { Client } from 'pg';
 import { getToken, authed, CRON_SECRET, BASE, CANDIDATE_INGEST_SECRET, uid } from '../helpers/api';
 import { purgeRolesFast, trackerMigrationSql } from '../helpers/sourcing-db';
+import { healSourcingPlansTable, snapshotSourcingSettings, restoreSourcingSettings } from '../helpers/db-specs';
 import { TEST_DB_URL } from '../helpers/db';
 
 const POST_URL = 'https://example.com/jobs/spec14';
@@ -36,8 +37,6 @@ test.describe('Sourcing workspace', () => {
   let enabled = false;
   const roleIds: string[] = [];
   let hr: string, hr2: string, alex: string, satyadev: string, lead: string;
-  let savedSettings: Array<{ key: string; value: unknown }> = [];
-  const TOUCHED_SETTINGS = ['go_live_date', 'shadow_until', 'qualified_rule', 'volume_min_qualified'];
 
   // ── helpers (same shapes as spec 13) ───────────────────────────────────────────────────────────
   const ymd = (offsetDays: number) => new Date(Date.now() + 5.5 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10);
@@ -154,14 +153,16 @@ test.describe('Sourcing workspace', () => {
   test.beforeAll(async ({ request }) => {
     client = new Client({ connectionString: TEST_DB_URL });
     await client.connect();
+    await healSourcingPlansTable(client);                  // spec 13 renames the real table for one request: a killed run leaves it missing
     const status = await request.get(`${BASE}/api/sourcing/status`, { headers: { Authorization: `Bearer ${await getToken(request, 'hr')}` } });
     enabled = status.ok() && (await status.json()).enabled === true;
     if (!enabled) return;
     hr = await getToken(request, 'hr'); hr2 = await getToken(request, 'hr2'); alex = await getToken(request, 'hm_alex');
     satyadev = await getToken(request, 'hm_satyadev'); lead = await getToken(request, 'leadership');
-    savedSettings = (await client.query(`SELECT key, value FROM sourcing_settings WHERE key = ANY($1)`, [TOUCHED_SETTINGS])).rows;
-    // The local database is in real use: pin the go-live date to the future (no PLAN_NOT_ACTIVATED noise on throwaway draft roles) and keep the
-    // threshold signals provisional unless a test switches the shadow period off. afterAll puts the saved values back.
+    // The local database may be in real use: pin the go-live date to the future (no PLAN_NOT_ACTIVATED noise on throwaway draft roles) and keep the
+    // threshold signals provisional unless a test switches the shadow period off. The WHOLE settings table is snapshotted first (a row of the table
+    // itself, so it survives a killed run — helpers/db-specs.ts) and afterAll puts it back exactly.
+    await snapshotSourcingSettings(client);
     await setSetting('go_live_date', ymd(60));
     await shadow(true);
   });
@@ -170,15 +171,15 @@ test.describe('Sourcing workspace', () => {
 
   test.afterAll(async () => {
     if (!client) return;
-    if (enabled) {
-      await client.query(`DELETE FROM sourcing_settings WHERE key = ANY($1)`, [TOUCHED_SETTINGS]);
-      for (const s of savedSettings) {
-        await client.query(`INSERT INTO sourcing_settings (key, value) VALUES ($1, $2::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [s.key, JSON.stringify(s.value)]);
+    try {
+      if (enabled) {
+        await restoreSourcingSettings(client);             // always: sourcing_settings exactly as it was before this file pinned it
+        // one transaction, no per-row foreign-key scans of the multi-million-row pending_actions table (see helpers/sourcing-db.ts)
+        await purgeRolesFast(client, roleIds, ['sp14+%@example.com', 'sp14ing+%@example.com']);
       }
-      // one transaction, no per-row foreign-key scans of the multi-million-row pending_actions table (see helpers/sourcing-db.ts)
-      await purgeRolesFast(client, roleIds, ['sp14+%@example.com', 'sp14ing+%@example.com']);
+    } finally {
+      await client.end();
     }
-    await client.end();
   });
 
   // ── (a) the first task of a tracked channel ────────────────────────────────────────────────────
