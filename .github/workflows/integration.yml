@@ -3,29 +3,42 @@ name: Integration (API and database specs)
 # The Playwright `api` and `db` projects against a real backend and a real Postgres, with NO credentials. Nightly and on demand,
 # never on a pull request. No repository secret is needed: the ingest and JWT secrets are generated per run.
 #
-# What it runs: every spec in hms-tests-final/tests/api and tests/db EXCEPT the tests listed in EXCLUDE below. Measured on
-# 2026-10-29 in Docker (Linux, Node 22.23.4, fresh database each time): 659 tests pass and 1 skips itself, in 16-21 seconds, in
-# 5 of 5 consecutive runs. Left out on purpose, so a red run here means a real regression and not a missing key:
-#   * browser specs (tests/e2e): need Chromium, the Vite dev server on :5173 and real JD generation. Not attempted here.
+# What it runs: every spec in hms-tests-final/tests/api and tests/db EXCEPT the tests listed in EXCLUDE below. Measured on 2026-11-05
+# against origin/main (b4ccb67), on an isolated stack from hms-tests-final/scripts/test-stack.sh (Postgres 16 on tmpfs, backend from
+# the checkout, an EMPTY environment: no Anthropic or Google credentials) with a fresh database: the two projects hold 792 tests
+# that are not tagged @live; 6 of them fail without credentials or on a stale pin (all excluded below), so 786 are selected,
+# of which 785 pass and 1 skips itself (the real Google Calendar round trip, api/15), in about 40 seconds. Left out on purpose,
+# so a red run here means a real regression and not a missing key:
+#   * browser specs (tests/e2e, tests/e2e-mobile, 250 tests): NOT run here yet. They pass 245 of 250 on a production build served by
+#     `vite preview` (test-stack.sh preview), but 2 Dashboard info-marker tests fail every time (e2e/13: a popover's bottom is covered
+#     by the page) and 1 e2e/09 test is stale after PR #55 (see db/17 below); and the job would also need `playwright install --with-deps
+#     chromium`, a frontend build and a preview server on a runner nobody has watched yet. Follow-up: fix or retire those three tests,
+#     then add an e2e job (npm ci in frontend/, `npx playwright install --with-deps chromium`, VITE_API_URL=http://localhost:4000/api
+#     vite build + vite preview --port 5173, TEST_FRONTEND_URL, --project=e2e --project=e2e-mobile) and run it a few times before it
+#     is relied on.
 #   * tests/smoke: production-only, read-only checks against the live deployment.
 # The suite's own documentation puts the full local run at ~45 minutes; almost all of that is the browser project and the real
 # Claude / Google calls, not these specs.
 #
-# EXCLUDE (a Playwright --grep-invert regex over the full test title, which includes the file name). Each entry and why:
-#   JD Generation + ResumeIQ scoring (real external calls)      api/10, 2 tests: live Claude and Google Drive
-#   every candidate entry carries application_id                api/19: asserts the funnel snapshot is NON-empty, so it passes
-#                                                                only on a long-lived dev database that already has SLA breaches
-#   falls back to a live AI estimate                            api/30: live Claude (the endpoint answers 500 without a key)
-#   05-aging-roles-no-movement                                  db/05, whole spec: builds candidate e-mails from Date.now() in a tight
-#                                                                loop, so on a fast machine two inserts share a millisecond and collide
-#                                                                on idx_candidates_email. Measured: 2 tests failed in one run, a THIRD in
-#                                                                another, none in a third. Racy by construction.
-#   a candidate with NO readable resume ... / an HR re-run ...  db/07, 3 tests: need a REAL base ResumeIQ score (live Claude)
-#     / a review stuck in "running" ...
-#   a Drive PDF + a website: pending                            db/15, 1 test: matches the @vercel/queue error text with a pattern whose
-#                                                                `.` cannot cross a line break; outside a linked Vercel project that
-#                                                                text spans several lines
-# A second skip is inside api/15 (the one real Google Calendar round trip skips itself without credentials).
+# EXCLUDE (a Playwright --grep-invert regex over the full test title, which includes the file name). A command-line --grep-invert
+# REPLACES playwright.config.ts's own `grepInvert: /@live/`, so `@live` has to be in this regex or the tests that need a real key
+# would run here. Each entry and why:
+#   @live                                                       every test tagged @live (needs a real Anthropic key or Google
+#                                                                credentials; skipped by the config unless TEST_LIVE=1). Today: db/07,
+#                                                                "a candidate with NO readable resume ... (the creation-time hook, with a
+#                                                                real model)", plus the two e2e ones that this job does not run anyway.
+#   JD Generation + ResumeIQ scoring (real external calls)      api/10, 2 tests, NOT tagged @live: real Claude, PDF render and Drive upload
+#                                                                (the second test needs the first one's role, so the whole block goes)
+#   every candidate entry carries application_id                api/19: asserts the funnel snapshot is NON-empty, which only holds on a
+#                                                                long-lived dev database that already has SLA breaches; a fresh one has none
+#   falls back to a live AI estimate                            api/30: NOT tagged @live; real Claude (the endpoint answers 500 without a key)
+#   the OLD token of the deactivated user still works           db/17, 2 tests: they pin the behaviour BEFORE PR #55 (authenticate() never
+#   / a DEACTIVATED super_admin's old token still passes          re-checked users.is_active); since #55 the old token answers 401 within
+#     requireSuperAdmin                                           15 s, which is the intended behaviour, so both now fail. The spec needs
+#                                                                rewriting to pin the new behaviour; drop these two entries then.
+# Dropped from the previous list because they no longer fail: db/05 (builds its e-mails from a per-run id and a counter now),
+# db/07's two "needs a real base score" tests (they write the base scores by SQL now; only the creation-time hook needs the model,
+# and its test is tagged @live) and db/15's queue-error test.
 # Remove an entry when its cause is fixed; do not add one without a measured reason.
 
 on:
@@ -74,7 +87,7 @@ jobs:
       PGUSER: hms_user
       PGPASSWORD: hms_password
       PGDATABASE: dp_hms
-      EXCLUDE: 'JD Generation \+ ResumeIQ scoring \(real external calls\)|every candidate entry carries application_id|falls back to a live AI estimate|05-aging-roles-no-movement|a candidate with NO readable resume gets the base score untouched|an HR re-run on a scored application re-checks the resume|a review stuck in "running" past the function limit|a Drive PDF \+ a website: pending'
+      EXCLUDE: '@live|JD Generation \+ ResumeIQ scoring \(real external calls\)|every candidate entry carries application_id|falls back to a live AI estimate|the OLD token of the deactivated user still works|a DEACTIVATED super_admin.s old token still passes requireSuperAdmin'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
