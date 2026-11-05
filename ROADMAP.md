@@ -19,7 +19,7 @@
       until they are given another way in (see `CLAUDE.md` Testing). `seed.sql` still carries
       the seed password for LOCAL Docker only.
 - [x] **Production smoke-test accounts (2026-10-19)** — chosen and approved by Aaron; both rows created in production, `npm run test:prod`
-      signs in as them (34 smoke tests, API + browser).
+      signs in as them (34 smoke tests, API + browser, when created; 38 now that the Help checks were added).
 
 ---
 
@@ -263,7 +263,10 @@ live.
       real, differentiated score vs. the profile-only fallback).
 - [ ] Offer letter generation + UI
 - [ ] Pre-joining documents checklist
-- [ ] Email digest (currently a stub that returns `ok` — no actual sending)
+- [ ] Email digest — `sendDailyDigest()` (`jobs/slaChecker.ts`, nodemailer over the `SMTP_*` variables) is real, not a stub, but nothing runs it in
+      production: `backend/vercel.json` schedules `/api/cron/email-digest` at 08:15 and Vercel Cron issues GET, while `routes/cron.ts` registers that
+      route as POST only (the `sourcing-check` route answers both verbs for exactly this reason). Fix the verb (or accept the digest is off) and
+      decide the sender; the Help page already says there is no daily pending-items e-mail.
 
 ---
 
@@ -361,13 +364,13 @@ live.
       tracker; Close channel (summary kept, reopenable) replaces Stop using; Applications by source and the tracker read the form's "How did you hear about this opening?"
       field. Release order and the production migration are in `docs/SourcingModule_Runbook.md` ("Release 2026-10-21"). Item 5.3 of the request was blank
       — the portals keep their 30-day renewal task unless told otherwise.
-- [ ] **Sourcing page in the left menu (2026-10-22)** — BUILT, unit-tested (frontend 717, backend 646) and browser-tested (e2e `08-sourcing`, 15 tests) on branch `feat/sourcing-sidebar-page`, NOT yet released: the plan workspace moved from the
+- [x] **Sourcing page in the left menu (2026-10-22)** — merged 2026-10-22 as PR #13 (`671002d`; it was unit-tested at 717 frontend / 646 backend tests then and browser-tested by e2e `08-sourcing`, 15 tests): the plan workspace moved from the
       bottom of the Dashboard to its own page, **Sourcing** (`/sourcing`, left menu right after Roles, every persona while the module is on, hidden — and the
       page says "Sourcing is switched off" — while it is off; shared hook `useSourcingEnabled`). The Dashboard keeps only Sourcing execution; the role page keeps
       only its chip; My Tasks' box is unchanged; `/dashboard?sourcing_role=…` and `#sourcing-workspace` links redirect (`DashboardRoute` in `App.tsx`); the
       e-mail links are `/sourcing?sourcing_role=<id>` and the daily note's closing line points at "Sourcing in the left menu". Help, the User Access Guide
       (Version 5.2), the PRD, the runbook and `CLAUDE.md` updated. No schema, env or flag change; deploy frontend first, then backend
-      (`docs/SourcingModule_Runbook.md`, "Release 2026-10-22").
+      (`docs/SourcingModule_Runbook.md`, "Release 2026-10-22"); CLAUDE.md "Surfaces" describes it as it is.
 - [ ] **Activate plans in waves (HR)** — P0/P1 roles first, R016 or R019 as the dry run; tell the HR team before the first open. The Google
       Form dropdown (and the Apps Script change that goes with it) is OPTIONAL — it only tells you which channel an applicant came from.
       Digest e-mails stay off until switched on in settings. Order and caveats: the runbook.
@@ -390,6 +393,143 @@ live.
 - [ ] **P4 outbound** — company lists, Sheets-API prospect sync, coverage/outbound exceptions, direct-send templated outreach with
       guardrails (owner-mailbox sender, durable cap, suppression, signed unsubscribe), prospect/outreach views on the Sourcing page.
 - [ ] Parked (needs a public careers page, partner access or is policy-barred): job syndication, Cutshort, Brave/GitHub search, Campus.
+
+---
+
+## Phase 7 — Engineering hygiene: CI, tests, Help (2026-11-05; the details are in CLAUDE.md "Testing" and "CI (GitHub Actions)")
+
+- [x] **CI (PR #28).** `.github/workflows/ci.yml` on every PR and push to `main` (backend `tsc` + Vitest, the Node 22.11 `require()` check, frontend
+      `tsc` + Vitest + `vite build`, Playwright type-check, async-promise lint, the database schema/seed/id-sequence guards, actionlint + shellcheck;
+      the aggregate **`CI passed`** is the one check to require), plus CodeQL, dependency review, a gitleaks secret scan with
+      `.github/gitleaks.toml`, a weekly `npm audit`, a nightly Playwright `api` + `db` run (`integration.yml`) and Dependabot.
+- [x] **Backend Vitest (PRs #31 flaky sandbox/timing tests, #32 route-level tests, #33 pure-logic tests, #56 a CI-runner floor for one linearity check).**
+      119 files, 9,603 tests + 14 skipped (measured 2026-11-05). Includes the allow-list of every route (`routes.authMatrix.test.ts`) and the
+      backend/frontend "twin" drift guard (`utils/crossPackageTwins.test.ts`).
+- [x] **Frontend Vitest (PRs #34 foundation and core components, #35 candidate pages and tables, #36 roles, agencies and admin pages).** 76 files, 2,305 tests.
+- [x] **Playwright foundation and specs (PRs #37 isolated disposable stack `scripts/test-stack.sh`, shared helpers and `@live` tagging; #39 schema replay,
+      user lifecycle and offline portfolio db specs; #40 candidate modals, bulk actions, lists; #41 My Tasks, role detail, role creation; #42 users,
+      Help, responsive and PWA).** 1,080 tests in 79 files over five projects (`api` 379, `db` 413, `e2e` 220, `e2e-mobile` 30, `smoke` 38). The `api`
+      specs of PR #38 are still open and are not in this count.
+- [x] **Help page and info markers (PRs #29, #30).** FAQ answers brought up to the system; every column and KPI marker says what its query counts, and
+      the marker tests read the backend's real numbers (`frontend/src/test/backendSource.ts`).
+- [x] **A deactivated user loses access within seconds (PR #55, 2026-11-05).** `authenticate()` checks `users.is_active` live (15 s in-process cache,
+      fail-closed 503, invalidated by `POST`/`PATCH /api/users`). Only `is_active` is live; persona and name still come from the token (below).
+- [x] **Dependabot vulnerability alerts enabled (repository setting, 2026-11-05).** Not a file; see CLAUDE.md "CI".
+- [ ] **Branch protection requiring `CI passed`** — recommended in CLAUDE.md; a repository setting, not recorded as done.
+- [ ] **The nightly `integration.yml` is red** until `hms-tests-final/tests/db/17-user-lifecycle.spec.ts` (lines 197 and 303) and
+      `tests/e2e/09-user-management.spec.ts` (line 479) are updated to the live `is_active` check, and `backend/src/routes/auth.test.ts`'s "characterization:
+      authentication does not ask the database…" is rewritten (it passes vacuously). Measured 2026-11-05: `api` + `db` nightly selection 772 tests,
+      756 passed, 1 failed, 14 not run behind it.
+- [ ] **Two `e2e/13-help-and-info-markers` checks failed on a fresh local stack** ("Candidates: marker 2 of 7", "Dashboard (Hiring Manager): marker 8 of 13":
+      the opened popover is reported covered or clipped by the page card), alone as well as in the full run. Find out whether they need more rows than a
+      fresh database has or are a real clipping defect (a related one is already pinned "as TODAY": the Gender header popover is cut off by the table card
+      when the list has a single row).
+- [ ] **The nightly `EXCLUDE` list may be longer than it needs to be.** On 2026-11-05, on a fresh stack with no credentials, `db/07` (all 17 tests, the three excluded ones
+      included), `db/05-aging-roles-no-movement` (13), `api/19-pending-actions-regressions` (9, the excluded "every candidate entry carries application_id" included)
+      and the excluded `db/15` "a Drive PDF + a website: pending" all passed when run on their own, once each, although `integration.yml`'s header says they need a
+      real key, a long-lived database, a multi-line queue error or are racy. Re-measure a few times, then trim the regex (do not add an entry without a measured
+      reason, as the header says).
+- [ ] Stale comments in the CI files: `integration.yml`'s header says "659 tests" (the same selection lists 772 now), and `audit.yml`'s header says
+      Dependabot alerts are off; `frontend/src/services/api.ts` comments say axios sends array params as repeated keys (it sends `key[]=a&key[]=b`;
+      `api.test.ts` pins the real format).
+
+### Open product issues found by the test suites (verified on `origin/main`, 2026-11-05)
+Each was confirmed by reading the code and, where it says "verified", by calling a local disposable stack. Where a test pins the behaviour it is
+named: fixing the issue turns that test red on purpose (see the "TODAY" / `characterization:` tests), so change the test with the fix.
+
+*Data and ids*
+- [ ] **Interview-round ids collide.** `nextRoundId` (`backend/src/routes/interviews.ts`) reads `SELECT id FROM interview_rounds ORDER BY id DESC LIMIT 1` and
+      adds 1, instead of using `seq_interview` (which exists, and is the column default). Two concurrent `POST /api/interviews` get the same id and one
+      fails on the primary key with a 500; and because the order is TEXT, once `IR10000` exists the "last" id is `IR9999` again and the next id issued is
+      `IR10000`, which already exists (`interviews.feedback.test.ts`, "characterization: the "last" id is the greatest as TEXT…").
+- [ ] **Several write routes answer 500 instead of 400 on a CHECK or cast violation** (the unhandled error reaches the generic handler). Reproduced:
+      `POST /api/roles` with `priority:"ZZ"` or `num_openings:"abc"`; `PATCH /api/roles/:id` with a bad `priority`, `status` or `num_openings`;
+      `POST /api/agencies` with a `contract_status` outside Active/Inactive/On Hold; `PATCH /api/applications/:id/notes` with `hr_priority_override:"Bogus"`;
+      `PATCH /api/users/<not a uuid>` (and `e2e/09`: editing a user's e-mail onto another user's is a 500 where Add user answers a clear 400);
+      `POST /api/auth/login` with a non-string e-mail. Most write routes do not validate enum or numeric fields at all (`POST /api/roles` ignores an
+      unknown `status`; `POST /api/applications/:id/stage` stores any string as a stage, `applications.stage` being plain TEXT; interview feedback accepts an
+      empty body and scores outside 1-5, and a 99 passes the "above 2.5" test that auto-advances the candidate).
+- [ ] **`seed.sql`'s closing `setval` block fails on an empty database.** `setval('seq_candidate', COALESCE(MAX(...), 0))` (and the same for application,
+      interview, refcheck) is "value 0 is out of bounds": `seed.sql` stops at its last block (data already committed), and **a fresh `docker-compose up`
+      on a new volume does not initialise: the Postgres init script fails there and the container exits with code 3** (verified 2026-11-05; an existing volume is
+      fine). Use `setval(seq, 1, false)` when the table is empty. CI and the test stack tolerate exactly this one error (`known-db-defects.txt`,
+      `.github/ci/apply-db.sh`, `scripts/test-stack.sh`); pinned by `db/16-schema-replay`.
+- [ ] **`seq_eval_question` and `seq_comp_benchmark` stay behind the seeded ids.** `seed.sql` inserts `Q001-Q013` / `BEN001-BEN012` explicitly and never advances them;
+      they are created `START 1`, the later `START 14` / `START 13` lines are `CREATE SEQUENCE IF NOT EXISTS` no-ops, so on a rebuilt database the first insert that
+      relies on the default id fails on the primary key (the `api/08` "HR can add a new question" test). Add the two `setval` lines to `seed.sql`, then
+      delete `known-db-defects.txt`'s two lines and `.github/ci/seed-sequence-workaround.sql`.
+- [ ] **`schema.sql` is not re-runnable** although its patch section is headed "Safe to run multiple times": the original block uses plain `CREATE TABLE`
+      (42P07 on the first statement) and two patches fail when repeated (`ALTER COLUMN vacancy_reason TYPE TEXT[] USING string_to_array(...)` when it is
+      already `text[]`, and `ADD COLUMN gender` without `IF NOT EXISTS`). Pinned by `db/16`.
+- [ ] **`pending_actions` has foreign keys to `applications` and `roles` with no index on `application_id` / `role_id`**, so every delete of an application or
+      role scans the table (`hms-tests-final/tests/helpers/sourcing-db.ts` `purgeRolesFast` exists because of it; pinned by `db/16`).
+- [ ] **`db.transaction()` can mask the original error** (`backend/src/db/index.ts`): its `catch` awaits `client.query('ROLLBACK')` before rethrowing, so a failed
+      ROLLBACK (a dropped connection) replaces the real error, and `client.release()` returns the broken client to the pool without `release(err)`.
+- [ ] **`roleIngest` edge cases** (`backend/src/routes/roleIngest.ts`): `num_openings:"abc"` becomes `parseInt` NaN and the insert fails with a 500 (the sequence
+      value is burned); `"0"` and `"-2"` are stored as given; the dedup key is `timestamp|email`, a row with neither has the key `|` and skips the lookup (a re-fired
+      trigger creates duplicates), and `requisition_source_row` has no unique index, so two concurrent posts of one row can both insert; the role id is padded to
+      3 digits (`R013`) where the column default pads to 4 (`R0009`).
+- [ ] **`compBenchmark` can produce NaN bounds** (`services/compBenchmark.ts`): a model reply with no text block parses as `{}` and returns `range_min` /
+      `range_max` NaN, with no validation of the range (`compBenchmark.test.ts`, "CURRENT BEHAVIOUR").
+
+*Access control and workflow rules*
+- [ ] **Persona and name are taken from the token** (`authenticate()` in `middleware/auth.ts`; `issueToken` in `routes/auth.ts`), so a demotion (or promotion) only
+      takes effect at the person's next sign-in, up to `JWT_EXPIRES_IN` (24 h) later; only `is_active` is live since PR #55. Re-read `persona` (and `name`) in the
+      same cached lookup, or shorten the token. Pinned by the two persona tests in `db/17` (`e2e/09` line 479 mixes this with the deactivation check and needs splitting).
+- [ ] **HR priority override does not require a reason although the test says it does.** `PATCH /api/applications/:id/notes` accepts `hr_priority_override` with no
+      `hr_priority_override_reason` (200; the activity line just ends in an empty reason), while `api/08-misc` is titled "HR priority override requires a reason"
+      and asserts `[400, 200]` ("backend may not validate this yet"), so it cannot fail. Decide the rule; make the test exact.
+- [ ] **The Hiring Manager is not scoped on `POST /api/applications/:id/screening`.** Any Hiring Manager can set `HM Shortlisted` on any application, whatever the
+      role's `hiring_manager_name` (verified: a Hiring Manager named on another role did it), unlike comp visibility and the dashboard, which are per role.
+- [ ] **`HM Shortlisted` is not idempotent** (same route): repeating it resolves nothing new but inserts another open "Schedule interview" action each time (three
+      calls, three open rows), because the route never compares the old and new status.
+- [ ] **`POST /api/interviews/:id/assignment-submit` does not check the round type**: a Standard round accepts an assignment submission (it writes the submission
+      onto the round and the application). `assignment-send` does check (400 "not configured as an Assignment round").
+- [ ] **A candidate with no e-mail gets an inconsistent answer when an Assignment round is created** (`attemptAssignmentEmail`): the row stores
+      "Candidate has no email on file." while the response says "Candidate has no email on file — cannot send assignment.", and, unlike a failed send, no
+      "Assignment Email Failed" activity-log row is written.
+- [ ] **The rejection/withdrawal reason gate is looser than it reads**: either kind of reason satisfies either status (a `Rejected` with only a withdrawal reason
+      is stored with no rejection reason), and a whitespace-only `withdrawal_reason_cat` counts (`applications.access.test.ts`).
+- [ ] **`GET /api/candidates/:id/edit-log` is open to a Hiring Manager and returns the raw rows, including the old and new values of the compensation fields**
+      (`expected_ctc` etc.) that `GET /api/candidates/:id` strips for that persona (verified live; `routes.authMatrix.test.ts` pins it). `requireLeadership` is
+      exported but mounted on no route.
+- [ ] **Google sign-in reads neither `email_verified` nor `hd`** (the check is the e-mail suffix alone), does not compare the Google subject with the stored
+      `google_id` (a different account for the same e-mail takes the link over when the picture differs), and answers 500 for a verified token with no payload
+      (`routes/auth.test.ts`, "characterization").
+- [ ] **Stored `sla_hours` disagrees with the SLA engine for high-fit candidates.** `getSlaHours('Applied and Screened', 80)` stores 48 while the SLA engine
+      (`tieredStandardHours`) breaches at 24 since Hiring SOP v2.1 (the two agree below fit 75).
+- [ ] **"Joining risk" is raised for every Offer Accepted application at once.** `checkJoiningRisk` (`jobs/slaChecker.ts`) flags `last_hr_contact IS NULL OR older than
+      5 days`, and nothing sets `last_hr_contact` when the stage moves (only `PATCH /notes` does), so the next SLA sweep raises "Joining risk — no contact"
+      ("No HR contact logged in 5+ days") immediately, with `hours_overdue` hard-coded to 120.
+- [ ] **`backend/src/jobs/scheduler.ts` is dead code** (imported nowhere; Vercel Cron and the compute-on-read sweep replaced it; it is also the 2 known findings of
+      the async-promise lint). Delete it and add `--fail` to the lint step in `ci.yml`.
+
+*Frontend*
+- [ ] **A corrupt `hms_user` in localStorage white-screens the app**: `AuthContext` parses it with a bare `JSON.parse` in the mount effect and there is no error
+      boundary, so the crash survives reloads until site data is cleared; and any valid-JSON value (a string, a number, an array, `true`) is adopted as the user, with
+      no persona and so no rights (`AuthContext.test.tsx`).
+- [ ] **The 401 interceptor redirects on a failed sign-in** (`frontend/src/services/api.ts`): it treats every 401, including the `POST /auth/login` and
+      `/auth/google` calls themselves, as an expired session, clears storage and sets `window.location.href = '/login'`, a full reload that loses the error
+      message (`api.test.ts`).
+- [ ] **The "Add agency" button has no handler** (`pages/Agencies.tsx`): it is drawn for every persona, including one who cannot load the list, and does nothing
+      (`pages.smoke.test.tsx`, `e2e/16`).
+- [ ] **Axios array parameters are bracket-serialized** (`gender[]=UNKNOWN`, `or_role_id[]=R019`), not repeated keys as the comments in `services/api.ts` say.
+      Express's `qs` reads both, so nothing is broken, but anything that matches request URLs (a proxy rule, a Playwright route) must use the real form.
+- [ ] **`frontend/tsconfig.json` has duplicate keys** (`strict`, `noUnusedLocals`, `noUnusedParameters` each appear twice); `strict` is false.
+- [ ] **`Candidates.tsx` calls `GET /api/candidates/unmatched` for every persona** (the query has no `enabled`), although the route is HR-tier only: a Hiring Manager's
+      page makes a request that is always a 403 (verified).
+- [ ] **A failed background refresh replaces the whole Dashboard** (`pages/Dashboard.tsx`): the `error || !data` test shows "Failed to load dashboard" even
+      though react-query still holds the last good `data` when a `refetchInterval` refresh fails.
+- [ ] **A Hiring Manager sees a Recruitment Mode filter with no options** on the Dashboard: the `roles/filter-options` query is disabled for them
+      (`enabled: !isLockedToOwnRole`), but the filter is still drawn, with an empty list.
+- [ ] **Smaller pinned UI behaviours** (each in the listed spec's header): the Stage modal has no skip-reason control; a candidate page keeps the old stage until
+      reloaded after an auto-advance; a Hiring Manager not on a round still sees "Submit feedback" and the edit pencils on roles and candidates (every save is
+      a 403); a role's activity timeline does not refresh after Change status; the bulk over-budget reason is sent for, and stored on, every selected row; bulk
+      withdraw stores its reason in the rejection column; clearing a user's Department in Edit does not clear it; the first tap on an info marker on a phone
+      opens nothing (`e2e/10`, `e2e/11`, `e2e/14`, `e2e/09`, `e2e-mobile/15`).
+- [ ] **Approve Role hides a JD-generation failure** (`RoleDetail.tsx` `handleApprove`): the PATCH returns `jdGeneration` (30 s of Claude, two PDFs, two Drive
+      uploads, awaited inline) but the button only toasts "Role approved", so a failed generation is invisible there; the Change status modal
+      (`handleStatusUpdate`) does show it, and the "Links & Assets" card just shows no JD link.
 
 ---
 

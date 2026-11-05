@@ -106,15 +106,121 @@ users that still had one (`UPDATE … SET password_hash = NULL`), so every produ
   port.
 - Backend runs via `tsx watch src/server.ts` — no build step, no `dist/`
   folder. TypeScript runs directly.
+- **A brand-new Postgres volume does not initialise today (verified 2026-11-05, `postgres:16-alpine` with exactly docker-compose's two init mounts).**
+  The image runs `01_schema.sql` then `02_seed.sql` with `ON_ERROR_STOP`, and `seed.sql`'s closing block calls `setval('seq_candidate', 0)` on the
+  empty table: "value 0 is out of bounds for sequence", the init script fails and the container exits (code 3). Everything above that block has
+  already committed, which is how the test stack and CI get a usable database (they apply the files themselves and tolerate that one error).
+  An EXISTING volume is unaffected, so this only bites `docker-compose down -v` followed by `up`; `ROADMAP.md` lists the fix. For a throw-away
+  database for tests use `hms-tests-final/scripts/test-stack.sh` (see Testing), not the developer's `dp_hms_db`.
 
-### Testing — two separate layers, don't confuse them
-- **`hms-tests-final/`** (Playwright) — exercises the app through its real
-  API/UI surface: `npm run test:local` (api+db+e2e, LOCAL ONLY — mutates
-  data) or `npm run test:prod` (read-only smoke tests, safe against the live
-  Vercel deployment). See that directory's own `README.md` for the full
-  per-file breakdown and conventions (fresh test data via `uid()`, direct-
-  Postgres `tests/db/*` specs for state no API can set, e.g. backdating a
-  timestamp). **`npm run test:prod` signs in as two dedicated read-only smoke accounts (2026-10-19).** The seed password hash was removed from
+### Testing — three layers, don't confuse them
+Counts below were measured on 2026-11-05 on `origin/main` (`b4ccb67`) with `vitest run --reporter=dot` and `playwright test --list`; re-measure
+before quoting them, they drift with every test PR.
+
+| Layer | Where | Run | Size now | Touches data? |
+|---|---|---|---|---|
+| Backend unit/route tests | `backend/src/**/*.test.ts` (Vitest, node) | `cd backend && npm test` | 119 files (118 run + 1 opt-in skipped), 9,603 tests passing + 14 skipped; `src/services/portfolio/**` is 55 of those files, 6,731 tests | no (the database and the outside world are faked) |
+| Frontend unit/component tests | `frontend/src/**/*.test.{ts,tsx}` (Vitest, jsdom, React Testing Library) | `cd frontend && npm test` | 76 files, 2,305 tests | no |
+| Playwright suite | `hms-tests-final/` | see below | 1,080 tests in 79 files (+ 3 `@live`) | **yes — except `smoke`** |
+
+**The rule that matters: `test:local` and every project except `smoke` MUTATE data, `test:prod` / `smoke` is read-only.** The `api`, `db`, `e2e`
+and `e2e-mobile` projects create, change and delete rows (the `db` specs also rename tables, rewrite settings and create throw-away databases);
+`playwright.config.ts` only defines them when `TEST_API_URL` is a local address (`isLocalTarget`), so `--project=api` against a remote URL stops
+with "Project(s) api not found" instead of running. Against production the one project that exists is `smoke`. Never point the others at
+Supabase or the live Vercel URL, and never at the developer's own `dp_hms_db` unless that is the intent (use a disposable stack, below).
+
+**Vitest (backend).** `vitest.config.ts`: `src/**/*.test.ts`, `testTimeout`/`hookTimeout` 30 s (a hang detector, not a performance assertion),
+`poolOptions.forks.minForks: 1` so `--maxWorkers=N` works. Route tests run the REAL Express routers, the real `authenticate`/`require*`
+middleware and real JWTs through `src/test/routeHarness.ts`, with only the database (`src/test/fakeDb.ts`: records every statement, answers
+programmed replies, answers `authenticate()`'s `SELECT is_active FROM users WHERE id=$1` by default, `setUserAccess` overrides it) and the outside
+world (`src/test/externalMocks.ts`) replaced; a hand-written db mock must answer that lookup too (`src/test/accessLookup.ts`).
+`src/routes.authMatrix.test.ts` is the allow-list of EVERY route and who may call it: a new route fails it until its gate is written down.
+`src/utils/crossPackageTwins.test.ts` reads the frontend's copies of backend rules (and `schema.sql`) as text and fails when a twin drifts;
+`frontend/src/test/backendSource.ts` is the same idea from the other side (the info markers quote backend numbers). `src/testing/timing.ts`
+(CPU time, best-of-N, cost ratios instead of wall-clock bounds) is how timing tests stay stable; the ones that remain timing-based can still fail
+on a heavily loaded machine, so re-run before suspecting the code. `capture.realBrowser.test.ts` (14 tests) is the one skipped file: it needs
+`PORTFOLIO_REAL_BROWSER_TEST=1` and a desktop Chrome. Tests titled `characterization:` pin what the code does today where that looks unintended,
+and say so; the day the behaviour is fixed they change with it (the frontend ones pair a `TODAY:` test with a WANTED `it.fails`).
+New pure logic worth testing should be `export`ed even if only used inside its module (`jobs/slaChecker.ts`'s `tieredStandardHours`,
+`services/jdContent.ts`'s `finalizeJdContent`).
+
+**Vitest (frontend).** `vitest.config.ts`: jsdom, `src/test/setup.ts` (jest-dom matchers, RTL cleanup after each test, `asyncUtilTimeout` 5 s,
+React Router's two future-flag warnings filtered). Fixtures and mocks live in `src/test/` (`authMock.ts`, `candidateFixtures.ts`,
+`candidateDetailFixtures.ts`, `helpers.ts`, `loadTolerance.ts` for the large page tests, `backendSource.ts`). Per-page `*.markers.test.tsx` pin
+the info-marker texts against the backend's real numbers; `pages.smoke.test.tsx` renders every page.
+
+**Playwright (`hms-tests-final/`)** — exercises the app through its real API and browser surface. `playwright.config.ts` defines five projects:
+
+| Project | Specs | Tests | Needs |
+|---|---|---|---|
+| `api` | `tests/api/` (42 files, `00-test-infrastructure` + `01`–`41`) | 379 | a backend and Postgres |
+| `db` | `tests/db/` (18 files, `00`–`17`; direct Postgres through `pg`, LOCAL ONLY) | 413 | a backend and a Postgres you may wreck |
+| `e2e` | `tests/e2e/` (16 files, `00`–`14` and `16`) | 220 | + a frontend (Vite) and Chromium |
+| `e2e-mobile` | `tests/e2e-mobile/15-responsive-and-pwa.spec.ts` (390x844, touch; the PWA checks need a PRODUCTION build served by `vite preview`, dev mode registers no service worker) | 30 | + `test-stack.sh preview` |
+| `smoke` | `tests/smoke/` (`production.spec.ts`, `production-ui.spec.ts`) | 38 | a deployment and the two smoke accounts |
+
+Run-wide rules in the config, on purpose: **`workers: 1`, `fullyParallel: false`, `retries: 0`** (every spec shares one database, the SLA sweep, the
+sourcing engine and the dashboard totals are global, and a retry would restart a test in a new worker where its module-level state is gone, so a test
+that skips itself on a missing precondition would then pass vacuously); `forbidOnly` in CI; test timeout 60 s, expect timeout 10 s; the browser's
+time zone is pinned to `Asia/Kolkata` (e2e/06 asserts an exact instant) and every non-local host is mapped to `NOTFOUND` (the page falls back to
+system fonts, the Google button never renders, a run no longer depends on Google's CDN; `PW_ALLOW_EXTERNAL_HOSTS=1` turns it off);
+screenshots/video/trace are kept only on failure (and are OFF for `smoke`, so nothing from production is written to disk). `global-setup.ts` runs once
+per `playwright test` invocation: it aborts with a clear message when `GET /health` does not answer, logs in all six seeded users (it THROWS when a
+seeded login fails), writes the JWTs and user records to `.auth/tokens.json` / `users.json` (git-ignored) so no test pays a login, and warms
+`/api/dashboard` once (the SLA sweep is compute-on-read; the first call after a quiet spell took 25-30 s). Against production it uses only the
+smoke accounts.
+
+- **Commands** (`hms-tests-final/package.json`): `test:api`, `test:db`, `test:e2e`, `test:mobile`, `test:smoke`, `test:local` (api + db + e2e —
+  mutating, LOCAL ONLY), `test:ci` (api + db projects; what the nightly workflow runs, minus its exclusions), `test:prod` (smoke against
+  `dp-hiringmaster-be.vercel.app` / `dp-hiringmaster.vercel.app`), `test:live` (`TEST_LIVE=1 playwright test --grep @live`), `test:report`,
+  `stack:up|down|env` (`STACK=N`).
+- **`@live` / `TEST_LIVE`.** A test that needs a real Anthropic key or Google credentials carries `@live` in its title and is dropped by `grepInvert`
+  unless `TEST_LIVE=1`: today three — `db/07` "a candidate with NO readable resume gets the base score untouched … (the creation-time hook, with a
+  real model)", `e2e/03` "Approving a role generates a JD and a Drive link appears", `e2e/14` "a role with no internal benchmark gets an AI
+  estimate". Everything else runs with no credentials (a stack has none, see below). Two older specs still make real calls when credentials exist
+  and skip or fail without them: `api/10-jd-generation-and-scoring` (2 tests, Claude + Drive) and the one real Calendar round trip in
+  `api/15` / `e2e/06` (guarded by `hasCalendarCredentials()`, deletes its event in a `finally`).
+- **The isolated test stack — `hms-tests-final/scripts/test-stack.sh`.** `bash scripts/test-stack.sh up|down|status|env|preview|restart|reset N`
+  (`N` = 0..9; `up N --no-frontend` for api/db only). Each index is a disposable stack: a throw-away Postgres container `hms-pw-db-N`
+  (`postgres:16-alpine`, data on tmpfs, schema.sql then seed.sql applied, the known seed error and the two stuck sequences handled), the backend
+  from THIS checkout's `backend/src` run with `tsx` on an EMPTY environment (`env -i`: no `ANTHROPIC_API_KEY`, no Google credentials, no
+  `backend/.env`, `SOURCING_ENABLED=true` by default) and a Vite server (`scripts/stack-vite.mjs`, with a private cache dir so a worktree's
+  symlinked `node_modules` is never re-optimised under the developer's own dev server). **Ports for index N: database `55440+N`, backend `4110+N`,
+  frontend `5180+N`**; `4000`, `5173`, `5432` and `55432` are refused outright. State, logs and pid files are in `hms-tests-final/.stack/N/`
+  (git-ignored). `up` is idempotent; `restart` restarts the backend only (it does not watch files: do it after editing `backend/src`); `reset`
+  rebuilds the database; `preview` serves a production build (needed by `e2e-mobile`'s PWA checks). A pid file is only ever signalled when the
+  process is still that stack's own (leader of its group, working directory = this checkout). Use it like
+  `eval "$(bash scripts/test-stack.sh env 3)" && npx playwright test --project=db`: that exports `TEST_API_URL`, `TEST_FRONTEND_URL` and
+  `TEST_DB_URL`. `helpers/db.ts` refuses a non-local `TEST_DB_URL` and refuses an API on a stack port (4110-4119) with no `TEST_DB_URL` (the db
+  specs would otherwise mutate the developer's database while the API under test used the stack's own).
+- **Helpers** (`tests/helpers/`): `api.ts` (`USERS`, token cache, `authed()`, data factories, `uid()`, ingest secrets, `pollUntil`, connection-level
+  retry that never retries a 500), `db.ts` + `db-specs.ts` (connection guard; schema replay, fingerprints, throw-away databases, healing of shared
+  state a killed run left behind), `dates.ts` (dates from the real clock, never hard-coded), `e2e.ts` (`loginViaApi`, `gotoAs`,
+  `expectNoPageErrors`: a browser session is built from the cached token), `e2e-candidates.ts` / `e2e-roles.ts` / `e2e-misc.ts` (fixtures built
+  through the real API or by SQL where no API can set the state, with a registry that removes them; an Assignment round must FAIL to send e-mail
+  on a stack, and its candidates use the reserved `.invalid` TLD), `browser-checks.ts` (DB-free checks shared with the smoke spec),
+  `smoke-env.ts`, `calendar.ts`, `sourcing-db.ts` (`purgeRolesFast`: `pending_actions` has foreign keys with no index, so deleting rows one by one
+  is ~0.5 s each). `tests/api/00-test-infrastructure.spec.ts` and `tests/e2e/00-test-infrastructure.spec.ts` are the self-tests of all this.
+- **Specs that pin a product defect "as TODAY".** A test whose title contains `TODAY` asserts what the product does now where that looks
+  unintended, so a fix turns it red on purpose and the test is changed with the fix: `db/16-schema-replay` (8), `db/17-user-lifecycle` (8),
+  `e2e/09-user-management` (3), `e2e/10-candidate-actions` (5), `e2e/11-candidates-bulk-and-pipeline` (2), `e2e/12-my-tasks` (1),
+  `e2e/13-help-and-info-markers` (3), `e2e/14-role-detail-actions` (2), `e2e/16-lists-and-forms` (3), `e2e-mobile/15-responsive-and-pwa` (1); each
+  file header lists what it pins, and `ROADMAP.md` lists the product issues. **Known stale pins (measured 2026-11-05 against a fresh stack):**
+  PR #55 made `authenticate()` check `is_active` live, but three Playwright pins still assert the old behaviour and FAIL on `main`: `db/17`
+  "TODAY: the OLD token of the deactivated user still works" (line 197) and "TODAY: a DEACTIVATED super_admin's old token still passes
+  requireSuperAdmin" (line 303; the serial file skips everything after the first failure, so the second only shows when the first is skipped,
+  as done here with a scratch copy), and `e2e/09` "TODAY: a token issued before the role change and the deactivation keeps working" (line 479). The two
+  persona-change pins in `db/17` (a promotion or demotion reaches the person only at the next sign-in) are still true. Also, `backend/src/routes/auth.test.ts`'s "characterization: authentication does not ask the database whether the user still exists or is active" is
+  now false but passes: its programmed "user is gone" reply targets the sign-in query, while `authenticate()`'s new lookup is answered "active" by
+  `fakeDb` without being recorded. Update them when touching that area.
+- **What a run looks like today** (2026-11-05, one fresh stack from `origin/main`, nothing credentialed): `api` + `db` with the nightly exclusions
+  (772 tests): 756 passed, 1 failed (the first stale `db/17` pin above), 14 not run (its serial cascade, which hides the second), 1 skipped, in 38 s. `e2e` (220): 212 passed, 3
+  failed, 3 skipped (the two `@live` ones and one more), 2 not run, in about 3 minutes; the three failures are the stale `e2e/09` pin and two
+  popover-clipping checks in `e2e/13` ("Candidates: marker 2 of 7" and "Dashboard (Hiring Manager): marker 8 of 13": the popover is reported covered
+  by the page card; they also failed alone on a re-run on this small database, and whether they depend on how many rows the tables hold was not
+  investigated). `e2e-mobile` (against `preview`): 30 of 30. `smoke` (against the same local stack, with the two smoke accounts created by
+  `scripts/smoke-accounts.mjs`): 38 of 38.
+- **Production smoke accounts.** `npm run test:prod` signs in as two dedicated read-only accounts (2026-10-19). The seed password hash was removed from
   the 8 production users that still had one, so every real production account is Google-only and the seeded users cannot sign in there.
   The suite uses `smoke.leadership@hms-smoke.invalid` (leadership) and `smoke.hm@hms-smoke.invalid` (hiring_manager, named on no role): the
   reserved `.invalid` domain means no mailbox can exist and Google sign-in can never reach them; `authenticate()` in
@@ -123,20 +229,84 @@ users that still had one (`UPDATE … SET password_hash = NULL`), so every produ
   environment; `node hms-tests-final/scripts/smoke-accounts.mjs` prints the SQL that creates / refreshes the two rows (hashes only) and
   `--rotate` replaces the passwords. **STATUS: both rows were created in production on 2026-10-19 (Aaron approved the write in chat; ids
   `d4a1aefb-…` leadership and `3b4d92b1-…` hiring manager; production now has exactly two accounts with a password hash, these two) and the whole
-  smoke suite (34 tests, API + browser) passes against local Docker AND against the live production deployment (verified 2026-10-19). The read-only guard protects only once a backend containing it is deployed.** Do not remove `POST /api/auth/login`: the smoke accounts and local Docker's seeded users sign in through it. The
+  smoke suite (34 tests then, API + browser; 38 now that the Help checks were added) passed against local Docker AND against the live production
+  deployment (verified 2026-10-19). The read-only guard protects only once a backend containing it is deployed.** Do not remove `POST /api/auth/login`: the smoke accounts and local Docker's seeded users sign in through it. The
   suite never writes, never prints candidate data, and has traces/videos/screenshots off. Details: `hms-tests-final/README.md`.
-  `seed.sql` still carries the seed password for LOCAL Docker only, so `test:local` is unaffected.
-- **`backend/src/**/*.test.ts` and `frontend/src/**/*.test.{ts,tsx}`**
-  (Vitest) — unit/module-level tests for pure logic and small components,
-  run with `npm test` from `backend/` or `frontend/` respectively. This is
-  where edge cases for a pure function (`computeAging`, persona gating,
-  JD-content validation, SLA tiering, etc.) get enumerated directly, rather
-  than indirectly through a real HTTP round trip. New pure logic worth
-  testing this way should be `export`ed even if only used internally
-  elsewhere in its own module — see `jobs/slaChecker.ts`'s
-  `tieredStandardHours` or `services/jdContent.ts`'s `finalizeJdContent` for
-  the pattern (both were private until exported specifically to unit-test
-  them).
+  `seed.sql` still carries the seed password for LOCAL Docker only (nine seeded users, all `password123`), so the local projects are unaffected.
+
+### CI (GitHub Actions) — `.github/` (PR #28, merged 2026-11-05; first measured 2026-10-29)
+Everything runs on GitHub-hosted `ubuntu-latest` runners (free for a public repository), needs no repository secret to pass, and pins every
+third-party action to a full commit SHA with its version in a comment (Dependabot keeps both in step). `.github/README.md` is the short version;
+`.github/pull_request_template.md` is the checklist every PR carries (database order, no fire-and-forget async, tests, docs, deploy order, "CI
+passed" green). Six workflows, one config for each tool:
+
+| Workflow | Runs on | What it does |
+|---|---|---|
+| `ci.yml` "CI" | **every PR, every push to `main`**, manual; no path filters (a filtered workflow that does not run leaves a required status pending forever); a new push cancels the older PR run | seven jobs, below, then the aggregate |
+| `codeql.yml` | PR and push to `main`, **weekly** (Mon 03:17 UTC), manual | CodeQL `javascript-typescript`, `security-extended`, config `.github/codeql/codeql-config.yml` (ignores `*.test.ts(x)`, `*.fixtures*.ts`, `hms-tests-final/tests`, `dist`); results under Security > Code scanning. Reports, does not block a merge by itself. A PR from a fork gets a read-only token and reports as failed (GitHub's rule). Advanced setup: never switch on GitHub's "default setup", it disables this workflow |
+| `dependency-review.yml` | PR to `main` | fails a PR that adds or updates a dependency (any `package-lock.json`, runtime or development scope) to a version with a **high or critical** advisory; looks only at what the PR changes, so an advisory already on `main` never fails an unrelated PR; no licence policy, no PR comment (the summary is in the job) |
+| `secret-scan.yml` | PR, push to `main`, **weekly** (Mon 02:41 UTC), manual | gitleaks 8.30.1 (pinned by version and sha256) with `.github/gitleaks.toml`; scans the PR's or push's new commits, the whole history on the weekly/manual run; `--redact` always on (workflow logs of a public repo are public) and only file, line and rule are printed |
+| `audit.yml` | **weekly** (Mon 03:23 UTC), manual, and PRs that touch `backend/package-lock.json`, `frontend/package-lock.json` or the workflow | `npm audit --omit=dev` for backend and frontend (the packages that ship); **informational**: it annotates critical/high findings but never fails on them, only a tooling failure fails it |
+| `integration.yml` | **nightly** (20:30 UTC = 02:00 IST) and manual; never on a PR | the Playwright `api` + `db` projects against a real backend (`tsx src/server.ts`) and a `postgres:16` service, no credentials (per-run JWT/ingest/cron secrets are generated and masked), minus an `EXCLUDE` regex of tests that need a real key or are racy (each entry is justified in the YAML header); on failure uploads `integration-failure-<run id>` (HTML report, test results, backend log) for 7 days |
+
+**`ci.yml` jobs** (each `timeout-minutes` 2-20): `backend` (Node 22.x: `vercel.json` `includeFiles` still resolve via
+`.github/ci/check-vercel-includes.mjs`, `tsc --noEmit`, `npm test`), `backend-compat` (Node **22.11.0**, the last 22.x that cannot `require()` an
+ES-module-only package, Vercel's "22.x" being older than 22.12: compiles with `tsc --outDir dist` and loads the compiled server and the lazily
+loaded packages with `require()` through `.github/ci/boot-smoke.cjs`; this is the guard against an ESM-only dependency bump that Vitest cannot see),
+`frontend` (`tsc --noEmit`, `npm test`, `npm run build` — which is `vite build` and does NOT type-check — and a check that `dist/index.html`,
+`sw.js` and `manifest.webmanifest` exist), `tests-typecheck` (type-checks `hms-tests-final` with `tools/ci-lint/tsconfig.playwright.json`:
+Playwright transpiles without checking), `lint-async` (ESLint `no-floating-promises`, `await-thenable`, `no-misused-promises` and a ban on
+`setImmediate(async …)` over `backend/src`, config in `tools/ci-lint/`; findings are reported, not blocking, see the ratchets), `database`
+(`postgres:16` service: `.github/ci/apply-db.sh` builds the database from `schema.sql` then `seed.sql`, `.github/ci/check-db.sh` runs the guards:
+`format_seq_id` behaves, every prefixed-id sequence is ahead of its table, no two tables share a sequence, no id default goes back to
+`LPAD(nextval())`) and `workflow-lint` (actionlint 1.7.12 pinned by sha256, which also runs shellcheck over the workflows' shell blocks, plus
+shellcheck on `apply-db.sh` and `check-db.sh`). **`CI passed` (job `ci-ok`) is the single aggregate: it `needs` all seven jobs, runs
+`if: always()` and fails unless every one of them succeeded**, printing `job: result` for each, so adding or renaming a job never leaves a stale
+required check. Not in CI: the Playwright suite on pull requests (needs a stack and, for some specs, credentials; only the nightly runs `api` +
+`db`, and `e2e`, `e2e-mobile` and `smoke` run nowhere in GitHub) and Vercel's own build (Vercel posts that status itself).
+
+**Two ratchets (read before "fixing" a warning).** CI found real defects on its first run; each is recorded, shown as a warning on every run, and does
+not fail the build, while anything NEW does: `.github/ci/known-db-defects.txt` (`seq_eval_question` and `seq_comp_benchmark` start behind their seeded
+ids; `apply-db.sh` additionally tolerates exactly one error in `seed.sql`, `setval(seq, 0)` on an empty database; the nightly workflow runs
+`.github/ci/seed-sequence-workaround.sql` to advance the two sequences — delete the line, the tolerance and the workaround when the bug is fixed;
+the job prints a notice for a line that no longer matches) and `tools/ci-lint/summarize-eslint.mjs` (the async-promise lint's 2 known findings, both in
+the dead `backend/src/jobs/scheduler.ts`; add `--fail` in `ci.yml` once they are gone). `tools/ci-lint/` is a separate package on purpose (Vercel
+installs from `backend/` and `frontend/`; nothing there may reach a production install).
+
+**`.github/gitleaks.toml` policy.** Extends gitleaks' default rules (`useDefault = true`); exceptions are narrow and **rule-scoped**
+(`[[rules.allowlists]]` under `generic-api-key`), each scoped to one path AND the exact value (or, for the committed local-Docker ingest secrets in
+`docker-compose.yml`, to the two commits that introduced them), with a note on how it was verified. Never a path-only entry and never a global
+`[[allowlists]]` with `paths`: a global allowlist skips the whole file whatever `condition` says (measured with 8.30.1), which would blind the scanner
+to a real secret added to that file later. Today: 2 verified false positives (a made-up Drive resourcekey in `google.test.ts`, the deliberately wrong
+password in the smoke spec's negative login) and 1 known-and-accepted real value (the local-Docker ingest secrets, standing owner decision; CI cannot
+verify they differ from production). First full-history scan on 2026-10-29: 9 findings, all `generic-api-key`. A secret that reached history is exposed:
+rotate it, then remove it; rewriting history does not un-expose it.
+
+**`.github/dependabot.yml`.** Weekly (Monday 06:00 IST), one grouped minor+patch PR per package, majors one PR each (a human decides); a cooldown
+(3 / 7 / 14 days for patch / minor / major, 7 for Actions) keeps a brand-new release from being proposed on day one; commit prefixes "Deps
+(backend|frontend|tests|ci-lint|actions)". Ecosystems: npm in `/backend`, `/frontend`, `/hms-tests-final`, `/tools/ci-lint`, and `github-actions`. The
+pinned packages are ignored by `update-types` (not by name, so a security PR for them is not suppressed — unverified on GitHub's side, check the
+first one): `puppeteer-core` and `@sparticuz/chromium` (an exact-pinned pair, moved together after the Lambda-image check), `@anthropic-ai/sdk`
+(stays on 0.24.x: minor and major), `pdf-parse` (minor and major), `@types/node` (major), and `typescript` in `tools/ci-lint` (major). Every update PR
+runs the full CI, including the Node 22.11 load check and the dependency review.
+
+**Reading a failure.** Actions tab > the run > `CI passed` lists each needed job with its result: open the one that is not `success`. `backend` /
+`frontend`: the `tsc` or Vitest output in the step (re-run locally with the same command from that directory; a timing-based test that fails only on
+CI is the loaded-machine case, re-run first). `backend-compat`: a `require()` that throws on Node 22.11 means a dependency went ES-module-only. `database`:
+the failing guard names the kind and subject (`format_seq_id`, a sequence behind its table, a shared sequence); reproduce with
+`PGHOST=… PGDATABASE=scratch bash .github/ci/apply-db.sh && bash .github/ci/check-db.sh` against an empty database you may wipe. `lint-async` /
+`workflow-lint`: annotations on the offending line. `secret-scan`: file, line and rule, never the value. Nightly red: download the
+`integration-failure-<run id>` artifact (HTML report, backend log); `playwright test --project=api --project=db` against a stack reproduces it
+(see Testing). **The nightly is red today**: it includes `db/17-user-lifecycle`, whose two "TODAY: … old token …" pins predate PR #55 (see Testing), and
+its YAML header's "659 tests" is from 2026-10-29 (the same selection lists 772 now: `db/16` and `db/17` were added). The header of `audit.yml` still
+says Dependabot alerts are off.
+
+**Branch protection (recommended, a repository setting).** Require the single check **`CI passed`** and nothing else: it aggregates every job in
+`ci.yml`; CodeQL does not block by itself, `dependency-review` and `secret-scan` are separate PR checks that can be added as required if wanted, and
+`integration.yml` and `audit.yml` are not PR checks. **GitHub-side settings are not in the repository** and no file shows them: branch protection, the
+dependency graph (always on for a public repository, and what `dependency-review` reads), secret scanning and push protection (the `secret-scan`
+header says they are on), and **Dependabot vulnerability alerts, which were enabled on 2026-11-05**. Check Settings > Code security when something
+here looks missing.
 
 ### Access control model
 Four personas: `hr_recruiter` (displayed as "HR/Admin" — same DB value, just
@@ -158,7 +328,7 @@ outside HR-tier), the Founder Review flag route, and the recruiter-screening-
 status route. **`leadership` sees everything `hr_recruiter` sees** — there is
 no field or route either is blocked from that the other isn't.
 
-**Deactivation takes effect live (2026-11-05).** `authenticate()` (async) does not trust the 24 h JWT alone: after verifying it, and after the smoke-account read-only check (a smoke write is still refused 403 before any lookup), it confirms the user still exists and `is_active` via `SELECT is_active FROM users WHERE id=$1`; an inactive or missing row is 401 "Account is deactivated or no longer exists", and a database failure fails closed with 503 "Could not verify account status". The answer is cached in-process for 15 s (max 1000 entries, definitive answers only), so `PATCH /api/users/:id` calls `invalidateUserAccess(id)` and a deactivation is immediate on that instance and reaches other serverless instances within the 15 s TTL. Tests that run the real `authenticate` with a mocked database must answer that lookup: `fakeDb` does it by default (`setUserAccess`), hand-written mocks use `src/test/accessLookup.ts`.
+**Deactivation takes effect live (2026-11-05).** `authenticate()` (async) does not trust the 24 h JWT alone: after verifying it, and after the smoke-account read-only check (a smoke write is still refused 403 before any lookup), it confirms the user still exists and `is_active` via `SELECT is_active FROM users WHERE id=$1`; an inactive or missing row is 401 "Account is deactivated or no longer exists", and a database failure fails closed with 503 "Could not verify account status". The answer is cached in-process for 15 s (max 1000 entries, definitive answers only), so `PATCH /api/users/:id` calls `invalidateUserAccess(id)` and a deactivation is immediate on that instance and reaches other serverless instances within the 15 s TTL. `POST /api/users` invalidates it too, and a token whose payload has no string `userId` is refused 401 before any lookup. **Only `is_active` is live: `persona` and `name` still come from the token** (`issueToken` in `routes/auth.ts`, `JWT_EXPIRES_IN` default 24 h), so a promotion or, worse, a demotion (a Leadership user made a Hiring Manager) only takes effect at that person's next sign-in, up to 24 h later — deactivate to cut access at once. Tests that run the real `authenticate` with a mocked database must answer that lookup: `fakeDb` does it by default (`setUserAccess`), hand-written mocks use `src/test/accessLookup.ts`. Three older tests still pin the pre-#55 behaviour and fail or pass vacuously (see Testing).
 
 `super_admin` is a strict superset of HR-tier (passes `isHRTier` too) plus
 `requireSuperAdmin`-gated routes (`/api/users`, the User Management API) that
@@ -184,7 +354,10 @@ nobody was specifically assigned. **A Hiring Manager cannot approve a
 role — not even their own.** `PATCH /roles/:id` is `isHRTier`-gated
 end to end (no `isHmForThisRole` carve-out); approver name and date are
 captured from the acting HR-tier user and Open Date copies from Approval
-Date the same moment.
+Date the same moment. **One known hole in "financial fields stripped"
+(verified 2026-11-05, listed in `ROADMAP.md`):** `GET /api/candidates/:id/edit-log`
+is open to a Hiring Manager and returns the raw log rows, old and new values of
+`expected_ctc` and the other compensation fields included.
 
 **A role can have several Hiring Managers (2026-10-07, first case: R016 Senior Platform
 Engineer — Mandeep Dagar + Piyush Negi).** There is still ONE text column,
@@ -334,7 +507,12 @@ API endpoint — never conflate them:
 
 Rejection/withdrawal requires a reason at the API level (a rejection may carry
 several — see "A rejection can carry several reasons" below) (hard 400 if
-missing) — this is intentional governance, not a bug to relax.
+missing) — this is intentional governance, not a bug to relax. As built the
+gate is one test, `!rejectionReasonText && !withdrawal_reason_cat`, so EITHER
+kind of reason satisfies EITHER status (a `Rejected` with only a withdrawal
+reason is stored with no rejection reason, and the reverse), and a
+whitespace-only `withdrawal_reason_cat` counts (pinned in
+`applications.access.test.ts`).
 
 ### ID scheme
 Sequence-generated, prefixed: `R###` roles, `C####` candidates, `A####`
@@ -357,7 +535,21 @@ so every subsequent INSERT collides on the primary key until the counter
 climbs back past the old max. Fixed to use the same `MAX(...)` pattern
 (wrapped in `COALESCE(...,0)`, since these four specifically can be
 genuinely empty on a fresh DB, unlike roles/agencies/assignments which this
-same script just seeded moments earlier). If a similar "everything's
+same script just seeded moments earlier). **That `COALESCE(...,0)` is itself
+a bug on a genuinely empty database (found by the 2026-11-05 CI/test work):
+`setval('seq_candidate', 0)` is below the sequence minimum and raises "value 0
+is out of bounds", so seed.sql stops at its closing block on a fresh database
+(every INSERT above it has already committed), docker-compose's init script
+fails there, and the three COALESCE setvals after it fail the same way. A
+fix is to call `setval(seq, 1, false)` when the table is empty; `ROADMAP.md`
+lists it. `db/16-schema-replay` pins it.**
+Related, same file: `seed.sql` inserts `Q001–Q013` and `BEN001–BEN012` with
+explicit ids but never advances `seq_eval_question` / `seq_comp_benchmark`
+(created `START 1`; the later `START 14` / `START 13` lines are
+`CREATE SEQUENCE IF NOT EXISTS` no-ops), so on a database rebuilt from the two
+files the first INSERT that relies on the default id collides on the primary
+key. A long-lived database is long past it; the test stack and CI advance
+both sequences by hand. If a similar "everything's
 failing with duplicate key on `<table>_pkey`" symptom ever recurs, check
 `SELECT last_value, is_called FROM seq_<name>` against the table's actual
 `MAX(id)` first — a stuck-low sequence is the same class of bug.
@@ -736,7 +928,7 @@ pattern as their existing `q`/`skills`/`tag` filters — this is a
 candidate-level filter, not a role-level one, so it does NOT live in
 `roleFilters.ts`). The Gender filter dropdown (all 3 pages below) also
 offers a third option, **"Not tagged"** — sent to the API as the literal
-string `gender=UNKNOWN`, a frontend-only sentinel with no matching DB value.
+value `UNKNOWN` (on the wire axios sends arrays in bracket form, `gender[]=UNKNOWN`, `gender[]=M&gender[]=UNKNOWN`; pinned by `frontend/src/services/api.test.ts`), a frontend-only sentinel with no matching DB value.
 Both routes special-case it to `c.gender IS NULL` OR'd alongside the normal
 `= ANY(...)` match on any other selected values, since `x = ANY(array)` can
 never match a SQL NULL no matter what's in the array — selecting Male +
@@ -1580,7 +1772,7 @@ The request held none of: the name, any slug form of it, age, family status, yea
 The real model passes the schema and completeness gate. **This canary pre-dates fix rounds 3 and 4:** the reworded prompt (assessability wording, the `creditQuote` rule, `[years]` redaction, the three-state name line, and round 4's conditional "is shown as [candidate]" clause), the new scoring, the stricter ownership-concern rule and the number-word quote matching were first run against the real model in production on 2026-10-24/25: 33 completed reviews and none ended `failed` for a model reason (the one `failed` is a Google Slides export fetch timeout). **What is still not known is whether the model fills `creditQuote` at all:** the stored review does not keep it, and none of the 36 links the model was shown in those 33 reviews ended "credited to someone else". (The local Anthropic key was over its usage limit when last tried, on 2026-10-23: the API message said access returns on 2026-11-01. The workspace limit that production uses was lifted on 2026-10-24, and whether the local key shares it was not checked.) **What it could not exercise:**
 Chromium site capture of a real candidate site (there is no Chrome on the dev machine and the bundled Chromium is the Linux Lambda build) — capture is reused from the production-verified designer path and covered by unit tests; the capture code HAS since been driven in a real browser against local hostile pages (desktop Chrome, and the compiled code in the Lambda image) for the lockdown and popup work, and on 2026-10-24/25 on Vercel against 25 real R019 website links in 23 applications (Production state).
 
-**Pinned by.** Vitest — backend 84 files passing + 1 skipped (`capture.realBrowser`, opt-in) / 7,496 tests passing + 14 skipped (run on 2026-10-26 on the build of PR #23, all green, `tsc` clean; that includes the `min_score` cases of PR #22 and the link-listing cases of PR #23; `backend/src/services/portfolio/**` is 56 test files, 55 passing + 1 skipped, 6,804 tests + 14 skipped), frontend 35 files / 951 tests (same run, `tsc` clean). Timing-based tests (the masking and hostile-text speed tests in `analyze.marketing*.test.ts`, the heartbeat gaps in `pdf.cpu.test.ts`) can fail on a heavily loaded machine (two did at a machine load of 14–20 on 10 cores: 1,092 ms against a 1,000 ms limit, 2,243 against 2,000) and pass in isolation: re-run before suspecting the code. The R007 characterization tests that must never be edited:
+**Pinned by.** Vitest — (a 2026-10-26 snapshot; today's totals are under Testing) backend 84 files passing + 1 skipped (`capture.realBrowser`, opt-in) / 7,496 tests passing + 14 skipped (run on 2026-10-26 on the build of PR #23, all green, `tsc` clean; that includes the `min_score` cases of PR #22 and the link-listing cases of PR #23; `backend/src/services/portfolio/**` is 56 test files, 55 passing + 1 skipped, 6,804 tests + 14 skipped), frontend 35 files / 951 tests (same run, `tsc` clean). Timing-based tests (the masking and hostile-text speed tests in `analyze.marketing*.test.ts`, the heartbeat gaps in `pdf.cpu.test.ts`) can fail on a heavily loaded machine (two did at a machine load of 14–20 on 10 cores: 1,092 ms against a 1,000 ms limit, 2,243 against 2,000) and pass in isolation: re-run before suspecting the code. The R007 characterization tests that must never be edited:
 `analyze.characterization`, `scoring`, `run`, `enqueue.prepare`, `resumeIQTrigger.portfolio` (and `run.busy`); marketing: `profiles`, `answerLinks` (+ `answerLinks.heldout`), `injection` (+ `injection.heldout`), `protectedAttributes` (+ `protectedAttributes.heldout`, and since round 4 `.heldout4` — the two fresh sets with their first-measurement numbers in comments —, `.review3` — the third review's corpus as a regression set —, `.round4` — G5/G9/G10, 240 + 6,000 generated combinations — and `.names4` — G11 masking table, G7 caps and the pathological "Ann Anne" text), `rubric.marketing` (+ `rubric.marketing.quotes`, `rubric.marketing.scoring`),
 `analyze.marketing` (+ `analyze.marketing.failure`, which runs the real `run.ts` + `run.marketing.ts` + analyzer with only the database, browser, fetchers and SDK stubbed, and `analyze.marketing.round4`: G6 through `fromCaptured` and the analyzer, G7 end to end under 1 s, G8 S4/S5/S9, G11 request interception with the real analyzer and a mocked SDK), `run.marketing`, `run.dispatch`, `enqueue.marketing`, `scoring.foldPolicy`, `resumeIQTrigger.marketing`, `routes/portfolio.requeue`,
 `capture` (300 tests: bot wall, Canva, the lockdown script, the popup layers, the gesture-free reads, the teardown guard — event order, fail-closed cases, bounded close, the timeout path — the request filter, `findUnopenedPages`/`partialCrawlNote` and a 25-shape held-out table of site shapes), `browser.launch` (35 tests: the designer launch arguments pinned key for key; the marketing launch adds exactly `--block-new-web-contents`, `--no-pings` and `--disable-features=Reporting` and drops one default; since round 5 also the browser close: a close that returns at once is called once, never killed, same call order, and one that never answers is killed after the limit with the slot released), `capture.realBrowser` (**opt-in**: skipped unless `PORTFOLIO_REAL_BROWSER_TEST=1`; 14 tests — the 4 popup ones plus 10 for the teardown vectors, each with a designer positive control that retries up to 3 times; it drives a real DESKTOP Chrome, so a pass is not proof for the headless shell Vercel runs —
@@ -1959,15 +2151,16 @@ its active plan as it was (it is reconciled on that role's next real save — se
   sync, the form's source tags, and the data migration run against production-shaped rows inside a rolled-back transaction), `tests/e2e/08-sourcing.spec.ts`
   (15 browser tests: the sidebar entry, the legacy-link redirect, the Hiring Manager's read-only view, the Dashboard without the workspace) and the sourcing block (4 tests) in `tests/db/00-schema-integrity.spec.ts`; all of them skip themselves when the flag is off. Helper:
   `tests/helpers/sourcing-db.ts` (`purgeRolesFast` — the local `pending_actions` table is millions of rows with unindexed foreign keys, so deleting
-  an application or role one by one costs ~0.5 s each). Vitest — backend 646 tests / 36 files, of which the sourcing ones are `sourcingChecker` (28),
+  an application or role one by one costs ~0.5 s each). Vitest — (at the time of that branch: backend 646 tests / 36 files; today's totals are under Testing) the sourcing ones are `sourcingChecker` (28),
   `sourcingAdvisor` (60 + 15 for the model call), `sourcingConfig` (32), `sourcingTimeline` (36), `sourcingWeeks` (42), `sourcingPlanTransitions` (42),
   `sourcingTemplates` (19), `sourcingDigest` util + service (17 + 16), `sourcingDescribe` (9) and `workingDays`; the read-only guard for the smoke accounts is in
   `middleware/auth.test.ts`. `services/sourcingPlans.ts` (lifecycle, activation, resolution, hook), `services/sourcingSettings.ts`, `services/sourcingWorkspace.ts`
-  and `routes/sourcing.ts` have NO Vitest and are covered only by the Playwright db specs. Frontend 717 tests / 28 files, of which the sourcing ones are
+  and `routes/sourcing.ts` had NO Vitest then and were covered only by the Playwright db specs; they have `sourcingPlans.test.ts`, `sourcingSettings.test.ts`,
+  `sourcingWorkspace.test.ts` and `routes/sourcing.test.ts` now (route-level, with the database faked). Frontend (then 717 tests / 28 files) the sourcing ones are
   `SourcingPlanPanel` (100), `SourcingModals` (103), `SourcingChannelBlock` (78), `SourcingWorkspace` (62), `SourcingTimeline` (18), `SourcingExecution` (10),
   `useSourcingPlan` (32, incl. `useSourcingEnabled`), `sourcingFormat` (7), `RoleDetail.sourcing` (17), the Sourcing page and its entry points —
   `Sourcing` (24), `Sidebar` (27), `App` (38: the `DashboardRoute` redirect and the route table), `Dashboard.sourcing` (9) — and the Sourcing / Help parts of `MyTasks` (31) and `Help` (26).
-  **Regression run of the finished branch (2026-10-21/22):** the whole local suite (api + db + e2e, `npm run test:local`, `SOURCING_ENABLED=true`) — 646
+  **Regression run of the finished branch (2026-10-21/22, historical):** the whole local suite (api + db + e2e, `npm run test:local`, `SOURCING_ENABLED=true`) — 646
   tests, 645 passed. The one failure is `tests/e2e/05-unlinked-candidates.spec.ts` ("candidate with zero applications appears in the Unmatched Candidates
   panel"): none of its files are touched by this branch; the panel's query (`utils/unmatchedCandidates.ts`) takes ~3.6 s on this local database because
   it now holds ~1,975 zero-application candidates left by months of test runs (the panel was still at "(0)" when the test's 5 s expect timed out). It is
@@ -2050,3 +2243,6 @@ every time the docx changes, never edit the PDF alone.
 | Resume parsing (every role, on the main API) | `backend/src/services/pdfSandbox/` (PDF: `resume.ts` what `driveService.ts` calls, `sandbox.ts` the child process, `preflight.ts` the bounded look) and `backend/src/services/boundedFiles/` (Word: `resumeDocx.ts`, `docx.ts`, `zip.ts`, `xml.ts`); shared with the worker, boundary pinned by `pdfSandbox/boundary.test.ts`; `driveService.ts` `settleResume`; spec of the outcomes in "ResumeIQ" |
 | Marketing work-sample review — rubric, prompt, fairness | `backend/src/services/portfolio/rubric.marketing.ts`, `analyze.marketing.ts`, `injection.ts`, `protectedAttributes.ts` |
 | Marketing work-sample review — go-live, spot-check, rollback SQL, the Lambda-image check (popups, teardown, PDF reader) | `docs/MarketingWorkSampleReview_Runbook.md` (the design record is the "Marketing work-sample review (2026-10-22, R019)" subsection of this file) |
+| CI: what runs on a PR, nightly, weekly; the secret-scan policy; Dependabot | the "CI (GitHub Actions)" section above, `.github/README.md`, `.github/workflows/*.yml`, `.github/gitleaks.toml`, `.github/dependabot.yml`, `.github/ci/` (database guards), `tools/ci-lint/` |
+| Tests: how to run the Playwright suite on a disposable stack; which specs pin a defect | the "Testing" section above, `hms-tests-final/README.md`, `hms-tests-final/scripts/test-stack.sh`, `hms-tests-final/playwright.config.ts` |
+| Open product issues found by the test work | `ROADMAP.md` ("Open product issues found by the test suites") |
