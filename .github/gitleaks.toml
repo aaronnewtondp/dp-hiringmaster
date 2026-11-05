@@ -53,3 +53,19 @@ commits = [
   "8a32ec82f28ccb9896b7c4f92d7437c5ba456ad3",
   "dc2db43098e539130e3785f62298174c6e994ed4",
 ]
+
+# 4. NOT A FALSE POSITIVE: KNOWN AND ACCEPTED, same values as entry 3. hms-tests-final/scripts/test-stack.sh lines
+#    DEV_ROLE_INGEST_SECRET and DEV_CANDIDATE_INGEST_SECRET repeat the two LOCAL DOCKER defaults already committed in
+#    docker-compose.yml, so the throwaway test stack's backend can be started with the same ingest secrets as the local one
+#    (verified 2026-11-05: both 64-hex values are equal to the ones in docker-compose.yml; nothing new is exposed).
+#    Scoped to the two commits that carry the lines: the squash that put them on main (c6741ce) and the unsquashed foundation
+#    commit (75c9ea9) that the stacked Playwright PRs still carry in their history. A different value, or the same line in
+#    another commit, is still caught. Delete this entry if entry 3's decision changes.
+[[rules.allowlists]]
+description = "Known and accepted: local-docker ingest secrets repeated in the test-stack script (two commits only)"
+condition = "AND"
+paths = ['''^hms-tests-final/scripts/test-stack\.sh$''']
+commits = [
+  "c6741ce9539ded90842fb7785a18801467c39d45",
+  "75c9ea9d71f92ff8be4fb52d3cccac42a36a7b06",
+]
