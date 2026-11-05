@@ -204,7 +204,7 @@ smoke accounts.
 - **Specs that pin a product defect "as TODAY".** A test whose title contains `TODAY` asserts what the product does now where that looks
   unintended, so a fix turns it red on purpose and the test is changed with the fix: `db/16-schema-replay` (8), `db/17-user-lifecycle` (8),
   `e2e/09-user-management` (3), `e2e/10-candidate-actions` (5), `e2e/11-candidates-bulk-and-pipeline` (2), `e2e/12-my-tasks` (1),
-  `e2e/13-help-and-info-markers` (1), `e2e/14-role-detail-actions` (2), `e2e/16-lists-and-forms` (3), `e2e-mobile/15-responsive-and-pwa` (1); each
+  `e2e/13-help-and-info-markers` (3), `e2e/14-role-detail-actions` (2), `e2e/16-lists-and-forms` (3), `e2e-mobile/15-responsive-and-pwa` (1); each
   file header lists what it pins, and `ROADMAP.md` lists the product issues. **Known stale pins (measured 2026-11-05 against a fresh stack):**
   PR #55 made `authenticate()` check `is_active` live, but three Playwright pins still assert the old behaviour and FAIL on `main`: `db/17`
   "TODAY: the OLD token of the deactivated user still works" (line 197) and "TODAY: a DEACTIVATED super_admin's old token still passes

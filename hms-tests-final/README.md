@@ -239,7 +239,7 @@ There is no `e2e/15`: that number is the mobile spec. The list is written by han
 A test whose title contains `TODAY` asserts what the product does now where that looks unintended, so a fix turns it red on purpose and the test is
 changed with the fix: `db/16-schema-replay` (8: seed.sql stops on `setval(…, 0)`, two sequences behind their tables, `schema.sql` not re-runnable, no index on
 `pending_actions`, RLS off on the 17 original tables), `db/17-user-lifecycle` (8), `e2e/09-user-management` (3), `e2e/10-candidate-actions` (5),
-`e2e/11-candidates-bulk-and-pipeline` (2), `e2e/12-my-tasks` (1), `e2e/13-help-and-info-markers` (1), `e2e/14-role-detail-actions` (2),
+`e2e/11-candidates-bulk-and-pipeline` (2), `e2e/12-my-tasks` (1), `e2e/13-help-and-info-markers` (3), `e2e/14-role-detail-actions` (2),
 `e2e/16-lists-and-forms` (3), `e2e-mobile/15-responsive-and-pwa` (1). `ROADMAP.md` lists the product issues behind them.
 
 **Stale pins as of 2026-11-05.** PR #55 made `authenticate()` check `users.is_active` live (15 s cache), but three tests still assert the old behaviour and fail
