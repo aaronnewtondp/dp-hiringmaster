@@ -165,12 +165,44 @@ test.describe('Interviews API', () => {
       expect(body.email).toHaveProperty('sent');
     });
 
-    test('submit assignment stores the submission link', async ({ request }) => {
+    // Runs on a real Assignment round (the old version used a Standard round and accepted 200 OR 400, so it proved nothing). What the route does
+    // (interviews.ts POST /:id/assignment-submit): stamps the round (assignment_submission_date + _link), copies the link onto the
+    // application, and logs 'Assignment Submitted'.
+    test('submit assignment stores the submission link on the round and the application, stamps the date and logs it', async ({ request }) => {
+      const { api, application, round } = await setupAssignmentRound(request);
+      const link = `https://github.com/test/submission-${Date.now()}`;
+      const subRes = await api.post(`/api/interviews/${round.id}/assignment-submit`, { submission_link: link });
+      expect(subRes.status()).toBe(200);
+      expect(await subRes.json()).toEqual({ success: true });
+
+      const { rounds } = await (await api.get(`/api/interviews?application_id=${application.id}`)).json();
+      const stored = rounds.find((r: { id: string }) => r.id === round.id);
+      expect(stored.assignment_submission_link).toBe(link);
+      expect(stored.assignment_submission_date).toBeTruthy();
+
+      const body = await (await api.get(`/api/applications/${application.id}`)).json();
+      expect(body.application.assignment_submission_link).toBe(link);
+      const event = body.activity.find((a: { event_type: string }) => a.event_type === 'Assignment Submitted');
+      expect(event).toMatchObject({ event_detail: 'Submission received', new_value: link });
+    });
+
+    test('assignment-submit refuses a missing submission_link (400) and an unknown round (404), and stores nothing', async ({ request }) => {
+      const { api, application, round } = await setupAssignmentRound(request);
+      const missing = await api.post(`/api/interviews/${round.id}/assignment-submit`, {});
+      expect(missing.status()).toBe(400);
+      expect((await missing.json()).error).toBe('submission_link required');
+      const unknown = await api.post('/api/interviews/IR-NOPE/assignment-submit', { submission_link: 'https://github.com/test/x' });
+      expect(unknown.status()).toBe(404);
+      expect((await unknown.json()).error).toBe('Round not found');
+
+      const { rounds } = await (await api.get(`/api/interviews?application_id=${application.id}`)).json();
+      expect(rounds.find((r: { id: string }) => r.id === round.id).assignment_submission_link).toBeNull();
+    });
+
+    test('TODAY: assignment-submit does not check the round type — a Standard round accepts a submission too (200)', async ({ request }) => {
       const { api, round } = await setupInterviewRound(request);
-      const subRes = await api.post(`/api/interviews/${round.id}/assignment-submit`, {
-        submission_link: 'https://github.com/test/submission',
-      });
-      expect([200, 400]).toContain(subRes.status());
+      const subRes = await api.post(`/api/interviews/${round.id}/assignment-submit`, { submission_link: 'https://github.com/test/submission' });
+      expect(subRes.status()).toBe(200);
     });
 
     // Regression guard for the exact weighted rubric in PATCH /:id/feedback:

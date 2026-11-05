@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { BASE, ROLE_INGEST_SECRET, uid } from '../helpers/api';
+import { futureDateOnly } from '../helpers/dates';
 
 // ─── POST /api/roles/ingest ─────────────────────────────────────────────────
 // Public webhook (no JWT) hit by the Requisition Form's Apps Script trigger.
@@ -32,7 +33,7 @@ test.describe('Role Ingestion Webhook', () => {
           ctc_band:               '12-18 LPA',
           kpi_expectations:       'Ship features on time',
           additional_remarks:     'Urgent backfill',
-          target_closure_date:    '2026-09-01',
+          target_closure_date:    futureDateOnly(60),
         },
       });
       expect(res.status()).toBe(201);

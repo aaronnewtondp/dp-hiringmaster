@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { getToken, authed, createCandidateWithApp, uid } from '../helpers/api';
 import { getCalendarEvent, deleteCalendarEvent, hasCalendarCredentials } from '../helpers/calendar';
+import { futureIso } from '../helpers/dates';
 
 // ─── Google Calendar integration on POST /api/interviews ──────────────────────
 // Calendar sync is attempted synchronously (not fire-and-forget, unlike
@@ -58,7 +59,7 @@ test.describe('Calendar integration on POST /api/interviews', () => {
       round_name:         'Assignment Round',
       round_number:       1,
       round_type:         'Assignment',
-      scheduled_date:     '2027-02-01T10:00:00+05:30',
+      scheduled_date:     futureIso(30, { hour: 10, offset: '+05:30' }),
       interviewer_emails: [`calendar-test-interviewer+${uid()}@example.com`],
       mail_body_content:  'Please find your assignment below.',
       assignment_link:    'https://drive.google.com/test-assignment',
@@ -92,7 +93,7 @@ test.describe('Calendar integration on POST /api/interviews', () => {
       round_name:     'Technical Round',
       round_number:   1,
       round_type:     'Standard',
-      scheduled_date: '2027-02-01T10:00:00+05:30',
+      scheduled_date: futureIso(30, { hour: 10, offset: '+05:30' }),
       // interviewer_emails intentionally omitted
     });
     expect(resA.status()).toBe(201);
@@ -117,14 +118,18 @@ test.describe('Calendar integration on POST /api/interviews', () => {
     expect(calendarB.error).toContain('scheduled date');
   });
 
-  test('Standard round with a real scheduled_date + interviewer_emails creates a real Calendar event (real external call)', async ({ request }) => {
-    // Degrades gracefully wherever the real service-account key isn't
-    // available (e.g. a fresh clone/CI) rather than failing hard.
-    test.skip(!hasCalendarCredentials(), 'No local Google service-account credentials available');
+  // @live: this creates a REAL event on a real calendar and invites real inboxes (hr@digitalpaani.com, always), so it runs only with
+  // TEST_LIVE=1 (`npm run test:live`). Two independent skips, both about what is ACTUALLY possible rather than about a file on disk:
+  //   * the RUNNER must hold the Google key (hasCalendarCredentials): verifying the event and deleting it afterwards is done from here;
+  //     without it the event could not be cleaned up, so none is created;
+  //   * the BACKEND must be able to impersonate the organizer: when the insert is refused (delegation not granted, "invalid_grant"), the
+  //     round is still committed and the failure is persisted, which is read back and used as the skip reason instead of a red test.
+  test('@live Standard round with a real scheduled_date + interviewer_emails creates a real Calendar event (real external call)', async ({ request }) => {
+    test.skip(!hasCalendarCredentials(), 'No local Google service-account credentials available: the event could not be verified or cleaned up');
 
-    // Two real network round-trips to Google (create via the app's own sync,
-    // then a direct fetch to verify it landed correctly), plus cleanup.
-    test.setTimeout(30_000);
+    // Two real network round-trips to Google (create via the app's own sync, then a direct fetch to verify it landed correctly), plus
+    // cleanup — within the project's 60 s test timeout, stated here because this test is the slowest one.
+    test.setTimeout(60_000);
 
     // 'hr' (aaron.newton@digitalpaani.com) is the one test persona confirmed
     // this session to be a real Google Workspace mailbox usable for
@@ -143,10 +148,9 @@ test.describe('Calendar integration on POST /api/interviews', () => {
     await api.patch(`/api/candidates/${candidate.id}`, { resume_drive_link: resumeLink });
 
     const interviewerEmail = `calendar-test-interviewer+${uid()}@example.com`;
-    // Far-future, fixed instant with an explicit +05:30 offset — this is the
-    // exact shape the frontend now sends (see this session's timezone fix),
-    // and lets us assert the instant lands with zero drift.
-    const scheduledDate = '2027-01-15T11:00:00+05:30';
+    // An instant 45 days ahead with an explicit +05:30 offset — this is the exact shape the frontend sends (see the timezone fix), and lets
+    // us assert the instant lands with zero drift. Computed from the clock: a hard-coded date would become "the past" one day.
+    const scheduledDate = futureIso(45, { hour: 11, offset: '+05:30' });
 
     const res = await api.post('/api/interviews', {
       application_id:     application.id,
@@ -160,6 +164,13 @@ test.describe('Calendar integration on POST /api/interviews', () => {
     expect(res.status()).toBe(201);
     const body = await res.json();
 
+    if (body.calendar?.synced !== true) {
+      // The route persists the underlying Google error on the round (calendar_sync_error); read it back to tell "this backend cannot
+      // create events" (skip) from any other failure (fall through to the assertion below, which fails).
+      const { rounds } = await (await api.get(`/api/interviews?application_id=${application.id}`)).json();
+      const reason: string = rounds.find((r: { id: string }) => r.id === body.round.id)?.calendar_sync_error ?? '';
+      test.skip(/invalid_grant|unauthorized_client|No Google service account credentials/i.test(reason), `the backend cannot create calendar events here: ${reason}`);
+    }
     expect(body.calendar?.synced).toBe(true);
     expect(body.round.calendar_event_id).toBeTruthy();
     expect(body.round.calendar_event_link).toBeTruthy();

@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { getToken, authed, createCandidateWithApp, uid } from '../helpers/api';
+import { activityOf, pendingRows } from '../helpers/api-specs';
+import { withDb } from '../helpers/db';
 
 async function freshApp(request: Parameters<typeof authed>[0]) {
   const token = await getToken(request, 'hr');
@@ -167,28 +169,53 @@ test.describe('Applications — Recruiter Screening Status', () => {
     expect(body.application.recruiter_screening_status).toBe('Awaiting HM Review');
   });
 
-  test('HM Shortlisted creates a Schedule Interview pending action for HR', async ({ request }) => {
+  test('HM Shortlisted opens exactly one unresolved "Schedule interview" pending action for HR on THIS application', async ({ request }) => {
     const { api, appId } = await freshApp(request);
-    await api.post(`/api/applications/${appId}/screening`, {
+    const res = await api.post(`/api/applications/${appId}/screening`, {
       new_screening_status: 'HM Shortlisted',
     });
-    const { actions } = await (await api.get('/api/dashboard/pending')).json();
-    expect(
-      actions.some((a: { action_type: string }) => a.action_type === 'Schedule Interview' || a.action_type === 'Schedule interview' || a.action_type === 'Interview scheduling')
-    ).toBeDefined(); // action_type name may differ
+    expect(res.status()).toBe(200);
+    // Read from the table, not from /api/dashboard/pending: that queue is a capped window (100 oldest rows) and says nothing about a row
+    // it did not return, which on a long-lived database made the old version of this test unfalsifiable.
+    const rows = (await pendingRows(appId)).filter(r => r.action_type === 'Schedule interview');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ owner_type: 'HR / Recruiter', resolved: false });
+  });
+
+  test('HM Shortlisted is written to the activity log with the old and new screening value', async ({ request }) => {
+    const { api, appId } = await freshApp(request);
+    await api.post(`/api/applications/${appId}/screening`, { new_screening_status: 'HM Shortlisted' });
+    const event = (await activityOf(api, appId)).find(a => a.event_type === 'Recruiter Screening Status Changed');
+    expect(event).toMatchObject({ old_value: 'New', new_value: 'HM Shortlisted' });
   });
 });
 
 test.describe('Applications — UNIQUE(candidate_id, role_id) constraint', () => {
 
-  test('creating a second application for the same candidate + role is rejected', async ({ request }) => {
+  test('linking the same candidate to the same role twice is 409 "Already linked" and names the FIRST application', async ({ request }) => {
+    // There is no POST /api/applications: an application is created by POST /api/candidates (with role_id) or by
+    // POST /api/candidates/:id/applications. The old version of this test posted to the non-existent route, so its 404 satisfied
+    // [409, 400, 404] and the constraint was never reached.
     const token = await getToken(request, 'hr');
     const { candidate, application } = await createCandidateWithApp(request, token);
-    const res2 = await authed(request, token).post('/api/applications', {
-      candidate_id: candidate.id,
-      role_id:      application.role_id,
+    const res2 = await authed(request, token).post(`/api/candidates/${candidate.id}/applications`, { role_id: application.role_id });
+    expect(res2.status()).toBe(409);
+    expect(await res2.json()).toMatchObject({ error: 'Already linked to this role', application_id: application.id });
+  });
+
+  test('the database itself refuses a second row for the pair (unique violation 23505), so a race can never create a duplicate', async ({ request }) => {
+    const token = await getToken(request, 'hr');
+    const { candidate, application } = await createCandidateWithApp(request, token);
+    const error = await withDb(async c => {
+      try {
+        await c.query(`INSERT INTO applications (candidate_id, role_id) VALUES ($1, $2)`, [candidate.id, application.role_id]);
+        return null;
+      } catch (e) { return e as { code?: string; constraint?: string }; }
     });
-    expect([409, 400, 404]).toContain(res2.status());
+    expect(error?.code).toBe('23505');
+    expect(error?.constraint).toBe('applications_candidate_id_role_id_key');
+    const n = await withDb(async c => (await c.query('SELECT count(*)::int AS n FROM applications WHERE candidate_id = $1 AND role_id = $2', [candidate.id, application.role_id])).rows[0].n);
+    expect(n).toBe(1);
   });
 });
 
