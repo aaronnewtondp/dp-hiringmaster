@@ -29,6 +29,7 @@ import { evalQuestionsRouter, compBenchmarksRouter } from './routes/lookups.js';
 import cronRouter          from './routes/cron.js';   // ← new
 import usersRouter         from './routes/users.js';
 import sourcingRouter      from './routes/sourcing.js';
+import sourcingDetailRouter from './routes/sourcingDetail.js';
 
 const app = express();
 
@@ -73,6 +74,7 @@ app.use('/api/comp-benchmarks',  compBenchmarksRouter);
 app.use('/api/cron',             cronRouter);   // ← new
 app.use('/api/users',            usersRouter);
 app.use('/api/sourcing',         sourcingRouter);
+app.use('/api/sourcing',         sourcingDetailRouter);   // plan detailing (templates, company directory, outreach, check-ins, overview) — additive
 
 // Error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

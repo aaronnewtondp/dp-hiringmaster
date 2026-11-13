@@ -151,6 +151,28 @@ const GATES: Record<string, Gate> = {
   'POST /api/sourcing/commitments/:id/reopen': 'hr',
   'POST /api/sourcing/exceptions/:id/resolve': 'hr',
   'GET /api/sourcing/queue': 'hr',
+  // Plan detailing (routes/sourcingDetail.ts): everything HR-tier; templates, alert settings and deleting a company are also refused to hr_recruiter by their handlers.
+  'GET /api/sourcing/templates': 'hr',
+  'PUT /api/sourcing/templates/:key': 'settings',
+  'GET /api/sourcing/plans/:roleId/detail': 'hr',
+  'PATCH /api/sourcing/plans/:planId/detail': 'hr',
+  'POST /api/sourcing/plans/:planId/template': 'hr',
+  'POST /api/sourcing/plans/:planId/prefill': 'hr',
+  'POST /api/sourcing/plans/:planId/checkin': 'hr',
+  'POST /api/sourcing/outreach/upload': 'hr',
+  'GET /api/sourcing/reminders': 'hr',
+  'GET /api/sourcing/overview': 'hr',
+  'GET /api/sourcing/detail-settings': 'hr',
+  'PUT /api/sourcing/detail-settings': 'settings',
+  'GET /api/sourcing/company-lists': 'hr',
+  'GET /api/sourcing/companies': 'hr',
+  'POST /api/sourcing/companies/import': 'hr',
+  'GET /api/sourcing/companies/:id': 'hr',
+  'POST /api/sourcing/companies': 'hr',
+  'PATCH /api/sourcing/companies/:id': 'hr',
+  'POST /api/sourcing/companies/:id/exclude': 'hr',
+  'POST /api/sourcing/companies/:id/checked': 'hr',
+  'DELETE /api/sourcing/companies/:id': 'settings',
 };
 
 /** What an anonymous, empty-bodied request to a PUBLIC route answers (nothing is looked at, so these are validation answers). */
@@ -200,7 +222,7 @@ describe('the route table is exactly the documented one', () => {
     const stale = documented.filter(k => !actual.includes(k));
     // A new route lands in `undocumented`: decide who may call it, add it to GATES, and (unless it is public) give it authenticate.
     expect({ undocumented, stale }).toEqual({ undocumented: [], stale: [] });
-    expect(actual).toHaveLength(90);
+    expect(actual).toHaveLength(111);   // 90 + the 21 plan-detailing routes
   });
 
   it('apart from routes and routers the app holds only the documented middleware, in this order — a plain app.use(path, handler) would answer outside the table above', () => {

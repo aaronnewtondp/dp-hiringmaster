@@ -133,6 +133,24 @@ export const sourcingApi = {
   updateChannel:     (planId: string, data: Record<string, unknown>) => api.patch(`/sourcing/plans/${planId}/channel-settings`, data),
   queue:             ()                                              => api.get('/sourcing/queue'),
   dashboard:         (params?: Record<string, string | string[]>)    => api.get('/dashboard/sourcing', { params }),
+  // Plan detailing — templates, the plan's lines, check-in, outreach upload, overview, company directory (backend/src/routes/sourcingDetail.ts)
+  detail:            (roleId: string)                                => api.get(`/sourcing/plans/${roleId}/detail`),
+  saveDetail:        (planId: string, data: Record<string, unknown>) => api.patch(`/sourcing/plans/${planId}/detail`, data),
+  templates:         ()                                              => api.get('/sourcing/templates'),
+  applyTemplate:     (planId: string, template_key: string)          => api.post(`/sourcing/plans/${planId}/template`, { template_key }),
+  checkin:           (planId: string, data: Record<string, unknown>) => api.post(`/sourcing/plans/${planId}/checkin`, data),
+  uploadOutreach:    (csv: string, filename: string)                 => api.post('/sourcing/outreach/upload', { csv, filename }),
+  reminders:         ()                                              => api.get('/sourcing/reminders'),
+  overview:          ()                                              => api.get('/sourcing/overview'),
+  companyLists:      ()                                              => api.get('/sourcing/company-lists'),
+  companies:         (params?: Record<string, string>)               => api.get('/sourcing/companies', { params }),
+  company:           (id: string)                                    => api.get(`/sourcing/companies/${id}`),
+  addCompany:        (data: Record<string, unknown>)                 => api.post('/sourcing/companies', data),
+  editCompany:       (id: string, data: Record<string, unknown>)     => api.patch(`/sourcing/companies/${id}`, data),
+  excludeCompany:    (id: string, excluded: boolean, reason?: string) => api.post(`/sourcing/companies/${id}/exclude`, { excluded, reason }),
+  checkedCompany:    (id: string)                                    => api.post(`/sourcing/companies/${id}/checked`, {}),
+  deleteCompany:     (id: string)                                    => api.delete(`/sourcing/companies/${id}`),
+  importCompanies:   (csv: string)                                   => api.post('/sourcing/companies/import', { csv }),
 };
 
 export const refChecksApi = {

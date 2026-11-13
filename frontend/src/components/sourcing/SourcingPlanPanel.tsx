@@ -18,6 +18,8 @@ import {
 } from './SourcingModals.tsx';
 import { Chip, ExceptionRow, PLAN_STATUS, StepItem } from './SourcingParts.tsx';
 import SourcingTimeline from './SourcingTimeline.tsx';
+import SourcingDetailPanel from './SourcingDetailPanel.tsx';
+import { useSourcingDetail } from '../../hooks/useSourcingDetail.ts';
 
 type Dialog =
   | { kind: 'activate' }
@@ -47,6 +49,9 @@ export default function SourcingPlanPanel({ roleId }: { roleId: string }) {
   const readOnlyView = !!(data && data.enabled && data.read_only);
   const canAdvise = canHR && !readOnlyView && (planStatus === 'active' || planStatus === 'paused');
   const advice = useSourcingAdvice(roleId, canAdvise);
+  // Plan detailing (template pre-fill suggestions for the activation form). Same query the detail panel uses, so it is fetched once.
+  const detailQ = useSourcingDetail(roleId, canHR && !readOnlyView);
+  const suggestion = detailQ.data && detailQ.data.enabled ? detailQ.data.detail : null;
 
   if (isLoading) return <div className="card p-6 flex justify-center"><Spinner /></div>;
   if (!data || !data.enabled || !data.plan) return null;
@@ -185,6 +190,9 @@ export default function SourcingPlanPanel({ roleId }: { roleId: string }) {
           </div>
         )}
 
+        {/* Plan detailing: health boxes, the plan's lines, outbound progress, weekly check-in (HR-tier) */}
+        {hr && <SourcingDetailPanel roleId={roleId} canEdit={canEdit} />}
+
         {/* Channels */}
         <div>
           {canEdit && tracked && (
@@ -244,7 +252,7 @@ export default function SourcingPlanPanel({ roleId }: { roleId: string }) {
         {hr && (view.changes?.length ?? 0) > 0 && <SourcingTimeline changes={view.changes!} total={view.changes_total ?? view.changes!.length} />}
       </div>
 
-      {dialog?.kind === 'activate' && <ActivatePlanModal plan={plan} channels={channels} defaultTarget={vol?.default_target ?? null} onClose={() => setDialog(null)} onDone={refresh} />}
+      {dialog?.kind === 'activate' && <ActivatePlanModal plan={plan} channels={channels} defaultTarget={vol?.default_target ?? null} suggested={suggestion?.suggested_channels} suggestedTarget={suggestion?.suggested_target ?? null} onClose={() => setDialog(null)} onDone={refresh} />}
       {dialog?.kind === 'complete' && <CompleteCommitmentModal commitment={dialog.commitment} channel={dialog.channel} onClose={() => setDialog(null)} onDone={refresh} />}
       {dialog?.kind === 'skip' && <SkipCommitmentModal commitment={dialog.commitment} channel={dialog.channel} onClose={() => setDialog(null)} onDone={refresh} />}
       {dialog?.kind === 'resolve' && <ResolveExceptionModal exception={dialog.exception} onClose={() => setDialog(null)} onDone={refresh} />}

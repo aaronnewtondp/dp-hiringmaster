@@ -61,6 +61,10 @@ export async function ensureDraftPlansForOpenRoles(onlyRoleId?: string): Promise
        ON CONFLICT (plan_id, channel) DO NOTHING`,
       [created.map(c => c.id), SOURCING_CHANNELS as unknown as string[]],
     );
+    // Plan detailing: pre-fill each new draft from the matching template (job titles, company lists, weekly numbers, plan lines). Additive and
+    // best-effort — it never activates anything, and a fault here cannot fail the creation of a plan. (Dynamic import: that module imports this one.)
+    try { const { prefillNewPlans } = await import('./sourcingDetail.js'); await prefillNewPlans(created.map(c => c.id)); }
+    catch (err) { console.error('[Sourcing] pre-fill of new draft plans failed (ignored):', err); }
   }
   return created.length;
 }

@@ -2,6 +2,8 @@
 // Shared by the dashboard table, the My Tasks queue and the email digests so they always say the same thing.
 // Inputs are the objective `evidence` the engine stored (counts and titles only — never prospect data).
 
+import { describeDetailException } from './sourcingDetailRules.js';
+
 export interface ExceptionLike {
   type: string;
   channel: string;
@@ -79,8 +81,10 @@ export function describeException(e: ExceptionLike): ExceptionDescription {
         next_action: 'Unblock it, or re-plan the channel',
       };
     }
-    default:
-      return { committed: e.type, happened: 'Needs attention', next_action: 'Review' };
+    default: {
+      const detail = describeDetailException(e.type, e.channel, ev);
+      return detail ?? { committed: e.type, happened: 'Needs attention', next_action: 'Review' };
+    }
   }
 }
 

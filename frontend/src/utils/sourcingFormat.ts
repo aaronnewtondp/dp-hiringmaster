@@ -9,7 +9,27 @@ export const EXCEPTION_LABELS: Record<ExceptionType, string> = {
   FOLLOWUP_OVERDUE:      'Follow-up overdue',
   VOLUME_GAP:            'Not enough qualified candidates',
   BLOCKER_OVERDUE:       'Blocker overdue',
+  CHECKIN_OVERDUE:       'Weekly check-in overdue',
+  WORK_BELOW_TARGET:     'Not enough work done',
+  CHANNEL_QUIET:         'Channel gone quiet',
+  SCREENING_BACKLOG:     'Screening backlog',
+  NO_RESULTS:            'Work done but no results',
+  WRONG_CANDIDATES:      'Wrong candidates',
+  HM_REJECTS_MOST:       'Hiring manager rejects most',
+  SOURCE_MISSING:        'Source missing',
+  BACKUP_PLAN_DUE:       'Backup plan due',
+  COMPANY_LIST_NOT_WORKED: 'Company list not worked',
+  TOO_FEW_PEOPLE_FOUND:  'Too few people found',
+  FOUND_NOT_CONTACTED:   'People found but not contacted',
+  FEW_REPLIES:           'Messages sent, few replies',
+  REPLIES_NOT_SUITABLE:  'Replies, but not suitable',
+  AGENCY_WEAK:           'Agency sends weak profiles',
 };
+
+/** The short list a recruiter picks from when resolving an alert (mirrors backend RESOLUTION_REASONS). Saved as the alert's reason text. */
+export const RESOLUTION_REASONS = [
+  'Wrong companies or titles', 'Too busy with other roles', 'Salary too low', 'Job description issue', 'Hiring manager delay', 'Market too thin', 'Other',
+] as const;
 export const exceptionLabel = (t: string): string => EXCEPTION_LABELS[t as ExceptionType] ?? t;
 
 /** One line on what "activating" this channel means in practice (shown on the activation screen). */
