@@ -140,16 +140,17 @@ export const DEFAULT_DETAIL_THRESHOLDS: DetailThresholds = {
   alerts_live: false,
 };
 
-/** Merge a stored override object over the defaults, ignoring unknown keys and wrongly-typed values. */
+/** Merge a stored override object over the defaults, ignoring unknown keys and wrongly-typed values. Iterates the TRUSTED default keys and only
+    reads the stored object, so a stored key can never decide which property is written. */
 export function mergeDetailThresholds(stored: unknown): DetailThresholds {
-  const out: DetailThresholds = { ...DEFAULT_DETAIL_THRESHOLDS };
-  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return out;
-  for (const [k, v] of Object.entries(stored as Record<string, unknown>)) {
-    if (!Object.prototype.hasOwnProperty.call(DEFAULT_DETAIL_THRESHOLDS, k)) continue;
-    if (k === 'alerts_live') { if (typeof v === 'boolean') out.alerts_live = v; continue; }
-    if (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1000) (out as unknown as Record<string, number>)[k] = v;
-  }
-  return out;
+  const isObj = !!stored && typeof stored === 'object' && !Array.isArray(stored);
+  const src = isObj ? stored as Record<string, unknown> : {};
+  const entries = Object.entries(DEFAULT_DETAIL_THRESHOLDS).map(([k, dflt]) => {
+    const v = Object.prototype.hasOwnProperty.call(src, k) ? src[k] : undefined;
+    if (typeof dflt === 'boolean') return [k, typeof v === 'boolean' ? v : dflt] as const;
+    return [k, typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1000 ? v : dflt] as const;
+  });
+  return Object.fromEntries(entries) as unknown as DetailThresholds;
 }
 
 /** A weekly target from the plan may be fractional (2.5); the plan's own per-role target is a whole number 1–500. */
