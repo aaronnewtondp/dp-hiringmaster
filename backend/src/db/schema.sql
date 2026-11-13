@@ -1227,3 +1227,152 @@ ALTER TABLE applications DROP CONSTRAINT IF EXISTS applications_portfolio_status
 ALTER TABLE applications ADD CONSTRAINT applications_portfolio_status_check
   CHECK (portfolio_analysis_status IS NULL OR portfolio_analysis_status IN
     ('pending','running','completed','failed','no_portfolio','inaccessible','unreviewable'));
+
+-- ─── Sourcing plan detailing (2026-11-13) — an ADDITIVE layer on the sourcing module ───
+-- Adds: plan templates that pre-fill a draft plan, the per-role plan rows (channel / supporting-activity detail), the shared company
+-- directory, the weekly outreach upload, the weekly check-in. NOTHING above is altered: the five channels, the form attribution
+-- (applications.sub_source / normalizeSourceTag), the weekly tracker and sourcing_exceptions are untouched (new alert types are plain
+-- TEXT values in sourcing_exceptions.type, which has no CHECK). All IF NOT EXISTS, RLS on with no policies, like the other sourcing_* tables.
+-- Spec: docs/SourcingPlanDetailing_Spec.md
+CREATE TABLE IF NOT EXISTS sourcing_templates (
+  id                      BIGSERIAL PRIMARY KEY,
+  key                     TEXT NOT NULL UNIQUE,
+  name                    TEXT NOT NULL,
+  description             TEXT,
+  match_rules             JSONB NOT NULL DEFAULT '{}',     -- {keywords:[...], priorities:[...]} — see utils/sourcingTemplateMatch.ts
+  weekly_qualified_target NUMERIC(5,2),                    -- may be fractional in the source workbook; rounded when applied to a plan
+  job_titles              TEXT[] NOT NULL DEFAULT '{}',
+  company_lists           TEXT[] NOT NULL DEFAULT '{}',    -- names of sourcing_company_lists
+  channel_rows            JSONB NOT NULL DEFAULT '[]',     -- [{workbook_channel, platform, status, owner_label, tracked_as, weekly_work, work_unit, ...}]
+  is_active               BOOLEAN NOT NULL DEFAULT true,
+  updated_by              UUID REFERENCES users(id),
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS sourcing_company_lists (
+  id         BIGSERIAL PRIMARY KEY,
+  name       TEXT NOT NULL UNIQUE,                         -- e.g. 'Water – Bangalore'
+  segment_group TEXT,                                      -- 'Water and wastewater' | 'SaaS / IoT'
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS sourcing_companies (
+  id               BIGSERIAL PRIMARY KEY,
+  name             TEXT NOT NULL,
+  name_key         TEXT NOT NULL UNIQUE,                   -- normalised (no Ltd/Pvt/punctuation) — one record per company
+  segment          TEXT,
+  size             TEXT,
+  cities           TEXT[] NOT NULL DEFAULT '{}',
+  what_they_do     TEXT,
+  source_url       TEXT,
+  notes            TEXT,
+  legacy_contacted BOOLEAN NOT NULL DEFAULT false,         -- the workbook's "Already contacted" — informational; contact history is system-filled
+  excluded         BOOLEAN NOT NULL DEFAULT false,
+  excluded_reason  TEXT,
+  last_checked_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by       UUID REFERENCES users(id),
+  updated_by       UUID REFERENCES users(id),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS sourcing_company_list_members (
+  list_id    BIGINT NOT NULL REFERENCES sourcing_company_lists(id) ON DELETE CASCADE,
+  company_id BIGINT NOT NULL REFERENCES sourcing_companies(id) ON DELETE CASCADE,
+  PRIMARY KEY (list_id, company_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sourcing_company_members_company ON sourcing_company_list_members(company_id);
+
+CREATE TABLE IF NOT EXISTS sourcing_plan_details (
+  plan_id          BIGINT PRIMARY KEY REFERENCES sourcing_plans(id) ON DELETE CASCADE,
+  template_key     TEXT,
+  job_titles       TEXT[] NOT NULL DEFAULT '{}',
+  company_list_ids BIGINT[] NOT NULL DEFAULT '{}',          -- plans pick companies from the directory; they never keep their own copy
+  target_date      DATE,
+  prefilled_at     TIMESTAMPTZ,
+  updated_by       UUID REFERENCES users(id),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- One row per line of the plan as the recruiter reviews it. mapped_channels says which of the FIVE channels it is carried by (empty = a
+-- supporting activity with no automatic performance tracking: Network, Community, Talent pool, Database search, Campus alumni…).
+CREATE TABLE IF NOT EXISTS sourcing_plan_rows (
+  id               BIGSERIAL PRIMARY KEY,
+  plan_id          BIGINT NOT NULL REFERENCES sourcing_plans(id) ON DELETE CASCADE,
+  position         INT NOT NULL DEFAULT 0,
+  workbook_channel TEXT NOT NULL,                           -- the plan's own label: Outbound, Job portal, Referrals, Talent pool, Campus …
+  mapped_channels  TEXT[] NOT NULL DEFAULT '{}',
+  platform         TEXT,
+  status           TEXT NOT NULL DEFAULT 'live' CHECK (status IN ('live','backup','not_used')),
+  owner_label      TEXT,                                    -- a LABEL (Recruiter / Hiring manager / Founder / HR lead) — ownership stays the HR persona
+  tracked_as       TEXT CHECK (tracked_as IS NULL OR tracked_as IN ('count','yes_no')),
+  weekly_work      NUMERIC(8,2),
+  work_unit        TEXT,
+  expected_applicants NUMERIC(8,2),
+  expected_qualified  NUMERIC(8,2),
+  start_condition  TEXT,
+  first_task       TEXT,
+  repeats          TEXT,
+  reason           TEXT,                                    -- why a row is Not used
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_sourcing_plan_rows_plan ON sourcing_plan_rows(plan_id);
+
+CREATE TABLE IF NOT EXISTS sourcing_checkins (
+  plan_id      BIGINT NOT NULL REFERENCES sourcing_plans(id) ON DELETE CASCADE,
+  week_start   DATE NOT NULL,                               -- the Monday (IST) of the week the check-in is for
+  answers      JSONB NOT NULL DEFAULT '{}',                 -- {post_refreshed, referral_push, agency_followup, outreach_uploaded}: 'yes' | 'no' | absent
+  blocker_text TEXT,
+  submitted_by UUID REFERENCES users(id),
+  submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (plan_id, week_start)
+);
+
+CREATE TABLE IF NOT EXISTS sourcing_outreach_uploads (
+  id            BIGSERIAL PRIMARY KEY,
+  uploaded_by   UUID REFERENCES users(id),
+  uploaded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  filename      TEXT,
+  rows_total    INT NOT NULL DEFAULT 0,
+  rows_new      INT NOT NULL DEFAULT 0,
+  rows_followup INT NOT NULL DEFAULT 0,
+  rows_merged   INT NOT NULL DEFAULT 0,
+  rows_rejected INT NOT NULL DEFAULT 0,
+  rejected      JSONB NOT NULL DEFAULT '[]',                -- [{row, reason}] (capped) — no profile data
+  role_ids      TEXT[] NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS sourcing_outreach_people (
+  id              BIGSERIAL PRIMARY KEY,
+  role_id         TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  profile_key     TEXT NOT NULL,                            -- normalised profile link: one person per (role, profile)
+  profile_link    TEXT NOT NULL,
+  company_text    TEXT NOT NULL,
+  company_id      BIGINT REFERENCES sourcing_companies(id) ON DELETE SET NULL,
+  job_title       TEXT,
+  first_contacted DATE,                                     -- NULL = found, not yet messaged
+  last_contacted  DATE,
+  followups       INT NOT NULL DEFAULT 0,
+  status          TEXT,
+  next_followup   DATE,
+  outcome         TEXT,
+  replied         BOOLEAN NOT NULL DEFAULT false,
+  qualified       BOOLEAN NOT NULL DEFAULT false,
+  upload_id       BIGINT REFERENCES sourcing_outreach_uploads(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (role_id, profile_key)
+);
+CREATE INDEX IF NOT EXISTS idx_sourcing_outreach_people_role ON sourcing_outreach_people(role_id);
+CREATE INDEX IF NOT EXISTS idx_sourcing_outreach_people_company ON sourcing_outreach_people(company_id);
+
+ALTER TABLE sourcing_templates             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_company_lists         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_companies             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_company_list_members  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_plan_details          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_plan_rows             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_checkins              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_outreach_uploads      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sourcing_outreach_people       ENABLE ROW LEVEL SECURITY;
+DROP TRIGGER IF EXISTS sourcing_templates_updated_at ON sourcing_templates;
+CREATE TRIGGER sourcing_templates_updated_at BEFORE UPDATE ON sourcing_templates FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS sourcing_companies_updated_at ON sourcing_companies;
+CREATE TRIGGER sourcing_companies_updated_at BEFORE UPDATE ON sourcing_companies FOR EACH ROW EXECUTE FUNCTION update_updated_at();

@@ -16,6 +16,22 @@ export const EXCEPTION_LABELS: Record<string, string> = {
   FOLLOWUP_OVERDUE: 'Follow-up overdue',
   VOLUME_GAP: 'Too few qualified candidates',
   BLOCKER_OVERDUE: 'Blocker past its deadline',
+  // Added by the plan-detailing layer (utils/sourcingDetail.ts)
+  CHECKIN_OVERDUE: 'Weekly check-in overdue',
+  WORK_BELOW_TARGET: 'Not enough work done',
+  CHANNEL_QUIET: 'Channel gone quiet',
+  SCREENING_BACKLOG: 'Screening backlog',
+  NO_RESULTS: 'Work done but no results',
+  WRONG_CANDIDATES: 'Wrong candidates',
+  HM_REJECTS_MOST: 'Hiring manager rejects most',
+  SOURCE_MISSING: 'Source missing',
+  BACKUP_PLAN_DUE: 'Backup plan due',
+  COMPANY_LIST_NOT_WORKED: 'Company list not worked',
+  TOO_FEW_PEOPLE_FOUND: 'Too few people found',
+  FOUND_NOT_CONTACTED: 'People found but not contacted',
+  FEW_REPLIES: 'Messages sent, few replies',
+  REPLIES_NOT_SUITABLE: 'Replies, but not suitable',
+  AGENCY_WEAK: 'Agency sends weak profiles',
 };
 const excLabel = (t: unknown) => EXCEPTION_LABELS[String(t)] ?? String(t ?? 'Exception').replace(/_/g, ' ').toLowerCase();
 
@@ -82,6 +98,11 @@ export function describeChange(c: ChangeLike | null | undefined): { text: string
       // A week cut short (the channel was closed, left out, or the role put on hold or closed) is neither met nor missed.
       return { category: 'weekly', text: withChannel(channel, `Week ${span}: ${actual} of ${target} applicants — ${ch.partial ? 'week cut short, not counted as met or missed' : `target ${ch.met ? 'met' : 'missed'}`}`) };
     }
+    // Plan detailing (docs/SourcingPlanDetailing_Spec.md)
+    case 'plan_prefilled': return { category: 'plan', text: `Plan pre-filled from the “${str(ch.template) ?? 'matching'}” template — review before activating` };
+    case 'plan_detail_edited': return { category: 'plan', text: `Plan details edited${list(ch.fields).length ? `: ${list(ch.fields).join(', ')}` : ''}` };
+    case 'checkin_submitted': return { category: 'task', text: `Weekly check-in done for the week of ${fmtDay(str(ch.week_of))}${ch.blocked ? ' (a blocker was noted)' : ''}` };
+    case 'outreach_uploaded': return { category: 'task', text: `Outreach sheet uploaded: ${num(ch.new) ?? 0} new people, ${num(ch.followups) ?? 0} follow-ups` };
     default:
       return { category: 'plan', text: type.replace(/_/g, ' ') };
   }

@@ -8,7 +8,7 @@ import { useAuth } from '../../contexts/AuthContext.tsx';
 import {
   ActivationChannelInput, MAX_WEEKLY_TARGET, ResolutionPath, SOURCING_CHANNELS, SourcingPerson, SourcingPlan, SourcingPlanChannel,
 } from '../../types/sourcing.ts';
-import { channelBlurb, isPortal, isTracked, plural, shortDate, ymd } from '../../utils/sourcingFormat.ts';
+import { channelBlurb, isPortal, isTracked, plural, RESOLUTION_REASONS, shortDate, ymd } from '../../utils/sourcingFormat.ts';
 
 export const apiError = (err: unknown, fallback: string): string =>
   (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? fallback;
@@ -77,8 +77,10 @@ const emptyRow = (): Row => ({ included: false, reason: '', running: false, url:
 const isUrl = (v: string): boolean => { try { const u = new URL(v.trim()); return u.protocol === 'https:' || u.protocol === 'http:'; } catch { return false; } };
 const wholeTarget = (v: string): number | null => { const n = Number(v); return v.trim() !== '' && Number.isInteger(n) && n >= 1 && n <= MAX_WEEKLY_TARGET ? n : null; };
 
-export function ActivatePlanModal({ plan, channels, defaultTarget, onClose, onDone }: {
+export function ActivatePlanModal({ plan, channels, defaultTarget, suggested, suggestedTarget, onClose, onDone }: {
   plan: SourcingPlan; channels: SourcingPlanChannel[]; /** the default qualified target for this role (5 for P0/P1, none for P2/P3) */ defaultTarget?: number | null;
+  /** From the plan's template (plan detailing): channels its LIVE lines would use, and its weekly qualified target. Only PRESELECTS — the recruiter decides. */
+  suggested?: Array<{ channel: string; weekly_target: number | null }>; suggestedTarget?: number | null;
   onClose: () => void; onDone: () => void;
 }) {
   const seeded = new Set(channels.map(c => c.channel));
@@ -87,12 +89,13 @@ export function ActivatePlanModal({ plan, channels, defaultTarget, onClose, onDo
     const init: Record<string, Row> = {};
     for (const ch of SOURCING_CHANNELS) {
       const existing = channels.find(c => c.channel === ch);
-      init[ch] = { ...emptyRow(), included: !!existing && existing.state !== 'excluded', reason: existing?.excluded_reason ?? '' };
+      const suggestedHere = !existing && !!suggested?.some(x => x.channel === ch);
+      init[ch] = { ...emptyRow(), included: (!!existing && existing.state !== 'excluded') || suggestedHere, reason: existing?.excluded_reason ?? '' };
     }
     return init;
   });
   const [note, setNote] = useState(plan.strategy_note ?? '');
-  const [qualified, setQualified] = useState(plan.weekly_qualified_target ? String(plan.weekly_qualified_target) : '');
+  const [qualified, setQualified] = useState(plan.weekly_qualified_target ? String(plan.weekly_qualified_target) : suggestedTarget ? String(suggestedTarget) : '');
   const [saving, setSaving] = useState(false);
 
   const set = (ch: string, patch: Partial<Row>) => setRows(r => ({ ...r, [ch]: { ...r[ch], ...patch } }));
@@ -297,6 +300,7 @@ export function ResolveExceptionModal({ exception, onClose, onDone }: {
   const people = peopleData?.data?.people ?? [];
   const [path, setPath] = useState<ResolutionPath>('catch_up');
   const [reason, setReason] = useState('');
+  const [reasonKind, setReasonKind] = useState('');
   const [action, setAction] = useState('');
   const [snoozeUntil, setSnoozeUntil] = useState(ymd(2));
   const [blockerDue, setBlockerDue] = useState(ymd(7));
@@ -367,6 +371,16 @@ export function ResolveExceptionModal({ exception, onClose, onDone }: {
         </label>
       )}
 
+      <Field label="Why is it behind?" optional>
+        <select className="input text-sm" aria-label="Why is it behind" value={reasonKind} onChange={e => {
+          const v = e.target.value; setReasonKind(v);
+          // Picking from the short list fills the reason when it is empty or still just a previous pick; anything typed on top is kept.
+          if (v && (!reason.trim() || (RESOLUTION_REASONS as readonly string[]).includes(reason.trim()))) setReason(v);
+        }}>
+          <option value="">Pick a reason…</option>
+          {RESOLUTION_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+      </Field>
       <Field label="Reason" hint={path === 'change_strategy' ? 'What changed, so the Hiring Manager can see why.' : undefined}>
         <textarea className="input text-sm h-16 resize-none" value={reason} onChange={e => setReason(e.target.value)} />
       </Field>

@@ -16,7 +16,11 @@ export type ChannelState = 'planned' | 'active' | 'excluded' | 'closed';
 export type CommitmentStatus = 'open' | 'done' | 'skipped' | 'blocked';
 export type ExceptionStatus = 'open' | 'snoozed' | 'blocked' | 'resolved';
 export type ExceptionType =
-  | 'PLAN_NOT_ACTIVATED' | 'CHANNEL_NOT_ACTIVATED' | 'COMMITMENT_OVERDUE' | 'FOLLOWUP_OVERDUE' | 'VOLUME_GAP' | 'BLOCKER_OVERDUE';
+  | 'PLAN_NOT_ACTIVATED' | 'CHANNEL_NOT_ACTIVATED' | 'COMMITMENT_OVERDUE' | 'FOLLOWUP_OVERDUE' | 'VOLUME_GAP' | 'BLOCKER_OVERDUE'
+  // Added by the plan-detailing layer (backend/src/utils/sourcingDetail.ts)
+  | 'CHECKIN_OVERDUE' | 'WORK_BELOW_TARGET' | 'CHANNEL_QUIET' | 'SCREENING_BACKLOG' | 'NO_RESULTS' | 'WRONG_CANDIDATES' | 'HM_REJECTS_MOST'
+  | 'SOURCE_MISSING' | 'BACKUP_PLAN_DUE' | 'COMPANY_LIST_NOT_WORKED' | 'TOO_FEW_PEOPLE_FOUND' | 'FOUND_NOT_CONTACTED' | 'FEW_REPLIES'
+  | 'REPLIES_NOT_SUITABLE' | 'AGENCY_WEAK';
 export type ResolutionPath = 'catch_up' | 'change_strategy' | 'blocker';
 
 export interface SourcingPlan {
@@ -167,4 +171,57 @@ export interface SourcingDashboard {
     by_priority: Record<string, number>;
   };
   exceptions: SourcingDashboardRow[];
+}
+
+// ─── Plan detailing (backend/src/services/sourcingDetail.ts) ─────────────────────────────────────────
+export type HealthColour = 'green' | 'amber' | 'red' | 'grey';
+export type PlanRowStatus = 'live' | 'backup' | 'not_used';
+export interface PlanLine {
+  id?: string; workbook_channel: string; mapped_channels?: string[]; platform: string | null; status: PlanRowStatus; owner_label: string | null;
+  tracked_as: 'count' | 'yes_no' | null; weekly_work: number | null; work_unit: string | null; expected_applicants: number | null; expected_qualified: number | null;
+  start_condition: string | null; first_task: string | null; repeats: string | null; reason: string | null;
+}
+export interface HealthBox { colour: HealthColour; text: string }
+export interface WorkItem { label: string; kind: 'count' | 'yes_no'; done: number | null; target: number | null; ok: boolean }
+export interface PlanHealth {
+  enough: HealthBox & { qualified: number; target: number | null; awaiting_screening: number };
+  right: HealthBox & { candidates: number; qualified: number; share: number | null };
+  worked: HealthBox & { items: WorkItem[]; share: number | null };
+  source: { untagged: number; total: number; share: number; untrusted: boolean };
+}
+export interface ChannelResult { channel: string; candidates: number; qualified: number; share: number | null; too_few: boolean; last_activity: string | null }
+export interface CheckinState { week_of: string; due: string; done: boolean; answers: Record<string, string>; blocker_text: string | null; questions: string[] }
+export interface PlanDetail {
+  plan_id: string; plan_status: PlanStatus; template: { key: string; name: string } | null; job_titles: string[]; target_date: string | null;
+  company_lists: Array<{ id: string; name: string; companies: number }>; rows: PlanLine[];
+  suggested_channels: Array<{ channel: string; weekly_target: number | null }>; suggested_target: number | null;
+  health: PlanHealth; channel_results: ChannelResult[]; untagged_warning: boolean;
+  outreach: {
+    companies_listed: number; companies_worked: number; worked_share: number | null; people_found: number; people_contacted: number; followups: number; replied: number;
+    last_upload: string | null; by_title: Array<{ job_title: string; found: number; contacted: number; replied: number }>;
+  };
+  checkin: CheckinState | null; reasons: string[];
+}
+export interface PlanDetailResponse { enabled: boolean; detail: PlanDetail | null }
+export interface TemplateSummary { id: string; key: string; name: string; description: string | null; job_titles: string[]; company_lists: string[]; weekly_qualified_target: number | null; channel_rows: PlanLine[]; is_active: boolean }
+export interface UploadSummary { ok: boolean; rows_total: number; people_new: number; followups: number; merged: number; rejected: Array<{ row: number; reason: string }>; rejected_total: number; unlisted_companies: number }
+export interface Reminder { kind: 'checkin' | 'outreach_upload' | 'untagged' | 'plan'; role_id: string; title: string; due: string | null; overdue: boolean; detail: string }
+export interface OverviewRow {
+  role_id: string; title: string; priority: string; plan_status: PlanStatus; hiring_manager: string | null;
+  enough: (HealthBox & { qualified: number; target: number | null; awaiting_screening: number }) | null; right: HealthBox | null; worked: HealthBox | null;
+  open_alerts: number; provisional_alerts: number; hm_alerts: number; headline: string | null;
+}
+export interface OverviewResponse {
+  enabled: boolean;
+  summary: { roles_with_active_plan: number; roles_total: number; checkins_on_time: number; checkins_due: number; open_alerts: number; hm_alerts: number };
+  rows: OverviewRow[];
+}
+export interface CompanyRow {
+  id: string; name: string; segment: string | null; size: string | null; cities: string[]; what_they_do: string | null; source_url: string | null; notes: string | null;
+  excluded: boolean; excluded_reason: string | null; last_checked_at: string; needs_recheck: boolean; legacy_contacted: boolean; lists: string[]; roles_targeting: string[];
+  people_contacted: number; people_found: number; candidates: number; last_contacted: string | null;
+}
+export interface CompanyDetail extends CompanyRow {
+  outreach_by_role: Array<{ role_id: string; people: number; contacted: number; replied: number }>; hires: number;
+  recent_people: Array<{ job_title: string | null; role_id: string; status: string | null; outcome: string | null; last_contacted: string | null }>;
 }

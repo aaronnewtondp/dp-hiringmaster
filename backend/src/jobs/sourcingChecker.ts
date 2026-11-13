@@ -18,13 +18,16 @@ import {
 import { ensureDraftPlansForOpenRoles, logChangeQ, syncChannelWeeksSafe } from '../services/sourcingPlans.js';
 import { loadSettings, stampGoLiveDefaults } from '../services/sourcingSettings.js';
 import { qualifiedAt, QualifiedInput, QUALIFIED_TIMESTAMPS_SQL } from '../utils/sourcingQualified.js';
+import { DETAIL_EXCEPTION_TYPES, DetailExceptionType } from '../utils/sourcingDetail.js';
+import { collectDetailExceptions } from './sourcingDetailChecker.js';
 
 export { qualifiedAt };
 export type { QualifiedInput };
 
 export type ExceptionType =
   | 'PLAN_NOT_ACTIVATED' | 'CHANNEL_NOT_ACTIVATED' | 'COMMITMENT_OVERDUE'
-  | 'FOLLOWUP_OVERDUE' | 'VOLUME_GAP' | 'BLOCKER_OVERDUE';
+  | 'FOLLOWUP_OVERDUE' | 'VOLUME_GAP' | 'BLOCKER_OVERDUE'
+  | DetailExceptionType;   // the additional alerts of the plan-detailing layer (utils/sourcingDetail.ts) — plain TEXT in the table
 
 export interface DetectedException {
   plan_id: string;
@@ -348,11 +351,17 @@ export async function runSourcingCheck(now: Date = new Date()): Promise<Sourcing
     ...detectBlockerOverdue(blockedRows, today),
   ];
 
-  return reconcileExceptions(desired, today);
+  // The additional alerts (plan detailing). A fault here must never stop the existing detection — and must not make the reconcile below
+  // auto-clear what it simply failed to look at: on failure those types are left exactly as they are for this run.
+  let keepTypes: string[] = [];
+  try { desired.push(...await collectDetailExceptions(now, settings.qualified_rule)); }
+  catch (err) { console.error('[Sourcing] additional alerts could not be checked (existing alerts unaffected):', err); keepTypes = [...DETAIL_EXCEPTION_TYPES]; }
+
+  return reconcileExceptions(desired, today, keepTypes);
 }
 
 /** Upsert the desired set, reopen snoozes that have lapsed, auto-clear what is no longer true. */
-export async function reconcileExceptions(desired: DetectedException[], today: string): Promise<SourcingCheckSummary> {
+export async function reconcileExceptions(desired: DetectedException[], today: string, keepTypes: string[] = []): Promise<SourcingCheckSummary> {
   const cols = {
     plan: desired.map(d => d.plan_id),
     channel: desired.map(d => d.channel),
@@ -405,12 +414,13 @@ export async function reconcileExceptions(desired: DetectedException[], today: s
     `UPDATE sourcing_exceptions e
         SET status = 'resolved', resolution_path = COALESCE(e.resolution_path, 'auto_cleared'), resolved_at = NOW()
       WHERE e.status IN ('open','snoozed','blocked')
+        AND NOT (e.type = ANY($5::text[]))     -- types the caller could not evaluate this run are left as they are
         AND NOT EXISTS (SELECT 1 FROM sourcing_plans p WHERE p.id = e.plan_id AND p.status = 'paused')   -- a plan on hold is not checked: what was open (a blocker, a catch-up date) waits unchanged
         AND NOT EXISTS (
           SELECT 1 FROM unnest($1::bigint[], $2::text[], $3::text[], $4::text[]) AS d(plan_id, channel, type, subject_key)
            WHERE e.plan_id = d.plan_id AND e.channel = d.channel AND e.type = d.type AND e.subject_key = d.subject_key)
       RETURNING e.id::text AS id, e.plan_id::text AS plan_id, e.channel, e.type, e.is_shadow`,
-    [cols.plan, cols.channel, cols.type, cols.subject],
+    [cols.plan, cols.channel, cols.type, cols.subject, keepTypes],
   );
 
   // The plan's history records what the system noticed: a problem flagged, a catch-up date that lapsed, a problem that cleared by itself.

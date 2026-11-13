@@ -71,6 +71,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** Whether the signed-in user is HR-tier — and false (never a throw) outside an AuthProvider, for pages that only ADD something for HR (the Sourcing page's extra tabs). */
+export function useCanHR(): boolean {
+  return !!useContext(AuthContext)?.canHR;
+}
+
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
