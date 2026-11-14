@@ -5,7 +5,7 @@
   "description": "CI-only checks for the HMS repo (type-aware async lint of backend/src, type-check of the Playwright suite). Kept apart from backend/, frontend/ and hms-tests-final/ on purpose: Vercel installs from those three, and nothing here may ever reach a production install. Commands run from the repo root, see README.md.",
   "type": "module",
   "devDependencies": {
-    "eslint": "10.13.0",
+    "eslint": "10.14.0",
     "typescript": "5.9.3",
     "typescript-eslint": "8.72.1"
   },
