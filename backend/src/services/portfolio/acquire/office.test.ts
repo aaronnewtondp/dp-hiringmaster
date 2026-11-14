@@ -754,9 +754,15 @@ describe('preparePptx', () => {
         { name: 'ppt/presentation.xml', data: '<p:presentation/>' },
         { name: 'ppt/slides/slide1.xml', rawCompressed: bomb, rawSize: 40 * MB, declaredSize: 4000 },
       ]);
-      const rss = process.memoryUsage().rss;
-      expect(await preparePptx(lying, 'f', ctxFor())).toMatchObject({ outcome: 'unreviewable', reason: BAD_ZIP_REASON });
-      expect(process.memoryUsage().rss - rss).toBeLessThan(10 * MB);
+      // RSS is process-wide and moves with the allocator and the GC for reasons of its own (14.5 MB seen once on a loaded machine against a 10 MB bound): the
+      // smallest growth over a few attempts is the code's, since a 40 MB inflate shows in EVERY attempt.
+      let growth = Infinity;
+      for (let attempt = 0; attempt < 3 && growth >= 10 * MB; attempt++) {
+        const rss = process.memoryUsage().rss;
+        expect(await preparePptx(lying, 'f', ctxFor())).toMatchObject({ outcome: 'unreviewable', reason: BAD_ZIP_REASON });
+        growth = Math.min(growth, process.memoryUsage().rss - rss);
+      }
+      expect(growth).toBeLessThan(10 * MB);
       const honest = buildZip([
         { name: 'ppt/presentation.xml', data: '<p:presentation/>' },
         { name: 'ppt/slides/slide1.xml', rawCompressed: bomb, rawSize: 40 * MB },
