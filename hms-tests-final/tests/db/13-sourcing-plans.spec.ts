@@ -339,11 +339,19 @@ test.describe('Sourcing module', () => {
   test('a qualified candidate (ResumeIQ > 60) counts toward the weekly volume; the two components are reported separately', async ({ request }) => {
     const { rows: c } = await client.query(`INSERT INTO candidates (full_name, email) VALUES ('Volume Candidate', $1) RETURNING id`, [`vol+${uid()}@example.com`]);
     candidateEmails.push((await client.query(`SELECT email FROM candidates WHERE id=$1`, [c[0].id])).rows[0].email);
+    // The gap rule looks at the last working days (Mon–Fri, IST), so a candidate scored on a Saturday or Sunday is not inside ANY of those days' windows:
+    // on a weekend the scores are dated the latest working day (Friday, noon IST), otherwise they are scored now. (Without this the test failed every weekend.)
+    const istNow = new Date(Date.now() + 5.5 * 3600000);
+    let scoredAt = 'NOW()';
+    if ([0, 6].includes(istNow.getUTCDay())) {
+      const back = istNow.getUTCDay() === 0 ? 2 : 1;
+      scoredAt = `'${new Date(istNow.getTime() - back * 86400000).toISOString().slice(0, 10)}T06:30:00Z'::timestamptz`;
+    }
     for (let i = 0; i < 5; i++) {
       const { rows: cc } = await client.query(`INSERT INTO candidates (full_name, email) VALUES ($1, $2) RETURNING id, email`, [`Volume Cand ${i}`, `vol${i}+${uid()}@example.com`]);
       candidateEmails.push(cc[0].email);
       await client.query(
-        `INSERT INTO applications (candidate_id, role_id, stage, status, ai_fit_score, score_computed_at) VALUES ($1,$2,'Applied and Screened','Active',72,NOW())`, [cc[0].id, roleId]);
+        `INSERT INTO applications (candidate_id, role_id, stage, status, ai_fit_score, score_computed_at) VALUES ($1,$2,'Applied and Screened','Active',72,${scoredAt})`, [cc[0].id, roleId]);
     }
     await cron(request);
     expect((await liveExceptions()).find(e => e.type === 'VOLUME_GAP')).toBeUndefined();             // 5 ≥ 5 today ⇒ no gap
