@@ -55,6 +55,11 @@ updates:
       # can move pdfjs or the layout, so both are deliberate upgrades with the measurements re-run. Patches stay allowed.
       - dependency-name: pdf-parse
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # pdfmake 0.3 is a breaking API change inside the 0.x line (the default export is no longer a constructor, so
+      # `new PdfPrinter(...)` throws and the long-form JD and role-closure PDFs fail). It is a deliberate migration of the two
+      # call sites, not a grouped bump; patches stay allowed.
+      - dependency-name: pdfmake
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       # Production runs Node 22 (engines: 22.x). @types/node must track that line, not the newest Node.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
