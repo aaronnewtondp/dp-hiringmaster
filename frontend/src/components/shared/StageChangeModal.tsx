@@ -59,7 +59,7 @@ export default function StageChangeModal({ application, onClose, onUpdated }: St
           {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         {needsBudgetReason && (
-          <div className="mb-4 space-y-3 p-3 bg-amber-50 border border-amber-100 rounded-lg">
+          <div className="mb-4 legacy-space-y-3 p-3 bg-amber-50 border border-amber-100 rounded-lg">
             <p className="text-xs text-amber-800">
               This candidate is 15%+ over the role's compensation band — select a reason to proceed.
             </p>

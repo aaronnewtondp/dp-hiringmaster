@@ -114,7 +114,7 @@ export default function SourcingPlanPanel({ roleId }: { roleId: string }) {
         </div>
       </div>
 
-      <div className="px-5 py-4 space-y-5">
+      <div className="px-5 py-4 legacy-space-y-5">
         {plan.status === 'draft' && (
           <p className="text-sm text-gray-600">
             {canEdit
@@ -159,7 +159,7 @@ export default function SourcingPlanPanel({ roleId }: { roleId: string }) {
                   <div className="flex-1 min-w-0">
                     {advicePending && !adviceResult && <p className="text-xs text-gray-500">Working out what to do next from the pipeline, targets and channels…</p>}
                     {adviceResult && <p className="text-sm font-medium text-gray-900">{adviceResult.advice.headline}</p>}
-                    {planSteps.length > 0 && <ol className="mt-2 space-y-2.5 list-decimal pl-4 marker:text-gray-300">{planSteps.map(s => <StepItem key={s.id} step={s} />)}</ol>}
+                    {planSteps.length > 0 && <ol className="mt-2 legacy-space-y-2.5 list-decimal pl-4 marker:text-gray-300">{planSteps.map(s => <StepItem key={s.id} step={s} />)}</ol>}
                     {adviceResult && adviceResult.advice.watch.length > 0 && (
                       <p className="mt-2 text-xs text-gray-500"><span className="text-gray-400">Keep an eye on:</span> {adviceResult.advice.watch.join(' · ')}</p>
                     )}
@@ -180,7 +180,7 @@ export default function SourcingPlanPanel({ roleId }: { roleId: string }) {
             )}
 
             {live.length > 0 && (
-              <ul className="space-y-2">
+              <ul className="legacy-space-y-2">
                 {live.map(e => (
                   <ExceptionRow key={e.id} e={e} canEdit={canEdit} steps={steps.filter(s => s.exception_id === e.id)} advicePending={advicePending}
                     onResolve={() => setDialog({ kind: 'resolve', exception: e })} />
@@ -202,7 +202,7 @@ export default function SourcingPlanPanel({ roleId }: { roleId: string }) {
             </div>
           )}
           {channels.length > 0 ? (
-            <div className="divide-y divide-gray-100">
+            <div className="legacy-divide-y legacy-divide-gray-100">
               {channels.map(ch => (
                 <SourcingChannelBlock key={ch.id} ch={ch} hr={hr} canEdit={canEdit} canManage={canEdit && tracked} planActive={plan.status === 'active'} today={today} undoingId={undoing}
                   onComplete={c => setDialog({ kind: 'complete', commitment: c, channel: ch.channel })}
@@ -233,7 +233,7 @@ export default function SourcingPlanPanel({ roleId }: { roleId: string }) {
             </h3>
             <table className="w-full text-xs">
               <thead><tr className="text-left text-gray-400"><th className="font-medium py-1">Source</th><th className="font-medium py-1 text-right">Applications</th><th className="font-medium py-1 text-right"><span className="inline-flex items-center gap-1">Qualified<InfoTooltip align="right" text="Applications from this source that scored above 60 or were moved past Applied and Screened — a snapshot of today over all of this role's applications, not the 7-day target above." /></span></th></tr></thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody className="legacy-divide-y legacy-divide-gray-50">
                 {view.output!.map(o => {
                   const untagged = o.tag === 'untagged_default' || o.tag === '(untagged)';
                   return (

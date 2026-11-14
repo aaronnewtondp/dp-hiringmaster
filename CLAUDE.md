@@ -70,7 +70,7 @@ various hiring managers per role.
 ### Stack
 | Layer | Technology |
 |---|---|
-| Frontend | React 18 + TypeScript + Vite + TailwindCSS |
+| Frontend | React 18 + TypeScript + Vite + TailwindCSS 4 (see "Tailwind 4 compatibility" below) |
 | Backend | Node.js + Express + TypeScript |
 | Local DB | PostgreSQL 16 via Docker |
 | Production DB | Supabase (Postgres) |
@@ -96,6 +96,27 @@ order, every time. Skipping the third step means the next `docker-compose down
 **Security state of production Supabase (found 2026-10-19).** *Closed:* the seed password hash was removed from the 8 production
 users that still had one (`UPDATE … SET password_hash = NULL`), so every production account is Google-only. The only password-login accounts in production are the two read-only smoke-test accounts (created 2026-10-19, see Testing).
 *Known and accepted — not being addressed (Aaron's decision, 2026-10-19):* the 17 pre-existing public tables have row level security OFF and the `anon`/`authenticated` roles hold table privileges, so the project's public Supabase key can read and modify candidate data through the Data API (established from the privilege catalog; not exercised through the API). The backend connects as role `postgres` (owner, BYPASSRLS). The 8 `sourcing_*` tables were created with RLS on.
+
+### Tailwind 4 compatibility (migrated 2026-11-14; the app is meant to look exactly as it did on Tailwind 3.4)
+`frontend/src/index.css` is `@import "tailwindcss"` + `@config "../tailwind.config.js"` (the JS config stays the source of the brand
+colours, fonts and line heights; PostCSS is `@tailwindcss/postcss`, autoprefixer is gone). Tailwind 4 changes several defaults silently, so
+each one is pinned back; **do not "clean these up" without re-running a before/after comparison**:
+- **Palette:** `tailwind.v3-palette.js` holds Tailwind 3's exact hex values for the colour families the app uses (4's OKLCH palette renders
+  slightly differently). A family added to the app must be added there too.
+- **Renamed utilities** (old look, new names): `shadow-sm`->`shadow-xs`, `shadow`->`shadow-sm`, `rounded`->`rounded-sm`,
+  `outline-none`->`outline-hidden`. Bare `border`/`divide` colour, placeholder colour, the pointer cursor on buttons, the default ring colour
+  (blue-500 at 50%, which `ring-dp-500` / `focus:ring-dp-500` rely on because `dp-500` does not exist), white form-field backgrounds, 1px
+  padding on `td`/`th`, option padding and the date input's inner padding are restored in `@layer base`; `hover:` is `@custom-variant hover (&:hover)`
+  (Tailwind 4 only hovers on devices that can hover); `fontSize` in the config restores fixed line heights (4 uses ratios, which re-scale
+  under `text-[10px]` children).
+- **`space-x/y-N`, `divide-y`, `divide-<colour>` are written `legacy-space-x/y-N`, `legacy-divide-y`, `legacy-divide-<colour>`** in the markup:
+  Tailwind 4's versions select differently (bottom margin/border on every child but the last, at zero specificity), so a child's own
+  `-mt-2` or `border-t-0` suddenly takes effect. A custom utility cannot replace a built-in one of the same name (both are emitted), hence the
+  new names, defined verbatim from Tailwind 3 in `index.css`.
+- Accepted differences (identical pixels, different computed values): `translate-*` uses the `translate` property, colours with opacity
+  compute as `oklab`, `outline-hidden` is `outline-style: none`. Tailwind 4 also needs Chrome 111+/Safari 16.4+/Firefox 128+.
+- How it was checked: a disposable stack, the old and new builds screenshot at 1440x900 and 390x844 on 23 pages plus ~30 opened
+  popovers/menus/modals, pixel diff, and a computed-style + layout-rect diff of every element (about 54,000 compared).
 
 ### Local dev workflow
 - **Backend + DB run in Docker.** `docker-compose up -d` (only `dp_hms_backend`

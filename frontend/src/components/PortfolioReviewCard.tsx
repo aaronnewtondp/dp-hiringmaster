@@ -160,7 +160,7 @@ function SiteRow({ site }: { site: PortfolioReviewedSite }) {
   return (
     <li className="text-xs py-1">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-medium">{PLATFORM_LABEL[site.platform] ?? site.platform}</span>
+        <span className="px-1.5 py-0.5 rounded-sm bg-gray-100 text-gray-600 text-[10px] font-medium">{PLATFORM_LABEL[site.platform] ?? site.platform}</span>
         <a href={site.url} target="_blank" rel="noreferrer" className="text-dp-600 hover:underline truncate max-w-[16rem] inline-flex items-center gap-1">
           {site.url.replace(/^https?:\/\/(www\.)?/, '')}<ExternalLink className="w-3 h-3 shrink-0" />
         </a>
@@ -237,7 +237,7 @@ const RELEVANCE_CHIP: Partial<Record<NonNullable<PortfolioReviewedSite['relevanc
 };
 
 const Chip = ({ children, tone = 'gray' }: { children: ReactNode; tone?: 'gray' | 'red' | 'amber' }) => (
-  <span className={`max-w-full px-1.5 py-0.5 rounded text-[10px] ${WRAP} ${
+  <span className={`max-w-full px-1.5 py-0.5 rounded-sm text-[10px] ${WRAP} ${
     tone === 'red' ? 'bg-red-50 text-red-600 font-medium' : tone === 'amber' ? 'bg-amber-50 text-amber-700' : 'bg-gray-50 border border-gray-100 text-gray-500'
   }`}>{children}</span>
 );
@@ -252,7 +252,7 @@ function UrlLink({ url }: { url: string }) {
 }
 
 function PlatformTag({ platform }: { platform: string }) {
-  return <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-medium">{WORK_PLATFORM_LABEL[platform] ?? platform}</span>;
+  return <span className="px-1.5 py-0.5 rounded-sm bg-gray-100 text-gray-600 text-[10px] font-medium">{WORK_PLATFORM_LABEL[platform] ?? platform}</span>;
 }
 
 function WorkRow({ site }: { site: PortfolioReviewedSite }) {
@@ -373,7 +373,7 @@ function NotReviewedList({ entries }: { entries: NotReviewedEntry[] }) {
   return (
     <div data-testid="unreviewed-list" className="min-w-0">
       <div className="text-[11px] font-medium text-gray-500 mb-0.5">Not reviewed — open these by hand</div>
-      <ul className="divide-y divide-gray-50">
+      <ul className="legacy-divide-y legacy-divide-gray-50">
         {entries.map(e => (
           <li key={e.key} className={cx('text-xs py-1', WRAP)} data-testid="unreviewed-item">
             <div className="flex items-center gap-2 flex-wrap">
@@ -410,7 +410,7 @@ function WorkCriterionRow({ c }: { c: PortfolioCriterion }) {
       <div className="min-w-0">
         <div className={`text-xs text-gray-700 font-medium leading-snug ${WRAP}`}>
           {c.label}
-          {basis && <span className={`ml-1.5 align-middle px-1 py-px rounded text-[9px] font-normal ${basis.cls}`} title={`${basis.title}${c.source ? ` (${c.source})` : ''}`}>{basis.text}</span>}
+          {basis && <span className={`ml-1.5 align-middle px-1 py-px rounded-sm text-[9px] font-normal ${basis.cls}`} title={`${basis.title}${c.source ? ` (${c.source})` : ''}`}>{basis.text}</span>}
         </div>
         {c.evidence && <div className={`text-[11px] text-gray-500 leading-snug ${WRAP}`}>{c.evidence}</div>}
       </div>
@@ -443,7 +443,7 @@ function WorkCriteria({ criteria }: { criteria: PortfolioCriterion[] }) {
           </button>
         )}
       </div>
-      <div className="space-y-2">
+      <div className="legacy-space-y-2">
         {CRITERIA_GROUPS.map(g => {
           // A row with no group (a record from an older build) is judged on what the work shows.
           const inGroup = criteria.filter(c => (c.group ?? 'direct') === g.id);
@@ -469,7 +469,7 @@ function Campaigns({ items }: { items: PortfolioCampaign[] }) {
   return (
     <div data-testid="campaigns">
       <div className="text-[11px] font-medium text-gray-500 mb-0.5">Campaigns identified ({items.length})</div>
-      <ul className="text-xs text-gray-600 space-y-0.5">
+      <ul className="text-xs text-gray-600 legacy-space-y-0.5">
         {items.map((c, i) => (
           <li key={i} className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 min-w-0">
             <span className={`max-w-full ${WRAP}`}>• <span className="font-medium text-gray-700">{c.name}</span>{c.metric ? ` — ${c.metric}` : ''}</span>
@@ -526,7 +526,7 @@ function EvidenceNotes({ notes }: { notes: string[] }) {
   return (
     <details data-testid="evidence-notes" className="text-[11px] text-gray-500">
       <summary className="cursor-pointer font-medium hover:text-gray-700">How the evidence was checked</summary>
-      <ul className={`mt-1 space-y-0.5 ${WRAP}`}>{notes.map((n, i) => <li key={i}>• {n}</li>)}</ul>
+      <ul className={`mt-1 legacy-space-y-0.5 ${WRAP}`}>{notes.map((n, i) => <li key={i}>• {n}</li>)}</ul>
     </details>
   );
 }
@@ -540,7 +540,7 @@ const CONFIDENCE: Record<NonNullable<PortfolioAnalysis['confidence']>, { label: 
 function ConfidenceChip({ confidence }: { confidence?: PortfolioAnalysis['confidence'] }) {
   const c = confidence ? CONFIDENCE[confidence] : undefined;
   if (!c) return null;
-  return <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${c.cls}`} title="How well the work that could be reviewed supports this score">{c.label}</span>;
+  return <span className={`px-1.5 py-0.5 rounded-sm text-[10px] font-medium ${c.cls}`} title="How well the work that could be reviewed supports this score">{c.label}</span>;
 }
 
 function WorkReview({ a }: { a: PortfolioAnalysis }) {
@@ -564,7 +564,7 @@ function WorkReview({ a }: { a: PortfolioAnalysis }) {
       {links.reviewed.length > 0 && (
         <div className="min-w-0">
           <div className="text-[11px] font-medium text-gray-500 mb-0.5">Work reviewed</div>
-          <ul className="divide-y divide-gray-50">{links.reviewed.map((p, i) => <WorkRow key={`${p.url}-${i}`} site={p} />)}</ul>
+          <ul className="legacy-divide-y legacy-divide-gray-50">{links.reviewed.map((p, i) => <WorkRow key={`${p.url}-${i}`} site={p} />)}</ul>
         </div>
       )}
 
@@ -574,11 +574,11 @@ function WorkReview({ a }: { a: PortfolioAnalysis }) {
         <div className="grid sm:grid-cols-2 gap-3">
           <div className="min-w-0">
             <div className="text-xs text-green-600 font-medium mb-1">{COPY.marketing_work.strengths}</div>
-            {highlights.length ? <ul className={`text-xs text-gray-600 space-y-0.5 ${WRAP}`}>{highlights.map((h, i) => <li key={i}>• {h}</li>)}</ul> : <p className="text-xs text-gray-500">—</p>}
+            {highlights.length ? <ul className={`text-xs text-gray-600 legacy-space-y-0.5 ${WRAP}`}>{highlights.map((h, i) => <li key={i}>• {h}</li>)}</ul> : <p className="text-xs text-gray-500">—</p>}
           </div>
           <div className="min-w-0">
             <div className="text-xs text-red-500 font-medium mb-1">{COPY.marketing_work.concerns}</div>
-            {redFlags.length ? <ul className={`text-xs text-gray-600 space-y-0.5 ${WRAP}`}>{redFlags.map((h, i) => <li key={i}>• {h}</li>)}</ul> : <p className="text-xs text-gray-500">None noted</p>}
+            {redFlags.length ? <ul className={`text-xs text-gray-600 legacy-space-y-0.5 ${WRAP}`}>{redFlags.map((h, i) => <li key={i}>• {h}</li>)}</ul> : <p className="text-xs text-gray-500">None noted</p>}
           </div>
         </div>
       )}
@@ -599,7 +599,7 @@ function WorkReview({ a }: { a: PortfolioAnalysis }) {
       {(a.unverifiedClaims ?? []).length > 0 && (
         <div data-testid="unverified-claims" className="min-w-0">
           <div className="text-[11px] font-medium text-gray-500 mb-0.5">Unverified claims — stated, but not shown in the work</div>
-          <ul className={`text-xs text-gray-600 space-y-0.5 ${WRAP}`}>{a.unverifiedClaims!.map((c, i) => <li key={i}>• {c}</li>)}</ul>
+          <ul className={`text-xs text-gray-600 legacy-space-y-0.5 ${WRAP}`}>{a.unverifiedClaims!.map((c, i) => <li key={i}>• {c}</li>)}</ul>
         </div>
       )}
 
@@ -628,10 +628,10 @@ function WorkNotScored({ status, data, header, canHR }: { status: NotScoredStatu
   const reason = `${stripRetryHint(data?.message) || fallback}${canHR && /Use Re-run/i.test(data?.message ?? '') ? ' Use Re-run to retry.' : ''}`;
 
   return (
-    <div className={`rounded-lg border border-gray-200 bg-gray-50/60 p-3 space-y-2 ${WRAP}`}>
+    <div className={`rounded-lg border border-gray-200 bg-gray-50/60 p-3 legacy-space-y-2 ${WRAP}`}>
       {header}
       <p className="text-xs text-gray-700">
-        <span className="mr-1.5 px-1.5 py-0.5 rounded bg-gray-200 text-gray-700 text-[10px] font-medium">Not scored</span>
+        <span className="mr-1.5 px-1.5 py-0.5 rounded-sm bg-gray-200 text-gray-700 text-[10px] font-medium">Not scored</span>
         {reason}
       </p>
       {a && a.model !== 'none' && a.summary && <p className="text-xs text-gray-600 leading-relaxed">{a.summary}</p>}
@@ -653,7 +653,7 @@ function WorkNotScored({ status, data, header, canHR }: { status: NotScoredStatu
       {links.reviewed.length > 0 && (
         <div className="min-w-0">
           <div className="text-[11px] font-medium text-gray-500 mb-0.5">Links looked at</div>
-          <ul className="divide-y divide-gray-100">{links.reviewed.map((p, i) => <WorkRow key={`${p.url}-${i}`} site={p} />)}</ul>
+          <ul className="legacy-divide-y legacy-divide-gray-100">{links.reviewed.map((p, i) => <WorkRow key={`${p.url}-${i}`} site={p} />)}</ul>
         </div>
       )}
       <NotReviewedList entries={links.notReviewed} />
@@ -719,7 +719,7 @@ export default function PortfolioReviewCard({ applicationId, status: initialStat
   // (and offers another try) instead of dressing the application row's status in the designer's words — or vanishing.
   if (isError && !data) {
     return (
-      <div role="alert" className="rounded-lg border border-red-100 bg-red-50/40 p-3 space-y-1">
+      <div role="alert" className="rounded-lg border border-red-100 bg-red-50/40 p-3 legacy-space-y-1">
         <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Portfolio review</span>
         <p className="text-xs text-red-600">Could not load the review.</p>
         <button onClick={() => { void refetch(); }} disabled={isFetching}
@@ -760,10 +760,10 @@ export default function PortfolioReviewCard({ applicationId, status: initialStat
   // none of the queue's own error text (it names internal packages and file paths) — just that it needs another try.
   if (status === 'pending' && isNotQueued(data?.message)) {
     return (
-      <div className={cx('rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-1', marketing && WRAP)}>
+      <div className={cx('rounded-lg border border-amber-200 bg-amber-50/50 p-3 legacy-space-y-1', marketing && WRAP)}>
         {header}
         <p className="text-xs text-gray-700">
-          <span className="mr-1.5 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-medium">Not queued</span>
+          <span className="mr-1.5 px-1.5 py-0.5 rounded-sm bg-amber-100 text-amber-800 text-[10px] font-medium">Not queued</span>
           The review could not be queued.{canHR ? ' Use Re-run to retry.' : ''}
         </p>
         <p className="text-[11px] text-gray-500">{data?.score != null ? copy.failedKeptScore(data.score) : copy.failedNoScore}</p>
@@ -773,7 +773,7 @@ export default function PortfolioReviewCard({ applicationId, status: initialStat
 
   if (status === 'pending' || status === 'running') {
     return (
-      <div className={cx('rounded-lg border border-dp-100 bg-dp-50/40 p-3 space-y-1', marketing && WRAP)}>
+      <div className={cx('rounded-lg border border-dp-100 bg-dp-50/40 p-3 legacy-space-y-1', marketing && WRAP)}>
         {header}
         <p className="text-xs text-gray-600 flex items-center gap-1.5">
           <Loader2 className="w-3.5 h-3.5 animate-spin text-dp-600" />
@@ -790,7 +790,7 @@ export default function PortfolioReviewCard({ applicationId, status: initialStat
       ? (marketing && (data?.message ?? '').includes(`(${data.score}/10)`) ? '' : copy.failedKeptScore(data.score))
       : copy.failedNoScore;
     return (
-      <div className={cx('rounded-lg border border-red-100 bg-red-50/40 p-3 space-y-1', marketing && WRAP)}>
+      <div className={cx('rounded-lg border border-red-100 bg-red-50/40 p-3 legacy-space-y-1', marketing && WRAP)}>
         {header}
         <p className="text-xs text-red-600">{copy.failedLead} {stripRetryHint(data?.message)}</p>
         <p className="text-[11px] text-gray-500">
@@ -807,7 +807,7 @@ export default function PortfolioReviewCard({ applicationId, status: initialStat
 
   if (status === 'no_portfolio' || (!a && (status === 'inaccessible' || status === 'unreviewable'))) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 space-y-1">
+      <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3 legacy-space-y-1">
         {header}
         <p className="text-xs text-gray-600">
           {status === 'no_portfolio' ? 'No portfolio was found for this candidate.'
@@ -822,7 +822,7 @@ export default function PortfolioReviewCard({ applicationId, status: initialStat
   // A finished review whose details are not on file: say so rather than leaving the page with a score and nothing behind it.
   if (!a) {
     return (
-      <div className={cx('rounded-lg border border-gray-200 bg-gray-50/60 p-3 space-y-1', marketing && WRAP)}>
+      <div className={cx('rounded-lg border border-gray-200 bg-gray-50/60 p-3 legacy-space-y-1', marketing && WRAP)}>
         {header}
         <p className="text-xs text-gray-600">The review finished, but its details are not available.</p>
       </div>
@@ -831,7 +831,7 @@ export default function PortfolioReviewCard({ applicationId, status: initialStat
 
   if (marketing) {
     return (
-      <div className={`rounded-lg border border-gray-200 bg-white p-3 space-y-3 ${WRAP}`}>
+      <div className={`rounded-lg border border-gray-200 bg-white p-3 legacy-space-y-3 ${WRAP}`}>
         {header}
         <WorkReview a={a} />
         <p className="text-[11px] text-gray-500">
@@ -852,7 +852,7 @@ export default function PortfolioReviewCard({ applicationId, status: initialStat
   const hiddenCount = a.criteria.length - shownCriteria.length;
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-3">
+    <div className="rounded-lg border border-gray-200 bg-white p-3 legacy-space-y-3">
       {header}
 
       {a.summary && <p className="text-xs text-gray-600 leading-relaxed">{a.summary}</p>}
@@ -860,7 +860,7 @@ export default function PortfolioReviewCard({ applicationId, status: initialStat
       {a.portfolios.length > 0 && (
         <div>
           <div className="text-[11px] font-medium text-gray-500 mb-0.5">Portfolios reviewed</div>
-          <ul className="divide-y divide-gray-50">{a.portfolios.map(p => <SiteRow key={p.url} site={p} />)}</ul>
+          <ul className="legacy-divide-y legacy-divide-gray-50">{a.portfolios.map(p => <SiteRow key={p.url} site={p} />)}</ul>
         </div>
       )}
 
@@ -868,11 +868,11 @@ export default function PortfolioReviewCard({ applicationId, status: initialStat
         <div className="grid sm:grid-cols-2 gap-3">
           <div>
             <div className="text-xs text-green-600 font-medium mb-1">{copy.strengths}</div>
-            {a.highlights.length ? <ul className="text-xs text-gray-600 space-y-0.5">{a.highlights.map((h, i) => <li key={i}>• {h}</li>)}</ul> : <p className="text-xs text-gray-400">—</p>}
+            {a.highlights.length ? <ul className="text-xs text-gray-600 legacy-space-y-0.5">{a.highlights.map((h, i) => <li key={i}>• {h}</li>)}</ul> : <p className="text-xs text-gray-400">—</p>}
           </div>
           <div>
             <div className="text-xs text-red-500 font-medium mb-1">{copy.concerns}</div>
-            {a.redFlags.length ? <ul className="text-xs text-gray-600 space-y-0.5">{a.redFlags.map((h, i) => <li key={i}>• {h}</li>)}</ul> : <p className="text-xs text-gray-400">None noted</p>}
+            {a.redFlags.length ? <ul className="text-xs text-gray-600 legacy-space-y-0.5">{a.redFlags.map((h, i) => <li key={i}>• {h}</li>)}</ul> : <p className="text-xs text-gray-400">None noted</p>}
           </div>
         </div>
       )}

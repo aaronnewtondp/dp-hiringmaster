@@ -337,7 +337,7 @@ export default function Candidates() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="legacy-space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Active Candidates</h1>
@@ -377,7 +377,7 @@ export default function Candidates() {
           </div>
           {showUnmatched && (
             <>
-              <div className="divide-y divide-gray-50 border-t border-amber-100">
+              <div className="legacy-divide-y legacy-divide-gray-50 border-t border-amber-100">
                 {unmatchedItems.map(sub => (
                   <div key={sub.candidate_id} className="px-5 py-3 flex items-center justify-between gap-4">
                     <div className="min-w-0">
@@ -563,7 +563,7 @@ export default function Candidates() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="legacy-divide-y legacy-divide-gray-50">
               {sorted.map(app => (
                 <tr key={app.id} className={`hover:bg-gray-50 transition-colors ${app.sla_breach ? 'bg-red-50/30' : ''}`}>
                   {canHR && (
@@ -580,7 +580,7 @@ export default function Candidates() {
                         <span className="text-xs text-gray-400">{app.id}</span>
                         <SlaBadge breached={app.sla_breach} />
                         {app.founder_review_flag && (
-                          <span className="text-xs bg-purple-100 text-purple-700 px-1 rounded" title="Flagged for Founder Review: Leadership sees this candidate in My Tasks → Ready for Review.">Founder</span>
+                          <span className="text-xs bg-purple-100 text-purple-700 px-1 rounded-sm" title="Flagged for Founder Review: Leadership sees this candidate in My Tasks → Ready for Review.">Founder</span>
                         )}
                       </div>
                     </div>
@@ -657,7 +657,7 @@ export default function Candidates() {
 
       {deleteCandidate && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 legacy-space-y-4">
             <h3 className="text-base font-semibold text-gray-900">Delete {deleteCandidate.full_name}?</h3>
             <p className="text-sm text-gray-500">
               This permanently deletes this candidate's record. This cannot be undone.
@@ -685,7 +685,7 @@ export default function Candidates() {
               {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
             {bulkNeedsBudgetReason && (
-              <div className="mb-4 space-y-3 p-3 bg-amber-50 border border-amber-100 rounded-lg">
+              <div className="mb-4 legacy-space-y-3 p-3 bg-amber-50 border border-amber-100 rounded-lg">
                 <p className="text-xs text-amber-800">
                   At least one selected candidate is 15%+ over the role's compensation band — select a reason to proceed.
                 </p>
@@ -717,7 +717,7 @@ export default function Candidates() {
 
       {showBulkStatusModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 legacy-space-y-4 max-h-[90vh] overflow-y-auto">
             <div>
               <h3 className="text-base font-semibold">Update status</h3>
               <p className="text-sm font-mono text-gray-500">{selectedIds.size} candidates</p>

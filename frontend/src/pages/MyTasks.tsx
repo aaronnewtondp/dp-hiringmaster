@@ -212,7 +212,7 @@ export default function MyTasks() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="legacy-space-y-6">
       {/* Header */}
       <div>
         <div className="flex items-center gap-1.5">
@@ -313,7 +313,7 @@ export default function MyTasks() {
                 />
               </div>
             ) : (
-              <div className="divide-y divide-gray-50">
+              <div className="legacy-divide-y legacy-divide-gray-50">
                 {feedbackDue.map(action => (
                   <FeedbackRow
                     key={action.id}
@@ -353,7 +353,7 @@ export default function MyTasks() {
             {(alerts.length + otherPending.length) === 0 ? (
               <div className="p-8"><EmptyState title="No alerts ✓" /></div>
             ) : (
-              <div className="divide-y divide-gray-50">
+              <div className="legacy-divide-y legacy-divide-gray-50">
                 {[...otherPending, ...alerts].map(action => (
                   <div key={action.id} className="px-5 py-3 flex items-start gap-3">
                     <div className="w-1.5 h-1.5 rounded-full bg-purple-300 mt-2 shrink-0" />
@@ -367,7 +367,7 @@ export default function MyTasks() {
             )}
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="legacy-space-y-4">
             <div className="card overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100">
                 <h2 className="text-sm font-semibold text-gray-900">Other pending actions</h2>
@@ -375,7 +375,7 @@ export default function MyTasks() {
               {otherPending.length === 0 ? (
                 <div className="p-8"><EmptyState title="Nothing else pending ✓" /></div>
               ) : (
-                <div className="divide-y divide-gray-50">
+                <div className="legacy-divide-y legacy-divide-gray-50">
                   {otherPending.map(action => (
                     <div key={action.id} className="px-5 py-3 flex items-start gap-3">
                       <div className="w-1.5 h-1.5 rounded-full bg-gray-300 mt-2 shrink-0" />
@@ -410,7 +410,7 @@ export default function MyTasks() {
                     <p className="text-xs text-purple-400 mt-0.5">Company-wide role-aging/compensation notices — shown for visibility, not counted above.</p>
                   </div>
                 </div>
-                <div className="divide-y divide-purple-100/60">
+                <div className="legacy-divide-y legacy-divide-purple-100/60">
                   {alerts.map(action => (
                     <div key={action.id} className="px-5 py-3 flex items-start gap-3">
                       <div className="w-1.5 h-1.5 rounded-full bg-purple-300 mt-2 shrink-0" />

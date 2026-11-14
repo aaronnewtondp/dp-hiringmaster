@@ -26,7 +26,7 @@ function CompanyForm({ initial, onSaved, onCancel }: { initial?: CompanyRow; onS
     <label className={`text-[11px] text-gray-500 ${wide ? 'sm:col-span-2' : ''}`}>{label}<input className="input text-sm w-full" value={f[k]} onChange={e => set(k, e.target.value)} /></label>
   );
   return (
-    <div className="card p-4 space-y-2" data-testid="company-form">
+    <div className="card p-4 legacy-space-y-2" data-testid="company-form">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{field('Company name', 'name', true)}{field('Segment', 'segment')}{field('Size', 'size')}{field('Cities (comma separated)', 'cities')}{field('Lists (comma separated)', 'lists')}{field('What they do', 'what', true)}{field('Source link', 'url', true)}{field('Notes (e.g. “don’t approach: client”)', 'notes', true)}</div>
       <div className="flex justify-end gap-2"><button type="button" className="btn-secondary text-xs py-1 px-3" onClick={onCancel}>Cancel</button>
         <button type="button" className="btn-primary text-xs py-1 px-3" disabled={saving || !f.name.trim()} onClick={save}>{saving ? <Spinner size="sm" /> : 'Save'}</button></div>
@@ -47,7 +47,7 @@ function CompanyPage({ id, onClose, onChanged }: { id: string; onClose: () => vo
   if (!c) return <div className="card p-6 flex justify-center"><Spinner /></div>;
   if (editing) return <CompanyForm initial={c} onCancel={() => setEditing(false)} onSaved={() => { setEditing(false); void load(); onChanged(); }} />;
   return (
-    <div className="card p-4 space-y-3" data-testid="company-page">
+    <div className="card p-4 legacy-space-y-3" data-testid="company-page">
       <div className="flex items-start justify-between gap-2 flex-wrap">
         <div><h3 className="text-base font-semibold text-gray-900">{c.name}{c.excluded && <span className="ml-2 text-xs font-normal text-red-600">Excluded: {c.excluded_reason}</span>}</h3>
           <p className="text-xs text-gray-500">{[c.segment, c.size].filter(Boolean).join(' · ')}{c.cities.length ? ` · ${c.cities.join(', ')}` : ''}</p></div>
@@ -73,7 +73,7 @@ function CompanyPage({ id, onClose, onChanged }: { id: string; onClose: () => vo
       <p className="text-[11px] text-gray-400">Last contacted {dayOf(c.last_contacted)} · last checked {dayOf(c.last_checked_at)}{c.needs_recheck && <span className="text-amber-700"> · due for a quick re-check</span>}</p>
       {c.outreach_by_role.length > 0 && (
         <table className="w-full text-xs"><thead><tr className="text-left text-gray-400"><th className="font-medium py-1">Role</th><th className="font-medium py-1 text-right">Found</th><th className="font-medium py-1 text-right">Contacted</th><th className="font-medium py-1 text-right">Replied</th></tr></thead>
-          <tbody className="divide-y divide-gray-50">{c.outreach_by_role.map(r => <tr key={r.role_id}><td className="py-1">{r.role_id}</td><td className="py-1 text-right font-mono">{r.people}</td><td className="py-1 text-right font-mono">{r.contacted}</td><td className="py-1 text-right font-mono">{r.replied}</td></tr>)}</tbody></table>
+          <tbody className="legacy-divide-y legacy-divide-gray-50">{c.outreach_by_role.map(r => <tr key={r.role_id}><td className="py-1">{r.role_id}</td><td className="py-1 text-right font-mono">{r.people}</td><td className="py-1 text-right font-mono">{r.contacted}</td><td className="py-1 text-right font-mono">{r.replied}</td></tr>)}</tbody></table>
       )}
     </div>
   );
@@ -109,7 +109,7 @@ export default function SourcingCompanies() {
   };
 
   return (
-    <div className="space-y-3" data-testid="sourcing-companies">
+    <div className="legacy-space-y-3" data-testid="sourcing-companies">
       <div className="flex flex-wrap items-center gap-2">
         <input className="input text-sm w-56" placeholder="Search companies" aria-label="Search companies" value={q} onChange={e => setQ(e.target.value)} />
         <select className="input text-xs py-1" aria-label="List" value={list} onChange={e => setList(e.target.value)}><option value="">All lists</option>{lists.map(l => <option key={l.id} value={l.name}>{l.name} ({l.companies})</option>)}</select>
@@ -128,7 +128,7 @@ export default function SourcingCompanies() {
           <table className="w-full text-sm">
             <thead><tr className="text-left text-[11px] uppercase tracking-wide text-gray-400"><th className="font-medium px-3 py-2">Company</th><th className="font-medium px-3 py-2">Segment</th><th className="font-medium px-3 py-2">Size</th><th className="font-medium px-3 py-2">Cities</th>
               <th className="font-medium px-3 py-2">Roles targeting it</th><th className="font-medium px-3 py-2 text-right">People contacted</th><th className="font-medium px-3 py-2 text-right">Candidates</th><th className="font-medium px-3 py-2">Last contacted</th></tr></thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="legacy-divide-y legacy-divide-gray-100">
               {rows.length === 0 && <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-400">No companies yet. Import the workbook's Company Lists tab as CSV, or add one.</td></tr>}
               {rows.map(c => (
                 <tr key={c.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setSelected(c.id)} data-testid={`company-row-${c.id}`}>

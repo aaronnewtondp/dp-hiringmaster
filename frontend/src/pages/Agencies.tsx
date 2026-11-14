@@ -27,7 +27,7 @@ export default function Agencies() {
   const agencies = data?.data?.agencies || [];
 
   return (
-    <div className="space-y-5">
+    <div className="legacy-space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Agency Repository</h1>
@@ -67,7 +67,7 @@ export default function Agencies() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="legacy-divide-y legacy-divide-gray-50">
               {agencies.map((ag, idx) => (
                 <tr key={ag.id} className={`hover:bg-gray-50 cursor-pointer ${idx % 2 ? 'bg-gray-50/40' : ''}`}>
                   <td className="table-td px-2">

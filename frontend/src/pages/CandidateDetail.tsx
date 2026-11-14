@@ -295,7 +295,7 @@ export default function CandidateDetail() {
   if (!candidate) return <EmptyState title="Candidate not found" />;
 
   return (
-    <div className="space-y-6">
+    <div className="legacy-space-y-6">
       <div>
         <BackButton fallback="/candidates" label="Candidates" />
         <div className="flex items-start justify-between gap-4">
@@ -342,7 +342,7 @@ export default function CandidateDetail() {
       </div>
 
       {applications.length > 0 && (
-        <div className="space-y-3">
+        <div className="legacy-space-y-3">
           {applications.map(app => (
             <PipelineProgress
               key={app.id}
@@ -354,7 +354,7 @@ export default function CandidateDetail() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="space-y-4">
+        <div className="legacy-space-y-4">
           <EditableSection
             title="Identity"
             tooltip="Source is how this candidate was found, and it feeds Source quality on the Dashboard. Candidates who arrive through the Job Application Form are recorded as LinkedIn when they have no Source yet. What an applicant says on the form's “How did you hear about this opening?” is kept separately, on the application, and is shown on the Sourcing page. Sourcing Agency appears when the Source is Agency, and it is what the Agency Repository counts as a hire."
@@ -442,7 +442,7 @@ export default function CandidateDetail() {
           {applications.length === 0 ? (
             <div className="p-8"><EmptyState title="No applications" /></div>
           ) : (
-            <div className="divide-y divide-gray-50">
+            <div className="legacy-divide-y legacy-divide-gray-50">
               {applications.map(app => {
                 const rounds = roundsMap?.[app.id] || [];
                 const refChecks = refChecksMap?.[app.id] || [];
@@ -464,11 +464,11 @@ export default function CandidateDetail() {
                           <div className="flex items-center gap-2 flex-wrap">
                             <Link to={`/roles/${app.role_id}`} className="font-medium text-gray-900 hover:text-dp-600 text-sm">{app.role_title}</Link>
                             {app.role_priority && <PriorityBadge priority={app.role_priority} />}
-                            {app.sla_breach && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium" title={SLA_FLAG_INFO}>SLA</span>}
+                            {app.sla_breach && <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded-sm font-medium" title={SLA_FLAG_INFO}>SLA</span>}
                             {canHR ? (
                               <button
                                 onClick={() => { setFounderAppId(app.id); setFounderSetTo(!app.founder_review_flag); setFounderNote(''); setShowFounderModal(true); }}
-                                className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 ${app.founder_review_flag ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-400 hover:bg-purple-50 hover:text-purple-600'}`}
+                                className={`text-xs px-1.5 py-0.5 rounded-sm flex items-center gap-1 ${app.founder_review_flag ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-400 hover:bg-purple-50 hover:text-purple-600'}`}
                                 title={app.founder_review_flag
                                   ? 'Flagged for Founder Review: Leadership sees this candidate in My Tasks → Ready for Review. Click to clear the flag.'
                                   : "Flag for Founder Review: gives Leadership a Founder Review task and puts this candidate in their Ready for Review list in My Tasks."}
@@ -476,7 +476,7 @@ export default function CandidateDetail() {
                                 <Star className={`w-3 h-3 ${app.founder_review_flag ? 'fill-current' : ''}`} /> Founder
                               </button>
                             ) : app.founder_review_flag && (
-                              <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded" title="Flagged for Founder Review: Leadership sees this candidate in My Tasks → Ready for Review."><Star className="w-3 h-3 inline fill-current" /> Founder</span>
+                              <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-sm" title="Flagged for Founder Review: Leadership sees this candidate in My Tasks → Ready for Review."><Star className="w-3 h-3 inline fill-current" /> Founder</span>
                             )}
                           </div>
                           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
@@ -537,7 +537,7 @@ export default function CandidateDetail() {
                     </div>
 
                     {expanded && (
-                      <div className="px-4 pb-4 space-y-4">
+                      <div className="px-4 pb-4 legacy-space-y-4">
                         <div>
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Interview rounds</span>
@@ -573,7 +573,7 @@ export default function CandidateDetail() {
                           {rounds.length === 0 ? (
                             <p className="text-xs text-gray-400">No rounds scheduled yet.</p>
                           ) : (
-                            <div className="space-y-2">
+                            <div className="legacy-space-y-2">
                               {rounds.map(round => {
                                 // Only rounds with actual submitted feedback have anything to
                                 // expand — Pending/Overdue Standard rounds or Assignment rounds
@@ -586,7 +586,7 @@ export default function CandidateDetail() {
                                     <div className="flex items-center gap-2">
                                       <span className="text-xs font-medium text-gray-900">Round {round.round_number} — {round.round_name}</span>
                                       {round.round_type === 'Assignment' ? <AssignmentStatusPill round={round} /> : <FeedbackBadge status={round.feedback_status} />}
-                                      {round.round_type === 'Assignment' && <span className="text-xs px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">Assignment</span>}
+                                      {round.round_type === 'Assignment' && <span className="text-xs px-1.5 py-0.5 rounded-sm bg-violet-100 text-violet-700">Assignment</span>}
                                     </div>
                                     <div className="text-xs text-gray-400 mt-0.5 flex gap-3">
                                       {round.interviewer_emails && round.interviewer_emails.length > 0 && (
@@ -681,7 +681,7 @@ export default function CandidateDetail() {
                                   )}
                                 </div>
                                 {hasDetail && expandedRounds.has(round.id) && (
-                                  <div className="px-3 pb-3 pt-1 border-t border-gray-100 space-y-2 text-xs">
+                                  <div className="px-3 pb-3 pt-1 border-t border-gray-100 legacy-space-y-2 text-xs">
                                     {round.round_type === 'Assignment' ? (
                                       <>
                                         {[
@@ -769,13 +769,13 @@ export default function CandidateDetail() {
                           {refChecks.length === 0 ? (
                             <p className="text-xs text-gray-400">No reference checks added yet.</p>
                           ) : (
-                            <div className="space-y-2">
+                            <div className="legacy-space-y-2">
                               {refChecks.map(rc => (
                                 <div key={rc.id} className="py-2 px-3 rounded-lg bg-gray-50 border border-gray-100">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="text-xs font-medium text-gray-900">{rc.reference_name}</span>
-                                    <span className="text-xs px-1.5 py-0.5 rounded bg-gray-200 text-gray-600">{rc.relationship}</span>
-                                    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                                    <span className="text-xs px-1.5 py-0.5 rounded-sm bg-gray-200 text-gray-600">{rc.relationship}</span>
+                                    <span className={`text-xs px-1.5 py-0.5 rounded-sm font-medium ${
                                       rc.feedback === 'Excellent' ? 'bg-green-100 text-green-700' :
                                       rc.feedback === 'Good' ? 'bg-dp-100 text-dp-700' :
                                       rc.feedback === 'Average' ? 'bg-amber-100 text-amber-700' :
@@ -798,7 +798,7 @@ export default function CandidateDetail() {
                         {app.screening_answers && app.screening_answers.length > 0 && (
                           <div className="border-t border-gray-100 pt-3 mt-3">
                             <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Screening Answers</span>
-                            <div className="mt-2 space-y-2">
+                            <div className="mt-2 legacy-space-y-2">
                               {app.screening_answers.map((qa, i) => (
                                 <div key={i} className="text-xs">
                                   <p className="text-gray-500 font-medium">{qa.question}</p>
@@ -856,7 +856,7 @@ export default function CandidateDetail() {
         {activity.length === 0 ? (
           <div className="p-8"><EmptyState title="No activity logged yet" /></div>
         ) : (
-          <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
+          <div className="legacy-divide-y legacy-divide-gray-50 max-h-80 overflow-y-auto">
             {(activity as Array<Record<string, unknown>>).map((evt, i) => (
               <div key={i} className="px-5 py-3 flex items-start gap-3">
                 <div className="w-2 h-2 rounded-full bg-dp-400 mt-1.5 shrink-0" />
@@ -890,10 +890,10 @@ export default function CandidateDetail() {
 
       {viewingRejection && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setViewingRejection(null)}>
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-3" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 legacy-space-y-3" onClick={e => e.stopPropagation()}>
             <h3 className="text-base font-semibold">Rejection reason</h3>
             {splitReasons(viewingRejection.cat).length > 1 ? (
-              <ul className="text-sm text-gray-900 list-disc pl-5 space-y-0.5">
+              <ul className="text-sm text-gray-900 list-disc pl-5 legacy-space-y-0.5">
                 {splitReasons(viewingRejection.cat).map(r => <li key={r}>{r}</li>)}
               </ul>
             ) : (
@@ -909,7 +909,7 @@ export default function CandidateDetail() {
 
       {showStatusModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 legacy-space-y-4 max-h-[90vh] overflow-y-auto">
             <h3 className="text-base font-semibold">Update status</h3>
             <select value={statusValue} onChange={e => setStatusValue(e.target.value)} className="select">
               {['Active', 'Rejected', 'Withdrawn', 'Hold for Future'].map(s => <option key={s} value={s}>{s}</option>)}
@@ -947,7 +947,7 @@ export default function CandidateDetail() {
 
       {showFounderModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 legacy-space-y-4">
             <h3 className="text-base font-semibold">{founderSetTo ? 'Flag for Founder Review' : 'Clear Founder Review flag'}</h3>
             <textarea
               placeholder="Note (optional)"
@@ -965,7 +965,7 @@ export default function CandidateDetail() {
 
       {showSubmitModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 legacy-space-y-4">
             <h3 className="text-base font-semibold">Record submission</h3>
             <input
               value={submitLink}

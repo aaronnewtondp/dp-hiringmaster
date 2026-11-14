@@ -23,14 +23,14 @@ export default function ReasonCheckboxList({ label, options, selected, onChange,
           {selected.length === 0 ? '(select one or more)' : `(${selected.length} selected)`}
         </span>
       </legend>
-      <div className="rounded-lg border border-gray-200 divide-y divide-gray-50 max-h-72 overflow-y-auto">
+      <div className="rounded-lg border border-gray-200 legacy-divide-y legacy-divide-gray-50 max-h-72 overflow-y-auto">
         {options.map(opt => (
           <label key={opt} className="flex items-center gap-2 px-3 py-1 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer">
             <input
               type="checkbox"
               checked={selected.includes(opt)}
               onChange={() => toggle(opt)}
-              className="rounded border-gray-300 text-dp-600 focus:ring-dp-500"
+              className="rounded-sm border-gray-300 text-dp-600 focus:ring-dp-500"
             />
             <span>{opt}</span>
           </label>

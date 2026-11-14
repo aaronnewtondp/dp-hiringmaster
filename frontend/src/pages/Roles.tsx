@@ -75,7 +75,7 @@ export default function Roles() {
     : roles;
 
   return (
-    <div className="space-y-5">
+    <div className="legacy-space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Roles</h1>
@@ -135,7 +135,7 @@ export default function Roles() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="legacy-divide-y legacy-divide-gray-50">
               {filtered.map(role => (
                 <tr key={role.id} className={`hover:bg-gray-50 transition-colors ${
                   role.aging_alert === 'red' ? 'bg-red-50/40' :

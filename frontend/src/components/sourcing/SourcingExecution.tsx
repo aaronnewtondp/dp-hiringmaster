@@ -94,7 +94,7 @@ export default function SourcingExecution({ masterFilterParams }: { masterFilter
                   <th className="table-th text-right"><span className="inline-flex items-center gap-1">Age<InfoTooltip align="right" text="Days since HMS first flagged this — not how overdue the task is (see 'What happened')." /></span></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody className="legacy-divide-y legacy-divide-gray-50">
                 {shown.map(r => (
                   <tr key={r.id} className={r.provisional ? 'text-gray-400' : ''}>
                     <td className="table-td">

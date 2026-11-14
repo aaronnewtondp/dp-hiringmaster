@@ -115,10 +115,10 @@ export default function NewCandidate() {
       <BackButton fallback="/candidates" label="Candidates" className="mb-4" />
       <h1 className="text-xl font-semibold text-gray-900 mb-6">Add candidate</h1>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <form onSubmit={handleSubmit} className="legacy-space-y-5">
 
         {/* ── Identity ─────────────────────────────────────────────────────── */}
-        <div className="card p-6 space-y-4">
+        <div className="card p-6 legacy-space-y-4">
           <h2 className="text-sm font-semibold text-gray-900">Identity</h2>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -141,7 +141,7 @@ export default function NewCandidate() {
         </div>
 
         {/* ── Application ──────────────────────────────────────────────────── */}
-        <div className="card p-6 space-y-4">
+        <div className="card p-6 legacy-space-y-4">
           <h2 className="text-sm font-semibold text-gray-900">Application</h2>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -171,7 +171,7 @@ export default function NewCandidate() {
         </div>
 
         {/* ── Current role & experience ────────────────────────────────────── */}
-        <div className="card p-6 space-y-4">
+        <div className="card p-6 legacy-space-y-4">
           <h2 className="text-sm font-semibold text-gray-900">Current role & experience</h2>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -206,7 +206,7 @@ export default function NewCandidate() {
         </div>
 
         {/* ── Compensation ─────────────────────────────────────────────────── */}
-        <div className="card p-6 space-y-4">
+        <div className="card p-6 legacy-space-y-4">
           <h2 className="text-sm font-semibold text-gray-900">Compensation</h2>
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
@@ -225,7 +225,7 @@ export default function NewCandidate() {
         </div>
 
         {/* ── Resume ───────────────────────────────────────────────────────── */}
-        <div className="card p-6 space-y-4">
+        <div className="card p-6 legacy-space-y-4">
           <h2 className="text-sm font-semibold text-gray-900">Resume</h2>
           <div>
             <label className="label">Resume — Google Drive link *</label>

@@ -69,7 +69,7 @@ export default function SourcingQueue({ queue, loading, failed, onRetry, onChang
   const done = () => { setDialog(null); onChanged(); };
 
   return (
-    <div className="space-y-4">
+    <div className="legacy-space-y-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 justify-between">
         <p className="text-xs text-gray-500" data-testid="sourcing-targets">
           {queue.volume.length > 0
@@ -86,7 +86,7 @@ export default function SourcingQueue({ queue, loading, failed, onRetry, onChang
 
       {queue.plans_to_activate.length > 0 && (
         <Section title="Plans to activate" count={queue.plans_to_activate.length}>
-          <ul className="divide-y divide-gray-50">
+          <ul className="legacy-divide-y legacy-divide-gray-50">
             {acts.shown.map(p => (
               <li key={p.plan_id} className="px-5 py-3 flex items-center gap-3">
                 <PriorityBadge priority={p.priority} />
@@ -104,7 +104,7 @@ export default function SourcingQueue({ queue, loading, failed, onRetry, onChang
 
       {dueToday.length > 0 && (
         <Section title="Due today" count={dueToday.length} info="Tasks due before midnight IST today; once their day ends they move to Needs attention. Working days are Monday to Friday; public holidays are not modelled.">
-          <ul className="divide-y divide-gray-50">
+          <ul className="legacy-divide-y legacy-divide-gray-50">
             {dues.shown.map(d => (
               <li key={d.id} className="px-5 py-3 flex items-center gap-3">
                 <PriorityBadge priority={d.priority} />
@@ -125,14 +125,14 @@ export default function SourcingQueue({ queue, loading, failed, onRetry, onChang
 
       {queue.exceptions.length > 0 && (
         <Section title="Needs attention" count={queue.exception_count} info="Sourcing tasks that were promised and not done, plans not activated in time and similar gaps. New provisional signals are not listed here. This list is shared by all of HR/Admin: there is no personal queue.">
-          <div className="divide-y divide-gray-100">
+          <div className="legacy-divide-y legacy-divide-gray-100">
             {groups.shown.map(g => (
               <div key={g.role_id} className="px-5 py-3">
                 <div className="flex items-center gap-2 mb-1.5">
                   <PriorityBadge priority={g.priority} />
                   <Link to={`/sourcing?sourcing_role=${g.role_id}`} className="text-sm font-medium text-gray-900 hover:text-dp-600">{g.title}</Link>
                         </div>
-                <ul className="space-y-2">
+                <ul className="legacy-space-y-2">
                   {g.items.map(e => (
                     <li key={e.id} className="rounded-lg border border-red-100 bg-red-50/40 px-3 py-2.5 flex items-start gap-3">
                       <div className="flex-1 min-w-0 text-xs">

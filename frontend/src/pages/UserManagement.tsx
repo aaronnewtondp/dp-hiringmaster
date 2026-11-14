@@ -74,7 +74,7 @@ function UserModal({ user, onClose, onSuccess }: {
           <h3 className="text-sm font-semibold text-gray-900">{isNew ? 'Add user' : 'Edit user'}</h3>
           <button onClick={onClose}><X className="w-4 h-4 text-gray-400" /></button>
         </div>
-        <div className="px-5 py-4 space-y-4">
+        <div className="px-5 py-4 legacy-space-y-4">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1.5">Name <span className="text-red-500">*</span></label>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Priya Sharma" className="input text-sm" />
@@ -135,7 +135,7 @@ export default function UserManagement() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="legacy-space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">User Management</h1>
@@ -160,7 +160,7 @@ export default function UserManagement() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="legacy-divide-y legacy-divide-gray-50">
               {users.map((u, idx) => {
                 const isSelf = u.id === currentUser?.id;
                 return (

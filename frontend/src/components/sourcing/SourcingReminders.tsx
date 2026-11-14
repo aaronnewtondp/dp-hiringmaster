@@ -13,7 +13,7 @@ export default function SourcingReminders() {
   return (
     <section aria-label="Coming up" className="card px-4 py-3" data-testid="sourcing-reminders">
       <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400 flex items-center gap-1.5"><CalendarClock className="w-3.5 h-3.5" aria-hidden="true" />Coming up</h2>
-      <ul className="mt-1.5 divide-y divide-gray-50">
+      <ul className="mt-1.5 legacy-divide-y legacy-divide-gray-50">
         {shown.map((r, i) => (
           <li key={`${r.kind}-${r.role_id}-${i}`} className="py-1 flex items-center justify-between gap-3 text-sm">
             <Link to={`/sourcing?sourcing_role=${r.role_id}`} className="text-gray-800 hover:underline">{r.title}<span className="text-gray-400 text-xs"> · {r.detail}</span></Link>

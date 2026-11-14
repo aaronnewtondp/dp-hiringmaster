@@ -459,7 +459,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="legacy-space-y-5">
       {roleIds.length === 1 && roleOptions.some(r => r.value === roleIds[0]) && (
         <div className="inline-flex items-center gap-2 text-sm bg-dp-50 text-dp-800 px-3 py-1.5 rounded-lg">
           Filtered to <span className="font-medium">{roleOptions.find(r => r.value === roleIds[0])?.label}</span>
@@ -643,7 +643,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="legacy-divide-y legacy-divide-gray-50">
               {sortedApps.map((app, idx) => (
                 <Fragment key={app.id}>
                   <tr className="hover:bg-gray-50 transition-colors">
@@ -726,14 +726,14 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                           <button
                             onClick={() => setRejectTargetIds([app.id])}
                             title="Reject"
-                            className="p-1 rounded text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                            className="p-1 rounded-sm text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
                           >
                             <XCircle className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={() => holdForFutureOne(app.id)}
                             title="Hold for future roles"
-                            className="p-1 rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                            className="p-1 rounded-sm text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
                           >
                             <PauseCircle className="w-3.5 h-3.5" />
                           </button>
@@ -768,7 +768,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                           <div>
                             <div className="text-xs text-green-600 font-medium mb-1">✓ Key strengths</div>
                             {app.score_strengths?.length ? (
-                              <ul className="text-xs text-gray-600 space-y-0.5">
+                              <ul className="text-xs text-gray-600 legacy-space-y-0.5">
                                 {app.score_strengths.map((s, i) => <li key={i}>• {s}</li>)}
                               </ul>
                             ) : <p className="text-xs text-gray-400">—</p>}
@@ -776,7 +776,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
                           <div>
                             <div className="text-xs text-red-500 font-medium mb-1">⚠ Red flags</div>
                             {app.score_red_flags?.length ? (
-                              <ul className="text-xs text-gray-600 space-y-0.5">
+                              <ul className="text-xs text-gray-600 legacy-space-y-0.5">
                                 {app.score_red_flags.map((s, i) => <li key={i}>• {s}</li>)}
                               </ul>
                             ) : <p className="text-xs text-gray-400">None noted</p>}

@@ -1492,7 +1492,7 @@ describe('PortfolioReviewCard — long unbroken strings', () => {
     } } });
     renderCard('completed');
     await screen.findByText('A strong designer portfolio.');
-    expect(card().className).toBe('rounded-lg border border-gray-200 bg-white p-3 space-y-3');
+    expect(card().className).toBe('rounded-lg border border-gray-200 bg-white p-3 legacy-space-y-3');
     expect(card().innerHTML).not.toContain('overflow-wrap');
   });
 });

@@ -50,7 +50,7 @@ function CheckinBox({ planId, detail, onDone }: { planId: string; detail: PlanDe
         {c.done && <span className="text-xs text-green-700">Done — you can still change it</span>}
       </div>
       {c.questions.length === 0 ? <p className="text-xs text-gray-400 mt-1">Nothing to ask for this plan yet — the system tracks the live channels itself.</p> : (
-        <div className="mt-2 space-y-1.5">
+        <div className="mt-2 legacy-space-y-1.5">
           {c.questions.map(q => (
             <div key={q} className="flex items-center justify-between gap-3 text-sm">
               <span className="text-gray-700">{QUESTION_LABEL[q] ?? q}</span>
@@ -104,7 +104,7 @@ function OutreachBox({ detail, onDone }: { detail: PlanDetail; onDone: () => voi
       {o.by_title.length > 0 && (
         <table className="mt-2 w-full text-xs">
           <thead><tr className="text-left text-gray-400"><th className="font-medium py-1">Job title</th><th className="font-medium py-1 text-right">Found</th><th className="font-medium py-1 text-right">Contacted</th><th className="font-medium py-1 text-right">Replied</th></tr></thead>
-          <tbody className="divide-y divide-gray-50">{o.by_title.map(t => <tr key={t.job_title}><td className="py-1 text-gray-700">{t.job_title}</td><td className="py-1 text-right font-mono">{t.found}</td><td className="py-1 text-right font-mono">{t.contacted}</td><td className="py-1 text-right font-mono">{t.replied}</td></tr>)}</tbody>
+          <tbody className="legacy-divide-y legacy-divide-gray-50">{o.by_title.map(t => <tr key={t.job_title}><td className="py-1 text-gray-700">{t.job_title}</td><td className="py-1 text-right font-mono">{t.found}</td><td className="py-1 text-right font-mono">{t.contacted}</td><td className="py-1 text-right font-mono">{t.replied}</td></tr>)}</tbody>
         </table>
       )}
       {result && (
@@ -169,11 +169,11 @@ function PlanLines({ planId, detail, canEdit, onDone }: { planId: string; detail
           {detail.rows.length === 0 ? <p className="mt-2 text-xs text-gray-400">No lines yet{canEdit ? ' — pick a template or press Edit to add the channels and weekly work.' : '.'}</p> : (
             <table className="mt-2 w-full text-xs">
               <thead><tr className="text-left text-gray-400"><th className="font-medium py-1">Channel</th><th className="font-medium py-1">Weekly work</th><th className="font-medium py-1">Owner</th><th className="font-medium py-1">Status</th></tr></thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody className="legacy-divide-y legacy-divide-gray-50">
                 {detail.rows.map((r, i) => (
                   <tr key={r.id ?? i} className={r.status === 'not_used' ? 'text-gray-400' : ''}>
                     <td className="py-1 pr-2"><span className="text-gray-800">{r.workbook_channel}</span>{r.platform && <span className="text-gray-400"> · {r.platform}</span>}
-                      {channelsOf(r) ? <span className="ml-1 text-[10px] rounded bg-gray-100 text-gray-500 px-1">{channelsOf(r)}</span> : <span className="ml-1 text-[10px] rounded bg-gray-50 text-gray-400 px-1" title="A supporting activity: it is not measured automatically">not tracked automatically</span>}</td>
+                      {channelsOf(r) ? <span className="ml-1 text-[10px] rounded-sm bg-gray-100 text-gray-500 px-1">{channelsOf(r)}</span> : <span className="ml-1 text-[10px] rounded-sm bg-gray-50 text-gray-400 px-1" title="A supporting activity: it is not measured automatically">not tracked automatically</span>}</td>
                     <td className="py-1 pr-2">{r.status === 'not_used' ? <span>{r.reason}</span> : r.weekly_work ? `${r.weekly_work} ${r.work_unit ?? ''}` : (r.work_unit ?? r.start_condition ?? '—')}</td>
                     <td className="py-1 pr-2">{r.owner_label ?? '—'}</td>
                     <td className="py-1"><span className={r.status === 'live' ? 'text-green-700' : r.status === 'backup' ? 'text-amber-700' : ''}>{STATUS_WORD[r.status]}</span>{r.status === 'backup' && r.start_condition && <span className="text-gray-400"> · {r.start_condition}</span>}</td>
@@ -184,7 +184,7 @@ function PlanLines({ planId, detail, canEdit, onDone }: { planId: string; detail
           )}
         </>
       ) : (
-        <div className="mt-2 space-y-2">
+        <div className="mt-2 legacy-space-y-2">
           <label className="block text-xs text-gray-500">Job titles to target (one per line)
             <textarea className="input text-sm h-20 w-full mt-0.5" value={titles} onChange={e => setTitles(e.target.value)} /></label>
           {rows.map((r, i) => (
@@ -225,7 +225,7 @@ export default function SourcingDetailPanel({ roleId, canEdit }: { roleId: strin
   const h = d.health;
   const active = d.plan_status === 'active';
   return (
-    <div className="space-y-3" data-testid="detail-panel">
+    <div className="legacy-space-y-3" data-testid="detail-panel">
       {active && (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -241,7 +241,7 @@ export default function SourcingDetailPanel({ roleId, canEdit }: { roleId: strin
           {d.channel_results.length > 0 && (
             <table className="w-full text-xs" data-testid="channel-results">
               <thead><tr className="text-left text-gray-400"><th className="font-medium py-1">Channel</th><th className="font-medium py-1 text-right">Candidates</th><th className="font-medium py-1 text-right">Qualified</th><th className="font-medium py-1 text-right">Last activity</th></tr></thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody className="legacy-divide-y legacy-divide-gray-50">
                 {d.channel_results.map(c => (
                   <tr key={c.channel}><td className="py-1 text-gray-700">{c.channel}</td><td className="py-1 text-right font-mono">{c.candidates}</td>
                     <td className="py-1 text-right font-mono">{c.too_few ? <span className="text-gray-400 font-sans">too few to judge</span> : `${c.qualified} (${Math.round((c.share ?? 0) * 100)}%)`}</td>

@@ -1,6 +1,102 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Tailwind 4 reads its theme from CSS; the existing JS config (brand colours, fonts, the
+   pinned v3 palette) stays the single source and is loaded here. */
+@config "../tailwind.config.js";
+
+/* Tailwind 4 applies `hover:` only on devices that can hover. Tailwind 3 applied it on every
+   device (a tap on a touch screen leaves :hover stuck), which is what this app was built and
+   tested against. */
+@custom-variant hover (&:hover);
+
+/* legacy-space-x/y-N, legacy-divide-y, legacy-divide-<colour>: Tailwind 3's `space-*` and `divide-*`.
+   Tailwind 4 rewrote them (every child but the last gets a bottom margin / bottom border, at zero
+   specificity) instead of Tailwind 3's (every child after the first gets a top margin / top border, at
+   high specificity). That changes the layout wherever a child also carries its own margin or border
+   utility - Tailwind 3 let the spacing rule win (`-mt-2` and `border-t-0` inside a `space-y-*` / `divide-y`
+   parent were dead there), Tailwind 4 lets the child win - and it cannot be switched off or overridden under
+   the same name, because the built-in utility keeps being generated beside a custom one. So the markup uses
+   these `legacy-` names, which are the Tailwind 3 rules verbatim. Do not rename them back to `space-` /
+   `divide-` without re-checking every page (see the Tailwind 4 notes in CLAUDE.md). */
+@utility legacy-space-y-* {
+  & > :not([hidden]) ~ :not([hidden]) {
+    --tw-space-y-reverse: 0;
+    margin-top: calc(calc(var(--spacing) * --value(number)) * calc(1 - var(--tw-space-y-reverse)));
+    margin-bottom: calc(calc(var(--spacing) * --value(number)) * var(--tw-space-y-reverse));
+  }
+}
+@utility legacy-space-x-* {
+  & > :not([hidden]) ~ :not([hidden]) {
+    --tw-space-x-reverse: 0;
+    margin-right: calc(calc(var(--spacing) * --value(number)) * var(--tw-space-x-reverse));
+    margin-left: calc(calc(var(--spacing) * --value(number)) * calc(1 - var(--tw-space-x-reverse)));
+  }
+}
+@utility legacy-divide-y {
+  & > :not([hidden]) ~ :not([hidden]) {
+    --tw-divide-y-reverse: 0;
+    border-top-width: calc(1px * calc(1 - var(--tw-divide-y-reverse)));
+    border-bottom-width: calc(1px * var(--tw-divide-y-reverse));
+  }
+}
+@utility legacy-divide-* {
+  & > :not([hidden]) ~ :not([hidden]) {
+    border-color: --value(--color-*, [color]);
+    border-color: color-mix(in oklab, --value(--color-*, [color]) calc(--modifier(integer) * 1%), transparent);
+  }
+}
+
+/* Tailwind 3 defaults that Tailwind 4 changed, pinned so nothing looks or acts differently. */
+@layer base {
+  /* Every border and divider without an explicit colour was gray-200; Tailwind 4 uses currentColor. */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: #e5e7eb; /* gray-200 */
+  }
+  /* Tailwind 4's reset zeroes every element's padding; Tailwind 3 left the browser's own padding on table
+     cells (1px) and options, which a few cells here (`pb-2` alone, `py-1` alone) rely on. */
+  td,
+  th {
+    padding: 1px;
+  }
+  option {
+    padding: 0 2px 1px;
+  }
+  /* Tailwind 4 also strips Chrome's own padding from the inner field of date and time inputs, which made
+     every `type="date"` input 2px shorter than before. */
+  ::-webkit-datetime-edit-fields-wrapper {
+    padding: 1px 0;
+  }
+  /* Tailwind 4 makes form controls transparent; Tailwind 3 left text fields, selects and areas with the
+     browser's own field background (white), and `.input` has no background of its own. */
+  input:not([type="button"], [type="submit"], [type="reset"], [type="file"], [type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="image"], [type="hidden"]),
+  select,
+  textarea {
+    background-color: field;
+  }
+  /* A ring with no colour was blue-500 at 50% in Tailwind 3 (the app has `ring-1 ring-dp-500` and
+     `focus:ring-dp-500`, colours that do not exist in its palette and so fell back to it); Tailwind 4
+     falls back to currentColor. Any `ring-<colour>` utility sets its own value over this. */
+  *,
+  ::after,
+  ::before,
+  ::backdrop {
+    --tw-ring-color: rgb(59 130 246 / 0.5);
+  }
+  /* Buttons showed the pointer cursor; Tailwind 4 leaves the browser default. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  /* Placeholders were gray-400; Tailwind 4 makes them half of the text colour. */
+  input::placeholder,
+  textarea::placeholder {
+    color: #9ca3af; /* gray-400 */
+  }
+}
 
 @layer base {
   body {
@@ -52,13 +148,13 @@ html.is-scrolling * {
     @apply inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors;
   }
   .card {
-    @apply bg-white rounded-xl border border-gray-200 shadow-sm;
+    @apply bg-white rounded-xl border border-gray-200 shadow-xs;
   }
   .input {
-    @apply block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-dp-600 focus:border-transparent;
+    @apply block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-hidden focus:ring-2 focus:ring-dp-600 focus:border-transparent;
   }
   .select {
-    @apply block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-dp-600 focus:border-transparent bg-white;
+    @apply block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-hidden focus:ring-2 focus:ring-dp-600 focus:border-transparent bg-white;
   }
   .label {
     @apply block text-sm font-medium text-gray-700 mb-1;

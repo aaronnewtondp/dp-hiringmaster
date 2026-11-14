@@ -92,7 +92,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
         {/* Nav — active state mirrors the brand book's own sidenav treatment:
             a teal left border + a faint teal wash on the navy field, rather
             than a solid fill block. */}
-        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 px-3 py-4 legacy-space-y-0.5 overflow-y-auto">
           {visible.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
