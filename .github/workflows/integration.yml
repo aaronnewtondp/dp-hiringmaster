@@ -3,11 +3,10 @@ name: Integration (API and database specs)
 # The Playwright `api` and `db` projects against a real backend and a real Postgres, with NO credentials. Nightly and on demand,
 # never on a pull request. No repository secret is needed: the ingest and JWT secrets are generated per run.
 #
-# What it runs: every spec in hms-tests-final/tests/api and tests/db EXCEPT the tests listed in EXCLUDE below. Measured on 2026-11-05
-# against origin/main (b4ccb67), on an isolated stack from hms-tests-final/scripts/test-stack.sh (Postgres 16 on tmpfs, backend from
-# the checkout, an EMPTY environment: no Anthropic or Google credentials) with a fresh database: the two projects hold 792 tests
-# that are not tagged @live; 6 of them fail without credentials or on a stale pin (all excluded below), so 786 are selected,
-# of which 785 pass and 1 skips itself (the real Google Calendar round trip, api/15), in about 40 seconds. Left out on purpose,
+# What it runs: every spec in hms-tests-final/tests/api and tests/db EXCEPT the tests listed in EXCLUDE below. Measured on 2026-11-14
+# with no credentials and a fresh database: the two projects hold 924 tests that are not tagged @live; the EXCLUDE list below leaves
+# out the few that need a real key or a long-lived database, and a run of this job passed 920 and skipped 1 (the real Google
+# Calendar round trip, api/15) in about 40 seconds. Left out on purpose,
 # so a red run here means a real regression and not a missing key:
 #   * browser specs (tests/e2e, tests/e2e-mobile): not in this job; they run in the second job, `e2e`, below (a production build served
 #     by `vite preview`, `playwright install --with-deps chromium`, --project=e2e --project=e2e-mobile, same Postgres service and
