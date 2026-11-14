@@ -38,7 +38,7 @@ export default function RejectReasonModal({ count, saving, onConfirm, onClose }:
           <h3 className="text-sm font-semibold text-gray-900">Reject {count > 1 ? `${count} candidates` : 'candidate'}</h3>
           <button onClick={onClose}><X className="w-4 h-4 text-gray-400" /></button>
         </div>
-        <div className="px-5 py-4 space-y-4 overflow-y-auto">
+        <div className="px-5 py-4 legacy-space-y-4 overflow-y-auto">
           <ReasonCheckboxList label="Reasons" required options={REJECTION_REASONS} selected={reasons} onChange={setReasons} />
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1.5">Additional detail <span className="text-gray-400">(optional)</span></label>

@@ -87,8 +87,8 @@ export default function NewRole() {
       <BackButton fallback="/roles" label="Roles" className="mb-4" />
       <h1 className="text-xl font-semibold text-gray-900 mb-6">{isRequesting ? 'Request new role' : 'Create new role'}</h1>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="card p-6 space-y-4">
+      <form onSubmit={handleSubmit} className="legacy-space-y-6">
+        <div className="card p-6 legacy-space-y-4">
           <h2 className="text-sm font-semibold text-gray-900">Basic information</h2>
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
@@ -173,7 +173,7 @@ export default function NewRole() {
           </div>
         </div>
 
-        <div className="card p-6 space-y-4">
+        <div className="card p-6 legacy-space-y-4">
           <h2 className="text-sm font-semibold text-gray-900">Requirements</h2>
           <div>
             <label className="label">Must Have Skills *</label>
@@ -197,7 +197,7 @@ export default function NewRole() {
           </div>
         </div>
 
-        <div className="card p-6 space-y-4">
+        <div className="card p-6 legacy-space-y-4">
           <h2 className="text-sm font-semibold text-gray-900">Sourcing</h2>
           <div>
             <label className="label">Recruitment Channels *</label>

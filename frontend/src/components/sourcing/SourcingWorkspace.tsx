@@ -84,7 +84,7 @@ export default function SourcingWorkspace({ heading: showHeading = true }: { hea
 
   const selectedDraft = drafts.find(r => r.role_id === selected);
   return (
-    <section id="sourcing-workspace" ref={ref} aria-label="Sourcing plans" className="scroll-mt-4 space-y-3" data-testid="sourcing-workspace">
+    <section id="sourcing-workspace" ref={ref} aria-label="Sourcing plans" className="scroll-mt-4 legacy-space-y-3" data-testid="sourcing-workspace">
       {heading ? <div>{heading}</div> : <h2 className="sr-only">Plans by role</h2>}
 
       {roles.length === 0 && drafts.length === 0 ? (

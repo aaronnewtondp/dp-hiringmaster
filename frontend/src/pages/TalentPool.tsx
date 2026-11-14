@@ -125,7 +125,7 @@ export default function TalentPool() {
     : rows;
 
   return (
-    <div className="space-y-5">
+    <div className="legacy-space-y-5">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Archived Pipeline</h1>
         <p className="text-sm font-mono text-gray-500 mt-0.5 flex items-center gap-1 flex-wrap">
@@ -259,7 +259,7 @@ export default function TalentPool() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="legacy-divide-y legacy-divide-gray-50">
               {sortedRows.map(({ candidate: c, app: a }) => (
                 <tr key={a.id} className="hover:bg-gray-50 transition-colors">
                   <td className="table-td px-2 py-4">
@@ -270,7 +270,7 @@ export default function TalentPool() {
                       {c.hr_tags && c.hr_tags.length > 0 && (
                         <div className="flex gap-1 mt-0.5 flex-wrap">
                           {c.hr_tags.map(t => (
-                            <span key={t} className="text-[10px] bg-gray-100 text-gray-600 px-1 rounded">{t}</span>
+                            <span key={t} className="text-[10px] bg-gray-100 text-gray-600 px-1 rounded-sm">{t}</span>
                           ))}
                         </div>
                       )}

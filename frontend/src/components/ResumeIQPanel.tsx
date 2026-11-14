@@ -99,7 +99,7 @@ export default function ResumeIQPanel({ app }: { app: Application }) {
             </span>
           )}
           {app.score_resume_read === false && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500" title="Resume could not be read; scored from profile fields only">
+            <span className="text-xs px-1.5 py-0.5 rounded-sm bg-gray-100 text-gray-500" title="Resume could not be read; scored from profile fields only">
               No resume read
             </span>
           )}
@@ -129,7 +129,7 @@ export default function ResumeIQPanel({ app }: { app: Application }) {
         {app.score_strengths && app.score_strengths.length > 0 && (
           <div>
             <div className="text-xs text-green-600 font-medium mb-1">✓ Key strengths</div>
-            <ul className="text-xs text-gray-600 space-y-0.5">
+            <ul className="text-xs text-gray-600 legacy-space-y-0.5">
               {app.score_strengths.map((s, i) => <li key={i}>• {s}</li>)}
             </ul>
           </div>
@@ -137,7 +137,7 @@ export default function ResumeIQPanel({ app }: { app: Application }) {
         {app.score_red_flags && app.score_red_flags.length > 0 && (
           <div>
             <div className="text-xs text-red-500 font-medium mb-1">⚠ Red flags</div>
-            <ul className="text-xs text-gray-600 space-y-0.5">
+            <ul className="text-xs text-gray-600 legacy-space-y-0.5">
               {app.score_red_flags.map((s, i) => <li key={i}>• {s}</li>)}
             </ul>
           </div>

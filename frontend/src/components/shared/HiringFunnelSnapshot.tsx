@@ -137,7 +137,7 @@ export default function HiringFunnelSnapshot({
                         aria-expanded={isOpen}
                         aria-controls={`funnel-panel-${s.stage.replace(/\s+/g, '-')}`}
                         onClick={() => toggleStage(s.stage)}
-                        className={`flex flex-col items-center justify-center transition-transform focus:outline-none focus:ring-2 focus:ring-dp-500 focus:ring-offset-2 focus:z-10 ${
+                        className={`flex flex-col items-center justify-center transition-transform focus:outline-hidden focus:ring-2 focus:ring-dp-500 focus:ring-offset-2 focus:z-10 ${
                           isOpen ? 'ring-2 ring-white ring-offset-1 z-10' : ''
                         }`}
                         style={{
@@ -176,7 +176,7 @@ export default function HiringFunnelSnapshot({
                   className="mt-4 border border-gray-100 rounded-xl overflow-hidden"
                 >
                   <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
-                    <h3 ref={panelHeadingRef} tabIndex={-1} className="text-xs font-semibold text-gray-700 outline-none">
+                    <h3 ref={panelHeadingRef} tabIndex={-1} className="text-xs font-semibold text-gray-700 outline-hidden">
                       {openStage}{openType ? <span className="text-gray-400 font-normal"> › {openType}</span> : ''}
                     </h3>
                     <button
@@ -190,7 +190,7 @@ export default function HiringFunnelSnapshot({
                   {activeStageData.breach_types.length === 0 ? (
                     <div className="p-6"><EmptyState title="No breaches — all clear ✓" /></div>
                   ) : (
-                    <div className="divide-y divide-gray-50">
+                    <div className="legacy-divide-y legacy-divide-gray-50">
                       {activeStageData.breach_types.map(bt => (
                         <div key={bt.type}>
                           <button
@@ -198,11 +198,11 @@ export default function HiringFunnelSnapshot({
                             aria-expanded={openType === bt.type}
                             aria-controls={`funnel-type-${bt.type.replace(/\s+/g, '-')}`}
                             onClick={() => toggleType(bt.type)}
-                            className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-dp-500"
+                            className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors focus:outline-hidden focus:ring-2 focus:ring-inset focus:ring-dp-500"
                           >
                             <span className="flex items-center gap-2 text-xs">
                               <span className="font-medium text-gray-800">{bt.type}</span>
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${bt.owner === 'Hiring Manager' ? 'bg-amber-100 text-amber-700' : 'bg-dp-100 text-dp-700'}`}>
+                              <span className={`px-1.5 py-0.5 rounded-sm text-[10px] font-medium ${bt.owner === 'Hiring Manager' ? 'bg-amber-100 text-amber-700' : 'bg-dp-100 text-dp-700'}`}>
                                 {ownerLabel(bt.owner)}
                               </span>
                             </span>
@@ -213,7 +213,7 @@ export default function HiringFunnelSnapshot({
                           </button>
 
                           {openType === bt.type && (
-                            <div id={`funnel-type-${bt.type.replace(/\s+/g, '-')}`} className="px-4 pb-3 space-y-2">
+                            <div id={`funnel-type-${bt.type.replace(/\s+/g, '-')}`} className="px-4 pb-3 legacy-space-y-2">
                               {bt.candidates.length === 0 ? (
                                 <div className="text-xs text-gray-400 py-2">No breaches — all clear ✓</div>
                               ) : (

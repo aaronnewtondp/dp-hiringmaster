@@ -38,7 +38,7 @@ function pctLabel(count: number, total: number) {
 
 function OwnerChip({ owner }: { owner: string }) {
   return (
-    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${owner === 'Hiring Manager' ? 'bg-amber-100 text-amber-700' : 'bg-dp-100 text-dp-700'}`}>
+    <span className={`px-1.5 py-0.5 rounded-sm text-[10px] font-medium ${owner === 'Hiring Manager' ? 'bg-amber-100 text-amber-700' : 'bg-dp-100 text-dp-700'}`}>
       {ownerLabel(owner)}
     </span>
   );
@@ -144,7 +144,7 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
                   <th scope="col" className="py-2 pl-2 font-medium text-right">Total</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody className="legacy-divide-y legacy-divide-gray-50">
                 {roles.map(r => {
                   const bc = new Map((perRole.get(r.role_id) ?? []).map(b => [b.bucket.key, b.count]));
                   return (
@@ -168,7 +168,7 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
                 <button
                   key={b.key} type="button" aria-pressed={hl === b.key}
                   onClick={() => setHighlight(h => (h === b.key ? null : b.key))}
-                  className={`inline-flex items-center gap-1.5 text-xs rounded px-1 py-0.5 transition-opacity ${hl && hl !== b.key ? 'opacity-50' : ''} hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-dp-600`}
+                  className={`inline-flex items-center gap-1.5 text-xs rounded-sm px-1 py-0.5 transition-opacity ${hl && hl !== b.key ? 'opacity-50' : ''} hover:bg-gray-50 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-dp-600`}
                 >
                   <span className="inline-block w-3 h-3 rounded-[3px]" style={{ background: b.color }} aria-hidden="true" />
                   <span className="text-gray-600">{b.label}</span>
@@ -176,7 +176,7 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
               ))}
             </div>
 
-            <ul className="space-y-1">
+            <ul className="legacy-space-y-1">
               {visible.map(r => {
                 const open = expanded === r.role_id;
                 const segs = perRole.get(r.role_id) ?? [];
@@ -194,7 +194,7 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
                         aria-controls={panelId}
                         aria-label={`${r.role_title}: ${r.total} open SLA breaches (${summary}). ${open ? 'Hide' : 'Show'} stage breakdown`}
                         onClick={() => setExpanded(open ? null : r.role_id)}
-                        className="flex items-center gap-2 py-1 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-dp-600"
+                        className="flex items-center gap-2 py-1 rounded-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-dp-600"
                       >
                         <span className="flex-1 min-w-0 h-5 flex">
                           <span className="flex h-full gap-[2px]" style={{ width: `${(r.total / max) * 100}%` }}>
@@ -227,7 +227,7 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
                           </span>
                           <Link to={`/roles/${r.role_id}`} className="text-dp-600 hover:underline whitespace-nowrap">Open role →</Link>
                         </div>
-                        <ul className="divide-y divide-gray-100">
+                        <ul className="legacy-divide-y legacy-divide-gray-100">
                           {r.by_stage.map(s => {
                             const b = (perRole.get(r.role_id) ?? []).find(x => x.stages.some(st => st.stage === s.stage))?.bucket ?? OTHER_BUCKET;
                             return (
@@ -237,7 +237,7 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
                                   <span className="text-xs font-medium text-gray-800 flex-1">{s.stage}</span>
                                   <span className="font-mono text-xs font-semibold text-gray-900">{nf.format(s.count)}</span>
                                 </div>
-                                <ul className="ml-[18px] mt-1 space-y-0.5">
+                                <ul className="ml-[18px] mt-1 legacy-space-y-0.5">
                                   {s.breach_types.map(t => (
                                     <li key={t.type} className="flex items-center gap-2 text-[11px] text-gray-500">
                                       <span>{t.type}</span>
@@ -281,13 +281,13 @@ export default function SlaBreachesByRole({ masterFilterParams }: { masterFilter
         >
           <div className="text-[11px] text-gray-500 truncate">{tip.role.role_title}</div>
           <div className="flex items-center gap-2 mt-0.5">
-            <span className="inline-block w-3 h-[3px] rounded" style={{ background: tip.bucket.color }} aria-hidden="true" />
+            <span className="inline-block w-3 h-[3px] rounded-sm" style={{ background: tip.bucket.color }} aria-hidden="true" />
             <span className="font-mono text-sm font-semibold text-gray-900">{nf.format(tip.count)}</span>
             <span className="text-gray-600">at {tip.bucket.label}</span>
           </div>
           <div className="text-[11px] text-gray-400 mt-0.5">{pctLabel(tip.count, tip.role.total)} of this role's {nf.format(tip.role.total)}</div>
           {tip.stages.length > 1 && (
-            <ul className="mt-1 pt-1 border-t border-gray-100 space-y-0.5">
+            <ul className="mt-1 pt-1 border-t border-gray-100 legacy-space-y-0.5">
               {tip.stages.map(s => (
                 <li key={s.stage} className="flex justify-between gap-3 text-[11px] text-gray-500"><span>{s.stage}</span><span className="font-mono text-gray-700">{nf.format(s.count)}</span></li>
               ))}

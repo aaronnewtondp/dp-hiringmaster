@@ -28,7 +28,7 @@ function WeeksTable({ weeks, label }: { weeks: TrackerWeek[]; label: string }) {
             <th className="font-medium py-1 text-right">Result</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-50">
+        <tbody className="legacy-divide-y legacy-divide-gray-50">
           {shown.map(w => (
             <tr key={w.week_start} className={w.partial ? '' : w.met ? 'bg-green-50/40' : 'bg-red-50/40'} data-testid="tracker-week">
               <td className="py-1 pl-1.5 text-gray-700">{weekLabel(w.week_start, w.week_end)}</td>
@@ -59,7 +59,7 @@ function Tracker({ ch, hr, canEdit, today, planActive, onEdit }: { ch: SourcingP
   const r = t.running;
   const pct = r ? Math.min(100, Math.round((r.actual / Math.max(1, r.target)) * 100)) : 0;
   return (
-    <div className="mt-2 space-y-2.5">
+    <div className="mt-2 legacy-space-y-2.5">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-gray-600">
         <span>Weekly sourcing target: <span className="font-mono font-semibold text-gray-900">{t.target}</span> applicants <span className="text-gray-400">(qualified + unqualified)</span></span>
         {hr && t.link && <a href={t.link} target="_blank" rel="noopener noreferrer" className="text-dp-600 hover:underline">View {ch.channel === 'Direct Outreach' ? 'campaign' : 'job post'}</a>}
@@ -98,7 +98,7 @@ function ClosedSummary({ ch, hr }: { ch: SourcingPlanChannel; hr: boolean }) {
   const [open, setOpen] = useState(true);
   const t = ch.tracker;
   return (
-    <div className="mt-2 rounded-md border border-gray-200 bg-gray-50/60 px-3 py-2.5 text-xs space-y-2" data-testid="closed-summary">
+    <div className="mt-2 rounded-md border border-gray-200 bg-gray-50/60 px-3 py-2.5 text-xs legacy-space-y-2" data-testid="closed-summary">
       <p className="text-gray-600">
         Closed {ch.closed_at ? shortDate(ch.closed_at.slice(0, 10)) : ''}{hr && ch.closed_reason ? <> — <span className="text-gray-700">{ch.closed_reason}</span></> : null}
       </p>
@@ -154,7 +154,7 @@ export default function SourcingChannelBlock({ ch, hr, canEdit, canManage = canE
       {ch.state === 'active' && ch.tracker.applicable && <Tracker ch={ch} hr={hr} canEdit={canManage} today={today} planActive={planActive} onEdit={onEdit} />}
 
       {live && ch.commitments.length > 0 && (
-        <ul className="divide-y divide-gray-50 mt-1.5">
+        <ul className="legacy-divide-y legacy-divide-gray-50 mt-1.5">
           {ch.commitments.map(c => (
             <CommitmentRow key={c.id} c={c} today={today} canEdit={canEdit && planActive}
               canUndo={canEdit && planActive} busy={undoingId === c.id}

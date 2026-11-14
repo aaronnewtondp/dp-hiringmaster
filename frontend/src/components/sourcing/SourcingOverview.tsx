@@ -33,7 +33,7 @@ export default function SourcingOverview() {
     <div className="card px-4 py-3"><div className="text-[11px] uppercase tracking-wide text-gray-400 flex items-center gap-1">{label}<InfoTooltip align="left" text={info} /></div><div className="text-xl font-semibold text-gray-900 mt-0.5">{value}</div></div>
   );
   return (
-    <div className="space-y-4" data-testid="sourcing-overview">
+    <div className="legacy-space-y-4" data-testid="sourcing-overview">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {tile('Roles with an active plan', `${s.roles_with_active_plan} of ${s.roles_total}`, 'Open roles whose sourcing plan has been activated, out of all roles with a plan to activate.')}
         {tile('Check-ins on time', s.checkins_due ? `${s.checkins_on_time} of ${s.checkins_due}` : '—', 'Weekly check-ins filed within two working days of the Friday they were due, over the last four weeks (only weeks the plan was already active).')}
@@ -50,7 +50,7 @@ export default function SourcingOverview() {
           <thead><tr className="text-left text-[11px] uppercase tracking-wide text-gray-400">
             <th className="font-medium px-3 py-2">Role</th><th className="font-medium px-3 py-2">Hiring manager</th><th className="font-medium px-3 py-2">Enough candidates?</th>
             <th className="font-medium px-3 py-2">Right candidates?</th><th className="font-medium px-3 py-2">Plan being worked?</th><th className="font-medium px-3 py-2 text-right">Open alerts</th></tr></thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="legacy-divide-y legacy-divide-gray-100">
             {shown.length === 0 && <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">No roles match.</td></tr>}
             {shown.map((r: OverviewRow) => (
               <tr key={r.role_id} data-testid={`overview-row-${r.role_id}`}>

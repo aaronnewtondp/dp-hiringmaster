@@ -108,7 +108,7 @@ export function ExceptionRow({ e, canEdit, steps, advicePending, onResolve }: {
       <div className="mt-2 rounded-md bg-white/70 border border-gray-100 px-3 py-2" data-testid="exception-next">
         <div className="text-xs text-gray-400 mb-1">Next</div>
         {steps.length > 0 ? (
-          <ol className="space-y-2 list-decimal pl-4 marker:text-gray-300">{steps.map(s => <StepItem key={s.id} step={s} />)}</ol>
+          <ol className="legacy-space-y-2 list-decimal pl-4 marker:text-gray-300">{steps.map(s => <StepItem key={s.id} step={s} />)}</ol>
         ) : (
           <p className="text-xs text-gray-700">{e.next_action}{advicePending && <span className="text-gray-400"> · working out detailed steps…</span>}</p>
         )}

@@ -32,7 +32,7 @@ function ModalShell({ title, subtitle, onClose, footer, children, wide }: {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId}
-        className={`bg-white rounded-xl shadow-xl w-full ${wide ? 'max-w-2xl' : 'max-w-md'} flex flex-col max-h-[90vh] outline-none`}>
+        className={`bg-white rounded-xl shadow-xl w-full ${wide ? 'max-w-2xl' : 'max-w-md'} flex flex-col max-h-[90vh] outline-hidden`}>
         <div className="flex items-start justify-between px-5 py-4 border-b border-gray-100 shrink-0">
           <div>
             <h3 id={titleId} className="text-sm font-semibold text-gray-900">{title}</h3>
@@ -40,7 +40,7 @@ function ModalShell({ title, subtitle, onClose, footer, children, wide }: {
           </div>
           <button type="button" onClick={onClose} aria-label="Close"><X className="w-4 h-4 text-gray-400" /></button>
         </div>
-        <div className="px-5 py-4 space-y-4 overflow-y-auto">{children}</div>
+        <div className="px-5 py-4 legacy-space-y-4 overflow-y-auto">{children}</div>
         <div className="flex gap-3 justify-end px-5 py-4 border-t border-gray-100 shrink-0">{footer}</div>
       </div>
     </div>
@@ -145,7 +145,7 @@ export function ActivatePlanModal({ plan, channels, defaultTarget, suggested, su
           {saving ? <Spinner size="sm" /> : 'Activate plan'}
         </button>
       </>}>
-      <fieldset className="space-y-2">
+      <fieldset className="legacy-space-y-2">
         <legend className="text-xs font-medium text-gray-600 mb-1.5">Channels</legend>
         {SOURCING_CHANNELS.map(ch => {
           const r = rows[ch];
@@ -160,7 +160,7 @@ export function ActivatePlanModal({ plan, channels, defaultTarget, suggested, su
               </label>
 
               {r.included && (
-                <div className="mt-2.5 ml-6 space-y-2">
+                <div className="mt-2.5 ml-6 legacy-space-y-2">
                   <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
                     <input type="checkbox" checked={r.running} onChange={e => set(ch, { running: e.target.checked })} />
                     Already running before today
@@ -532,7 +532,7 @@ export function AddChannelModal({ planId, planStatus, channels, preset, onClose,
         <button type="button" onClick={submit} disabled={saving || !choice} className="btn-primary text-sm">{saving ? <Spinner size="sm" /> : preset ? 'Bring it back' : 'Add channel'}</button>
       </>}>
       {options.length === 0 && <p className="text-sm text-gray-500">Every channel is already in this plan.</p>}
-      <div role="radiogroup" aria-label="Channel" className="space-y-2">
+      <div role="radiogroup" aria-label="Channel" className="legacy-space-y-2">
         {options.map(ch => (
           <button key={ch} type="button" role="radio" aria-checked={choice === ch} onClick={() => setChoice(ch)}
             className={`w-full text-left rounded-lg border-2 px-3 py-2.5 transition-colors ${choice === ch ? 'border-dp-500 bg-dp-50/50' : 'border-gray-200 hover:border-gray-300'}`}>

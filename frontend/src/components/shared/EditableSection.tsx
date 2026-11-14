@@ -171,7 +171,7 @@ export default function EditableSection({ title, data: rawData, fields, onSave, 
   };
 
   return (
-    <div className="card p-5 space-y-3">
+    <div className="card p-5 legacy-space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
@@ -185,7 +185,7 @@ export default function EditableSection({ title, data: rawData, fields, onSave, 
       </div>
 
       {!isEditing ? (
-        <div className="space-y-2">
+        <div className="legacy-space-y-2">
           {visibleFields.filter(f => isConditionMet(f, data)).map(f => {
             const displayVal = data[f.displayKey || f.key];
             const pendingLabel = !data[f.key] ? pendingLabels?.[f.key] : undefined;
@@ -211,7 +211,7 @@ export default function EditableSection({ title, data: rawData, fields, onSave, 
           })}
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="legacy-space-y-3">
           {visibleFields.filter(f => isConditionMet(f, draft)).map(f => (
             <div key={f.key}>
               <label className="label">{f.label}</label>
@@ -267,7 +267,7 @@ export default function EditableSection({ title, data: rawData, fields, onSave, 
                   type="checkbox"
                   checked={draft[f.key] as boolean}
                   onChange={e => setDraft(d => ({ ...d, [f.key]: e.target.checked }))}
-                  className="h-4 w-4 rounded border-gray-300 text-dp-600 focus:ring-dp-600"
+                  className="h-4 w-4 rounded-sm border-gray-300 text-dp-600 focus:ring-dp-600"
                 />
               )}
               {(f.type === 'text' || f.type === 'number' || f.type === 'date' || f.type === 'tags') && (

@@ -27,7 +27,7 @@ export default function AgencyDetail() {
   if (!agency) return <EmptyState title="Agency not found" />;
 
   return (
-    <div className="space-y-6">
+    <div className="legacy-space-y-6">
       <div>
         <BackButton fallback="/agencies" label="Agencies" />
         <div className="flex items-center gap-3">

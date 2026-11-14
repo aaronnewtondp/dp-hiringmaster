@@ -25,7 +25,7 @@ export default function Sourcing() {
   const tab = canHR && (asked === 'overview' || asked === 'companies') ? asked : 'plans';
   const pick = (t: string) => setParams(p => { const n = new URLSearchParams(p); if (t === 'plans') n.delete('tab'); else n.set('tab', t); return n; }, { replace: true });
   return (
-    <div className="space-y-5">
+    <div className="legacy-space-y-5">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Sourcing</h1>
         <p className="text-sm text-gray-500 mt-0.5">Pick a role to see its channels, weekly results, recommended next steps and history.</p>

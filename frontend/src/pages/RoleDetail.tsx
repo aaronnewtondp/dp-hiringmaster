@@ -193,7 +193,7 @@ export default function RoleDetail() {
   const STAGE_ORDER = STAGES;
 
   return (
-    <div className="space-y-6">
+    <div className="legacy-space-y-6">
       {/* Header */}
       <div>
         <BackButton fallback="/roles" label="Roles" />
@@ -228,7 +228,7 @@ export default function RoleDetail() {
               )}
             </div>
           </div>
-          <div className="text-right shrink-0 space-y-2">
+          <div className="text-right shrink-0 legacy-space-y-2">
             <div>
               <div className="text-2xl font-bold text-gray-900">{total}</div>
               <div className="text-xs text-gray-500">active candidates</div>
@@ -297,7 +297,7 @@ export default function RoleDetail() {
             { key: 'target_closure_date', label: 'Close Target', type: 'date' },
           ]}
         />
-        <div className="card p-5 space-y-3">
+        <div className="card p-5 legacy-space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-900">Approval</h2>
             {!editingNote && (
@@ -306,7 +306,7 @@ export default function RoleDetail() {
               </button>
             )}
           </div>
-          <div className="space-y-2">
+          <div className="legacy-space-y-2">
             <div>
               <div className="text-xs text-gray-400 mb-0.5">Approver</div>
               <div className="text-sm text-gray-700">{role.approver_name || '—'}</div>
@@ -364,7 +364,7 @@ export default function RoleDetail() {
             </button>
           )}
         </div>
-        <div className="space-y-2">
+        <div className="legacy-space-y-2">
           <EditableSection
             title="Links & Assets"
             tooltip="Long-form and Social JD are generated automatically when a role is Approved. While it is still Approved, HR can re-run them with Regenerate JD (it overwrites both links); once the role moves on they can't be regenerated here. Some roles have a long-form JD written outside the system — for those the link points straight at that document, Regenerate JD doesn't appear, and ResumeIQ scores against it. Assignment Link is the brief emailed to the candidate by Send Assignment."
@@ -416,7 +416,7 @@ export default function RoleDetail() {
         {total === 0 ? (
           <div className="card p-8"><EmptyState title="No active candidates in this pipeline" /></div>
         ) : (
-          <div className="space-y-3">
+          <div className="legacy-space-y-3">
             {STAGE_ORDER.filter(s => pipeline[s]?.length).map(stage => (
               <div key={stage} className="card overflow-hidden">
                 <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
@@ -426,7 +426,7 @@ export default function RoleDetail() {
                   </div>
                 </div>
                 <table className="w-full">
-                  <tbody className="divide-y divide-gray-50">
+                  <tbody className="legacy-divide-y legacy-divide-gray-50">
                     {pipeline[stage].map(app => (
                       <tr key={app.id} className={`hover:bg-gray-50 ${app.sla_breach ? 'bg-red-50/20' : ''}`}>
                         <td className="table-td font-medium text-gray-900 w-56">
@@ -439,7 +439,7 @@ export default function RoleDetail() {
                         <td className="table-td text-xs text-gray-400">{app.recruiter_screening_status}</td>
                         <td className="table-td">
                           {app.sla_breach && (
-                            <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium" title={SLA_FLAG_INFO}>SLA</span>
+                            <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded-sm font-medium" title={SLA_FLAG_INFO}>SLA</span>
                           )}
                         </td>
                         <td className="table-td">
@@ -466,7 +466,7 @@ export default function RoleDetail() {
         {activity.length === 0 ? (
           <div className="p-8"><EmptyState title="No activity logged yet" /></div>
         ) : (
-          <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
+          <div className="legacy-divide-y legacy-divide-gray-50 max-h-80 overflow-y-auto">
             {(activity as Array<Record<string, unknown>>).map((evt, i) => (
               <div key={i} className="px-5 py-3 flex items-start gap-3">
                 <div className="w-2 h-2 rounded-full bg-dp-400 mt-1.5 shrink-0" />
@@ -486,7 +486,7 @@ export default function RoleDetail() {
 
       {showStatusModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 legacy-space-y-4">
             <h3 className="text-base font-semibold">Update status</h3>
             <select value={statusValue} onChange={e => setStatusValue(e.target.value)} className="select">
               {ROLE_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
@@ -501,7 +501,7 @@ export default function RoleDetail() {
 
       {showDiscardModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 legacy-space-y-4">
             <h3 className="text-base font-semibold text-gray-900">Discard {role.title}?</h3>
             <p className="text-sm text-gray-500">
               This permanently deletes this Draft role. This cannot be undone.

@@ -88,12 +88,12 @@ export default function AssignmentOutcomeModal({ round, onClose, onSuccess }: Pr
           </button>
         </div>
 
-        <div className="px-6 py-5 space-y-6">
+        <div className="px-6 py-5 legacy-space-y-6">
           <section>
             <h3 className="text-sm font-semibold text-gray-900 mb-3">
               Evaluation rubric <span className="text-red-500">*</span>
             </h3>
-            <div className="space-y-2">
+            <div className="legacy-space-y-2">
               {RUBRIC.map(r => (
                 <div key={r.key} className="flex items-center gap-3 p-3 rounded-lg bg-gray-50">
                   <span className="flex-1 text-sm text-gray-700">{r.label} <span className="text-gray-400">({r.weight})</span></span>

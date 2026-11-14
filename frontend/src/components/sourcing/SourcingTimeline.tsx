@@ -49,7 +49,7 @@ export default function SourcingTimeline({ changes, total }: { changes: PlanChan
         </div>
       </div>
       {rows.length === 0 ? <p className="text-xs text-gray-400">Nothing here yet.</p> : (
-        <ol className="relative border-l border-gray-100 ml-1.5 space-y-0">
+        <ol className="relative border-l border-gray-100 ml-1.5 legacy-space-y-0">
           {visible.map(c => {
             const day = localDay(c.at);
             const heading = day !== lastDay ? dayHeading(c.at) : null;

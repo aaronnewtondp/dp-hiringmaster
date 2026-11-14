@@ -52,15 +52,15 @@ export default function RejectionEmailDraft({
   if (!reasons.length) return null;
 
   return (
-    <div className="space-y-2">
+    <div className="legacy-space-y-2">
       <label className="flex items-center gap-2 text-sm text-gray-700">
         <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
         Send rejection email to candidate{isBulk ? 's' : ''}
       </label>
 
       {enabled && (
-        <div className="space-y-2 p-3 bg-gray-50 border border-gray-200 rounded-lg">
-          <div className="text-xs text-gray-500 space-y-0.5">
+        <div className="legacy-space-y-2 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+          <div className="text-xs text-gray-500 legacy-space-y-0.5">
             <div><span className="font-medium">To:</span> {isBulk ? `${bulkCount} candidates` : (recipientEmail || '—')}</div>
           </div>
           <div>

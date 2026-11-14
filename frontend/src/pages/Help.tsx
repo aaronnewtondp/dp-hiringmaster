@@ -300,7 +300,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         answer: (
           <>
             <p>They track three independent things, each updated separately:</p>
-            <ul className="list-disc pl-5 mt-1.5 space-y-1">
+            <ul className="list-disc pl-5 mt-1.5 legacy-space-y-1">
               <li><strong>Stage</strong> — where the candidate sits in the pipeline: Applied and
               Screened, Interview Round 1, Interview Round 2, Assignment Round, Founders Round,
               Reference Check, Pre-Joining Documents, Offer Discussion, Offer Released, Offer Accepted
@@ -583,7 +583,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
         question: 'How do I activate and work a plan? (HR/Admin, Leadership and Super Admin)',
         answer: (
           <>
-            <ol className="list-decimal pl-5 space-y-1">
+            <ol className="list-decimal pl-5 legacy-space-y-1">
               <li>Open <strong>Sourcing</strong> in the left menu, pick the role (a role waiting for
               a plan is listed under "plans waiting to be activated") and click <strong>Activate plan</strong>.
               Tick the channels you'll use and optionally set this role's weekly qualified target. For a
@@ -769,7 +769,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
             Leadership and Super Admin can submit it for any round, and anyone else only for rounds where
             their email is listed as an interviewer (a round with no interviewer listed, such as an
             assignment, is open to everyone).</p>
-            <ul className="list-disc pl-5 space-y-1.5">
+            <ul className="list-disc pl-5 legacy-space-y-1.5">
               <li><strong>HR/Admin</strong> — full visibility and control across roles, candidates,
               approvals, screening, and compensation data for every role.</li>
               <li><strong>Hiring Manager</strong> — views roles, candidates and applications company-wide
@@ -848,7 +848,7 @@ export default function Help() {
   });
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="legacy-space-y-6 max-w-3xl">
       <div>
         <div className="flex items-center gap-2">
           <HelpCircle className="w-5 h-5 text-dp-600" />

@@ -32,7 +32,7 @@ export default function BudgetExceptionModal({ count, saving, onConfirm, onClose
           </h3>
           <button onClick={onClose}><X className="w-4 h-4 text-gray-400" /></button>
         </div>
-        <div className="px-5 py-4 space-y-4">
+        <div className="px-5 py-4 legacy-space-y-4">
           <p className="text-xs text-gray-500">
             A reason is required before shortlisting {count > 1 ? 'these candidates' : 'this candidate'}.
           </p>

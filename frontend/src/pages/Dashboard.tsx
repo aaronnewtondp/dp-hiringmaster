@@ -28,9 +28,9 @@ const AGING_SEVERITY: Record<'red' | 'yellow' | 'ok', number> = { red: 0, yellow
 
 // Every figure comes from the constants in utils/columnInfo.ts, which utils/markerFacts.backend.test.ts checks against jobs/slaChecker.ts.
 const SLA_BREACH_TYPES_INFO = (
-  <div className="space-y-1.5">
+  <div className="legacy-space-y-1.5">
     <div className="font-medium text-white">SLA breach types</div>
-    <ul className="space-y-1">
+    <ul className="legacy-space-y-1">
       <li><b>Idle Candidate</b> (HR/Admin) — no stage change in {SLA_STANDARD_HOURS}h+ (Reference Check, Pre-Joining Docs, Offer Discussion, Offer Released)</li>
       <li><b>Resume Shortlist Pending</b> (Hiring Manager) — not shortlisted within {SLA_STANDARD_HOURS}h of Applied and Screened ({SLA_HIGH_SCORE_HOURS}h if fit score ≥{SLA_HIGH_SCORE_FIT})</li>
       <li><b>Interview/Founders Round Not Scheduled</b> (HR/Admin) — no round with a date booked within {SLA_STANDARD_HOURS}h of entering that stage ({SLA_HIGH_SCORE_HOURS}h if fit score ≥{SLA_HIGH_SCORE_FIT})</li>
@@ -116,7 +116,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="legacy-space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Dashboard</h1>
@@ -210,7 +210,7 @@ export default function Dashboard() {
                     <th className="table-th" title={AGE_COLUMN_INFO}>Age</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-50">
+                <tbody className="legacy-divide-y legacy-divide-gray-50">
                   {[...aging_roles]
                     .sort((a, b) => AGING_SEVERITY[a.aging_alert] - AGING_SEVERITY[b.aging_alert])
                     .map(r => (
@@ -247,7 +247,7 @@ export default function Dashboard() {
               <InfoTooltip align="left" text="Where every application sits right now. Each application is counted once, at its current stage — a candidate who has moved on is not counted at earlier stages. The bar shows Active candidates at that stage; the small text beneath counts those Rejected, Withdrawn or put on Hold for Future while at it (their stage freezes where it happened). Joined and Closed applications aren't shown, so the Joined bar stays at 0." width="w-80" />
             </div>
           </div>
-          <div className="px-5 py-4 space-y-2.5">
+          <div className="px-5 py-4 legacy-space-y-2.5">
             {FUNNEL_ORDER.map(stage => {
               const f = funnelMap.get(stage);
               const active = f?.active ?? 0;
@@ -263,7 +263,7 @@ export default function Dashboard() {
                       />
                     </div>
                     {(!!f?.rejected || !!f?.withdrawn || !!f?.hold_for_future) && (
-                      <div className="text-[10px] font-mono mt-0.5 space-x-2">
+                      <div className="text-[10px] font-mono mt-0.5 legacy-space-x-2">
                         {!!f?.rejected && <span className="text-red-400">{f.rejected} rejected</span>}
                         {!!f?.withdrawn && <span className="text-amber-500">{f.withdrawn} withdrawn</span>}
                         {!!f?.hold_for_future && <span className="text-gray-400">{f.hold_for_future} on hold</span>}
@@ -298,7 +298,7 @@ export default function Dashboard() {
               <h2 className="text-sm font-semibold text-gray-900">Source quality</h2>
               <InfoTooltip align="left" width="w-80" text="Per source, using each candidate's own Source field (Naukri/IIMjobs, LinkedIn, Internal Referral, Agency, Direct Outreach). Candidates who arrived through the Job Application Form are recorded as LinkedIn, so that bar includes every form applicant. Computed over all applications, not just Active. Pass rate = % that reached Interview Round 1 or later. Hire rate = % that reached Offer Accepted or later. Contribution = the source's share of all applications that have a source. This is the candidate's Source field, not what applicants say on the application form: where the Sourcing page is switched on, that answer is shown there under Applications by source." />
             </div>
-            <div className="px-5 py-4 space-y-4">
+            <div className="px-5 py-4 legacy-space-y-4">
               {source_quality.length === 0 ? (
                 <EmptyState title="No sourced applications yet" />
               ) : (
@@ -308,7 +308,7 @@ export default function Dashboard() {
                       <span className="text-xs font-medium text-gray-700 truncate">{s.source_channel}</span>
                       <span className="text-xs font-mono text-gray-400 shrink-0">{s.n} {s.n === 1 ? 'application' : 'applications'}</span>
                     </div>
-                    <div className="space-y-1">
+                    <div className="legacy-space-y-1">
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-gray-400 w-24 shrink-0">Pass rate</span>
                         <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -364,7 +364,7 @@ export default function Dashboard() {
                     <th className={`${NUM_TH} w-[84px] !pr-3`} title="Shortlisted AND scored above 60 (information only)">Shortlisted &gt;60</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-50">
+                <tbody className="legacy-divide-y legacy-divide-gray-50">
                   {low_pipeline.map(r => (
                     <tr key={r.id}>
                       <td className="table-td !px-3 font-medium text-gray-900">
@@ -400,7 +400,7 @@ export default function Dashboard() {
               <h2 className="text-sm font-semibold text-gray-900">Turnaround time by stage</h2>
               <InfoTooltip align="left" text="Average time between entering a stage and leaving it, mined from the stage-change activity log — sorted slowest first, so the top bar is literally where time is being lost the most. Only stays that have ended count, so people still at a stage, or rejected or withdrawn there, are left out. Applied and Screened is measured from the application date (for Naukri imports, the date they applied on Naukri)." />
             </div>
-            <div className="px-5 py-4 space-y-2.5">
+            <div className="px-5 py-4 legacy-space-y-2.5">
               {velocity.tat_by_stage.length === 0 ? (
                 <EmptyState title="Not enough stage-change history yet" />
               ) : (() => {
@@ -424,7 +424,7 @@ export default function Dashboard() {
           </div>
 
           {/* Interview→Offer ratio + biggest drop-off */}
-          <div className="space-y-6">
+          <div className="legacy-space-y-6">
             <div className="card p-5">
               <div className="flex items-center gap-2 mb-2">
                 <TrendingUp className="w-4 h-4 text-dp-600" />
@@ -445,7 +445,7 @@ export default function Dashboard() {
                 <InfoTooltip align="left" text="Highest count: the stage where the most candidates were rejected (biased toward busy early stages). Highest rate: the stage with the biggest share of its candidates rejected — rejected ÷ everyone currently or last at that stage, so people who moved on aren't counted and the rate overstates real rejection odds. Shown together because they can point at different stages." width="w-80" />
               </div>
               {velocity.biggest_drop_off ? (
-                <div className="space-y-2">
+                <div className="legacy-space-y-2">
                   <div>
                     <div className="text-sm font-semibold text-gray-900">{velocity.biggest_drop_off.stage}</div>
                     <div className="text-xs font-mono text-gray-400">{velocity.biggest_drop_off.count} rejected — highest count</div>

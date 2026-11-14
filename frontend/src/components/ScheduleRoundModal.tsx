@@ -71,7 +71,7 @@ export default function ScheduleRoundModal({ applicationId, nextRoundNumber, def
           <h3 className="text-sm font-semibold text-gray-900">Schedule interview round</h3>
           <button onClick={onClose}><X className="w-4 h-4 text-gray-400" /></button>
         </div>
-        <div className="px-5 py-4 space-y-4">
+        <div className="px-5 py-4 legacy-space-y-4">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1.5">Round name <span className="text-red-500">*</span></label>
             <input

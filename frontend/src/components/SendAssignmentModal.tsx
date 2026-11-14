@@ -111,8 +111,8 @@ export default function SendAssignmentModal({
           </h3>
           <button onClick={onClose}><X className="w-4 h-4 text-gray-400" /></button>
         </div>
-        <div className="px-5 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
-          <div className="text-xs text-gray-500 space-y-1">
+        <div className="px-5 py-4 legacy-space-y-4 max-h-[70vh] overflow-y-auto">
+          <div className="text-xs text-gray-500 legacy-space-y-1">
             <div>To: <span className="text-gray-900 font-medium">{candidateEmail || '—'}</span></div>
             <div>Subject: <span className="text-gray-900 font-medium">{subject}</span></div>
           </div>

@@ -35,7 +35,7 @@ export default function CompBenchmarkPanel({ roleId }: { roleId: string }) {
   };
 
   return (
-    <div className="card p-5 space-y-3">
+    <div className="card p-5 legacy-space-y-3">
       <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
         <Calculator className="w-4 h-4 text-gray-400" /> Internal Compensation Benchmarking
         <InfoTooltip align="left" text="Benchmarks this role itself, not any one candidate. It uses DigitalPaani's own benchmark records when one exists for exactly this role title (if there are several, the one for the role's experience range, otherwise the first on file). With none, it gives an AI estimate from the role's title, department, experience, must-have skills and responsibilities, labelled as such. The result is not compared with this role's CTC Band." />

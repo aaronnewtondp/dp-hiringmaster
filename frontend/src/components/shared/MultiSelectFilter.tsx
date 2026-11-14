@@ -124,7 +124,7 @@ export default function MultiSelectFilter({ label, options, selected, onChange }
                   type="checkbox"
                   checked={selected.includes(opt.value)}
                   onChange={() => toggle(opt.value)}
-                  className="rounded border-gray-300 text-dp-600 focus:ring-dp-500"
+                  className="rounded-sm border-gray-300 text-dp-600 focus:ring-dp-500"
                 />
                 <span className="truncate">{opt.label}</span>
               </label>
