@@ -9,13 +9,9 @@ name: Integration (API and database specs)
 # that are not tagged @live; 6 of them fail without credentials or on a stale pin (all excluded below), so 786 are selected,
 # of which 785 pass and 1 skips itself (the real Google Calendar round trip, api/15), in about 40 seconds. Left out on purpose,
 # so a red run here means a real regression and not a missing key:
-#   * browser specs (tests/e2e, tests/e2e-mobile, 250 tests): NOT run here yet. They pass 245 of 250 on a production build served by
-#     `vite preview` (test-stack.sh preview), but 2 Dashboard info-marker tests fail every time (e2e/13: a popover's bottom is covered
-#     by the page) and 1 e2e/09 test is stale after PR #55 (see db/17 below); and the job would also need `playwright install --with-deps
-#     chromium`, a frontend build and a preview server on a runner nobody has watched yet. Follow-up: fix or retire those three tests,
-#     then add an e2e job (npm ci in frontend/, `npx playwright install --with-deps chromium`, VITE_API_URL=http://localhost:4000/api
-#     vite build + vite preview --port 5173, TEST_FRONTEND_URL, --project=e2e --project=e2e-mobile) and run it a few times before it
-#     is relied on.
+#   * browser specs (tests/e2e, tests/e2e-mobile): not in this job; they run in the second job, `e2e`, below (a production build served
+#     by `vite preview`, `playwright install --with-deps chromium`, --project=e2e --project=e2e-mobile, same Postgres service and
+#     per-run secrets, no credentials).
 #   * tests/smoke: production-only, read-only checks against the live deployment.
 # The suite's own documentation puts the full local run at ~45 minutes; almost all of that is the browser project and the real
 # Claude / Google calls, not these specs.
@@ -154,5 +150,122 @@ jobs:
             hms-tests-final/playwright-report/
             hms-tests-final/test-results/
             ${{ runner.temp }}/backend.log
+          retention-days: 7
+          if-no-files-found: warn
+
+  e2e:
+    name: Playwright e2e + e2e-mobile projects (production build, no credentials)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hms_user
+          POSTGRES_PASSWORD: hms_password   # the db helpers hard-code postgresql://hms_user:hms_password@localhost:5432/dp_hms
+          POSTGRES_DB: dp_hms
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hms_user -d dp_hms"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: hms_user
+      PGPASSWORD: hms_password
+      PGDATABASE: dp_hms
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
+            hms-tests-final/package-lock.json
+      - name: Install frontend, backend and test dependencies
+        run: |
+          npm ci --prefix frontend
+          npm ci --prefix backend
+          npm ci --prefix hms-tests-final
+      - name: Install Chromium for Playwright (with its system libraries)
+        working-directory: hms-tests-final
+        run: npx playwright install --with-deps chromium
+      - name: psql client
+        run: |
+          command -v psql >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends postgresql-client; }
+          psql --version
+      - name: Per-run secrets (generated, masked, never stored)
+        run: |
+          for name in JWT_SECRET ROLE_INGEST_SECRET CANDIDATE_INGEST_SECRET CRON_SECRET; do
+            value="$(openssl rand -hex 32)"
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done
+      - name: Build the database (schema.sql, then seed.sql)
+        run: bash .github/ci/apply-db.sh
+      - name: Workaround for the stuck eval-question and comp-benchmark sequences (see the file; delete when fixed)
+        run: psql -v ON_ERROR_STOP=1 -q -f .github/ci/seed-sequence-workaround.sql
+      - name: Start the backend (npx tsx src/server.ts, no Anthropic or Google credentials)
+        working-directory: backend
+        env:
+          NODE_ENV: development   # rate limiters are skipped outside production, as in the local suite
+          PORT: "4000"
+          DATABASE_URL: postgresql://hms_user:hms_password@localhost:5432/dp_hms
+          FRONTEND_URL: http://localhost:5173
+          SOURCING_ENABLED: "true"   # on in production since 2026-10-20; the sourcing specs skip themselves when it is off
+        run: |
+          npx tsx src/server.ts > "$RUNNER_TEMP/backend.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/backend.pid"
+          for _ in $(seq 1 60); do
+            curl -fsS http://localhost:4000/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://localhost:4000/health
+      - name: Build the frontend (production build, API URL baked in)
+        working-directory: frontend
+        env:
+          VITE_API_URL: http://localhost:4000/api
+        run: npx vite build
+      - name: Serve the build (vite preview on 5173)
+        working-directory: frontend
+        run: |
+          npx vite preview --port 5173 --strictPort > "$RUNNER_TEMP/preview.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/preview.pid"
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:5173/ >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://localhost:5173/ >/dev/null
+      - name: Playwright (e2e and e2e-mobile projects)
+        working-directory: hms-tests-final
+        env:
+          TEST_API_URL: http://localhost:4000
+          TEST_FRONTEND_URL: http://localhost:5173
+          TEST_JWT_SECRET: ${{ env.JWT_SECRET }}   # specs that forge tokens must sign with the per-run secret the backend was started with
+          PLAYWRIGHT_HTML_OPEN: never
+        run: npx playwright test --project=e2e --project=e2e-mobile --reporter=list,html
+      - name: Stop the backend and the preview server
+        if: always()
+        run: |
+          for f in backend preview; do
+            if [ -f "$RUNNER_TEMP/$f.pid" ]; then kill "$(cat "$RUNNER_TEMP/$f.pid")" 2>/dev/null || true; fi
+          done
+      - name: Keep the Playwright report and the server logs when something failed
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-failure-${{ github.run_id }}
+          path: |
+            hms-tests-final/playwright-report/
+            hms-tests-final/test-results/
+            ${{ runner.temp }}/backend.log
+            ${{ runner.temp }}/preview.log
           retention-days: 7
           if-no-files-found: warn
