@@ -9,7 +9,7 @@
 //
 // MEASURED on 2026-10-29 (109 production files) with the three type-aware rules at their defaults: 89 findings, ALL of one
 // kind, no-misused-promises "voidReturnArgument": 87 are Express route handlers (async functions passed to router.get/post/...,
-// which is correct here because server.ts imports express-async-errors) and 2 are node-cron callbacks in jobs/scheduler.ts
+// which is correct here because Express 5 forwards a rejected async handler to the error handler) and 2 are node-cron callbacks in jobs/scheduler.ts
 // (dead code: nothing imports startScheduler, and both bodies are try/catch). No-floating-promises: 0. Await-thenable: 0.
 // Hence the two scoped decisions below. Everything else is the plain default.
 import path from 'node:path';
@@ -58,7 +58,7 @@ export default tseslint.config(
     },
   },
   {
-    // Express route handlers: an async handler is fine because server.ts imports express-async-errors (a rejection becomes the
+    // Express route handlers: an async handler is fine because Express 5 forwards its rejection to the error handler (it becomes the
     // 500 handler, not an unhandled rejection). Only callback ARGUMENTS are exempted here; conditionals, spreads, returns,
     // variables, properties, attributes and the floating-promise rule all still apply to routes.
     files: ['backend/src/routes/**/*.ts'],

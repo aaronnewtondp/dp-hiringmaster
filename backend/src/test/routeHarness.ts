@@ -12,13 +12,12 @@
 //
 // Everything a test sees about a person is synthetic (example.test addresses, ids like U9001).
 //
-// One trap: express-async-errors (imported below, and by server.ts) turns a rejected async handler into a 500 by wrapping
-// Express's Layer at the moment a route is CREATED. A test file that imports a router must therefore load it AFTER that
-// patch — put `import 'express-async-errors';` first in the test file (or import this module before the router). Otherwise a
-// handler that throws leaves an unhandled rejection and a request that never answers.
+// Express 5 forwards a rejected async handler to the error handler itself (express-async-errors was removed with the
+// Express 4 -> 5 upgrade), so no import-order trick is needed any more.
 
-import 'express-async-errors';
 import http from 'node:http';
+import path from 'node:path';
+import { createRequire } from 'node:module';
 import type { AddressInfo } from 'node:net';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import jwt from 'jsonwebtoken';
@@ -146,16 +145,47 @@ export interface RouteEntry {
 interface ExpressLayer {
   route?: { path: string; methods: Record<string, boolean> };
   name?: string;
-  regexp?: RegExp;
+  slash?: boolean;      // Express 5 (router 2.x): true for a layer mounted at '/' (it sees every request)
+  mountPath?: string;   // set by recordMountPaths() below: the literal path a layer was mounted at
   handle?: { stack?: ExpressLayer[] };
 }
 
-/** The literal path an `app.use('/api/x', router)` was mounted at, read back from the layer's regexp (path-to-regexp 0.1). */
+/**
+ * Express 5's router keeps no readable copy of the path a `use('/api/x', …)` was mounted at (its Layer holds only a compiled
+ * matcher function; Express 4 kept a regexp). So Router.prototype.use is wrapped ONCE, at import, to stamp each layer it creates with
+ * the literal path it was given. Import this module BEFORE anything that builds the app (the authentication matrix imports it
+ * ahead of server.ts for exactly that reason): a layer created earlier has no stamp and `mountPathOf` throws on it.
+ */
+function recordMountPaths(): void {
+  const fromBackend = createRequire(path.join(__dirname, '..', '..', 'package.json'));
+  const Router = createRequire(fromBackend.resolve('express'))('router') as {
+    prototype: { use: (...args: unknown[]) => unknown; __mountRecorder?: boolean };
+  };
+  const proto = Router.prototype;
+  if (proto.__mountRecorder) return;
+  const original = proto.use;
+  proto.use = function patchedUse(this: { stack: ExpressLayer[] }, ...args: unknown[]) {
+    const before = this.stack.length;
+    const result = original.apply(this, args);
+    const first = args[0];
+    const mount = typeof first === 'string' ? first : '/';   // use(fn…) / use([fn…]) are mounted at '/'
+    for (const layer of this.stack.slice(before)) layer.mountPath = mount;
+    return result;
+  };
+  proto.__mountRecorder = true;
+}
+recordMountPaths();
+
 function mountPathOf(layer: ExpressLayer): string {
-  const source = layer.regexp?.source ?? '';
-  const m = /^\^((?:\\\/[^\\/()?^$|*+\[\]{}]*)*)\\\/\?\(\?=\\\/\|\$\)$/.exec(source);
-  if (!m) throw new Error(`cannot read the mount path of a router layer from ${source}`);
-  return m[1].replace(/\\\//g, '/');
+  if (layer.mountPath === undefined) {
+    throw new Error('cannot read the mount path of a router layer: it was created before routeHarness was imported');
+  }
+  return layer.mountPath === '/' ? '' : layer.mountPath.replace(/\/+$/, '');
+}
+
+/** Express 5 keeps the app's router at `app.router` (Express 4: `app._router`). */
+function stackOf(app: Express): ExpressLayer[] {
+  return ((app as unknown as { router?: { stack: ExpressLayer[] } }).router?.stack) ?? [];
 }
 
 /**
@@ -164,7 +194,7 @@ function mountPathOf(layer: ExpressLayer): string {
  * some other way cannot be silently left out of a table that is meant to be complete.
  */
 export function listRoutes(app: Express): RouteEntry[] {
-  const stack = ((app as unknown as { _router?: { stack: ExpressLayer[] } })._router?.stack) ?? [];
+  const stack = stackOf(app);
   const out: RouteEntry[] = [];
   const add = (prefix: string, layer: ExpressLayer) => {
     if (!layer.route) return;
@@ -196,12 +226,10 @@ export interface MiddlewareEntry {
  * list as well, in order, so any new one has to be written down on purpose.
  */
 export function listMiddleware(app: Express): MiddlewareEntry[] {
-  const stack = ((app as unknown as { _router?: { stack: ExpressLayer[] } })._router?.stack) ?? [];
   const out: MiddlewareEntry[] = [];
-  for (const layer of stack) {
+  for (const layer of stackOf(app)) {
     if (layer.route || layer.name === 'router') continue;
-    const fastSlash = (layer.regexp as unknown as { fast_slash?: boolean } | undefined)?.fast_slash === true;
-    out.push({ path: fastSlash ? '*' : mountPathOf(layer), name: layer.name ?? '' });
+    out.push({ path: layer.slash === true ? '*' : mountPathOf(layer), name: layer.name ?? '' });
   }
   return out;
 }

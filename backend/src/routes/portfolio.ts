@@ -109,7 +109,7 @@ router.get('/:id/portfolio-analysis', authenticate, async (req: Request, res: Re
 
 // POST — HR re-runs the review (re-extracts the links, queues the job).
 router.post('/:id/portfolio-analysis', authenticate, requireHR, async (req: Request, res: Response) => {
-  const r = await requeue(req.params.id);
+  const r = await requeue(String(req.params.id));
   if (!r.ok) { res.status(r.code).json({ error: r.error }); return; }
   res.status(202).json({ status: r.status, links: r.links, queued: r.queued });
 });
