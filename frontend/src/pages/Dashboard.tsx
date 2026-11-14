@@ -291,8 +291,8 @@ export default function Dashboard() {
           <h2 className="text-base font-semibold text-gray-900">Source quality &amp; pipeline</h2>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          {/* Source Quality */}
-          <div className="card overflow-hidden lg:col-span-2">
+          {/* Source Quality. No overflow-hidden on the card: its info tooltip is long and the card is short when empty. */}
+          <div className="card lg:col-span-2">
             <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
               <Radio className="w-4 h-4 text-gray-400" />
               <h2 className="text-sm font-semibold text-gray-900">Source quality</h2>
