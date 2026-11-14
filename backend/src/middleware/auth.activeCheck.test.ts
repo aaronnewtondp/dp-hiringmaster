@@ -1,4 +1,3 @@
-import 'express-async-errors';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import jwt from 'jsonwebtoken';
 import type { Request, Response } from 'express';

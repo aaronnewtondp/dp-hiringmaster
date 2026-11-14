@@ -30,11 +30,12 @@ vi.mock('@vercel/queue', async () => (await import('./test/externalMocks.js')).v
 vi.mock('./jobs/slaChecker.js', async (orig) => ({ ...(await orig<typeof import('./jobs/slaChecker.js')>()), runSlaCheck: vi.fn(async () => undefined), sendDailyDigest: vi.fn(async () => undefined) }));
 vi.mock('./jobs/sourcingChecker.js', async (orig) => ({ ...(await orig<typeof import('./jobs/sourcingChecker.js')>()), maybeRunSourcingCheck: vi.fn(async () => undefined), runSourcingCheck: vi.fn(async () => ({})) }));
 
-import app from './server.js';
-import { fakeDb } from './test/fakeDb.js';
+// routeHarness FIRST: it stamps each mounted layer with its literal path (Express 5 keeps none), and must do so before server.ts builds the app.
 import {
   ALL_PERSONAS, ApiClient, SMOKE_USER, TEST_JWT_SECRET, TEST_USERS, concretePath, listMiddleware, listRoutes, setEnv, signToken,
 } from './test/routeHarness.js';
+import app from './server.js';
+import { fakeDb } from './test/fakeDb.js';
 
 // ─── the documented outcome of every route ──────────────────────────────────────────────────────────────────────
 type Gate =
@@ -230,8 +231,9 @@ describe('the route table is exactly the documented one', () => {
     // handler). A new entry here means someone mounted a handler that listRoutes cannot enumerate: give it authenticate and a row in
     // GATES by making it a router, or write it down here on purpose.
     expect(listMiddleware(app)).toEqual([
-      { path: '*', name: 'query' }, { path: '*', name: 'expressInit' }, { path: '*', name: 'helmetMiddleware' },
+      { path: '*', name: 'helmetMiddleware' },
       { path: '*', name: 'corsMiddleware' }, { path: '*', name: 'jsonParser' },
+      { path: '*', name: '<anonymous>' },   // server.ts: req.body defaults to {} (Express 5 leaves it undefined on a bodyless request)
       { path: '/api/auth', name: '<anonymous>' }, { path: '/api', name: '<anonymous>' },
       { path: '*', name: '<anonymous>' }, { path: '*', name: '<anonymous>' },
     ]);

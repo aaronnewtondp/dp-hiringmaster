@@ -1,5 +1,3 @@
-// First, before any router is imported (see src/test/routeHarness.ts): express-async-errors must patch Express before a route exists.
-import 'express-async-errors';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 
 // The governance rules of routes/applications.ts (CLAUDE.md "Application state model" and "Hiring Manager's real capability set"),

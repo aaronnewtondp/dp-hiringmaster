@@ -1,6 +1,3 @@
-// First, before any router is imported: express-async-errors patches Express's Layer when a route is CREATED, so a router
-// loaded earlier would leave a rejected handler as an unhandled rejection and the request hanging instead of a 500.
-import 'express-async-errors';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';

@@ -1,4 +1,3 @@
-import 'express-async-errors';
 import roleIngestRoutes from './routes/roleIngest.js';
 import candidateIngestRoutes from './routes/candidateIngest.js';
 /**
@@ -35,6 +34,11 @@ const app = express();
 
 
 app.set('trust proxy', 1);  // Required behind Vercel's edge network
+// Express 5 changed two defaults this app depends on; both are pinned back to the Express 4 behaviour:
+//  - query parser: 'simple' (node:querystring) is the new default and does NOT understand the `status[]=A&status[]=B`
+//    form axios sends for array params (it would yield req.query['status[]'], silently dropping every multi-select
+//    filter); 'extended' (qs) is what Express 4 used.
+app.set('query parser', 'extended');
 
 app.use(helmet());
 app.use(cors({
@@ -42,6 +46,8 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '2mb' }));
+//  - req.body is undefined (not {}) when a request has no body; many handlers read req.body.x on bodyless POSTs/PATCHes.
+app.use((req, _res, next) => { if (req.body === undefined) req.body = {}; next(); });
 app.use('/api/roles', roleIngestRoutes);
 app.use('/api/candidates', candidateIngestRoutes);
 
