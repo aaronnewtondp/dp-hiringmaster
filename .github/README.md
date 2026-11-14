@@ -9,7 +9,7 @@ Everything here runs on GitHub-hosted `ubuntu-latest` runners, which are free an
 | `dependency-review.yml` | PR | fails a PR that adds or updates a dependency to a version with a high or critical advisory |
 | `secret-scan.yml` | PR, push, weekly | gitleaks over the new commits (PR, push) or the whole history (weekly, manual) |
 | `audit.yml` | weekly, manual, PRs touching a lockfile | `npm audit --omit=dev` for backend and frontend; informational, never fails the run |
-| `integration.yml` | nightly, manual | Playwright `api` + `db` projects against a real backend and Postgres, no credentials (659 tests, about 20 s) |
+| `integration.yml` | nightly, manual | Playwright `api` + `db` projects against a real backend and Postgres, no credentials (about 40 s) |
 
 ## Two ratchets (read before "fixing" a warning)
 
