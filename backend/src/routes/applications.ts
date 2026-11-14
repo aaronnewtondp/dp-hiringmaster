@@ -627,7 +627,7 @@ router.patch('/:id/notes', requireHR, async (req: Request, res: Response) => {
   if (req.body.hr_priority_override) {
     const app = await queryOne<Application>('SELECT candidate_id, role_id FROM applications WHERE id=$1', [req.params.id]);
     await transaction(async (client) => {
-      await logActivity(client, req.params.id, app!.candidate_id, app!.role_id,
+      await logActivity(client, String(req.params.id), app!.candidate_id, app!.role_id,
         'Priority Override Set', `HR Priority → ${req.body.hr_priority_override}: ${req.body.hr_priority_override_reason || ''}`,
         null, req.body.hr_priority_override, req.user!.userId, req.user!.name
       );
