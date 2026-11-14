@@ -138,6 +138,7 @@ jobs:
         working-directory: hms-tests-final
         env:
           TEST_API_URL: http://localhost:4000
+          TEST_JWT_SECRET: ${{ env.JWT_SECRET }}   # api/42, 44, 45 forge tokens; they must sign with the per-run secret the backend was started with
           PLAYWRIGHT_HTML_OPEN: never
         run: npx playwright test --project=api --project=db --grep-invert "$EXCLUDE" --reporter=list,html
       - name: Stop the backend
