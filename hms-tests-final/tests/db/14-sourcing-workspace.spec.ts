@@ -88,8 +88,10 @@ test.describe('Sourcing workspace', () => {
     Number((await sql(`SELECT count(*) AS n FROM sourcing_plan_changes WHERE plan_id=$1::bigint AND change->>'type'=$2`, [pid, type]))[0].n);
   const liveExceptions = (pid: string) =>
     sql(`SELECT id::text AS id, channel, type, status, is_shadow, evidence FROM sourcing_exceptions WHERE plan_id=$1::bigint AND status IN ('open','snoozed','blocked') ORDER BY id`, [pid]);
-  /** The live exceptions that are about a channel's tasks (a P0/P1 plan with no applications also carries a plan-level VOLUME_GAP). */
-  const liveTaskExceptions = async (pid: string) => (await liveExceptions(pid)).filter(e => e.type !== 'VOLUME_GAP');
+  /** The live exceptions that are about a channel's tasks: the original task family only. A P0/P1 plan with no applications also carries a plan-level
+   *  VOLUME_GAP, and since PR #63 a plan whose applicants wait can carry provisional plan-detailing alerts (SCREENING_BACKLOG …), which are not task alerts. */
+  const TASK_EXCEPTION_TYPES = ['PLAN_NOT_ACTIVATED', 'CHANNEL_NOT_ACTIVATED', 'COMMITMENT_OVERDUE', 'FOLLOWUP_OVERDUE', 'BLOCKER_OVERDUE'];
+  const liveTaskExceptions = async (pid: string) => (await liveExceptions(pid)).filter(e => TASK_EXCEPTION_TYPES.includes(e.type));
 
   /** `n` applications to a role, tagged with a channel (null = no tag), made on a given instant. */
   const addApps = async (rid: string, tag: string | null, at: string, n: number, o: { score?: number | null; stage?: string; status?: string } = {}) => {

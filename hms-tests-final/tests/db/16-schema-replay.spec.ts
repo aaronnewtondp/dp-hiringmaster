@@ -56,6 +56,9 @@ const ID_COLUMNS = [
 const SOURCING_TABLES = [
   'sourcing_advice', 'sourcing_channel_weeks', 'sourcing_commitment_log', 'sourcing_commitments', 'sourcing_evidence',
   'sourcing_exceptions', 'sourcing_plan_changes', 'sourcing_plan_channels', 'sourcing_plans', 'sourcing_settings',
+  // the plan-detailing layer (PR #63, schema block "Sourcing plan detailing (2026-11-13)"): 9 more tables, RLS on like the first ten
+  'sourcing_checkins', 'sourcing_companies', 'sourcing_company_list_members', 'sourcing_company_lists', 'sourcing_outreach_people',
+  'sourcing_outreach_uploads', 'sourcing_plan_details', 'sourcing_plan_rows', 'sourcing_templates',
 ];
 const OTHER_TABLES = [
   'activity_log', 'agencies', 'agency_edit_log', 'applications', 'assignment_repo', 'candidate_edit_log', 'candidates', 'comp_benchmarks',
@@ -94,7 +97,9 @@ test.describe('the statement splitter the replay depends on', () => {
     expect(base.filter(s => /^CREATE TABLE /.test(s))).toHaveLength(16);                      // the 16 original tables (portfolio_analyses and the sourcing tables come later)
     expect(tail.length).toBeGreaterThan(80);
     expect(tail[0]).toMatch(/^ALTER TABLE candidates\s+ADD COLUMN IF NOT EXISTS current_ctc_fixed/);        // the patch history starts right after the original block
-    expect(tail[tail.length - 1]).toMatch(/^ALTER TABLE applications ADD CONSTRAINT applications_portfolio_status_check[\s\S]*'unreviewable'\)\)$/);   // and ends with the widest status list
+    // the widest portfolio status list is in the patch history (the file no longer ENDS with it: the plan-detailing block of PR #63 was appended after it)
+    expect(tail.some(s => /^ALTER TABLE applications ADD CONSTRAINT applications_portfolio_status_check[\s\S]*'unreviewable'\)\)$/.test(s))).toBe(true);
+    expect(tail[tail.length - 1]).toMatch(/^CREATE TRIGGER sourcing_companies_updated_at /);                   // the file currently ends with the plan-detailing block
     expect(tail.some(s => /^CREATE OR REPLACE FUNCTION format_seq_id/.test(s) && s.includes('$$ LANGUAGE SQL'))).toBe(true);   // a function body stays ONE statement
     expect(tail.every(s => !s.startsWith('--') && s.length > 0)).toBe(true);
     const seed = splitSqlStatements(seedSql());
@@ -174,7 +179,7 @@ test.describe('Schema replay: schema.sql + seed.sql on an empty database', () =>
       }
     });
 
-    test('the database has exactly the 27 tables: the 17 original ones and the 10 sourcing ones', async () => {
+    test('the database has exactly the 36 tables: the 17 original ones and the 19 sourcing ones (10 + the 9 of the plan-detailing layer)', async () => {
       expect(firstPass.tables).toEqual([...OTHER_TABLES, ...SOURCING_TABLES].sort());
     });
 
