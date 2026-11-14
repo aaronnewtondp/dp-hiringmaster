@@ -429,9 +429,8 @@ live.
       and the excluded `db/15` "a Drive PDF + a website: pending" all passed when run on their own, once each, although `integration.yml`'s header says they need a
       real key, a long-lived database, a multi-line queue error or are racy. Re-measure a few times, then trim the regex (do not add an entry without a measured
       reason, as the header says).
-- [ ] Stale comments in the CI files: `integration.yml`'s header says "659 tests" (the same selection lists 772 now), and `audit.yml`'s header says
-      Dependabot alerts are off; `frontend/src/services/api.ts` comments say axios sends array params as repeated keys (it sends `key[]=a&key[]=b`;
-      `api.test.ts` pins the real format).
+- [x] Stale comments in the CI files fixed: the "659 tests" count (`.github/README.md`, CLAUDE.md), `audit.yml`'s "Dependabot alerts are off", and the
+      `frontend/src/services/api.ts` comments about axios array params (bracket form `key[]=a&key[]=b`; `api.test.ts` pins the real format).
 
 ### Open product issues found by the test suites (verified on `origin/main`, 2026-11-05)
 Each was confirmed by reading the code and, where it says "verified", by calling a local disposable stack. Where a test pins the behaviour it is

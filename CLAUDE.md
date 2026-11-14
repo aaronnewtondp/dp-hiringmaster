@@ -297,9 +297,9 @@ the failing guard names the kind and subject (`format_seq_id`, a sequence behind
 `PGHOST=… PGDATABASE=scratch bash .github/ci/apply-db.sh && bash .github/ci/check-db.sh` against an empty database you may wipe. `lint-async` /
 `workflow-lint`: annotations on the offending line. `secret-scan`: file, line and rule, never the value. Nightly red: download the
 `integration-failure-<run id>` artifact (HTML report, backend log); `playwright test --project=api --project=db` against a stack reproduces it
-(see Testing). **The nightly is red today**: it includes `db/17-user-lifecycle`, whose two "TODAY: … old token …" pins predate PR #55 (see Testing), and
-its YAML header's "659 tests" is from 2026-10-29 (the same selection lists 772 now: `db/16` and `db/17` were added). The header of `audit.yml` still
-says Dependabot alerts are off.
+(see Testing). The two stale `db/17` "TODAY: … old token …" pins (they predate PR #55, see Testing) are in the nightly's `EXCLUDE` list, so they do not
+turn it red; `integration.yml`'s header carries the dated measurement of the selection. Dependabot vulnerability alerts are enabled (2026-11-05), as the
+`audit.yml` header now says.
 
 **Branch protection (recommended, a repository setting).** Require the single check **`CI passed`** and nothing else: it aggregates every job in
 `ci.yml`; CodeQL does not block by itself, `dependency-review` and `secret-scan` are separate PR checks that can be added as required if wanted, and
