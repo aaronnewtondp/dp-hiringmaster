@@ -34,6 +34,21 @@ describe('assertLinear', () => {
   });
 });
 
+describe('assertLinear: noise on the big input is retried, a regression is not', () => {
+  it('passes when only the first few big runs are disturbed (correlated noise on a loaded machine: three slow runs in a row, then a clean one)', () => {
+    let bigCalls = 0;
+    const r = assertLinear('noisy', n => { if (n === 100) { burnCpu(2); return; } bigCalls++; burnCpu(bigCalls <= 3 ? 400 : 16); }, 100, 800, { floorMs: 5, runs: 3 });
+    expect(bigCalls).toBe(4);
+    expect(r.bigMs).toBeLessThanOrEqual(r.allowedMs);
+  });
+
+  it('still fails when EVERY attempt is over the bound (a quadratic path at 8x the input is ~2.7x over, however often it is measured)', () => {
+    let bigCalls = 0;
+    expect(() => assertLinear('always slow', n => { if (n === 100) burnCpu(2); else { bigCalls++; burnCpu(2 * 64 * 0.9); } }, 100, 800, { floorMs: 0, runs: 3 })).toThrow(/always slow: size 800/);
+    expect(bigCalls).toBeGreaterThan(3);                      // it did retry before failing
+  });
+});
+
 describe('assertLinearOn', () => {
   it('passes a linear function and holds the big input to the absolute backstop as well', () => {
     const made: number[] = [];
