@@ -102,6 +102,13 @@ export const scaled = (boundMs: number): number => boundMs * hostSlowdown();
 
 // ─── "this is linear" ────────────────────────────────────────────────────────────────────────────────────────────
 
+/** Extra attempts on the big input, beyond `runs`, once a run is over the bound (see assertLinear). */
+const EXTRA_RETRIES = 4;
+/** Sleeps `ms` of wall time without using CPU (so it is never counted, and a descheduled process gets a chance to be scheduled again). */
+function pause(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /**
  * Asserts that `run(big)` costs no more CPU than linear scaling from `run(small)` allows: `factor` x (big / small) x (small's cost) plus a small floor for
  * noise. A quadratic code path costs (big / small) x more than that, so it fails; the speed of the machine cancels out, which no fixed number of
@@ -121,8 +128,15 @@ export function assertLinear(
   const allowedMs = factor * (big / small) * smallMs + floorMs * hostSlowdown();
   // The big input is run again only when the first run is close enough to the bound for noise to matter: a run that is already many times over it is a
   // regression, not a pause for garbage collection, and a quadratic path can take minutes per run (repeating it would only slow the failure down).
+  // The first big run also pays one-time costs the warmed-up small input did not (flattening a 2 MB rope string, first-touch page faults), and on a loaded
+  // machine noise is correlated across back-to-back runs (a CI run failed at 144.6 ms against 141.5 allowed with all three runs over). So a run over the bound
+  // gets `runs + EXTRA_RETRIES` attempts in all, spread out by a short pause for the OS to hand the CPU back: a real regression is over the bound on EVERY
+  // attempt (a quadratic path at 8x the input costs ~2.7x the bound or more, however many times it is measured), noise is not.
   let bigMs = cpuTimed(() => run(big)).ms;
-  for (let again = 1; again < runs && bigMs > allowedMs && bigMs <= 8 * allowedMs; again++) bigMs = Math.min(bigMs, cpuTimed(() => run(big)).ms);
+  for (let again = 1; again < runs + EXTRA_RETRIES && bigMs > allowedMs && bigMs <= 8 * allowedMs; again++) {
+    pause(again * 15);
+    bigMs = Math.min(bigMs, cpuTimed(() => run(big)).ms);
+  }
   expect(
     bigMs,
     `${label}: size ${big} used ${bigMs.toFixed(1)} ms of CPU, size ${small} used ${smallMs.toFixed(1)} ms; linear scaling allows ${allowedMs.toFixed(1)} ms`,
