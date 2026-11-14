@@ -47,7 +47,7 @@ const handleQueueMessage = queue.handleNodeCallback(
   },
 );
 
-app.get('*', (_req, res) => { res.json({ ok: true, service: 'portfolio-worker' }); });
-app.post('*', handleQueueMessage as unknown as express.RequestHandler);
+app.get('/{*splat}', (_req, res) => { res.json({ ok: true, service: 'portfolio-worker' }); });
+app.post('/{*splat}', handleQueueMessage as unknown as express.RequestHandler);
 
 export default app;

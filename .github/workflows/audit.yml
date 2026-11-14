@@ -4,8 +4,8 @@ name: Dependency audit
 # hms-tests-final and tools/ci-lint are dev-only and never deployed, so they are not audited here.
 #
 # Informational on purpose: it reports and annotates but never fails the run, because a NEW advisory against an UNCHANGED
-# lockfile would turn every unrelated build red. (Dependabot alerts, which would notify you, are off; see the notes that came
-# with this change.) Only a tooling failure (npm cannot reach the registry, unparseable output) fails the job.
+# lockfile would turn every unrelated build red. (Dependabot vulnerability alerts, which notify the repository admins, were enabled on 2026-11-05;
+# this workflow is the in-CI report, the alerts are the notification.) Only a tooling failure (npm cannot reach the registry, unparseable output) fails the job.
 #
 # `npm audit` reads the lockfile; it needs no install.
 

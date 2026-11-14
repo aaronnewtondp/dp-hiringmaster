@@ -476,16 +476,17 @@ test.describe('one user, from creation to revoked access', () => {
     expect(res.status(), 'a deactivated user cannot sign in with a password').toBe(401);
   });
 
-  test('TODAY: a token issued before the role change and the deactivation keeps working, with its OLD role, until it expires (authenticate() trusts the JWT and never re-reads users)', async ({ request }) => {
+  test('a token issued before the role change and the deactivation is refused with 401: authenticate() re-checks users.is_active', async ({ request }) => {
     expect(oldToken, 'the sign-in step must have run').not.toBe('');
     const db = (await userRowByEmail(email))!;
     expect(db.is_active).toBe(false);
     expect(db.persona).toBe('leadership');
 
-    const me = await request.get(`${BASE}/api/auth/me`, { headers: { Authorization: `Bearer ${oldToken}` } });
-    expect(me.status(), 'known gap: a revoked user\'s existing token is still accepted').toBe(200);
-    expect((await me.json()).user.persona, 'known gap: the token still says hiring_manager although the user is now leadership').toBe('hiring_manager');
-    expect((await request.get(`${BASE}/api/roles`, { headers: { Authorization: `Bearer ${oldToken}` } })).status()).toBe(200);
+    for (const path of ['/api/auth/me', '/api/roles']) {
+      const r = await request.get(`${BASE}${path}`, { headers: { Authorization: `Bearer ${oldToken}` } });
+      expect(r.status(), `${path}: a revoked user's existing token is refused`).toBe(401);
+      expect(await r.json()).toEqual({ error: 'Account is deactivated or no longer exists' });
+    }
   });
 
   test('Reactivate restores access: toast, Active, and password sign-in works again', async ({ page, request }) => {

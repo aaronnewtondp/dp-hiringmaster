@@ -41,8 +41,9 @@ export const authApi = {
 
 export const rolesApi = {
   // string[] values (department/location/recruitment_mode/priority/status)
-  // are serialized by axios as repeated keys and re-assembled into an array
-  // by Express's default `qs` parser — same convention as candidatesApi.list.
+  // are serialized by axios in bracket form (`key[]=a&key[]=b`) and re-assembled
+  // into an array by Express's default `qs` parser — same convention as
+  // candidatesApi.list. api.test.ts pins the real wire format.
   list:          (params?: Record<string, string | string[]>) => api.get('/roles', { params }),
   get:           (id: string)                      => api.get(`/roles/${id}`),
   create:        (data: Record<string, unknown>)   => api.post('/roles', data),
@@ -60,8 +61,9 @@ export const rolesApi = {
 };
 
 export const candidatesApi = {
-  // string[] values (e.g. `skills`) are serialized by axios as repeated
-  // keys and re-assembled into an array by Express's default `qs` parser.
+  // string[] values (e.g. `skills`) are serialized by axios in bracket form
+  // (`key[]=a&key[]=b`) and re-assembled into an array by Express's default
+  // `qs` parser.
   list:     (params?: Record<string, string | string[]>)  => api.get('/candidates', { params }),
   get:      (id: string)                       => api.get(`/candidates/${id}`),
   create:   (data: Record<string, unknown>)    => api.post('/candidates', data),
@@ -74,7 +76,7 @@ export const candidatesApi = {
 
 export const applicationsApi = {
   // role_id is string[]-capable (Candidates page's Role filter) — same
-  // repeated-key convention as rolesApi.list/candidatesApi.list.
+  // bracket-form (`role_id[]=a&role_id[]=b`) convention as rolesApi.list/candidatesApi.list.
   list:            (params?: Record<string, string | string[]>)  => api.get('/applications', { params }),
   get:             (id: string)                       => api.get(`/applications/${id}`),
   advanceStage:    (id: string, newStage: string, opts?: { skipReason?: string; budgetExceptionReasonCat?: string; budgetExceptionReasonDetail?: string }) =>
