@@ -14,7 +14,7 @@ const h = vi.hoisted(() => {
   const NAMES = ['plan', 'people', 'activate', 'completeCommitment', 'skipCommitment', 'resolveException', 'setChannel', 'reopenCommitment',
     'updatePlan', 'advice', 'closeChannel', 'reopenChannel', 'updateChannel'] as const;
   type Name = typeof NAMES[number];
-  const spies = {} as Record<Name, ReturnType<typeof vi.fn>>;
+  const spies = {} as Record<Name, ReturnType<typeof vi.fn<(...a: unknown[]) => unknown>>>;
   const impl = {} as Record<Name, (...a: unknown[]) => Promise<unknown>>;
   const api: Record<string, (...a: unknown[]) => Promise<unknown>> = {};
   for (const n of NAMES) { spies[n] = vi.fn(); api[n] = (...a: unknown[]) => { spies[n](...a); return impl[n](...a); }; }
