@@ -9,10 +9,11 @@
 //   removing access   the row stays, the history that points at it keeps pointing at it, a hard DELETE is refused by the database (every foreign
 //                     key to users(id) is NO ACTION), the list still shows the user as inactive, and a password sign-in answers 401 — with the same
 //                     words as a wrong password
-//   the 24 h token    PINNED AS "TODAY": authenticate() verifies the JWT and nothing else — it never looks at users.is_active or users.persona. So an
-//                     old token of a deactivated user keeps working, for reads AND writes, until it expires (JWT_EXPIRES_IN, 24 h); a deactivated
-//                     SUPER_ADMIN's token still passes requireSuperAdmin; and a persona change (promotion or demotion) only takes effect at the next
-//                     sign-in. Reported as product issues; the tests change when the middleware starts checking the row.
+//   the 24 h token   since PR #55 authenticate() re-checks users.is_active (15 s in-process cache; PATCH /api/users/:id invalidates it, so on the
+//                     instance that handled the PATCH the effect is immediate, on another serverless instance within 15 s; a failed lookup answers 503).
+//                     So the old token of a deactivated user, and of a deactivated SUPER_ADMIN, answers 401 on reads, HR-gated routes and writes, and works
+//                     again the moment access is restored. PINNED AS "TODAY": a persona change (promotion or demotion) still only takes effect at the next
+//                     sign-in, because the token carries the persona it was issued with and only is_active is re-read.
 //   super_admin       the API never creates or assigns it (400, nothing written) and a super_admin cannot demote or deactivate themselves; at the
 //                     database level the CHECK admits exactly four personas and nothing limits super_admin to one row (TODAY: the "exactly one person"
 //                     rule is a convention, not a constraint)
@@ -194,19 +195,22 @@ test.describe('User lifecycle (local Postgres + API)', () => {
       expect(right.body.token).toBeUndefined();
     });
 
-    test('TODAY: the OLD token of the deactivated user still works — it identifies them, reads, passes the HR gate and WRITES — until it expires (authenticate() never re-checks users.is_active)', async ({ request }) => {
-      const me = await call(request, staleToken, 'get', '/api/auth/me');
-      expect(me.status).toBe(200);
-      expect(me.body.user).toMatchObject({ userId: users.hr.id, email: users.hr.email, persona: 'hr_recruiter' });
-      expect((await call(request, staleToken, 'get', '/api/roles')).status).toBe(200);
-      expect((await call(request, staleToken, 'get', '/api/agencies')).status).toBe(200);          // requireHR passes on the persona in the token
+    test('the OLD token of the deactivated user is refused with 401 on every kind of route (reads, the HR gate, writes) and nothing is written: authenticate() re-checks users.is_active, and PATCH invalidates the 15 s cache at once', async ({ request }) => {
+      const gone = { error: 'Account is deactivated or no longer exists' };
+      const rolesBefore = (await db.query(`SELECT count(*)::int AS n FROM roles WHERE created_by=$1`, [users.hr.id])).rows[0].n;
+      for (const path of ['/api/auth/me', '/api/roles', '/api/agencies']) {
+        const r = await call(request, staleToken, 'get', path);
+        expect(r.status, path).toBe(401);
+        expect(r.body, path).toEqual(gone);
+      }
       const write = await call(request, staleToken, 'post', '/api/roles', { title: `Lifecycle written after deactivation ${RUN}`, priority: 'P3' });
-      expect(write.status).toBe(201);
-      expect((await db.query(`SELECT created_by FROM roles WHERE id=$1`, [write.body.role.id])).rows[0].created_by).toBe(users.hr.id);   // attributed to a user whose access was removed
-      expect((await dbUser(users.hr.id)).is_active).toBe(false);                                 // and the row still says inactive throughout
+      expect(write.status).toBe(401);
+      expect(write.body).toEqual(gone);
+      expect((await db.query(`SELECT count(*)::int AS n FROM roles WHERE created_by=$1`, [users.hr.id])).rows[0].n).toBe(rolesBefore);   // the write never happened
+      expect((await dbUser(users.hr.id)).is_active).toBe(false);
     });
 
-    test('Restore access signs the user in again; the old token and the new one both work (nothing was ever revoked server-side)', async ({ request }) => {
+    test('Restore access signs the user in again; the old token (only refused while the row was inactive, never revoked) and the new one both work at once', async ({ request }) => {
       const r = await setActive(request, users.hr.id, true);
       expect(r.status).toBe(200);
       expect(r.body.user.is_active).toBe(true);
@@ -300,18 +304,22 @@ test.describe('User lifecycle (local Postgres + API)', () => {
       expect((await call(request, t, 'get', '/api/users')).status).toBe(200);
     });
 
-    test('TODAY: a DEACTIVATED super_admin\'s old token still passes requireSuperAdmin: it lists every user and edits another one', async ({ request }) => {
+    test('a DEACTIVATED super_admin\'s old token is refused 401 at the authenticate gate, before requireSuperAdmin: it can neither list users nor edit another one', async ({ request }) => {
       const t = await tokenFor(request, 'second_sa');
+      expect((await call(request, t, 'get', '/api/users')).status).toBe(200);                    // control: while active, the token opens User Management
       expect((await setActive(request, users.second_sa.id, false)).status).toBe(200);
       expect((await dbUser(users.second_sa.id)).is_active).toBe(false);
       expect((await login(request, users.second_sa.email)).status).toBe(401);                    // cannot sign in again ...
 
-      const list = await call(request, t, 'get', '/api/users');                                  // ... but the token they already hold still opens User Management
-      expect(list.status).toBe(200);
-      expect((list.body.users as Json[]).some(x => x.email === 'superadmin@digitalpaani.com')).toBe(true);
+      const gone = { error: 'Account is deactivated or no longer exists' };
+      const list = await call(request, t, 'get', '/api/users');                                  // ... and the token they already hold no longer opens anything
+      expect(list.status).toBe(401);
+      expect(list.body).toEqual(gone);
+      const before = (await dbUser(users.promoted.id)).department;
       const edited = await call(request, t, 'patch', `/api/users/${users.promoted.id}`, { department: `Edited after revocation ${RUN}` });
-      expect(edited.status).toBe(200);
-      expect((await dbUser(users.promoted.id)).department).toBe(`Edited after revocation ${RUN}`);
+      expect(edited.status).toBe(401);
+      expect(edited.body).toEqual(gone);
+      expect((await dbUser(users.promoted.id)).department).toBe(before);                         // nothing was edited
     });
   });
 

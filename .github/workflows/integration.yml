@@ -32,11 +32,7 @@ name: Integration (API and database specs)
 #   every candidate entry carries application_id                api/19: asserts the funnel snapshot is NON-empty, which only holds on a
 #                                                                long-lived dev database that already has SLA breaches; a fresh one has none
 #   falls back to a live AI estimate                            api/30: NOT tagged @live; real Claude (the endpoint answers 500 without a key)
-#   the OLD token of the deactivated user still works           db/17, 2 tests: they pin the behaviour BEFORE PR #55 (authenticate() never
-#   / a DEACTIVATED super_admin's old token still passes          re-checked users.is_active); since #55 the old token answers 401 within
-#     requireSuperAdmin                                           15 s, which is the intended behaviour, so both now fail. The spec needs
-#                                                                rewriting to pin the new behaviour; drop these two entries then.
-# Dropped from the previous list because they no longer fail: db/05 (builds its e-mails from a per-run id and a counter now),
+# Dropped from the previous list because they no longer fail: db/17's two old-token tests (rewritten to pin the 401 since PR #55), db/05 (builds its e-mails from a per-run id and a counter now),
 # db/07's two "needs a real base score" tests (they write the base scores by SQL now; only the creation-time hook needs the model,
 # and its test is tagged @live) and db/15's queue-error test.
 # Remove an entry when its cause is fixed; do not add one without a measured reason.
@@ -87,7 +83,7 @@ jobs:
       PGUSER: hms_user
       PGPASSWORD: hms_password
       PGDATABASE: dp_hms
-      EXCLUDE: '@live|JD Generation \+ ResumeIQ scoring \(real external calls\)|every candidate entry carries application_id|falls back to a live AI estimate|the OLD token of the deactivated user still works|a DEACTIVATED super_admin.s old token still passes requireSuperAdmin'
+      EXCLUDE: '@live|JD Generation \+ ResumeIQ scoring \(real external calls\)|every candidate entry carries application_id|falls back to a live AI estimate'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
