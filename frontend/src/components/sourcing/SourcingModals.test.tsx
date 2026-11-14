@@ -11,7 +11,7 @@ import { ymd } from '../../utils/sourcingFormat.ts';
 const h = vi.hoisted(() => {
   const NAMES = ['activate', 'completeCommitment', 'skipCommitment', 'closeChannel', 'reopenChannel', 'updateChannel', 'updatePlan', 'setChannel', 'people'] as const;
   type Name = typeof NAMES[number];
-  const spies = {} as Record<Name, ReturnType<typeof vi.fn>>;
+  const spies = {} as Record<Name, ReturnType<typeof vi.fn<(...a: unknown[]) => unknown>>>;
   const impl = {} as Record<Name, (...a: unknown[]) => Promise<unknown>>;
   const api: Record<string, (...a: unknown[]) => Promise<unknown>> = {};
   for (const n of NAMES) { spies[n] = vi.fn(); api[n] = (...a: unknown[]) => { spies[n](...a); return impl[n](...a); }; }
