@@ -17,6 +17,9 @@ import { withDb } from './db';
 // Override with TEST_JWT_SECRET for a backend that uses another secret. Production is never reachable from these projects.
 export const DEV_JWT_SECRET = process.env.TEST_JWT_SECRET || 'change_this_in_production_to_a_long_random_string';
 
+/** seed.sql's first user (Aaron Newton): a fixed, active row in every freshly seeded database. */
+export const SEED_USER_ID = 'a0000000-0000-0000-0000-000000000001';
+
 const b64url = (v: Buffer | string) => Buffer.from(v).toString('base64url');
 
 export interface SignOptions {
@@ -42,7 +45,8 @@ export function signJwt(payload: Record<string, unknown>, opts: SignOptions = {}
 export interface ForgedUser {
   email: string;
   persona: 'hr_recruiter' | 'hiring_manager' | 'leadership' | 'super_admin';
-  /** Defaults to a random UUID: fine for every read and for any write that does not reference users(id). */
+  /** Defaults to the seeded Aaron Newton row (SEED_USER_ID): since PR #55 authenticate() rejects a token whose userId is not an
+   *  active row in users, so a random UUID is a 401. Pass the id of the user you mean when the id matters. */
   userId?: string;
   name?: string;
 }
@@ -50,7 +54,7 @@ export interface ForgedUser {
 /** A token exactly shaped like the backend's own (userId, email, persona, name). */
 export function forgeToken(user: ForgedUser, opts: SignOptions = {}): string {
   return signJwt({
-    userId:  user.userId ?? crypto.randomUUID(),
+    userId:  user.userId ?? SEED_USER_ID,
     email:   user.email,
     persona: user.persona,
     name:    user.name ?? 'Forged User',
