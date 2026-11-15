@@ -15,7 +15,7 @@ Everything here runs on GitHub-hosted `ubuntu-latest` runners, which are free an
 
 CI found real defects on its first run. Each is recorded, shown as a warning on every run, and does not fail the build; anything **new** does.
 
-- `ci/known-db-defects.txt`: sequences that start behind their seeded ids (`seq_eval_question`, `seq_comp_benchmark`). `ci/apply-db.sh` additionally tolerates exactly one known error in `seed.sql` (`setval(seq, 0)` on an empty database). Delete the line, and the matching step, when the bug is fixed; the job prints a notice for a line that no longer matches.
+- `ci/known-db-defects.txt`: reported database defects that are warnings instead of errors (empty since the seed.sql sequence defects were fixed). `ci/apply-db.sh` is strict: any error in `schema.sql` or `seed.sql` fails the job. Delete a line when its bug is fixed; the job prints a notice for a line that no longer matches.
 - `tools/ci-lint/summarize-eslint.mjs`: the async-promise lint reports its 2 known findings (`backend/src/jobs/scheduler.ts`, dead code with `try/catch` bodies) without failing. Add `--fail` in `ci.yml` once they are gone.
 
 ## Run it locally

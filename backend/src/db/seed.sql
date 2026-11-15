@@ -199,12 +199,19 @@ COMMIT;
 -- took down a huge fraction of a local Playwright run, 2026-09-05, with
 -- "duplicate key value violates unique constraint" on candidates_pkey once
 -- seq_candidate got reset under a DB already holding ~10k real candidates).
--- COALESCE(...,0) covers the genuinely-fresh-DB case, where these four
--- tables really are empty and MAX() is NULL.
-SELECT setval('seq_role',       (SELECT MAX(CAST(REPLACE(id,'R','') AS INTEGER)) FROM roles));
-SELECT setval('seq_candidate',   COALESCE((SELECT MAX(CAST(REPLACE(id,'C','')  AS INTEGER)) FROM candidates), 0));
-SELECT setval('seq_application', COALESCE((SELECT MAX(CAST(REPLACE(id,'A','')  AS INTEGER)) FROM applications), 0));
-SELECT setval('seq_interview',   COALESCE((SELECT MAX(CAST(REPLACE(id,'IR','') AS INTEGER)) FROM interview_rounds), 0));
-SELECT setval('seq_agency',     (SELECT MAX(CAST(REPLACE(id,'AGN','') AS INTEGER)) FROM agencies));
-SELECT setval('seq_assignment', (SELECT MAX(CAST(REPLACE(id,'ASN','') AS INTEGER)) FROM assignment_repo));
-SELECT setval('seq_refcheck',    COALESCE((SELECT MAX(CAST(REPLACE(id,'RC','') AS INTEGER)) FROM ref_checks), 0));
+-- A genuinely-fresh DB has these tables empty, MAX() is NULL, and setval(seq, 0) is below the sequence minimum
+-- ("value 0 is out of bounds"), which stopped this script (and docker-compose's ON_ERROR_STOP init) at the closing
+-- block. So every sequence uses the same shape: with rows, setval(seq, max, true) (the next id is max + 1, exactly as
+-- before); with none, setval(seq, 1, false) (the next id is 1).
+SELECT setval('seq_role',        COALESCE(m, 1), m IS NOT NULL) FROM (SELECT MAX(CAST(REPLACE(id,'R','')   AS INTEGER)) AS m FROM roles) t;
+SELECT setval('seq_candidate',   COALESCE(m, 1), m IS NOT NULL) FROM (SELECT MAX(CAST(REPLACE(id,'C','')   AS INTEGER)) AS m FROM candidates) t;
+SELECT setval('seq_application', COALESCE(m, 1), m IS NOT NULL) FROM (SELECT MAX(CAST(REPLACE(id,'A','')   AS INTEGER)) AS m FROM applications) t;
+SELECT setval('seq_interview',   COALESCE(m, 1), m IS NOT NULL) FROM (SELECT MAX(CAST(REPLACE(id,'IR','')  AS INTEGER)) AS m FROM interview_rounds) t;
+SELECT setval('seq_agency',      COALESCE(m, 1), m IS NOT NULL) FROM (SELECT MAX(CAST(REPLACE(id,'AGN','') AS INTEGER)) AS m FROM agencies) t;
+SELECT setval('seq_assignment',  COALESCE(m, 1), m IS NOT NULL) FROM (SELECT MAX(CAST(REPLACE(id,'ASN','') AS INTEGER)) AS m FROM assignment_repo) t;
+SELECT setval('seq_refcheck',    COALESCE(m, 1), m IS NOT NULL) FROM (SELECT MAX(CAST(REPLACE(id,'RC','')  AS INTEGER)) AS m FROM ref_checks) t;
+-- Q001-Q013 and BEN001-BEN012 are inserted above with explicit ids, and schema.sql creates both sequences START 1 (its later
+-- "START 14" / "START 13" lines are CREATE SEQUENCE IF NOT EXISTS no-ops), so without these the first INSERT that relies on the
+-- default id collided with Q001 / BEN001.
+SELECT setval('seq_eval_question',  COALESCE(m, 1), m IS NOT NULL) FROM (SELECT MAX(substring(id from '[0-9]+')::int) AS m FROM eval_questions) t;
+SELECT setval('seq_comp_benchmark', COALESCE(m, 1), m IS NOT NULL) FROM (SELECT MAX(substring(id from '[0-9]+')::int) AS m FROM comp_benchmarks) t;

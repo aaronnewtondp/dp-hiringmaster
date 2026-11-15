@@ -11,15 +11,12 @@
 // constraints for the application status, the portfolio statuses and review kinds, the key indexes and delete rules, the seed counts, and that no
 // sequence is behind its table. It then applies schema.sql a SECOND time and compares the live test database with the replay.
 //
-// PINNED AS "TODAY" (what the files do now, reported as product issues rather than fixed here — schema.sql and seed.sql are not edited):
+// PINNED AS "TODAY" (what the files do now, reported as product issues rather than fixed here):
+// (The two seed.sql defects that used to be pinned here — `setval(seq, 0)` stopping the script on an empty database, and seq_eval_question /
+// seq_comp_benchmark left behind their seeded ids — were fixed 2026-11-15; the tests below now pin the fixed behaviour.)
 //   * schema.sql is NOT safe to run twice, although its patch section is headed "Safe to run multiple times (all IF NOT EXISTS)": the original
 //     block uses plain CREATE TABLE (42P07 on the first statement) and two patches fail when repeated: `ALTER TABLE roles ALTER COLUMN vacancy_reason TYPE
 //     TEXT[] USING ... string_to_array(vacancy_reason, ...)` (the column is already text[], 42883) and `ALTER TABLE candidates ADD COLUMN gender` (no IF NOT EXISTS);
-//   * seed.sql stops with `setval: value 0 is out of bounds` at its closing block on an empty database (the stack script and the CI job both
-//     tolerate exactly that one error);
-//   * after schema.sql + seed.sql, seq_eval_question and seq_comp_benchmark are BEHIND their tables (the seeded ids Q001-Q013 / BEN001-BEN012 are
-//     explicit, and the `START 14` / `START 13` lines of the patch are no-ops after the first CREATE SEQUENCE ... START 1), so the first insert that
-//     relies on the default id collides on the primary key — the stack and CI advance them by hand;
 //   * pending_actions has no index on application_id / role_id (tests/helpers/sourcing-db.ts exists because of it).
 //
 // INTENTIONALLY LOCAL-ONLY, like the other tests/db specs: it creates and drops databases (the connection comes from helpers/db.ts, which refuses
@@ -34,12 +31,6 @@ import {
   healSourcingPlansTable, healSharedState, snapshotSourcingSettings, restoreSourcingSettings, setSourcingSetting, purgeByTitlePrefix,
   REPLAY_DB_PREFIX, SETTINGS_BACKUP_KEY,
 } from '../helpers/db-specs';
-
-// What the stack script and the CI job apply after seed.sql (see the TODAY note above). Same two statements.
-const SEQUENCE_WORKAROUND = [
-  `SELECT setval('seq_eval_question',  (SELECT MAX(substring(id from '[0-9]+')::int) FROM eval_questions))`,
-  `SELECT setval('seq_comp_benchmark', (SELECT MAX(substring(id from '[0-9]+')::int) FROM comp_benchmarks))`,
-];
 
 const ID_COLUMNS = [
   { table: 'roles',            seq: 'seq_role',           prefix: 'R',   pad: 4 },
@@ -104,7 +95,7 @@ test.describe('the statement splitter the replay depends on', () => {
     expect(tail.every(s => !s.startsWith('--') && s.length > 0)).toBe(true);
     const seed = splitSqlStatements(seedSql());
     expect(seed[0]).toBe('BEGIN');
-    expect(seed.filter(s => /^SELECT setval\(/.test(s))).toHaveLength(7);
+    expect(seed.filter(s => /^SELECT setval\(/.test(s))).toHaveLength(9);
   });
 });
 
@@ -115,7 +106,6 @@ test.describe('Schema replay: schema.sql + seed.sql on an empty database', () =>
   let db: Client;                    // on the replay database
   const created: string[] = [];      // every database this run made — all dropped in afterAll
   let replayName = '';
-  let seedStoppedAt = -1;            // index of the seed.sql statement that raised the tolerated error
   let seedStatements: string[] = [];
   let firstPass: Awaited<ReturnType<typeof schemaFingerprint>>;
 
@@ -315,18 +305,12 @@ test.describe('Schema replay: schema.sql + seed.sql on an empty database', () =>
 
   // ═══════════════════════════════════════════════════════════════════════════
   test.describe('seed.sql', () => {
-    test("TODAY: seed.sql applied the way `psql -v ON_ERROR_STOP=1` does stops at exactly ONE error — setval(seq_candidate, 0) in its closing block — after every INSERT has committed", async () => {
+    test("seed.sql applied the way `psql -v ON_ERROR_STOP=1` does (docker-compose's init) runs to the end with no error on an empty database", async () => {
       seedStatements = splitSqlStatements(seedSql());
       const { errors, executed } = await runStatements(db, seedStatements, { stopOnError: true });
-      expect(errors).toHaveLength(1);
-      expect(errors[0].code).toBe('22003');                                                      // numeric_value_out_of_range
-      expect(errors[0].message).toMatch(/setval: value 0 is out of bounds for sequence "seq_candidate"/);
-      expect(errors[0].statement).toContain(`setval('seq_candidate'`);
-      seedStoppedAt = errors[0].index;
-      expect(executed).toBe(seedStoppedAt);
-      // everything before it, including the COMMIT of the data block and the setval of seq_role, ran
-      expect(seedStatements.slice(0, seedStoppedAt).some(s => s === 'COMMIT')).toBe(true);
-      expect(seedStatements.slice(seedStoppedAt + 1).filter(s => /^SELECT setval\(/.test(s))).toHaveLength(5);   // application, interview, agency, assignment, refcheck: never reached
+      expect(errors).toEqual([]);
+      expect(executed).toBe(seedStatements.length);
+      expect(seedStatements.filter(s => /^SELECT setval\(/.test(s))).toHaveLength(9);          // one per id series, none skipped
     });
 
     test('the seed holds 9 users (2 HR, 4 Hiring Managers, 2 Leadership, 1 super_admin), 7 roles, 15 agencies, 12 benchmarks, 13 eval questions, 4 assignments and nothing else', async () => {
@@ -346,33 +330,14 @@ test.describe('Schema replay: schema.sql + seed.sql on an empty database', () =>
       expect((await scalar(`SELECT count(*)::int AS n FROM roles WHERE portfolio_analysis_enabled`)).n).toBe(0);
     });
 
-    test('TODAY: continuing past the first error, the other three COALESCE(.., 0) setvals fail the same way and the agency and assignment ones succeed', async () => {
-      const rest = seedStatements.slice(seedStoppedAt + 1);
-      const { errors } = await runStatements(db, rest);
-      expect(errors.map(e => (/sequence "(\w+)"/.exec(e.message) ?? [])[1]).sort()).toEqual(['seq_application', 'seq_interview', 'seq_refcheck']);
-      for (const e of errors) expect(e.message).toMatch(/setval: value 0 is out of bounds/);
-      expect(Number((await scalar(`SELECT last_value FROM seq_agency`)).last_value)).toBe(15);
-      expect(Number((await scalar(`SELECT last_value FROM seq_assignment`)).last_value)).toBe(4);
-    });
-
-    test('TODAY: seq_eval_question and seq_comp_benchmark are created START 1 (the later START 14 / START 13 lines are no-ops) and are BEHIND their tables; every other sequence is fine', async () => {
-      const start = Object.fromEntries((await db.query(`SELECT sequencename, start_value FROM pg_sequences WHERE schemaname = 'public' AND sequencename IN ('seq_eval_question', 'seq_comp_benchmark', 'seq_role', 'seq_agency', 'seq_assignment')`))
-        .rows.map(r => [r.sequencename, Number(r.start_value)]));
-      expect(start).toEqual({ seq_eval_question: 1, seq_comp_benchmark: 1, seq_role: 8, seq_agency: 16, seq_assignment: 5 });
-      expect(await sequencesBehind()).toEqual([
-        'seq_eval_question (next 1, eval_questions holds up to 13)',
-        'seq_comp_benchmark (next 1, comp_benchmarks holds up to 12)',
-      ]);
-    });
-
-    test('TODAY: so the first INSERT that relies on the default id collides on the primary key', async () => {
-      await expect(db.query(`INSERT INTO eval_questions (evaluation_area, question_text) VALUES ('Probe', 'Probe')`)).rejects.toThrow(/eval_questions_pkey/);
-      await expect(db.query(`INSERT INTO comp_benchmarks (role_category, experience_range) VALUES ('Probe', '0-1')`)).rejects.toThrow(/comp_benchmarks_pkey/);
-    });
-
-    test('with the two setvals the stack and CI apply, no sequence is behind its table and the next default ids are Q014 and BEN013', async () => {
-      for (const sql of SEQUENCE_WORKAROUND) await db.query(sql);
+    test('right after the seed no sequence is behind its table: empty tables hand out id 1 next, the seeded ones continue after their ids', async () => {
       expect(await sequencesBehind()).toEqual([]);
+      const next = async (seq: string) => { const r = await scalar(`SELECT last_value, is_called FROM ${seq}`); return Number(r.last_value) + (r.is_called ? 1 : 0); };
+      expect([await next('seq_candidate'), await next('seq_application'), await next('seq_interview'), await next('seq_refcheck')]).toEqual([1, 1, 1, 1]);
+      expect([await next('seq_agency'), await next('seq_assignment'), await next('seq_role'), await next('seq_eval_question'), await next('seq_comp_benchmark')]).toEqual([16, 5, 8, 14, 13]);
+    });
+
+    test('the first default ids are Q014, BEN013, R0008, AGN016, ASN005 and C0001 (no primary-key collision with the seeded Q001-Q013 / BEN001-BEN012)', async () => {
       await db.query('BEGIN');
       try {
         expect((await scalar(`INSERT INTO eval_questions (evaluation_area, question_text) VALUES ('Probe', 'Probe') RETURNING id`)).id).toBe('Q014');
