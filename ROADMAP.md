@@ -263,10 +263,8 @@ live.
       real, differentiated score vs. the profile-only fallback).
 - [ ] Offer letter generation + UI
 - [ ] Pre-joining documents checklist
-- [ ] Email digest — `sendDailyDigest()` (`jobs/slaChecker.ts`, nodemailer over the `SMTP_*` variables) is real, not a stub, but nothing runs it in
-      production: `backend/vercel.json` schedules `/api/cron/email-digest` at 08:15 and Vercel Cron issues GET, while `routes/cron.ts` registers that
-      route as POST only (the `sourcing-check` route answers both verbs for exactly this reason). Fix the verb (or accept the digest is off) and
-      decide the sender; the Help page already says there is no daily pending-items e-mail.
+- [x] Email digest — retired 2026-11-15 (Aaron's decision): the dead `/api/cron/email-digest` entry was removed from `backend/vercel.json`. `sendDailyDigest()` and the POST route stay as a
+      manual endpoint; there is no daily pending-items e-mail (the Sourcing digest, off by default, is the only scheduled mail).
 
 ---
 
