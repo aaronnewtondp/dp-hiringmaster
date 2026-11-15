@@ -489,9 +489,9 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       "Assignment Email Failed" activity-log row is written.
 - [ ] **The rejection/withdrawal reason gate is looser than it reads**: either kind of reason satisfies either status (a `Rejected` with only a withdrawal reason
       is stored with no rejection reason), and a whitespace-only `withdrawal_reason_cat` counts (`applications.access.test.ts`).
-- [ ] **`GET /api/candidates/:id/edit-log` is open to a Hiring Manager and returns the raw rows, including the old and new values of the compensation fields**
-      (`expected_ctc` etc.) that `GET /api/candidates/:id` strips for that persona (verified live; `routes.authMatrix.test.ts` pins it). `requireLeadership` is
-      exported but mounted on no route.
+- [x] **`GET /api/candidates/:id/edit-log` returned raw compensation old/new values to a Hiring Manager.** Fixed 2026-11-15: HR-tier sees every row; a Hiring Manager sees the
+      `current_ctc_fixed` / `current_ctc_variable` / `current_esops` / `expected_ctc` rows only when named on a role the candidate has an application on (the rule of `GET /:id`).
+      Pinned in `routes.authMatrix.test.ts`. `requireLeadership` is still exported but mounted on no route.
 - [ ] **Google sign-in reads neither `email_verified` nor `hd`** (the check is the e-mail suffix alone), does not compare the Google subject with the stored
       `google_id` (a different account for the same e-mail takes the link over when the picture differs), and answers 500 for a verified token with no payload
       (`routes/auth.test.ts`, "characterization").
