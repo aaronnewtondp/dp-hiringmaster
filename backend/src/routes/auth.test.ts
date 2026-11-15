@@ -278,13 +278,13 @@ describe('POST /api/auth/google', () => {
     });
 
     it('the response user is the public part of the row with the Google picture as avatar_url — no password hash, no google_id', async () => {
-      registered({ google_id: 'old-sub' });
+      registered({ google_id: 'google-sub-1' });
       const res = await signIn();
       expect(res.status).toBe(200);
       expect(res.body.user).toEqual({
         id: 'U9001', name: 'HMS Recruiter Name', email: USER.email, persona: 'hr_recruiter', department: 'People', avatar_url: GOOGLE_PAYLOAD.picture,
       });
-      expect(JSON.stringify(res.body)).not.toMatch(/password|hash|google_id|old-sub|google-sub-1/i);
+      expect(JSON.stringify(res.body)).not.toMatch(/password|hash|google_id|google-sub-1/i);
     });
 
     it('the issued token is accepted by the next request (GET /me)', async () => {
@@ -327,35 +327,52 @@ describe('POST /api/auth/google', () => {
     });
   });
 
-  describe('characterization: what the code does today and does not check (see productIssues)', () => {
-    it('the payload\'s email_verified flag is never read: an unverified address on the right domain signs in', async () => {
-      asPayload({ ...GOOGLE_PAYLOAD, email_verified: false });
-      registered();
-      const res = await signIn();
-      expect(res.status).toBe(200);
-      expect(res.body.token).toBeTruthy();
+  describe('Google identity checks (email_verified, hd, stored google_id, missing payload)', () => {
+    it('an unverified address on the right domain is refused 403, nothing read or written', async () => {
+      for (const email_verified of [false, undefined, 'true' as unknown as boolean]) {
+        asPayload({ ...GOOGLE_PAYLOAD, email_verified });
+        registered();
+        const res = await signIn();
+        expect([res.status, res.body.token]).toEqual([403, undefined]);
+        expect(res.body.error).toMatch(/not verified/);
+      }
+      expect(fakeDb.writes()).toEqual([]);
     });
 
-    it('the hd (hosted domain) claim is never read: the check is the e-mail suffix alone', async () => {
-      asPayload({ ...GOOGLE_PAYLOAD, hd: 'some-other-workspace.example' });
-      registered();
-      expect((await signIn()).status).toBe(200);
-      asPayload({ ...GOOGLE_PAYLOAD, hd: undefined });
-      expect((await signIn()).status).toBe(200);
+    it('the hd (hosted domain) claim must be digitalpaani.com: another Workspace, or none at all, is refused 403 before any lookup', async () => {
+      for (const hd of ['some-other-workspace.example', undefined, 'DIGITALPAANI.COM']) {
+        fakeDb.reset();
+        asPayload({ ...GOOGLE_PAYLOAD, hd });
+        const res = await signIn();
+        expect([res.status, res.body.error]).toEqual([403, 'Only @digitalpaani.com accounts can access this system.']);
+        expect(fakeDb.untouched()).toBe(true);
+      }
     });
 
-    it('the Google subject is not compared with the google_id already stored: a different Google account for the same e-mail takes the link over when the picture differs', async () => {
+    it('a different Google account for an already-linked e-mail is refused 403 and does NOT take over the link, even when the picture differs', async () => {
       asPayload({ ...GOOGLE_PAYLOAD, sub: 'a-different-google-account', picture: 'https://pics.example.test/other.png' });
       registered({ google_id: 'google-sub-1', avatar_url: GOOGLE_PAYLOAD.picture });
       const res = await signIn();
-      expect(res.status).toBe(200);
-      expect(fakeDb.one(LINK_GOOGLE).params[0]).toBe('a-different-google-account');
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/different Google account/);
+      expect(res.body.token).toBeUndefined();
+      expect(fakeDb.writes()).toEqual([]);
     });
 
-    it('a verified token with no payload (getPayload() returns undefined) is a 500 from reading payload.email, not a clean 401; nothing is read or written', async () => {
+    it('the same Google account keeps signing in, and a user with no google_id yet is linked on first sign-in', async () => {
+      registered({ google_id: 'google-sub-1', avatar_url: GOOGLE_PAYLOAD.picture });
+      expect((await signIn()).status).toBe(200);
+      fakeDb.reset();
+      registered({ google_id: null });
+      const res = await signIn();
+      expect(res.status).toBe(200);
+      expect(fakeDb.one(LINK_GOOGLE).params[0]).toBe('google-sub-1');
+    });
+
+    it('a verified token with no payload (getPayload() returns undefined) is a clean 401, nothing read or written', async () => {
       asPayload(null);
       const res = await signIn();
-      expect(res.status).toBe(500);
+      expect([res.status, res.body.error]).toEqual([401, 'Invalid Google credential']);
       expect(res.body.token).toBeUndefined();
       expect(fakeDb.untouched()).toBe(true);
     });
