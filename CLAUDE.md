@@ -127,12 +127,10 @@ each one is pinned back; **do not "clean these up" without re-running a before/a
   port.
 - Backend runs via `tsx watch src/server.ts` — no build step, no `dist/`
   folder. TypeScript runs directly.
-- **A brand-new Postgres volume does not initialise today (verified 2026-11-05, `postgres:16-alpine` with exactly docker-compose's two init mounts).**
-  The image runs `01_schema.sql` then `02_seed.sql` with `ON_ERROR_STOP`, and `seed.sql`'s closing block calls `setval('seq_candidate', 0)` on the
-  empty table: "value 0 is out of bounds for sequence", the init script fails and the container exits (code 3). Everything above that block has
-  already committed, which is how the test stack and CI get a usable database (they apply the files themselves and tolerate that one error).
-  An EXISTING volume is unaffected, so this only bites `docker-compose down -v` followed by `up`; `ROADMAP.md` lists the fix. For a throw-away
-  database for tests use `hms-tests-final/scripts/test-stack.sh` (see Testing), not the developer's `dp_hms_db`.
+- **A brand-new Postgres volume initialises (fixed 2026-11-15).** The image runs `01_schema.sql` then `02_seed.sql` with `ON_ERROR_STOP`; `seed.sql`'s closing
+  block used to call `setval('seq_candidate', 0)` on the empty table and kill the init script, and now ends every id series with
+  `setval(seq, COALESCE(max, 1), max IS NOT NULL)`, so it runs to the end on an empty database. For a throw-away database for tests use
+  `hms-tests-final/scripts/test-stack.sh` (see Testing), not the developer's `dp_hms_db`.
 
 ### Testing — three layers, don't confuse them
 Counts below were measured on 2026-11-05 on `origin/main` (`b4ccb67`) with `vitest run --reporter=dot` and `playwright test --list`; re-measure
@@ -203,7 +201,7 @@ smoke accounts.
   `api/15` / `e2e/06` (guarded by `hasCalendarCredentials()`, deletes its event in a `finally`).
 - **The isolated test stack — `hms-tests-final/scripts/test-stack.sh`.** `bash scripts/test-stack.sh up|down|status|env|preview|restart|reset N`
   (`N` = 0..9; `up N --no-frontend` for api/db only). Each index is a disposable stack: a throw-away Postgres container `hms-pw-db-N`
-  (`postgres:16-alpine`, data on tmpfs, schema.sql then seed.sql applied, the known seed error and the two stuck sequences handled), the backend
+  (`postgres:16-alpine`, data on tmpfs, schema.sql then seed.sql applied), the backend
   from THIS checkout's `backend/src` run with `tsx` on an EMPTY environment (`env -i`: no `ANTHROPIC_API_KEY`, no Google credentials, no
   `backend/.env`, `SOURCING_ENABLED=true` by default) and a Vite server (`scripts/stack-vite.mjs`, with a private cache dir so a worktree's
   symlinked `node_modules` is never re-optimised under the developer's own dev server). **Ports for index N: database `55440+N`, backend `4110+N`,
@@ -287,10 +285,9 @@ required check. Not in CI: the Playwright suite on pull requests (needs a stack 
 `db`, and `e2e`, `e2e-mobile` and `smoke` run nowhere in GitHub) and Vercel's own build (Vercel posts that status itself).
 
 **Two ratchets (read before "fixing" a warning).** CI found real defects on its first run; each is recorded, shown as a warning on every run, and does
-not fail the build, while anything NEW does: `.github/ci/known-db-defects.txt` (`seq_eval_question` and `seq_comp_benchmark` start behind their seeded
-ids; `apply-db.sh` additionally tolerates exactly one error in `seed.sql`, `setval(seq, 0)` on an empty database; the nightly workflow runs
-`.github/ci/seed-sequence-workaround.sql` to advance the two sequences — delete the line, the tolerance and the workaround when the bug is fixed;
-the job prints a notice for a line that no longer matches) and `tools/ci-lint/summarize-eslint.mjs` (the async-promise lint's 2 known findings, both in
+not fail the build, while anything NEW does: `.github/ci/known-db-defects.txt` (empty since 2026-11-15, when the two seed.sql sequence defects were fixed and the
+`apply-db.sh` tolerance and `seed-sequence-workaround.sql` were deleted; add a line only for a real, reported database defect, and delete it when fixed — the job prints
+a notice for a line that no longer matches) and `tools/ci-lint/summarize-eslint.mjs` (the async-promise lint's 2 known findings, both in
 the dead `backend/src/jobs/scheduler.ts`; add `--fail` in `ci.yml` once they are gone). `tools/ci-lint/` is a separate package on purpose (Vercel
 installs from `backend/` and `frontend/`; nothing there may reach a production install).
 
@@ -556,22 +553,15 @@ so every subsequent INSERT collides on the primary key until the counter
 climbs back past the old max. Fixed to use the same `MAX(...)` pattern
 (wrapped in `COALESCE(...,0)`, since these four specifically can be
 genuinely empty on a fresh DB, unlike roles/agencies/assignments which this
-same script just seeded moments earlier). **That `COALESCE(...,0)` is itself
-a bug on a genuinely empty database (found by the 2026-11-05 CI/test work):
-`setval('seq_candidate', 0)` is below the sequence minimum and raises "value 0
-is out of bounds", so seed.sql stops at its closing block on a fresh database
-(every INSERT above it has already committed), docker-compose's init script
-fails there, and the three COALESCE setvals after it fail the same way. A
-fix is to call `setval(seq, 1, false)` when the table is empty; `ROADMAP.md`
-lists it. `db/16-schema-replay` pins it.**
-Related, same file: `seed.sql` inserts `Q001–Q013` and `BEN001–BEN012` with
-explicit ids but never advances `seq_eval_question` / `seq_comp_benchmark`
-(created `START 1`; the later `START 14` / `START 13` lines are
-`CREATE SEQUENCE IF NOT EXISTS` no-ops), so on a database rebuilt from the two
-files the first INSERT that relies on the default id collides on the primary
-key. A long-lived database is long past it; the test stack and CI advance
-both sequences by hand. If a similar "everything's
-failing with duplicate key on `<table>_pkey`" symptom ever recurs, check
+same script just seeded moments earlier). That `COALESCE(...,0)` was itself a bug on a genuinely empty database (found by the
+2026-11-05 CI/test work; fixed 2026-11-15): `setval(seq, 0)` is below the sequence minimum
+("value 0 is out of bounds"), so seed.sql stopped at its closing block and
+docker-compose's init failed. Every series now uses `setval(seq, COALESCE(m, 1), m IS NOT NULL)`
+(next id is 1 on an empty table). The same block now also advances `seq_eval_question` /
+`seq_comp_benchmark` past the explicitly inserted `Q001–Q013` / `BEN001–BEN012` (they are
+created `START 1`; the later `START 14` / `START 13` lines are
+`CREATE SEQUENCE IF NOT EXISTS` no-ops). `db/16-schema-replay` pins both. If a similar
+"everything's failing with duplicate key on `<table>_pkey`" symptom ever recurs, check
 `SELECT last_value, is_called FROM seq_<name>` against the table's actual
 `MAX(id)` first — a stuck-low sequence is the same class of bug.
 

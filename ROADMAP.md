@@ -448,15 +448,10 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       `POST /api/auth/login` with a non-string e-mail. Most write routes do not validate enum or numeric fields at all (`POST /api/roles` ignores an
       unknown `status`; `POST /api/applications/:id/stage` stores any string as a stage, `applications.stage` being plain TEXT; interview feedback accepts an
       empty body and scores outside 1-5, and a 99 passes the "above 2.5" test that auto-advances the candidate).
-- [ ] **`seed.sql`'s closing `setval` block fails on an empty database.** `setval('seq_candidate', COALESCE(MAX(...), 0))` (and the same for application,
-      interview, refcheck) is "value 0 is out of bounds": `seed.sql` stops at its last block (data already committed), and **a fresh `docker-compose up`
-      on a new volume does not initialise: the Postgres init script fails there and the container exits with code 3** (verified 2026-11-05; an existing volume is
-      fine). Use `setval(seq, 1, false)` when the table is empty. CI and the test stack tolerate exactly this one error (`known-db-defects.txt`,
-      `.github/ci/apply-db.sh`, `scripts/test-stack.sh`); pinned by `db/16-schema-replay`.
-- [ ] **`seq_eval_question` and `seq_comp_benchmark` stay behind the seeded ids.** `seed.sql` inserts `Q001-Q013` / `BEN001-BEN012` explicitly and never advances them;
-      they are created `START 1`, the later `START 14` / `START 13` lines are `CREATE SEQUENCE IF NOT EXISTS` no-ops, so on a rebuilt database the first insert that
-      relies on the default id fails on the primary key (the `api/08` "HR can add a new question" test). Add the two `setval` lines to `seed.sql`, then
-      delete `known-db-defects.txt`'s two lines and `.github/ci/seed-sequence-workaround.sql`.
+- [x] **`seed.sql`'s closing `setval` block failed on an empty database, and `seq_eval_question` / `seq_comp_benchmark` stayed behind the seeded ids.** Fixed 2026-11-15: every id
+      series ends `setval(seq, COALESCE(max, 1), max IS NOT NULL)` (rows: next id is max + 1 as before; none: next id is 1), and the two sequences are advanced past `Q013` / `BEN012`.
+      A fresh `docker-compose up` on a new volume now initialises (verified with `postgres:16-alpine`, `ON_ERROR_STOP`, zero errors). The CI and test-stack tolerances,
+      `known-db-defects.txt`'s two lines and `.github/ci/seed-sequence-workaround.sql` are gone; `db/16-schema-replay` pins the fixed behaviour.
 - [ ] **`schema.sql` is not re-runnable** although its patch section is headed "Safe to run multiple times": the original block uses plain `CREATE TABLE`
       (42P07 on the first statement) and two patches fail when repeated (`ALTER COLUMN vacancy_reason TYPE TEXT[] USING string_to_array(...)` when it is
       already `text[]`, and `ADD COLUMN gender` without `IF NOT EXISTS`). Pinned by `db/16`.

@@ -107,8 +107,6 @@ jobs:
           done
       - name: Build the database (schema.sql, then seed.sql)
         run: bash .github/ci/apply-db.sh
-      - name: Workaround for the stuck eval-question and comp-benchmark sequences (see the file; delete when fixed)
-        run: psql -v ON_ERROR_STOP=1 -q -f .github/ci/seed-sequence-workaround.sql
       - name: Start the backend (npx tsx src/server.ts, no Anthropic or Google credentials)
         working-directory: backend
         env:
@@ -205,8 +203,6 @@ jobs:
           done
       - name: Build the database (schema.sql, then seed.sql)
         run: bash .github/ci/apply-db.sh
-      - name: Workaround for the stuck eval-question and comp-benchmark sequences (see the file; delete when fixed)
-        run: psql -v ON_ERROR_STOP=1 -q -f .github/ci/seed-sequence-workaround.sql
       - name: Start the backend (npx tsx src/server.ts, no Anthropic or Google credentials)
         working-directory: backend
         env:
