@@ -375,10 +375,8 @@ nobody was specifically assigned. **A Hiring Manager cannot approve a
 role — not even their own.** `PATCH /roles/:id` is `isHRTier`-gated
 end to end (no `isHmForThisRole` carve-out); approver name and date are
 captured from the acting HR-tier user and Open Date copies from Approval
-Date the same moment. **One known hole in "financial fields stripped"
-(verified 2026-11-05, listed in `ROADMAP.md`):** `GET /api/candidates/:id/edit-log`
-is open to a Hiring Manager and returns the raw log rows, old and new values of
-`expected_ctc` and the other compensation fields included.
+Date the same moment. **`GET /api/candidates/:id/edit-log` follows the same rule (fixed 2026-11-15):** compensation rows (`current_ctc_fixed`, `current_ctc_variable`, `current_esops`, `expected_ctc`) are
+left out for a Hiring Manager unless they are named on a role the candidate has an application on.
 
 **A role can have several Hiring Managers (2026-10-07, first case: R016 Senior Platform
 Engineer — Mandeep Dagar + Piyush Negi).** There is still ONE text column,

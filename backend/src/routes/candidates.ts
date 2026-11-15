@@ -487,8 +487,21 @@ router.delete('/:id', requireHR, async (req: Request, res: Response) => {
 });
 
 // ─── GET /api/candidates/:id/edit-log ─────────────────────────────────────────
+// A row logging a compensation edit carries the plaintext old/new value, so it follows the same rule as the candidate's own
+// CTC fields in GET /:id: HR-tier sees everything, a Hiring Manager sees those rows only when the candidate has an application
+// on a role they are the named Hiring Manager of. Excluded entirely (not redacted in place), as roles.ts does for ctc_band.
+export const CANDIDATE_COMP_FIELDS = ['current_ctc_fixed', 'current_ctc_variable', 'current_esops', 'expected_ctc'];
 router.get('/:id/edit-log', async (req: Request, res: Response) => {
-  const logs = await query(
+  const persona = req.user!.persona;
+  let canSeeComp = isHRTier(persona);
+  if (!canSeeComp) {
+    const roles = await query<{ hiring_manager_name: string | null }>(
+      `SELECT r.hiring_manager_name FROM applications a JOIN roles r ON r.id = a.role_id WHERE a.candidate_id = $1`,
+      [req.params.id]
+    );
+    canSeeComp = roles.some(r => canSeeCompForRole(persona, req.user!.name, r.hiring_manager_name));
+  }
+  const logs = await query<{ field_name?: string }>(
     `SELECT el.*, u.name AS changed_by_name
      FROM candidate_edit_log el
      LEFT JOIN users u ON u.id = el.changed_by
@@ -496,7 +509,7 @@ router.get('/:id/edit-log', async (req: Request, res: Response) => {
      ORDER BY el.changed_at DESC`,
     [req.params.id]
   );
-  res.json({ logs });
+  res.json({ logs: canSeeComp ? logs : logs.filter(l => !CANDIDATE_COMP_FIELDS.includes(String(l.field_name))) });
 });
 
 // ─── GET /api/candidates/:id/activity — full activity timeline ────────────────
