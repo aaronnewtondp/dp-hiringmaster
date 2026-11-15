@@ -34,7 +34,9 @@ router.post('/sla-check', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/cron/email-digest
+// POST /api/cron/email-digest — NOT scheduled (retired from vercel.json 2026-11-15: Vercel Cron issues GET, this route is POST-only, so it
+// never fired, and nobody decided to e-mail every open pending action to HR_EMAIL). Kept as a manually callable endpoint; it sends mail
+// over the SMTP_* variables, so call it only on purpose. Anyone scheduling it must also answer GET (see sourcing-check below).
 router.post('/email-digest', async (req: Request, res: Response) => {
   if (!verifyCron(req, res)) return;
   try {
@@ -47,7 +49,7 @@ router.post('/email-digest', async (req: Request, res: Response) => {
 });
 
 // GET|POST /api/cron/sourcing-check — Sourcing module exception engine. One handler for both verbs: Vercel Cron
-// issues GET (the existing /email-digest route is POST-only and therefore never fires; deliberately left alone).
+// issues GET (the only route listed in vercel.json's crons).
 // A no-op unless SOURCING_ENABLED=true. Same engine the dashboard/queue run opportunistically, so cron and a page
 // load are equivalent.
 async function sourcingCheck(req: Request, res: Response) {

@@ -95,7 +95,7 @@ offer figures) are removed at the API layer, not in the UI. `backend/src/routes.
 | `/agencies`, `/assignment-repo`, `/ref-checks`, `/eval-questions`, `/comp-benchmarks` | lookups and repositories: writes are HR-tier; agencies and comp benchmarks are HR-tier for reads too |
 | `/users` | `GET /`, `POST /`, `PATCH /:id` — `super_admin` only |
 | `/sourcing` | status, settings, people, workspace, plans (activate, edit, channels), commitments, exceptions, queue, advice — off unless `SOURCING_ENABLED=true` |
-| `/cron` | `POST /sla-check`, `POST /email-digest`, `GET`/`POST /sourcing-check` — `Authorization: Bearer $CRON_SECRET` |
+| `/cron` | `POST /sla-check`, `POST /email-digest` (manual only, not scheduled), `GET`/`POST /sourcing-check` — `Authorization: Bearer $CRON_SECRET` |
 
 Application state is three independent fields, each with its own endpoint: `stage` (Applied and Screened → Interview Round 1 → … → Joined),
 `status` (Active / Rejected / Withdrawn / Hold for Future / Joined / Closed) and `recruiter_screening_status`. Never conflate them (`CLAUDE.md`).
