@@ -63,6 +63,11 @@ updates:
       # Production runs Node 22 (engines: 22.x). @types/node must track that line, not the newest Node.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # typescript 7 is the native (Go) port and has no JavaScript compiler API: crossPackageTwins.test.ts calls
+      # `ts.transpileModule` / `ModuleKind` / `ScriptTarget`, which do not exist there (Dependabot #79 failed on exactly
+      # those three lines), and typescript-eslint does not support it yet. Moving on is a deliberate migration, not a bump.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /frontend
