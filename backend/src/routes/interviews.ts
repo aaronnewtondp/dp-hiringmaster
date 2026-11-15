@@ -353,6 +353,22 @@ router.patch('/:id/feedback', async (req: Request, res: Response) => {
     score_clarity, score_practical_thinking, score_completeness, assignment_notes,
   } = req.body;
 
+  // Scores are 1-5 (the assignment columns carry a CHECK for it; the per-area scores live in JSONB and carried none, so a 99 used to be
+  // averaged in and could trip the "above 2.5" auto-advance). Refuse anything else here, before it is stored or acted on.
+  const outOfScale = (v: unknown) => typeof v !== 'number' || !Number.isFinite(v) || v < 1 || v > 5;
+  if (scores_per_area !== undefined && scores_per_area !== null) {
+    if (typeof scores_per_area !== 'object' || Array.isArray(scores_per_area) || Object.values(scores_per_area).some(outOfScale)) {
+      res.status(400).json({ error: 'scores_per_area must map each area to a number from 1 to 5.' });
+      return;
+    }
+  }
+  for (const [name, v] of Object.entries({ score_technical_accuracy, score_problem_solving, score_clarity, score_practical_thinking, score_completeness })) {
+    if (v !== undefined && v !== null && (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 5)) {
+      res.status(400).json({ error: `${name} must be a whole number from 1 to 5.` });
+      return;
+    }
+  }
+
   // Compute weighted average (Standard rounds)
   let overall_round_score: number | null = null;
   if (scores_per_area && typeof scores_per_area === 'object') {

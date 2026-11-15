@@ -365,9 +365,9 @@ test.describe('User lifecycle (local Postgres + API)', () => {
       expect(r.body.error).toBe('User not found');
     });
 
-    test('TODAY: a malformed user id is a 500 (the id reaches Postgres as a uuid and fails the cast) — not a 400 or 404', async ({ request }) => {
+    test('a malformed user id is a 400 (the id reaches Postgres as a uuid and fails the cast, which the error handler maps) — not a 500', async ({ request }) => {
       const r = await call(request, sa, 'patch', '/api/users/not-a-uuid', { department: 'x' });
-      expect(r.status).toBe(500);
+      expect(r.status).toBe(400);
     });
 
     test('TODAY: users.email is a case-sensitive UNIQUE: SQL can store an address with capitals, that user can never sign in by password, and once a lower-case twin exists the same sign-in lands on the TWIN', async ({ request }) => {

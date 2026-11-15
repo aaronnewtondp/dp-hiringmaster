@@ -51,7 +51,7 @@ test.describe('Mandatory interview/assignment feedback before stage advance', ()
 
     const feedbackRes = await api.patch(`/api/interviews/${round.id}/feedback`, {
       overall_assessment: 'Positive', round_recommendation: 'Proceed',
-      scores_per_area: { Technical: 8 },
+      scores_per_area: { Technical: 4 },
     });
     expect(feedbackRes.status()).toBe(200);
     expect((await feedbackRes.json()).round.feedback_status).toBe('Submitted');

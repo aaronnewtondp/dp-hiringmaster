@@ -145,10 +145,10 @@ describe('POST /api/auth/login', () => {
     expect(res.body.token).toBeUndefined();
   });
 
-  it('characterization: an email that is not a string (a number, an object) is a 500 from email.toLowerCase(), not a 400', async () => {
+  it('an email or password that is not a string (a number, an object, an array) is a 400, never a 500', async () => {
     for (const email of [12345, { a: 1 }, ['a@example.test']]) {
       const res = await login({ email, password: PASSWORD });
-      expect([JSON.stringify(email), res.status]).toEqual([JSON.stringify(email), 500]);
+      expect([JSON.stringify(email), res.status]).toEqual([JSON.stringify(email), 400]);
     }
     expect(fakeDb.untouched()).toBe(true);
   });

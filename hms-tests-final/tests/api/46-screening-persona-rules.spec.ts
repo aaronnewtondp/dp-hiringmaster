@@ -116,11 +116,11 @@ test.describe('POST /api/applications/:id/screening', () => {
     expect((await applicationRow(application.id)).recruiter_screening_status).toBe('New');
   });
 
-  test('TODAY: an undefined status value from HR is a 500 (the CHECK constraint), not a 400, and nothing changes', async ({ request }) => {
+  test('an undefined status value from HR is a 400 (the CHECK constraint, mapped by the error handler) and nothing changes', async ({ request }) => {
     const { hr, application } = await newApplicationAt(request, 'Applied and Screened', 'R006');
     const res = await hr.post(`/api/applications/${application.id}/screening`, { new_screening_status: 'Totally Bogus' });
-    expect(res.status()).toBe(500);
-    expect((await res.json()).error).toBe('Internal server error');
+    expect(res.status()).toBe(400);
+    expect((await res.json()).error).toBe('One of the submitted values is missing, the wrong type, or not allowed.');
     expect((await applicationRow(application.id)).recruiter_screening_status).toBe('New');
     expect((await activityOf(hr, application.id)).map(a => a.event_type)).not.toContain('Recruiter Screening Status Changed');
   });

@@ -439,13 +439,11 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       adds 1, instead of using `seq_interview` (which exists, and is the column default). Two concurrent `POST /api/interviews` get the same id and one
       fails on the primary key with a 500; and because the order is TEXT, once `IR10000` exists the "last" id is `IR9999` again and the next id issued is
       `IR10000`, which already exists (`interviews.feedback.test.ts`, "characterization: the "last" id is the greatest as TEXT…").
-- [ ] **Several write routes answer 500 instead of 400 on a CHECK or cast violation** (the unhandled error reaches the generic handler). Reproduced:
-      `POST /api/roles` with `priority:"ZZ"` or `num_openings:"abc"`; `PATCH /api/roles/:id` with a bad `priority`, `status` or `num_openings`;
-      `POST /api/agencies` with a `contract_status` outside Active/Inactive/On Hold; `PATCH /api/applications/:id/notes` with `hr_priority_override:"Bogus"`;
-      `PATCH /api/users/<not a uuid>` (and `e2e/09`: editing a user's e-mail onto another user's is a 500 where Add user answers a clear 400);
-      `POST /api/auth/login` with a non-string e-mail. Most write routes do not validate enum or numeric fields at all (`POST /api/roles` ignores an
-      unknown `status`; `POST /api/applications/:id/stage` stores any string as a stage, `applications.stage` being plain TEXT; interview feedback accepts an
-      empty body and scores outside 1-5, and a 99 passes the "above 2.5" test that auto-advances the candidate).
+- [x] **Several write routes answered 500 instead of 400 on a CHECK or cast violation.** Fixed 2026-11-15: the server's last error handler (`utils/httpErrors.ts`) maps Postgres 23514 / 22P02 / 22003 / 22001 /
+      22007 / 22008 to 400 "One of the submitted values is missing, the wrong type, or not allowed." (no field named) and 23505 to 409 "That value already exists."; malformed JSON keeps its 400. Also:
+      `POST /auth/login` with a non-string e-mail or password is a 400; `POST /applications/:id/stage` refuses a name that is not in `STAGE_ORDER` (400 "Unknown stage", checked after the persona gate);
+      interview feedback refuses per-area scores outside 1-5 and assignment scores that are not whole numbers 1-5 (a 99 no longer advances the candidate). The old second error handler
+      (unreachable, and it echoed `err.message`) was removed. **Still open:** `POST /roles` ignores an unknown `status` instead of refusing it, and interview feedback still accepts an empty body.
 - [x] **`seed.sql`'s closing `setval` block failed on an empty database, and `seq_eval_question` / `seq_comp_benchmark` stayed behind the seeded ids.** Fixed 2026-11-15: every id
       series ends `setval(seq, COALESCE(max, 1), max IS NOT NULL)` (rows: next id is max + 1 as before; none: next id is 1), and the two sequences are advanced past `Q013` / `BEN012`.
       A fresh `docker-compose up` on a new volume now initialises (verified with `postgres:16-alpine`, `ON_ERROR_STOP`, zero errors). The CI and test-stack tolerances,
