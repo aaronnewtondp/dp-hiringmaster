@@ -492,9 +492,9 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
 - [x] **`GET /api/candidates/:id/edit-log` returned raw compensation old/new values to a Hiring Manager.** Fixed 2026-11-15: HR-tier sees every row; a Hiring Manager sees the
       `current_ctc_fixed` / `current_ctc_variable` / `current_esops` / `expected_ctc` rows only when named on a role the candidate has an application on (the rule of `GET /:id`).
       Pinned in `routes.authMatrix.test.ts`. `requireLeadership` is still exported but mounted on no route.
-- [ ] **Google sign-in reads neither `email_verified` nor `hd`** (the check is the e-mail suffix alone), does not compare the Google subject with the stored
-      `google_id` (a different account for the same e-mail takes the link over when the picture differs), and answers 500 for a verified token with no payload
-      (`routes/auth.test.ts`, "characterization").
+- [x] **Google sign-in identity checks.** Fixed 2026-11-15 (`POST /api/auth/google`): the ID token's `email_verified` must be true and `hd` must equal `digitalpaani.com` (besides the
+      e-mail suffix); a user already linked to a Google `sub` is refused 403 if a different `sub` presents the same e-mail (an admin clears `users.google_id` to re-link a person who
+      really got a new Google account — SQL, there is no UI); a token with no payload is a clean 401 instead of a 500. Pinned in `routes/auth.test.ts`.
 - [ ] **Stored `sla_hours` disagrees with the SLA engine for high-fit candidates.** `getSlaHours('Applied and Screened', 80)` stores 48 while the SLA engine
       (`tieredStandardHours`) breaches at 24 since Hiring SOP v2.1 (the two agree below fit 75).
 - [ ] **"Joining risk" is raised for every Offer Accepted application at once.** `checkJoiningRisk` (`jobs/slaChecker.ts`) flags `last_hr_contact IS NULL OR older than
