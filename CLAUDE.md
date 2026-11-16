@@ -524,12 +524,15 @@ API endpoint — never conflate them:
 
 Rejection/withdrawal requires a reason at the API level (a rejection may carry
 several — see "A rejection can carry several reasons" below) (hard 400 if
-missing) — this is intentional governance, not a bug to relax. As built the
-gate is one test, `!rejectionReasonText && !withdrawal_reason_cat`, so EITHER
-kind of reason satisfies EITHER status (a `Rejected` with only a withdrawal
-reason is stored with no rejection reason, and the reverse), and a
-whitespace-only `withdrawal_reason_cat` counts (pinned in
-`applications.access.test.ts`).
+missing) — this is intentional governance, not a bug to relax. Each status needs
+its OWN kind of reason (2026-11-16): `Rejected` a non-blank rejection reason
+(`rejection_reason_cats` / `rejection_reason_cat`), `Withdrawn` a non-blank
+`withdrawal_reason_cat` (trimmed, stored trimmed); the other kind does not
+satisfy it, and the 400 names the missing one, before any write. The UI sends a
+withdrawal's reason as `withdrawal_reason_cat` (`statusReasonFields`). Likewise
+`PATCH /applications/:id/notes` needs a non-blank `hr_priority_override_reason`
+to set or change `hr_priority_override`; clearing it (null, '' or 'Normal')
+needs none.
 
 ### ID scheme
 Sequence-generated, prefixed: `R###` roles, `C####` candidates, `A####`

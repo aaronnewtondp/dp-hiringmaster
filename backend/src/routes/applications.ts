@@ -477,9 +477,16 @@ router.post('/:id/status', async (req: Request, res: Response) => {
     return;
   }
 
-  // Rejection and withdrawal require a reason
-  if ((new_status === 'Rejected' || new_status === 'Withdrawn') && !rejectionReasonText && !withdrawal_reason_cat) {
-    res.status(400).json({ error: 'A reason is required when rejecting or withdrawing a candidate' });
+  // Rejection and withdrawal each require THEIR OWN kind of reason: Rejected needs a non-blank
+  // rejection reason, Withdrawn a non-blank withdrawal_reason_cat (trimmed). One kind no longer
+  // satisfies the other status. Before any write.
+  const withdrawalReason = typeof withdrawal_reason_cat === 'string' ? withdrawal_reason_cat.trim() : '';
+  if (new_status === 'Rejected' && !rejectionReasonText) {
+    res.status(400).json({ error: 'A rejection reason is required when rejecting a candidate (rejection_reason_cats or rejection_reason_cat)' });
+    return;
+  }
+  if (new_status === 'Withdrawn' && !withdrawalReason) {
+    res.status(400).json({ error: 'A withdrawal reason is required when withdrawing a candidate (withdrawal_reason_cat)' });
     return;
   }
 
@@ -512,7 +519,7 @@ router.post('/:id/status', async (req: Request, res: Response) => {
        withdrawal_reason_cat=$4, withdrawal_reason_detail=$5,
        last_updated=NOW()${clearJoiningRisk} WHERE id=$6`,
       [new_status, rejectionReasonText, rejection_reason_detail || null,
-       withdrawal_reason_cat || null, withdrawal_reason_detail || null, req.params.id]
+       withdrawalReason || null, withdrawal_reason_detail || null, req.params.id]
     );
     await logActivity(client, app.id, app.candidate_id, app.role_id,
       'Status Changed',
@@ -624,10 +631,24 @@ router.patch('/:id/notes', requireHR, async (req: Request, res: Response) => {
   for (const field of allowed) {
     if (req.body[field] !== undefined) {
       updates.push(`${field} = $${i++}`);
-      values.push(req.body[field]);
+      // An empty-string override means "clear": store NULL (the column's CHECK rejects '').
+      values.push(field === 'hr_priority_override' && req.body[field] === '' ? null : req.body[field]);
     }
   }
   if (!updates.length) { res.status(400).json({ error: 'No valid fields' }); return; }
+
+  // Setting or changing the HR priority override needs a non-blank reason (trimmed), checked before any
+  // write. Clearing it (null, an empty string or 'Normal') needs none. A body that carries only the
+  // reason is not an override change.
+  const overrideValue = req.body.hr_priority_override;
+  const clearsOverride = overrideValue === null || overrideValue === '' || overrideValue === 'Normal';
+  if (overrideValue !== undefined && !clearsOverride) {
+    const reason = req.body.hr_priority_override_reason;
+    if (typeof reason !== 'string' || !reason.trim()) {
+      res.status(400).json({ error: 'hr_priority_override_reason is required when setting an HR priority override' });
+      return;
+    }
+  }
 
   // joining_risk_auto_flag is otherwise write-once (only ever set true, by
   // slaChecker.ts's checkJoiningRisk) — logging fresh HR contact here is the

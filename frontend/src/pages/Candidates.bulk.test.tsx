@@ -286,7 +286,7 @@ describe('Active Candidates — bulk status change', () => {
     fireEvent.change(select, { target: { value: 'Process too slow' } });
     update(modal);
     await waitFor(() => expect(h.updateStatus).toHaveBeenCalledTimes(1));
-    expect(h.updateStatus).toHaveBeenCalledWith('A9002', { new_status: 'Withdrawn', rejection_reason_cats: ['Process too slow'], rejection_reason_cat: 'Process too slow' });
+    expect(h.updateStatus).toHaveBeenCalledWith('A9002', { new_status: 'Withdrawn', withdrawal_reason_cat: 'Process too slow' });
   });
 
   it('Hold for Future carries no reasons, even after Rejected was opened and a reason ticked first', async () => {

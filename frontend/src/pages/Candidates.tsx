@@ -11,7 +11,7 @@ import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import RejectionEmailDraft, { RejectionEmailState } from '../components/shared/RejectionEmailDraft.tsx';
 import ReasonCheckboxList from '../components/shared/ReasonCheckboxList.tsx';
-import { reasonFields } from '../utils/rejectionReasons.ts';
+import { statusReasonFields } from '../utils/rejectionReasons.ts';
 import { interpolateRejectionDraft } from '../utils/rejectionEmailTemplates.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
@@ -315,7 +315,7 @@ export default function Candidates() {
         : null;
       return applicationsApi.updateStatus(id, {
         new_status: bulkStatusValue,
-        ...reasonFields(reasons),
+        ...statusReasonFields(bulkStatusValue, reasons),
         rejection_reason_detail: bulkRejectionDetail || undefined,
         send_rejection_email: perRecipient ? true : undefined,
         rejection_email_subject: perRecipient?.subject,

@@ -459,11 +459,13 @@ describe('POST /:id/status — Reject / Withdraw / Hold', () => {
   });
 
   describe('a reason is required to reject or withdraw (hard 400)', () => {
+    const REJECT_MSG = 'A rejection reason is required when rejecting a candidate (rejection_reason_cats or rejection_reason_cat)';
+    const WITHDRAW_MSG = 'A withdrawal reason is required when withdrawing a candidate (withdrawal_reason_cat)';
     it.each(['Rejected', 'Withdrawn'])('%s with no reason of any kind is 400, nothing written, and the same for a blank or non-text reason', async newStatus => {
       for (const body of [{}, { rejection_reason_cat: '' }, { rejection_reason_cat: '   ' }, { rejection_reason_cats: [] }, { rejection_reason_cats: ['', '  ', 3, null] }, { rejection_reason_cat: 42 }, { withdrawal_reason_cat: '' }]) {
         fakeDb.reset(); program();
         const res = await status('hr_recruiter', { new_status: newStatus, ...body });
-        expect([newStatus, JSON.stringify(body), res.status, res.body.error]).toEqual([newStatus, JSON.stringify(body), 400, 'A reason is required when rejecting or withdrawing a candidate']);
+        expect([newStatus, JSON.stringify(body), res.status, res.body.error]).toEqual([newStatus, JSON.stringify(body), 400, newStatus === 'Rejected' ? REJECT_MSG : WITHDRAW_MSG]);
         nothingWritten();
       }
     });
@@ -521,19 +523,50 @@ describe('POST /:id/status — Reject / Withdraw / Hold', () => {
     });
   });
 
-  describe('characterization: how the reason requirement is actually evaluated (see productIssues)', () => {
-    it('either kind of reason satisfies it for either status: a Rejected with only a withdrawal reason, and a Withdrawn with only rejection reasons, are accepted', async () => {
+  describe('each status needs its OWN kind of reason (400 before any write)', () => {
+    const noWrite = () => expect(fakeDb.statements().join('\n')).not.toMatch(/UPDATE applications SET status/);
+
+    it('Rejected with only a withdrawal reason is a 400 naming the rejection reason; nothing is written', async () => {
       program();
-      expect((await status('hr_recruiter', { new_status: 'Rejected', withdrawal_reason_cat: 'Accepted another offer' })).status).toBe(200);
-      expect(fakeDb.one(SQL.statusUpdate).params).toEqual(['Rejected', null, null, 'Accepted another offer', null, APP_ID]);   // a rejection stored with no rejection reason
-      fakeDb.reset(); program();
-      expect((await status('hr_recruiter', { new_status: 'Withdrawn', rejection_reason_cats: ['Skills gap'] })).status).toBe(200);
+      const res = await status('hr_recruiter', { new_status: 'Rejected', withdrawal_reason_cat: 'Accepted another offer' });
+      expect([res.status, res.body.error]).toEqual([400, 'A rejection reason is required when rejecting a candidate (rejection_reason_cats or rejection_reason_cat)']);
+      noWrite();
     });
 
-    it('a whitespace-only withdrawal_reason_cat counts as a reason (it is tested for truthiness, not cleaned like the rejection reasons)', async () => {
+    it('Withdrawn with only rejection reasons (array or string) is a 400 naming the withdrawal reason; nothing is written', async () => {
+      for (const body of [{ rejection_reason_cats: ['Skills gap'] }, { rejection_reason_cat: 'Skills gap' }]) {
+        fakeDb.reset(); program();
+        const res = await status('hr_recruiter', { new_status: 'Withdrawn', ...body });
+        expect([res.status, res.body.error]).toEqual([400, 'A withdrawal reason is required when withdrawing a candidate (withdrawal_reason_cat)']);
+        noWrite();
+      }
+    });
+
+    it('a blank withdrawal_reason_cat (empty, whitespace, non-string) is a 400', async () => {
+      for (const v of ['', '   ', '\t\n', 7, null, {}, ['x']]) {
+        fakeDb.reset(); program();
+        expect([String(v), (await status('hr_recruiter', { new_status: 'Withdrawn', withdrawal_reason_cat: v })).status]).toEqual([String(v), 400]);
+        noWrite();
+      }
+    });
+
+    it('a Rejected with only blank rejection reasons is a 400 even with a withdrawal reason', async () => {
       program();
-      expect((await status('hr_recruiter', { new_status: 'Withdrawn', withdrawal_reason_cat: '   ' })).status).toBe(200);
-      expect(fakeDb.one(SQL.statusUpdate).params[3]).toBe('   ');
+      expect((await status('hr_recruiter', { new_status: 'Rejected', rejection_reason_cats: [' ', ''], withdrawal_reason_cat: 'Personal reasons' })).status).toBe(400);
+      noWrite();
+    });
+
+    it('the withdrawal reason is stored trimmed', async () => {
+      program();
+      expect((await status('hr_recruiter', { new_status: 'Withdrawn', withdrawal_reason_cat: '  Personal reasons ' })).status).toBe(200);
+      expect(fakeDb.one(SQL.statusUpdate).params).toEqual(['Withdrawn', null, null, 'Personal reasons', null, APP_ID]);
+    });
+
+    it('a Hiring Manager rejecting from Applied and Screened still needs a rejection reason', async () => {
+      program();
+      const res = await status('hiring_manager', { new_status: 'Rejected', withdrawal_reason_cat: 'Personal reasons' });
+      expect(res.status).toBe(400);
+      noWrite();
     });
   });
 
@@ -839,6 +872,39 @@ describe('PATCH /:id/notes and POST /:id/retry-scoring (HR-tier)', () => {
     fakeDb.reset(); program();
     await notes('hr_recruiter', { joining_risk_notes: 'n' });
     expect(fakeDb.statements().join('\n')).not.toContain('joining_risk_auto_flag');
+  });
+
+  it('notes: setting or changing a priority override needs a non-blank reason (400 before any write); only the reason, or clearing, needs none', async () => {
+    const noWrite = () => expect(fakeDb.statements().join('\n')).not.toMatch(/UPDATE applications SET/);
+    for (const reason of [undefined, '', '   ', '\n', null, 5]) {
+      fakeDb.reset(); program();
+      const body: Record<string, unknown> = { hr_priority_override: 'Critical' };
+      if (reason !== undefined) body.hr_priority_override_reason = reason;
+      const res = await notes('hr_recruiter', body);
+      expect([String(reason), res.status, res.body.error]).toEqual([String(reason), 400, 'hr_priority_override_reason is required when setting an HR priority override']);
+      noWrite();
+    }
+    // other notes fields sent alongside do not rescue it, and nothing of them is written either
+    fakeDb.reset(); program();
+    expect((await notes('hr_recruiter', { hr_priority_override: 'High', hr_recruiter_summary: 'x' })).status).toBe(400);
+    noWrite();
+  });
+
+  it('notes: clearing the override (null, empty string, Normal) needs no reason; an empty string is stored as NULL; a reason alone is not an override change', async () => {
+    for (const [v, stored] of [[null, null], ['', null], ['Normal', 'Normal']] as const) {
+      fakeDb.reset(); program();
+      fakeDb.whenOne(/^SELECT candidate_id, role_id FROM applications WHERE id=\$1$/, { candidate_id: 'C9001', role_id: 'R9001' });
+      expect([String(v), (await notes('hr_recruiter', { hr_priority_override: v })).status]).toEqual([String(v), 200]);
+      expect(fakeDb.one(/^UPDATE applications SET hr_priority_override = \$1/).params).toEqual([stored, APP_ID]);
+    }
+    fakeDb.reset(); program();
+    expect((await notes('hr_recruiter', { hr_priority_override_reason: 'only a reason' })).status).toBe(200);
+  });
+
+  it('notes: the override reason is trimmed-checked but stored as sent; a valid pair is logged', async () => {
+    program();
+    fakeDb.whenOne(/^SELECT candidate_id, role_id FROM applications WHERE id=\$1$/, { candidate_id: 'C9001', role_id: 'R9001' });
+    expect((await notes('hr_recruiter', { hr_priority_override: 'High', hr_priority_override_reason: ' urgent ' })).status).toBe(200);
   });
 
   it('notes: setting a priority override is logged with the reason, against the acting user', async () => {

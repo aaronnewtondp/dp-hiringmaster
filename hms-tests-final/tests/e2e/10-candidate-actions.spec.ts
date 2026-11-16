@@ -321,7 +321,7 @@ test.describe('Status modal: reject, withdraw, hold', () => {
     await expect(dialogWith(page, 'Rejection reason').getByRole('listitem')).toHaveCount(0);   // one reason is plain text, not a list
   });
 
-  test('TODAY withdraw needs exactly one reason (a dropdown, no e-mail draft) and the reason is stored in the rejection column', async ({ page, request }) => {
+  test('withdraw needs exactly one reason (a dropdown, no e-mail draft) and the reason is stored in the withdrawal column', async ({ page, request }) => {
     const a = await arrange(request);
     const posts = recordRequests(page, isPost(`/api/applications/${a.appId}/status`));
     await open(page, 'hr', a);
@@ -338,12 +338,12 @@ test.describe('Status modal: reject, withdraw, hold', () => {
     await dialog.getByRole('button', { name: 'Update', exact: true }).click();
 
     await expect(toastWith(page, 'Status updated to Withdrawn')).toBeVisible();
-    expect(posts.bodies()).toEqual([{ new_status: 'Withdrawn', rejection_reason_cats: ['Process too slow'], rejection_reason_cat: 'Process too slow' }]);
+    expect(posts.bodies()).toEqual([{ new_status: 'Withdrawn', withdrawal_reason_cat: 'Process too slow' }]);
     const app = await getApp(request, a.appId);
     expect(app.status).toBe('Withdrawn');
-    // TODAY: the UI sends a withdrawal's reason in the REJECTION fields, so withdrawal_reason_cat (which the API supports) stays empty.
-    expect(app.rejection_reason_cat).toBe('Process too slow');
-    expect(app.withdrawal_reason_cat).toBeNull();
+    // The withdrawal's reason is stored in the withdrawal column; the rejection column stays empty.
+    expect(app.withdrawal_reason_cat).toBe('Process too slow');
+    expect(app.rejection_reason_cat).toBeNull();
   });
 
   test('Hold for Future sends no reasons even after Rejected was ticked, and Active brings the application back', async ({ page, request }) => {

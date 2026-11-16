@@ -484,7 +484,7 @@ describe('Candidate page — the Status dialog', () => {
     expect(h.updateStatus).not.toHaveBeenCalled();
     fireEvent.change(select, { target: { value: 'Accepted another offer' } });
     update(modal);
-    await waitFor(() => expect(h.updateStatus).toHaveBeenCalledWith('A9001', { new_status: 'Withdrawn', rejection_reason_cats: ['Accepted another offer'], rejection_reason_cat: 'Accepted another offer' }));
+    await waitFor(() => expect(h.updateStatus).toHaveBeenCalledWith('A9001', { new_status: 'Withdrawn', withdrawal_reason_cat: 'Accepted another offer' }));
   });
 
   it('Hold for Future carries no reasons, even after Rejected was opened and ticked first', async () => {
