@@ -469,7 +469,7 @@ describe('Help — workflow and section answers that were wrong, stale or mislea
     expect(t).toMatch(/the Skills and Industry boxes match profile data that nothing fills today/);
   });
 
-  it('Agencies: the list shows hires, an agency\'s own page shows submitted and hired, and the Add agency button does nothing yet', () => {
+  it('Agencies: the list shows hires, an agency\'s own page shows submitted and hired; agencies cannot be added from this screen', () => {
     mount();
     const t = answerTo(/What is the Agencies page/);
     expect(t).toMatch(/The Agency Repository holds each recruitment agency's contact/);
@@ -477,7 +477,8 @@ describe('Help — workflow and section answers that were wrong, stale or mislea
     expect(t).toMatch(/The list shows each agency's hires; open an agency to see two counts, submitted \(/);
     expect(t).toMatch(/hired \(candidates the agency sourced who reached Offer Accepted or Joined, counted once per candidate — the same number as Hires in the list\)/);
     expect(t).not.toMatch(/Each agency also shows two counts/);
-    expect(t).toMatch(/The Add agency button doesn't open anything yet/);
+    expect(t).toMatch(/Agencies can't be added from this screen today/);
+    expect(t).not.toMatch(/Add agency/);
     expect(t).not.toMatch(/the candidates they've submitted/);
   });
 

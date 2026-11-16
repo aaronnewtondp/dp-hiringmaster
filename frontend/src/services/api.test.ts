@@ -178,16 +178,25 @@ describe('api — response interceptor (401 = the session is over)', () => {
     expect(localStorage.getItem('hms_token')).toBeNull();
   });
 
-  // Pinned as it is today, and worth knowing: the interceptor has no exemption for the sign-in calls themselves. The backend answers a bad credential with
-  // 401 ('Invalid email or password' / 'Invalid Google credential', routes/auth.ts), so a failed sign-in navigates to /login — a full reload when the user is
-  // already there — before Login.tsx's catch block can show that message. If /auth/* is ever exempted, change this test.
-  it('TODAY: a 401 from the sign-in calls themselves redirects to /login as well', async () => {
-    const loc = stubLocation('/login');
-    reply = failing(401, { error: 'Invalid Google credential' });
-    await expect(authApi.loginWithGoogle('bad-credential')).rejects.toMatchObject({ response: { data: { error: 'Invalid Google credential' } } });
+  // A 401 from the sign-in calls themselves is a bad credential, not an expired session: no redirect (a full reload would lose the message) and no storage clearing.
+  it.each([['loginWithGoogle', () => authApi.loginWithGoogle('bad-credential')], ['login', () => authApi.login('a@example.test', 'wrong')]] as const)(
+    'a 401 from authApi.%s rejects to the caller without redirecting or touching the session', async (_n, call) => {
+      const loc = stubLocation('/login'); signedIn();
+      reply = failing(401, { error: 'Invalid Google credential' });
+      await expect(call()).rejects.toMatchObject({ response: { status: 401, data: { error: 'Invalid Google credential' } } });
+      expect(loc.href).toBe('/login');
+      expect(localStorage.getItem('hms_token')).toBe('tok');
+      expect(localStorage.getItem('hms_user')).not.toBeNull();
+    });
+
+  it('only the exact sign-in endpoints are exempt: another /auth call (me) still ends the session on a 401', async () => {
+    const loc = stubLocation(); signedIn();
+    reply = failing(401);
+    await expect(authApi.me()).rejects.toBeInstanceOf(AxiosError);
     expect(loc.href).toBe('/login');
     expect(localStorage.getItem('hms_token')).toBeNull();
   });
+
 });
 
 // ═══ How array parameters are put on the URL ═════════════════════════════════════════════════════════
