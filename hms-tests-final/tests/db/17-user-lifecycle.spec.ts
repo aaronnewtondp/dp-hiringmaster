@@ -12,8 +12,8 @@
 //   the 24 h token   since PR #55 authenticate() re-checks users.is_active (15 s in-process cache; PATCH /api/users/:id invalidates it, so on the
 //                     instance that handled the PATCH the effect is immediate, on another serverless instance within 15 s; a failed lookup answers 503).
 //                     So the old token of a deactivated user, and of a deactivated SUPER_ADMIN, answers 401 on reads, HR-gated routes and writes, and works
-//                     again the moment access is restored. PINNED AS "TODAY": a persona change (promotion or demotion) still only takes effect at the next
-//                     sign-in, because the token carries the persona it was issued with and only is_active is re-read.
+//                     again the moment access is restored. A persona change (promotion or demotion) is live too since 2026-11-16: the same lookup reads users.persona and
+//                     authenticate() uses it over the token's, so the old token acts as the NEW persona at once (name and e-mail still come from the token).
 //   super_admin       the API never creates or assigns it (400, nothing written) and a super_admin cannot demote or deactivate themselves; at the
 //                     database level the CHECK admits exactly four personas and nothing limits super_admin to one row (TODAY: the "exactly one person"
 //                     rule is a convention, not a constraint)
@@ -223,8 +223,8 @@ test.describe('User lifecycle (local Postgres + API)', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  test.describe('a persona change reaches the person only at their next sign-in', () => {
-    test('TODAY: a promoted user keeps the old persona in the old token; a fresh sign-in has the new one', async ({ request }) => {
+  test.describe('a persona change reaches the person at once (authenticate() reads users.persona live; PATCH invalidates the cache)', () => {
+    test('a promoted user\'s OLD token acts as the new persona at once (and /me says so); a fresh sign-in agrees', async ({ request }) => {
       const u = await makeUser('promoted', 'hiring_manager');
       const old = await tokenFor(request, 'promoted');
       expect((await call(request, old, 'get', '/api/agencies')).status).toBe(403);               // HR-tier only
@@ -233,14 +233,14 @@ test.describe('User lifecycle (local Postgres + API)', () => {
       expect(patched.status).toBe(200);
       expect((await dbUser(u.id)).persona).toBe('leadership');
 
-      expect((await call(request, old, 'get', '/api/auth/me')).body.user.persona).toBe('hiring_manager');   // the token carries the persona it was issued with
-      expect((await call(request, old, 'get', '/api/agencies')).status).toBe(403);
+      expect((await call(request, old, 'get', '/api/auth/me')).body.user.persona).toBe('leadership');
+      expect((await call(request, old, 'get', '/api/agencies')).status).toBe(200);
       const fresh = await login(request, u.email);
       expect(fresh.body.user.persona).toBe('leadership');
       expect((await call(request, fresh.body.token, 'get', '/api/agencies')).status).toBe(200);
     });
 
-    test('TODAY: and a demoted user keeps the old, higher persona in the old token (privileges outlive the demotion by up to the token lifetime)', async ({ request }) => {
+    test('a demoted user loses the higher persona on the OLD token at once (no privileges outlive the demotion)', async ({ request }) => {
       const u = users.promoted;
       const old = await tokenFor(request, 'promoted');                                           // leadership token
       expect((await call(request, old, 'get', '/api/agencies')).status).toBe(200);
@@ -248,8 +248,8 @@ test.describe('User lifecycle (local Postgres + API)', () => {
       expect((await call(request, sa, 'patch', `/api/users/${u.id}`, { persona: 'hiring_manager' })).status).toBe(200);
       expect((await dbUser(u.id)).persona).toBe('hiring_manager');
 
-      expect((await call(request, old, 'get', '/api/auth/me')).body.user.persona).toBe('leadership');
-      expect((await call(request, old, 'get', '/api/agencies')).status).toBe(200);                // still HR-tier
+      expect((await call(request, old, 'get', '/api/auth/me')).body.user.persona).toBe('hiring_manager');
+      expect((await call(request, old, 'get', '/api/agencies')).status).toBe(403);                // no longer HR-tier
       const fresh = await login(request, u.email);
       expect(fresh.body.user.persona).toBe('hiring_manager');
       expect((await call(request, fresh.body.token, 'get', '/api/agencies')).status).toBe(403);

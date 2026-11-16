@@ -205,3 +205,49 @@ describe('PATCH /api/users/:id invalidates the edited user\'s cached access', ()
     expect(fakeDb.accessLookups).toBe(before);
   });
 });
+
+describe('authenticate — the persona is the database\'s, not the token\'s', () => {
+  it('a demoted user: the token says hr_recruiter, the row says hiring_manager, and the request runs as hiring_manager', async () => {
+    fakeDb.setUserPersona('U1', 'hiring_manager');
+    const r = await call('U1');
+    expect(r.next).toHaveBeenCalledTimes(1);
+    expect(r.req.user?.persona).toBe('hiring_manager');
+    expect(r.req.user).toMatchObject({ userId: 'U1', email: 'person@example.test', name: 'Test Person' });
+  });
+
+  it('a promoted user gets the higher persona at once, too', async () => {
+    fakeDb.setUserPersona('U1', 'leadership');
+    expect((await call('U1', 'GET', { ...claims('U1'), persona: 'hiring_manager' })).req.user?.persona).toBe('leadership');
+  });
+
+  it('an unchanged persona leaves the token\'s payload object alone', async () => {
+    fakeDb.setUserPersona('U1', 'hr_recruiter');
+    expect((await call('U1')).req.user?.persona).toBe('hr_recruiter');
+  });
+
+  it('a NULL, unknown or non-string persona in the row is "no opinion": the token\'s persona stands', async () => {
+    for (const odd of [null, 'intern', 42, undefined]) {
+      invalidateUserAccess();
+      fakeDb.setUserPersona('U1', odd);
+      expect((await call('U1')).req.user?.persona, String(odd)).toBe('hr_recruiter');
+    }
+  });
+
+  it('the persona rides the same 15 s cache: one lookup serves both, and invalidateUserAccess() makes a change live at once', async () => {
+    fakeDb.setUserPersona('U1', 'hiring_manager');
+    expect((await call('U1')).req.user?.persona).toBe('hiring_manager');
+    fakeDb.setUserPersona('U1', 'leadership');
+    expect((await call('U1')).req.user?.persona).toBe('hiring_manager');   // still cached
+    expect(fakeDb.accessLookups).toBe(1);
+    invalidateUserAccess('U1');                                             // what PATCH /api/users/:id does
+    expect((await call('U1')).req.user?.persona).toBe('leadership');
+    expect(fakeDb.accessLookups).toBe(2);
+  });
+
+  it('a deactivated user is still refused whatever persona the row carries', async () => {
+    fakeDb.setUserAccess('U1', 'inactive').setUserPersona('U1', 'super_admin');
+    const r = await call('U1');
+    expect(r.next).not.toHaveBeenCalled();
+    expect(r.status).toEqual([401]);
+  });
+});

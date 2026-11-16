@@ -17,8 +17,17 @@ import { withDb } from './db';
 // Override with TEST_JWT_SECRET for a backend that uses another secret. Production is never reachable from these projects.
 export const DEV_JWT_SECRET = process.env.TEST_JWT_SECRET || 'change_this_in_production_to_a_long_random_string';
 
-/** seed.sql's first user (Aaron Newton): a fixed, active row in every freshly seeded database. */
+/** seed.sql's first user (Aaron Newton, hr_recruiter): a fixed, active row in every freshly seeded database. */
 export const SEED_USER_ID = 'a0000000-0000-0000-0000-000000000001';
+
+/** A seeded, active user for each persona. Since 2026-11-16 authenticate() takes the persona from users.persona, not from the token, so a
+ *  forged token only acts as the persona it claims when its userId is a row that really holds that persona. */
+export const SEED_USER_ID_BY_PERSONA = {
+  hr_recruiter:   SEED_USER_ID,
+  hiring_manager: 'a0000000-0000-0000-0000-000000000003',   // Alex
+  leadership:     'a0000000-0000-0000-0000-000000000007',   // Nalin
+  super_admin:    'a0000000-0000-0000-0000-000000000009',   // Super Admin Test
+} as const;
 
 const b64url = (v: Buffer | string) => Buffer.from(v).toString('base64url');
 
@@ -45,8 +54,9 @@ export function signJwt(payload: Record<string, unknown>, opts: SignOptions = {}
 export interface ForgedUser {
   email: string;
   persona: 'hr_recruiter' | 'hiring_manager' | 'leadership' | 'super_admin';
-  /** Defaults to the seeded Aaron Newton row (SEED_USER_ID): since PR #55 authenticate() rejects a token whose userId is not an
-   *  active row in users, so a random UUID is a 401. Pass the id of the user you mean when the id matters. */
+  /** Defaults to a seeded user holding `persona` (SEED_USER_ID_BY_PERSONA): since PR #55 authenticate() rejects a token whose userId is not an
+   *  active row in users (a random UUID is a 401), and since 2026-11-16 it uses that row's persona over the token's. Pass the id of the
+   *  user you mean when the id matters. */
   userId?: string;
   name?: string;
 }
@@ -54,7 +64,7 @@ export interface ForgedUser {
 /** A token exactly shaped like the backend's own (userId, email, persona, name). */
 export function forgeToken(user: ForgedUser, opts: SignOptions = {}): string {
   return signJwt({
-    userId:  user.userId ?? SEED_USER_ID,
+    userId:  user.userId ?? SEED_USER_ID_BY_PERSONA[user.persona],
     email:   user.email,
     persona: user.persona,
     name:    user.name ?? 'Forged User',

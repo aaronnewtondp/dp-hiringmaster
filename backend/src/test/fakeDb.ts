@@ -35,7 +35,7 @@ interface Handler {
 }
 
 const collapse = (sql: string) => String(sql).replace(/\s+/g, ' ').trim();
-const ACCESS_SQL = 'SELECT is_active FROM users WHERE id=$1';
+const ACCESS_SQL = 'SELECT is_active, persona FROM users WHERE id=$1';
 const WRITE_RE = /^(INSERT|UPDATE|DELETE|TRUNCATE|ALTER|DROP|CREATE)\b/i;
 
 export class FakeDb {
@@ -49,6 +49,7 @@ export class FakeDb {
     this.handlers = [];
     this.accessLookups = 0;
     this.userAccess.clear();
+    this.userPersona.clear();
     this.tx = { started: 0, committed: 0, rolledBack: 0 };
   }
 
@@ -75,7 +76,7 @@ export class FakeDb {
   }
 
   /**
-   * What authenticate()'s live account check (`SELECT is_active FROM users WHERE id=$1`) sees. By default every user is active.
+   * What authenticate()'s live account check (`SELECT is_active, persona FROM users WHERE id=$1`) sees. By default every user is active.
    * That lookup is answered here BEFORE the call log and the programmed replies, so it never shows up in `calls` /
    * `untouched()` / `statements()` and never consumes a `whenOnce` reply — tests written before the check keep proving what
    * they proved. Override per user with `setUserAccess`; `accessLookups` counts them. (authenticate() caches the answer for
@@ -84,6 +85,9 @@ export class FakeDb {
   accessLookups = 0;
   private userAccess = new Map<string, 'active' | 'inactive' | 'missing' | 'error'>();
   setUserAccess(userId: string, state: 'active' | 'inactive' | 'missing' | 'error'): this { this.userAccess.set(userId, state); return this; }
+  /** The persona authenticate()'s lookup returns for this user (default: none, so the token's persona stands). Any value is passed through as-is, so a test can also feed it an unknown one. */
+  private userPersona = new Map<string, unknown>();
+  setUserPersona(userId: string, persona: unknown): this { this.userPersona.set(userId, persona); return this; }
 
   private async run(via: RecordedCall['via'], text: string, params: unknown[] | undefined, inTransaction: boolean): Promise<Rows> {
     const sql = collapse(text);
@@ -93,7 +97,9 @@ export class FakeDb {
       const state = this.userAccess.get(String(bound[0])) ?? 'active';
       if (state === 'error') throw new Error('simulated database failure');
       if (state === 'missing') return [];
-      return [{ is_active: state === 'active' }];
+      return this.userPersona.has(String(bound[0]))
+        ? [{ is_active: state === 'active', persona: this.userPersona.get(String(bound[0])) }]
+        : [{ is_active: state === 'active' }];
     }
     this.calls.push({ via, sql, params: bound, inTransaction });
     for (let i = this.handlers.length - 1; i >= 0; i--) {
