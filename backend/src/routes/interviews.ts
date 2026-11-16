@@ -11,16 +11,6 @@ import { getSlaHours } from './applications.js';
 const router = Router();
 router.use(authenticate);
 
-async function nextRoundId(client?: import('pg').PoolClient): Promise<string> {
-  const q = client
-    ? client.query("SELECT id FROM interview_rounds ORDER BY id DESC LIMIT 1")
-    : queryOne<{ id: string }>("SELECT id FROM interview_rounds ORDER BY id DESC LIMIT 1");
-  const last = await q;
-  const row = client ? (last as import('pg').QueryResult).rows[0] : last as { id: string } | null;
-  const num = row ? parseInt(row.id.replace('IR', '')) + 1 : 1;
-  return `IR${String(num).padStart(4, '0')}`;
-}
-
 // ─── GET /api/interviews?application_id=A001 ─────────────────────────────────
 router.get('/', async (req: Request, res: Response) => {
   const { application_id } = req.query;
@@ -168,14 +158,13 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
   if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
 
   const round = await transaction(async (client) => {
-    const id = await nextRoundId(client);
     const r = await client.query(
       `INSERT INTO interview_rounds
-         (id, application_id, round_name, round_type, round_number,
+         (application_id, round_name, round_type, round_number,
           interviewer_emails, scheduled_date, interview_mode, focus_areas, duration_minutes,
           assignment_mail_body, assignment_cc, assignment_link, assignment_supporting_docs)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
-      [id, application_id, round_name, round_type,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [application_id, round_name, round_type,
        round_number || 1, interviewer_emails || null, scheduled_date, interview_mode,
        focus_areas || [], duration_minutes,
        mail_body_content || null, cc || null, assignment_link || null, supporting_documentation || null]

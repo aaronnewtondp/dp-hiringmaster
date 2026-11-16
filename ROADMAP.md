@@ -435,10 +435,10 @@ Each was confirmed by reading the code and, where it says "verified", by calling
 named: fixing the issue turns that test red on purpose (see the "TODAY" / `characterization:` tests), so change the test with the fix.
 
 *Data and ids*
-- [ ] **Interview-round ids collide.** `nextRoundId` (`backend/src/routes/interviews.ts`) reads `SELECT id FROM interview_rounds ORDER BY id DESC LIMIT 1` and
-      adds 1, instead of using `seq_interview` (which exists, and is the column default). Two concurrent `POST /api/interviews` get the same id and one
-      fails on the primary key with a 500; and because the order is TEXT, once `IR10000` exists the "last" id is `IR9999` again and the next id issued is
-      `IR10000`, which already exists (`interviews.feedback.test.ts`, "characterization: the "last" id is the greatest as TEXT…").
+- [x] **Interview-round ids collided.** Fixed 2026-11-16: `POST /api/interviews` no longer computes `MAX+1` in JS (`nextRoundId` is gone); the INSERT omits `id` and the column default
+      (`format_seq_id('seq_interview', 'IR', 4)`) issues it, so 15 simultaneous creations are 15 x 201 (was: some 409 after the central error mapping, a 500 before) and ids past `IR9999` no longer repeat.
+      **Deploy order:** production's `seq_interview` was at 1 while the table's highest id was `IR0170` (nothing ever used the default), so advance it BEFORE this code is deployed:
+      `SELECT setval('seq_interview', (SELECT COALESCE(MAX(substring(id from 3)::int), 1) FROM interview_rounds))` (Aaron's go, a production write).
 - [x] **Several write routes answered 500 instead of 400 on a CHECK or cast violation.** Fixed 2026-11-15: the server's last error handler (`utils/httpErrors.ts`) maps Postgres 23514 / 22P02 / 22003 / 22001 /
       22007 / 22008 to 400 "One of the submitted values is missing, the wrong type, or not allowed." (no field named) and 23505 to 409 "That value already exists."; malformed JSON keeps its 400. Also:
       `POST /auth/login` with a non-string e-mail or password is a 400; `POST /applications/:id/stage` refuses a name that is not in `STAGE_ORDER` (400 "Unknown stage", checked after the persona gate);
