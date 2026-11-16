@@ -4,7 +4,7 @@ import { authenticate, requireHR, stripRestrictedFields, isHRTier, canSeeCompFor
 import { Application, SLA_HOURS, STAGE_ORDER, Candidate, Role } from '../types/index.js';
 import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
 import { parseRoleFilters, buildRoleFilterSql, toArray } from '../utils/roleFilters.js';
-import { STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
+import { STAGE_SLA_ACTION_TYPES, getSlaHours } from '../jobs/slaChecker.js';
 import { isSeverelyOverBudget } from '../utils/budget.js';
 import { sendAssignmentEmail } from '../services/gmailService.js';
 import { joinReasons, normalizeReasons } from '../utils/rejectionReasons.js';
@@ -13,22 +13,8 @@ const router = Router();
 router.use(authenticate);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-export function getSlaHours(stage: string, fitScore?: number | null): number {
-  // Applied and Screened (renamed from plain 'Applied' 2026-09-01, see
-  // STAGE_ORDER) now covers what 'Resume Review' used to (that stage was
-  // retired) — same high-fit/normal threshold, just measured from
-  // application creation instead of a later manual move.
-  if (stage === 'Applied and Screened') {
-    return (fitScore && fitScore >= 75) ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL;
-  }
-  if (stage === 'Reference Check') return SLA_HOURS.REF_INIT;
-  if (stage === 'Offer Released') return SLA_HOURS.OFFER_RELEASE;
-  // 'Founders Round' no longer matches startsWith('Interview') after the
-  // rename from 'Interview – Round 3' — treated the same as a plain
-  // interview round for SLA purposes.
-  if (stage.startsWith('Interview') || stage === 'Founders Round') return SLA_HOURS.INTERVIEW_FEEDBACK;
-  return SLA_HOURS.IDLE;
-}
+// getSlaHours lives with the SLA engine (jobs/slaChecker.ts) so the stored value and the breach thresholds share one tiering.
+export { getSlaHours };
 
 async function logActivity(
   client: import('pg').PoolClient,
@@ -315,7 +301,10 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
   // Offer Accepted date from a non-skipped progression is never overwritten.
   let offerDateSql = '';
   if (new_stage === 'Offer Released') offerDateSql = ', offer_sent_date=NOW()';
-  if (new_stage === 'Offer Accepted') offerDateSql = ', offer_accepted_date=NOW()';
+  // Joining-risk clock (5 days without HR contact, jobs/slaChecker.ts checkJoiningRisk) starts when the application REACHES Offer
+  // Accepted: last_hr_contact becomes today unless a contact logged today or later is already there (GREATEST — a real, more recent
+  // contact is never overwritten; an older one, or none, is not a contact since the acceptance).
+  if (new_stage === 'Offer Accepted') offerDateSql = ', offer_accepted_date=NOW(), last_hr_contact=GREATEST(last_hr_contact, CURRENT_DATE)';
   if (new_stage === 'Joined') offerDateSql = ', offer_accepted_date=COALESCE(offer_accepted_date, NOW())';
 
   // status is a separate field from stage (see CLAUDE.md's application state

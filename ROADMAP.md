@@ -499,12 +499,12 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
 - [x] **Google sign-in identity checks.** Fixed 2026-11-15 (`POST /api/auth/google`): the ID token's `email_verified` must be true and `hd` must equal `digitalpaani.com` (besides the
       e-mail suffix); a user already linked to a Google `sub` is refused 403 if a different `sub` presents the same e-mail (an admin clears `users.google_id` to re-link a person who
       really got a new Google account — SQL, there is no UI); a token with no payload is a clean 401 instead of a 500. Pinned in `routes/auth.test.ts`.
-- [ ] **Stored `sla_hours` disagrees with the SLA engine for high-fit candidates.** `getSlaHours('Applied and Screened', 80)` stores 48 while the SLA engine
+- [x] **Stored `sla_hours` disagrees with the SLA engine for high-fit candidates.** *(Fixed 2026-11-16: `getSlaHours` now lives in `jobs/slaChecker.ts` and returns `tieredStandardHours(fit)` for the five score-tiered stages (so 24 from fit 75; Assignment Round is now 48/24 instead of the idle 72); the ResumeIQ and portfolio score writers use it for the application's current stage, so a score that arrives after creation refreshes the stored value; exhaustive stage x fit table test.)* `getSlaHours('Applied and Screened', 80)` stores 48 while the SLA engine
       (`tieredStandardHours`) breaches at 24 since Hiring SOP v2.1 (the two agree below fit 75).
-- [ ] **"Joining risk" is raised for every Offer Accepted application at once.** `checkJoiningRisk` (`jobs/slaChecker.ts`) flags `last_hr_contact IS NULL OR older than
+- [x] **"Joining risk" is raised for every Offer Accepted application at once.** *(Fixed 2026-11-16: the move into Offer Accepted sets `last_hr_contact = GREATEST(last_hr_contact, CURRENT_DATE)`; the sweep measures from the contact, else from `stage_entry_time`; `hours_overdue` is the real time past 120 h and the text says "since <date>" / "since the offer was accepted".)* `checkJoiningRisk` (`jobs/slaChecker.ts`) flags `last_hr_contact IS NULL OR older than
       5 days`, and nothing sets `last_hr_contact` when the stage moves (only `PATCH /notes` does), so the next SLA sweep raises "Joining risk — no contact"
       ("No HR contact logged in 5+ days") immediately, with `hours_overdue` hard-coded to 120.
-- [ ] **`backend/src/jobs/scheduler.ts` is dead code** (imported nowhere; Vercel Cron and the compute-on-read sweep replaced it; it is also the 2 known findings of
+- [x] **`backend/src/jobs/scheduler.ts` is dead code** *(Fixed 2026-11-16: deleted with `node-cron` / `@types/node-cron`; the lint is at zero findings and `ci.yml` runs it with `--fail`.)* (imported nowhere; Vercel Cron and the compute-on-read sweep replaced it; it is also the 2 known findings of
       the async-promise lint). Delete it and add `--fail` to the lint step in `ci.yml`.
 
 *Frontend*

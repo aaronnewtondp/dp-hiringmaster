@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../db/index.js', () => ({ query: vi.fn(), queryOne: vi.fn(), transaction: vi.fn(), pool: {} }));
 
 import {
-  tieredStandardHours,
+  tieredStandardHours, getSlaHours, SCORE_TIERED_STAGES,
   BREACH_IDLE_HOURS, BREACH_STANDARD_HOURS, BREACH_ASSIGNMENT_FEEDBACK_HOURS, HIGH_SCORE_THRESHOLD, BREACH_HIGH_SCORE_HOURS, LEADERSHIP_ESCALATION_HOURS,
   FLAT_STAGE_CHECKS, NOT_YET_ACTIONED_STAGES, FEEDBACK_DUE_STAGES, VALID_STAGES_BY_ACTION_TYPE, ALL_KNOWN_ACTION_TYPES,
   STAGE_SLA_ACTION_TYPES, ALL_BREACH_ACTION_TYPES, NON_ACTIONABLE_ALERT_TYPES, EXTERNAL_ACTION_TYPES, LEADERSHIP_ESCALATION_ACTION_TYPES,
@@ -44,10 +44,29 @@ describe('thresholds (Hiring SOP v2.1)', () => {
     expect(BREACH_ASSIGNMENT_FEEDBACK_HOURS).toBeGreaterThan(BREACH_STANDARD_HOURS);
   });
 
-  it('KNOWN DIVERGENCE (pinned so a change is deliberate): the stored SLA_HOURS.RESUME_REVIEW_HIGH_FIT is still 48 while the engine tiers a high-fit candidate at 24', () => {
-    expect(SLA_HOURS.RESUME_REVIEW_HIGH_FIT).toBe(48);
-    expect(tieredStandardHours(HIGH_SCORE_THRESHOLD)).toBe(24);
-    expect(SLA_HOURS.RESUME_REVIEW_HIGH_FIT).not.toBe(tieredStandardHours(HIGH_SCORE_THRESHOLD));
+  it('the stored sla_hours follows the engine: a high-fit candidate is stored at 24 (it used to be 48 while the engine breached at 24)', () => {
+    expect(getSlaHours('Applied and Screened', HIGH_SCORE_THRESHOLD)).toBe(tieredStandardHours(HIGH_SCORE_THRESHOLD));
+    expect(getSlaHours('Applied and Screened', HIGH_SCORE_THRESHOLD)).toBe(24);
+  });
+
+  // The exhaustive table: every pipeline stage x a spread of fit scores. The five tiered stages must store EXACTLY what the engine breaches at;
+  // every other stage must ignore the fit score.
+  const FITS: Array<number | null | undefined> = [undefined, null, NaN, -5, 0, 1, 40, 60, 74, 74.99, 75, 75.01, 80, 99, 100, 250];
+  it.each(STAGE_ORDER.map(s => [s]))('%s: stored hours vs the engine for every fit score', stage => {
+    const tiered = (SCORE_TIERED_STAGES as readonly string[]).includes(stage);
+    for (const fit of FITS) {
+      const stored = getSlaHours(stage, fit);
+      if (tiered) expect([stage, fit, stored]).toEqual([stage, fit, tieredStandardHours(fit ?? null)]);
+      else expect([stage, fit, stored]).toEqual([stage, fit, getSlaHours(stage, null)]);
+    }
+  });
+
+  it('the tiered stage list is the five stages the SOP and the engine name, and each is a real pipeline stage', () => {
+    expect([...SCORE_TIERED_STAGES]).toEqual(['Applied and Screened', 'Interview Round 1', 'Interview Round 2', 'Founders Round', 'Assignment Round']);
+    for (const s of SCORE_TIERED_STAGES) expect(STAGE_ORDER).toContain(s);
+    // the engine's own stage tables agree: every NOT_YET_ACTIONED stage is tiered
+    for (const c of NOT_YET_ACTIONED_STAGES) expect(SCORE_TIERED_STAGES).toContain(c.stage);
+    for (const c of FEEDBACK_DUE_STAGES.filter(f => f.scoreTiered)) expect(SCORE_TIERED_STAGES).toContain(c.stage);
   });
 });
 

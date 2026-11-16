@@ -332,6 +332,18 @@ describe('POST /:id/stage — what a move writes', () => {
     expect(plain).not.toMatch(/offer_sent_date|offer_accepted_date|status='Joined'/);
   });
 
+  it('starts the 5-day joining-risk clock on the move INTO Offer Accepted only: last_hr_contact = GREATEST(existing, today), never overwriting a more recent contact', async () => {
+    const sqlFor = async (from: string, to: string) => {
+      fakeDb.reset(); program({ app: { stage: from }, refChecks: '1' });
+      await stage('hr_recruiter', { new_stage: to });
+      return fakeDb.one(SQL.stageUpdate).sql;
+    };
+    expect(await sqlFor('Offer Released', 'Offer Accepted')).toContain('last_hr_contact=GREATEST(last_hr_contact, CURRENT_DATE)');
+    for (const to of ['Offer Released', 'Joined', 'Interview Round 2']) {
+      expect(await sqlFor('Offer Discussion', to)).not.toContain('last_hr_contact');
+    }
+  });
+
   it('resets the SLA clock: stage_entry_time=NOW(), sla_breach=false, sla_hours from getSlaHours(new stage, fit score)', async () => {
     program({ app: { stage: 'Interview Round 1', ai_fit_score: 90 } });
     await stage('hr_recruiter', { new_stage: 'Assignment Round' });
@@ -339,7 +351,7 @@ describe('POST /:id/stage — what a move writes', () => {
     expect(u.sql).toContain('stage_entry_time=NOW()');
     expect(u.sql).toContain('sla_breach=false');
     expect(u.params[1]).toBe(getSlaHours('Assignment Round', 90));
-    expect(u.params[1]).toBe(SLA_HOURS.IDLE);
+    expect(u.params[1]).toBe(24);                 // Assignment Round is score-tiered: fit 90 stores the 24h window, as the engine breaches
   });
 
   it('resolves the stage-keyed pending actions of the OLD stage — all stage SLA types plus "HM shortlist review" — in the same transaction', async () => {
@@ -900,9 +912,9 @@ describe('GET /:id and GET / — compensation is hidden from a hiring_manager un
 describe('getSlaHours — the sla_hours stored on an application at each stage change', () => {
   const H = SLA_HOURS;
   it.each([
-    ['Applied and Screened', H.RESUME_REVIEW_NORMAL], ['Interview Round 1', H.INTERVIEW_FEEDBACK], ['Interview Round 2', H.INTERVIEW_FEEDBACK],
+    ['Applied and Screened', 48], ['Interview Round 1', H.INTERVIEW_FEEDBACK], ['Interview Round 2', H.INTERVIEW_FEEDBACK],
     ['Founders Round', H.INTERVIEW_FEEDBACK], ['Reference Check', H.REF_INIT], ['Offer Released', H.OFFER_RELEASE],
-    ['Assignment Round', H.IDLE], ['Pre-Joining Documents', H.IDLE], ['Offer Discussion', H.IDLE], ['Offer Accepted', H.IDLE], ['Joined', H.IDLE],
+    ['Assignment Round', 48], ['Pre-Joining Documents', H.IDLE], ['Offer Discussion', H.IDLE], ['Offer Accepted', H.IDLE], ['Joined', H.IDLE],
     ['Interview Round 7', H.INTERVIEW_FEEDBACK], ['Interview – Round 3', H.INTERVIEW_FEEDBACK],
     ['interview round 1', H.IDLE], ['Resume Review', H.IDLE], ['Shortlisted', H.IDLE], ['', H.IDLE], ['Banana', H.IDLE],
   ])('%s → %i hours', (stageName, hours) => {
@@ -912,23 +924,27 @@ describe('getSlaHours — the sla_hours stored on an application at each stage c
   it('every stage of STAGE_ORDER gets one of the documented values (a stage added without thinking about its SLA falls to the 72-hour idle default)', () => {
     const byStage = Object.fromEntries(STAGE_ORDER.map(s => [s, getSlaHours(s)]));
     expect(byStage).toEqual({
-      'Applied and Screened': 48, 'Interview Round 1': 48, 'Interview Round 2': 48, 'Assignment Round': 72, 'Founders Round': 48,
+      'Applied and Screened': 48, 'Interview Round 1': 48, 'Interview Round 2': 48, 'Assignment Round': 48, 'Founders Round': 48,
       'Reference Check': 48, 'Pre-Joining Documents': 72, 'Offer Discussion': 72, 'Offer Released': 48, 'Offer Accepted': 72, 'Joined': 72,
     });
   });
 
-  it('the fit score only matters at Applied and Screened, and the high-fit value equals the normal one (48 and 48)', () => {
-    for (const fit of [undefined, null, 0, 74, 74.99, 75, 100, NaN, -5]) {
+  it('the fit score tiers the five SOP stages (24 from fit 75) and matters nowhere else', () => {
+    for (const fit of [undefined, null, 0, 74, 74.99, NaN, -5]) {
       expect([fit, getSlaHours('Applied and Screened', fit)]).toEqual([fit, 48]);
       expect([fit, getSlaHours('Interview Round 1', fit)]).toEqual([fit, 48]);
       expect([fit, getSlaHours('Joined', fit)]).toEqual([fit, 72]);
     }
-    expect(SLA_HOURS.RESUME_REVIEW_HIGH_FIT).toBe(SLA_HOURS.RESUME_REVIEW_NORMAL);
+    for (const fit of [75, 100]) {
+      for (const st of ['Applied and Screened', 'Interview Round 1', 'Interview Round 2', 'Founders Round', 'Assignment Round']) expect([st, getSlaHours(st, fit)]).toEqual([st, 24]);
+      expect([fit, getSlaHours('Reference Check', fit)]).toEqual([fit, 48]);
+      expect([fit, getSlaHours('Joined', fit)]).toEqual([fit, 72]);
+    }
   });
 
-  it('characterization: for a high-fit candidate (fit >= 75) at Applied and Screened the STORED sla_hours is 48 but the SLA engine breaches at 24 (tieredStandardHours) — the two disagree since Hiring SOP v2.1', () => {
-    expect(getSlaHours('Applied and Screened', 80)).toBe(48);
+  it('for a high-fit candidate (fit >= 75) the stored sla_hours equals the engine\'s breach threshold (tieredStandardHours), above and below the line', () => {
+    expect(getSlaHours('Applied and Screened', 80)).toBe(24);
     expect(tieredStandardHours(80)).toBe(24);
-    expect(getSlaHours('Applied and Screened', 74)).toBe(tieredStandardHours(74));      // below the threshold they agree
+    expect(getSlaHours('Applied and Screened', 74)).toBe(tieredStandardHours(74));
   });
 });

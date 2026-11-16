@@ -45,7 +45,6 @@ vi.mock('./portfolio/enqueue.js', () => ({
 }));
 
 import { runResumeIQScoring } from './resumeIQTrigger.js';
-import { SLA_HOURS } from '../types/index.js';
 
 afterAll(() => {
   if (savedKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = savedKey;
@@ -60,7 +59,7 @@ const SCREENING = [
 ];
 
 const APP = {
-  id: 'A0619', candidate_id: 'C1001', role_id: 'R019', score_avg: null,
+  id: 'A0619', candidate_id: 'C1001', role_id: 'R019', stage: 'Applied and Screened', score_avg: null,
   preferred_location: 'Gurugram', screening_answers: SCREENING,
 };
 const CANDIDATE = { id: 'C1001', full_name: 'Jane Doe', resume_drive_link: RESUME_URL };
@@ -205,7 +204,7 @@ describe('runResumeIQScoring — roles whose review takes its links from the scr
       expect(query.mock.calls[0][1]).toStrictEqual([
         7, 't', 8, 'e', 6, 'i', 7, 'c', 8, 'r', 7, 'tr', 6, 'l', 8, 'co',
         7.4, ['s1', 's2', 's3'], ['rf'], 'Good fit.', 'Yes', true,
-        74, 'Review', SLA_HOURS.RESUME_REVIEW_NORMAL, 'A0619',
+        74, 'Review', 48, 'A0619', 'Applied and Screened',
       ]);
       expect(sql(1)).toMatch(/^INSERT INTO activity_log/);
       expect(query.mock.calls[1][1]).toStrictEqual(['A0619', 'C1001', 'R019', 'Score: 74/100 (Review)', 'Review']);

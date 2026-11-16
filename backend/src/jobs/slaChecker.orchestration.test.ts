@@ -18,7 +18,7 @@ vi.mock('../db/index.js', () => ({
 }));
 vi.mock('nodemailer', () => ({ default: { createTransport: (...a: unknown[]) => h.createTransport(...a) } }));
 
-import { runSlaCheck, sendDailyDigest } from './slaChecker.js';
+import { runSlaCheck, sendDailyDigest, joiningRiskHoursOverdue, joiningRiskDescription, JOINING_CONTACT_HOURS } from './slaChecker.js';
 
 const NOW = new Date('2026-10-14T06:00:00Z');                       // Wednesday 14 October 2026
 const norm = (s: unknown) => String(s).replace(/\s+/g, ' ').trim();
@@ -189,5 +189,53 @@ describe('sendDailyDigest', () => {
     h.query.mockRejectedValue(new Error('db down'));
     await expect(sendDailyDigest()).rejects.toThrow('db down');
     expect(h.sendMail).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('Joining risk — the 5-day no-contact clock', () => {
+  const hoursAgo = (n: number) => new Date(NOW.getTime() - n * 3600000).toISOString();
+
+  it('the SQL measures from the last contact, falling back to when the application reached Offer Accepted, never from "no contact ever"', async () => {
+    await runSlaCheck();
+    const sql = seenSql().find(s => s.includes('SET joining_risk_auto_flag = true'))!;
+    expect(sql).toContain('COALESCE(last_hr_contact::timestamptz, stage_entry_time) < NOW() - make_interval(hours => $1::int)');
+    expect(sql).not.toContain('last_hr_contact IS NULL');
+    const call = h.query.mock.calls.find(c => norm(c[0]).includes('SET joining_risk_auto_flag = true'))!;
+    expect(call[1]).toEqual([120]);
+  });
+
+  it('writes the REAL hours past the 5-day line (not the constant 120) and says "since <date>" when there is a contact date', async () => {
+    h.query.mockImplementation(async (text: unknown) => norm(text).includes('SET joining_risk_auto_flag = true')
+      ? [{ id: 'A1', candidate_id: 'C1', role_id: 'R1', last_hr_contact: '2026-10-05', clock_start: hoursAgo(120 + 36) }] : []);
+    h.queryOne.mockImplementation(async (text: unknown) => norm(text).includes('FROM candidates') ? { full_name: 'Asha Rao' } : { title: 'QA Engineer' });
+    await runSlaCheck();
+    const ins = h.query.mock.calls.find(c => norm(c[0]).includes("'Joining risk — no contact'"))!;
+    const p = ins[1] as unknown[];
+    expect(p[5]).toBe(36);
+    expect(p[4]).toBe('No HR contact logged since 2026-10-05 (5+ days) for Asha Rao (Offer Accepted)');
+    expect(p[0]).toBe('A1');
+  });
+
+  it('with no contact date at all the text says since the offer was accepted', async () => {
+    h.query.mockImplementation(async (text: unknown) => norm(text).includes('SET joining_risk_auto_flag = true')
+      ? [{ id: 'A2', candidate_id: 'C2', role_id: 'R1', last_hr_contact: null, clock_start: hoursAgo(121) }] : []);
+    h.queryOne.mockResolvedValue({ full_name: 'Ben', title: 'X' });
+    await runSlaCheck();
+    const p = h.query.mock.calls.find(c => norm(c[0]).includes("'Joining risk — no contact'"))![1] as unknown[];
+    expect(p[4]).toContain('since the offer was accepted');
+    expect(p[5]).toBe(1);
+  });
+
+  it('pure helpers: overdue hours are elapsed minus 120, one decimal, never negative', () => {
+    expect(JOINING_CONTACT_HOURS).toBe(120);
+    expect(joiningRiskHoursOverdue(hoursAgo(120), NOW)).toBe(0);
+    expect(joiningRiskHoursOverdue(hoursAgo(120.04), NOW)).toBe(0);
+    expect(joiningRiskHoursOverdue(hoursAgo(144.5), NOW)).toBe(24.5);
+    expect(joiningRiskHoursOverdue(hoursAgo(50), NOW)).toBe(0);
+    expect(joiningRiskHoursOverdue(hoursAgo(1000), NOW)).toBe(880);
+    expect(joiningRiskDescription('A', null)).toBe('No HR contact logged since the offer was accepted (5+ days) for A (Offer Accepted)');
+    expect(joiningRiskDescription('A', '2026-10-01')).toBe('No HR contact logged since 2026-10-01 (5+ days) for A (Offer Accepted)');
+    expect(joiningRiskDescription('A', 'garbage')).toBe('No HR contact logged (5+ days) for A (Offer Accepted)');
   });
 });

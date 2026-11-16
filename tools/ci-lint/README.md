@@ -19,7 +19,7 @@ tools/ci-lint/node_modules/.bin/tsc --project tools/ci-lint/tsconfig.playwright.
 | File | What it is |
 |---|---|
 | `eslint.config.mjs` | `no-floating-promises`, `await-thenable`, `no-misused-promises` plus one syntax rule banning `setImmediate(async ...)`: the "no fire-and-forget async on Vercel" rule in `CLAUDE.md`. The header comment records what was measured and why `routes/` is scoped as it is. |
-| `summarize-eslint.mjs` | Turns the ESLint JSON into annotations and a job summary. Findings do not fail the job unless `--fail` is passed. |
+| `summarize-eslint.mjs` | Turns the ESLint JSON into annotations and a job summary. `ci.yml` passes `--fail`, so any finding fails the job (the run is at zero findings). |
 | `tsconfig.playwright.json` | Type-checks `hms-tests-final/**/*.ts` without putting a `tsconfig.json` inside the suite (Playwright reads one, so adding it there could change behaviour). `strict` is off: with it on there is one error, `helpers/calendar.ts:37` (`undefined` versus `null`). |
 
 `typescript` is pinned to 5.9.3, the version in `backend/package-lock.json`: `typescript-eslint` 8.72 supports TypeScript below 6.1, and npm's latest is 7.x.

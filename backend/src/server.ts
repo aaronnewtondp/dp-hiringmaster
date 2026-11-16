@@ -4,7 +4,7 @@ import candidateIngestRoutes from './routes/candidateIngest.js';
  * Express server entry point.
  *
  * CHANGES from Docker version:
- *  1. node-cron is NOT started here — Vercel Cron calls /api/cron/* instead.
+ *  1. No in-process scheduler runs here — Vercel Cron calls /api/cron/* instead.
  *  2. The app is exported as default so api/index.ts can re-export it to Vercel.
  *  3. app.listen() only runs when executed directly (local dev), not on Vercel.
  */
