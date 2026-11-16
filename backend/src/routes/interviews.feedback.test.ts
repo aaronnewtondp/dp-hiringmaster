@@ -376,17 +376,15 @@ describe('PATCH /:id/feedback — moving the candidate on by itself after positi
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('POST / — creating a round (HR-tier) and the Assignment e-mail', () => {
   const APP_LOOKUP = /^SELECT a\.candidate_id, a\.role_id, c\.full_name AS candidate_name, c\.email AS candidate_email/;
-  const NEXT_ID = /^SELECT id FROM interview_rounds ORDER BY id DESC LIMIT 1$/;
-  const INSERT_ROUND = /^INSERT INTO interview_rounds \(id, application_id, round_name, round_type, round_number,/;
+  const INSERT_ROUND = /^INSERT INTO interview_rounds \(application_id, round_name, round_type, round_number,/;
   const CANDIDATE = { candidate_id: 'C9001', role_id: 'R9001', candidate_name: 'Candidate Example', candidate_email: 'candidate@example.test', role_title: 'Quality Assurance Engineer', candidate_resume_link: null };
   const create = (as: Actor, body: Record<string, unknown>) => api.post('/api/interviews', { as, body });
 
-  function programCreate(candidate: Record<string, unknown> | null = CANDIDATE, lastId: string | null = null) {
+  function programCreate(candidate: Record<string, unknown> | null = CANDIDATE) {
     fakeDb.whenOne(APP_LOOKUP, candidate);
-    fakeDb.whenOne(NEXT_ID, lastId ? { id: lastId } : null);
     fakeDb.when(INSERT_ROUND, p => [{
-      id: p[0], application_id: p[1], round_name: p[2], round_type: p[3], round_number: p[4], interviewer_emails: p[5], scheduled_date: p[6],
-      interview_mode: p[7], focus_areas: p[8], duration_minutes: p[9], assignment_mail_body: p[10], assignment_cc: p[11], assignment_link: p[12],
+      id: 'IR0001', application_id: p[0], round_name: p[1], round_type: p[2], round_number: p[3], interviewer_emails: p[4], scheduled_date: p[5],
+      interview_mode: p[6], focus_areas: p[7], duration_minutes: p[8], assignment_mail_body: p[9], assignment_cc: p[10], assignment_link: p[11],
     }]);
     fakeDb.whenOne(/^SELECT candidate_id, role_id FROM applications WHERE id=\$1$/, { candidate_id: 'C9001', role_id: 'R9001' });
   }
@@ -429,23 +427,17 @@ describe('POST / — creating a round (HR-tier) and the Assignment e-mail', () =
     nothingWritten();
   });
 
-  describe('round ids (nextRoundId)', () => {
-    it.each([[null, 'IR0001'], ['IR0001', 'IR0002'], ['IR0009', 'IR0010'], ['IR0999', 'IR1000'], ['IR9999', 'IR10000']])('after %s the next round is %s (zero-padded to four digits, never truncated)', async (last, next) => {
-      programCreate(CANDIDATE, last);
+  describe('round ids', () => {
+    it('the id comes from the column default (seq_interview), not from MAX+1: the INSERT carries no id, no SELECT of the latest id runs, and it is one statement', async () => {
+      programCreate();
       const res = await create('hr_recruiter', STANDARD);
-      expect(res.body.round.id).toBe(next);
-      expect(fakeDb.one(INSERT_ROUND).params[0]).toBe(next);
-      expect(fakeDb.one(NEXT_ID).inTransaction).toBe(true);
-    });
-
-    it('characterization: the "last" id is the greatest as TEXT, so once IR10000 exists the latest is again IR9999 and the next id issued is IR10000 — an id that already exists', async () => {
-      const existing = ['IR9998', 'IR9999', 'IR10000'];
-      fakeDb.whenOne(APP_LOOKUP, CANDIDATE);
-      fakeDb.when(NEXT_ID, () => [{ id: [...existing].sort().reverse()[0] }]);          // what ORDER BY id DESC returns for text ids
-      fakeDb.when(INSERT_ROUND, p => [{ id: p[0] }]);
-      const res = await create('hr_recruiter', STANDARD);
-      expect(existing).toContain(res.body.round.id);
-      expect(res.body.round.id).toBe('IR10000');
+      expect(res.status).toBe(201);
+      expect(res.body.round.id).toBe('IR0001');
+      const ins = fakeDb.one(INSERT_ROUND);
+      expect(ins.sql).not.toMatch(/\(\s*id\b/);
+      expect(ins.params).not.toContain('IR0001');
+      expect(ins.inTransaction).toBe(true);
+      expect(fakeDb.calls.some(c => /SELECT id FROM interview_rounds ORDER BY id DESC/.test(c.sql))).toBe(false);
     });
   });
 
