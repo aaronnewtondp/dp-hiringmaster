@@ -10,9 +10,10 @@
 //
 // Each race has two kinds of test:
 //   * an INVARIANT that must hold whatever the timing (no duplicate rows, no ghost rows, exactly one winner, ids unique) — a failure is a bug;
-//   * a `TODAY:` test that pins the way the LOSER fails right now (HTTP 500 "Internal server error" where the sequential path says 409/200).
-//     A race is timing, so each TODAY test repeats the race up to RACE_TRIES times and passes as soon as the loser is seen to fail with a 500
-//     (in practice on the first or second try, also under CPU load). If a fix makes the loser's answer clean, it fails with a message that
+//   * a `TODAY:` test that pins the way the LOSER fails right now: since 2026-11-15 a lost unique-constraint race is the generic 409 "That value already
+//     exists." (it was a 500 "Internal server error"; the sequential path says "Already linked" / 200 "Already ingested"), and a double shortlist still
+//     leaves two open rows. A race is timing, so each TODAY test repeats the race up to RACE_TRIES times and passes as soon as the loser is seen to fail
+//     that way (in practice on the first or second try, also under CPU load). If a fix makes the loser's answer clean, it fails with a message that
 //     says to flip it to the clean contract. Nothing here is fixed by this spec.
 // ─────────────────────────────────────────────────────────────────────────────
 import { test, expect } from '@playwright/test';
@@ -23,7 +24,7 @@ import { withDb } from '../helpers/db';
 test.afterAll(retireTrackedApplications);   // leave no open pending rows behind (see helpers/api-specs.ts)
 
 const RACE_TRIES = 10;
-const FLIP_HINT = (what: string) => `${what} no longer fails with a 500 in ${RACE_TRIES} tries: the race is probably fixed — replace this TODAY test with the clean contract.`;
+const FLIP_HINT = (what: string) => `${what} no longer fails the way it is pinned to (the generic 409, or two open rows) in ${RACE_TRIES} tries: the race is probably fixed — replace this TODAY test with the clean contract.`;
 
 type Api = ReturnType<typeof authed>;
 
