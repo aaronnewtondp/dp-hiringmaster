@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Plus, ExternalLink } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import { agenciesApi } from '../services/api.ts';
 import { Agency } from '../types/index.ts';
 import { Spinner, EmptyState } from '../components/shared/Badges.tsx';
@@ -33,9 +33,6 @@ export default function Agencies() {
           <h1 className="text-xl font-semibold text-gray-900">Agency Repository</h1>
           <p className="text-sm font-mono text-gray-500 mt-0.5">{agencies.length} agencies</p>
         </div>
-        <button className="btn-primary">
-          <Plus className="w-4 h-4" /> Add agency
-        </button>
       </div>
 
       <div className="card overflow-hidden">

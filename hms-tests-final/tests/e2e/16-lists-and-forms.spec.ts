@@ -207,23 +207,17 @@ test.describe('Agencies list', () => {
     await expect(page.getByRole('link', { name: 'Agencies', exact: true })).toHaveCount(0);   // ... without the HR-only entry
     await gotoAs(page, 'hm_alex', '/agencies');
     await expect(page.getByRole('heading', { name: 'Agency Repository' })).toBeVisible();
-    // TODAY: not a "no access" message — an empty list, with the Add agency button still drawn (it does nothing for anyone, see below).
+    // TODAY: not a "no access" message — an empty list.
     await expect(page.getByText('0 agencies', { exact: true })).toBeVisible();
     await expect(page.getByText('No agencies', { exact: true })).toBeVisible();
     expect(answers.requests.length).toBeGreaterThan(0);
     expect(new Set(statuses)).toEqual(new Set([403]));
   });
 
-  test('TODAY the "Add agency" button is not wired: clicking it opens nothing', async ({ page }) => {
+  test('there is no "Add agency" button (it had no handler and was removed)', async ({ page }) => {
     await gotoAs(page, 'hr', '/agencies');
-    const add = page.getByRole('button', { name: 'Add agency' });
-    await expect(add).toBeVisible();
-    const posts = recordRequests(page, isPost('/api/agencies'));
-    await add.click();
-    await expect(page).toHaveURL(/\/agencies$/);
-    await expect(page.locator('div.fixed.inset-0')).toHaveCount(0);                    // no dialog
-    await expect(page.getByRole('heading', { name: 'Agency Repository' })).toBeVisible();   // (a settled page: any request or dialog would have started by now)
-    expect(posts.requests).toHaveLength(0);
+    await expect(page.getByRole('heading', { name: 'Agency Repository' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Add agency' })).toHaveCount(0);
   });
 });
 

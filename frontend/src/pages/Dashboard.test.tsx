@@ -220,6 +220,18 @@ describe('Dashboard — a Hiring Manager is locked to their own role', () => {
     expect(screen.getByRole('button', { name: /^Department/ })).toBeInTheDocument();     // the other filters are still theirs to use
   });
 
+  it('draws no Recruitment Mode filter (its options are not loaded for them), and a remembered mode is not an invisible filter', async () => {
+    sessionStorage.setItem('hms:dashboard.modes', JSON.stringify(['Agency']));
+    mount();
+    await ready();
+    expect(screen.queryByRole('button', { name: /^Recruitment Mode/ })).toBeNull();
+    expect(lastParams()).not.toHaveProperty('recruitment_mode');
+    expect(screen.queryByRole('button', { name: /Clear all/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /^Department/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Location/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Priority/ })).toBeInTheDocument();
+  });
+
   it('never sends a role_id, even when one is left over from an earlier session', async () => {
     sessionStorage.setItem('hms:dashboard.roleIds', JSON.stringify(['R9002']));
     mount();

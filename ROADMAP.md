@@ -503,14 +503,14 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       the async-promise lint). Delete it and add `--fail` to the lint step in `ci.yml`.
 
 *Frontend*
-- [ ] **A corrupt `hms_user` in localStorage white-screens the app**: `AuthContext` parses it with a bare `JSON.parse` in the mount effect and there is no error
+- [x] **A corrupt `hms_user` in localStorage white-screens the app**: `AuthContext` parses it with a bare `JSON.parse` in the mount effect and there is no error
       boundary, so the crash survives reloads until site data is cleared; and any valid-JSON value (a string, a number, an array, `true`) is adopted as the user, with
-      no persona and so no rights (`AuthContext.test.tsx`).
-- [ ] **The 401 interceptor redirects on a failed sign-in** (`frontend/src/services/api.ts`): it treats every 401, including the `POST /auth/login` and
+      no persona and so no rights (`AuthContext.test.tsx`). **Fixed 2026-11-16:** `AuthContext` parses the stored user inside try/catch and adopts it only if it is an object with a known persona and string id/email/name; anything else (corrupt JSON, wrong shape, a token with no user) clears both session keys and starts signed out.
+- [x] **The 401 interceptor redirects on a failed sign-in** (`frontend/src/services/api.ts`): it treats every 401, including the `POST /auth/login` and
       `/auth/google` calls themselves, as an expired session, clears storage and sets `window.location.href = '/login'`, a full reload that loses the error
-      message (`api.test.ts`).
-- [ ] **The "Add agency" button has no handler** (`pages/Agencies.tsx`): it is drawn for every persona, including one who cannot load the list, and does nothing
-      (`pages.smoke.test.tsx`, `e2e/16`).
+      message (`api.test.ts`). **Fixed 2026-11-16:** a 401 from `/auth/login` or `/auth/google` is rejected to the caller with no redirect and no storage clearing, so Login shows the server's message; every other 401 is unchanged.
+- [x] **The "Add agency" button has no handler** (`pages/Agencies.tsx`): it is drawn for every persona, including one who cannot load the list, and does nothing
+      (`pages.smoke.test.tsx`, `e2e/16`). **Fixed 2026-11-16:** the dead button was removed (agencies cannot be added from the UI; `POST /api/agencies` still exists server-side).
 - [ ] **Axios array parameters are bracket-serialized** (`gender[]=UNKNOWN`, `or_role_id[]=R019`), not repeated keys as the comments in `services/api.ts` say.
       Express's `qs` reads both, so nothing is broken, but anything that matches request URLs (a proxy rule, a Playwright route) must use the real form.
 - [ ] **`frontend/tsconfig.json` has duplicate keys** (`strict`, `noUnusedLocals`, `noUnusedParameters` each appear twice); `strict` is false.
@@ -518,8 +518,8 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       page makes a request that is always a 403 (verified).
 - [ ] **A failed background refresh replaces the whole Dashboard** (`pages/Dashboard.tsx`): the `error || !data` test shows "Failed to load dashboard" even
       though react-query still holds the last good `data` when a `refetchInterval` refresh fails.
-- [ ] **A Hiring Manager sees a Recruitment Mode filter with no options** on the Dashboard: the `roles/filter-options` query is disabled for them
-      (`enabled: !isLockedToOwnRole`), but the filter is still drawn, with an empty list.
+- [x] **A Hiring Manager sees a Recruitment Mode filter with no options** on the Dashboard: the `roles/filter-options` query is disabled for them
+      (`enabled: !isLockedToOwnRole`), but the filter is still drawn, with an empty list. **Fixed 2026-11-16:** the filter is no longer drawn for a Hiring Manager, and a remembered mode is ignored for them.
 - [ ] **Smaller pinned UI behaviours** (each in the listed spec's header): the Stage modal has no skip-reason control; a candidate page keeps the old stage until
       reloaded after an auto-advance; a Hiring Manager not on a round still sees "Submit feedback" and the edit pencils on roles and candidates (every save is
       a 403); a role's activity timeline does not refresh after Change status; the bulk over-budget reason is sent for, and stored on, every selected row; bulk

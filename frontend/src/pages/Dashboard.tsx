@@ -62,7 +62,10 @@ export default function Dashboard() {
   // every metric/section below is computed only over roles matching these.
   const [departments, setDepartments] = usePersistedState<string[]>('dashboard.departments', []);
   const [locations,   setLocations]   = usePersistedState<string[]>('dashboard.locations', []);
-  const [modes,        setModes]      = usePersistedState<string[]>('dashboard.modes', []);
+  const [storedModes,  setModes]      = usePersistedState<string[]>('dashboard.modes', []);
+  // A Hiring Manager gets no Recruitment Mode filter (its options come from roles/filter-options, which is not loaded for them),
+  // so a mode remembered from another sign-in in this browser must not act as an invisible filter.
+  const modes = isLockedToOwnRole ? [] : storedModes;
   const [filterPriorities, setFilterPriorities] = usePersistedState<string[]>('dashboard.priorities', []);
   const [roleIds,      setRoleIds]    = usePersistedState<string[]>('dashboard.roleIds', []);
 
@@ -131,7 +134,9 @@ export default function Dashboard() {
       <div className="flex items-center gap-2 flex-wrap">
         <MultiSelectFilter label="Department"       options={DEPARTMENTS}       selected={departments}      onChange={setDepartments} />
         <MultiSelectFilter label="Location"         options={LOCATIONS}         selected={locations}        onChange={setLocations} />
-        <MultiSelectFilter label="Recruitment Mode" options={modeOptions}       selected={modes}             onChange={setModes} />
+        {!isLockedToOwnRole && (
+          <MultiSelectFilter label="Recruitment Mode" options={modeOptions}       selected={modes}             onChange={setModes} />
+        )}
         <MultiSelectFilter label="Priority"         options={PRIORITIES}        selected={filterPriorities} onChange={setFilterPriorities} />
         {isLockedToOwnRole ? (
           <span
