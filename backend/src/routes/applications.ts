@@ -303,8 +303,11 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
   if (new_stage === 'Offer Released') offerDateSql = ', offer_sent_date=NOW()';
   // Joining-risk clock (5 days without HR contact, jobs/slaChecker.ts checkJoiningRisk) starts when the application REACHES Offer
   // Accepted: last_hr_contact becomes today unless a contact logged today or later is already there (GREATEST — a real, more recent
-  // contact is never overwritten; an older one, or none, is not a contact since the acceptance).
-  if (new_stage === 'Offer Accepted') offerDateSql = ', offer_accepted_date=NOW(), last_hr_contact=GREATEST(last_hr_contact, CURRENT_DATE)';
+  // contact is never overwritten; an older one, or none, is not a contact since the acceptance). The auto flag is reset in the same statement: an
+  // application that reaches Offer Accepted AGAIN (moved back and forward) was flagged for the previous acceptance, and the stamp restarts the
+  // clock, so the old flag must not keep it listed as at risk; the sweep raises it again if 5 days pass with no contact. NOTE for readers of the
+  // data: last_hr_contact is then the system's stamp (the day the offer was accepted), not necessarily a logged conversation.
+  if (new_stage === 'Offer Accepted') offerDateSql = ', offer_accepted_date=NOW(), last_hr_contact=GREATEST(last_hr_contact, CURRENT_DATE), joining_risk_auto_flag=false';
   if (new_stage === 'Joined') offerDateSql = ', offer_accepted_date=COALESCE(offer_accepted_date, NOW())';
 
   // status is a separate field from stage (see CLAUDE.md's application state

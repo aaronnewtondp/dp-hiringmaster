@@ -1863,6 +1863,10 @@ Offer Accepted: the stage move INTO Offer Accepted sets `last_hr_contact = GREAT
 overwritten; an older one or none restarts the clock), and the sweep falls back to `stage_entry_time` for a row with no contact date. `hours_overdue` is the real
 elapsed time past the 120 h and the pending-action text says "since <date>" or "since the offer was accepted". Rows already at Offer Accepted with a NULL
 `last_hr_contact` are flagged only once 5 days have really passed since they reached the stage; HR clears one by logging a contact in the notes.
+**Two consequences to know when reading the data (found in review):** (1) the same stage move also sets `joining_risk_auto_flag = false`, so an application that reaches
+Offer Accepted again (moved back and forward) is not still listed for the previous acceptance's flag; the sweep raises it again if 5 days pass with no contact; (2)
+`last_hr_contact` is now sometimes the SYSTEM's stamp (the day the offer was accepted), not a conversation HR logged: the candidate page's "Last HR contact" can show a
+date nobody phoned on, and no column tells the two apart (a separate column would be a schema change; not done).
 
 **Low Pipeline Roles redefined — twice.** Was "fewer than 5 Active applications,
 any stage/score"; then (SOP v2.1) "fewer than 3 shortlisted **and** scored above 60";

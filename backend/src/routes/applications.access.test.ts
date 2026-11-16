@@ -339,6 +339,11 @@ describe('POST /:id/stage — what a move writes', () => {
       return fakeDb.one(SQL.stageUpdate).sql;
     };
     expect(await sqlFor('Offer Released', 'Offer Accepted')).toContain('last_hr_contact=GREATEST(last_hr_contact, CURRENT_DATE)');
+    // reaching Offer Accepted again restarts the clock AND clears the flag raised for the previous acceptance (found in review)
+    expect(await sqlFor('Offer Released', 'Offer Accepted')).toContain('joining_risk_auto_flag=false');
+    for (const to of ['Offer Released', 'Joined', 'Interview Round 2']) {
+      expect(await sqlFor('Offer Discussion', to)).not.toContain('joining_risk_auto_flag');
+    }
     for (const to of ['Offer Released', 'Joined', 'Interview Round 2']) {
       expect(await sqlFor('Offer Discussion', to)).not.toContain('last_hr_contact');
     }
