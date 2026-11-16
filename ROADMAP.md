@@ -247,6 +247,10 @@ live.
       files refused in under 1 ms at 177 MB resident in the Lambda image. `mammoth` and 15 dependencies removed from `package.json` and the
       lockfile; real nft trace: `api/index` 2,190 files / 63.1 MB (was 2,394 / 62.5 MB before both resume changes), no jszip or mammoth.
       Backend 90 files / 7,207 tests pass (baseline `main` 85 / 7,000; 77 of the 207 new tests are the Word change). Details: CLAUDE.md "ResumeIQ".
+- [x] `pdf.test.ts` "is linear on 5 MB of …" (`assertLinearOn`, 0.25 MB against 2 MB) failed CI three times on 2026-11-16 by a few ms (137-144 ms against 134-143
+      allowed; a ~5x slower shared runner than a developer machine): its `floorMs` went from 60 to 150; a quadratic tokenizer is still caught by the 1 s backstop and the 5 MB bound.
+- [x] **googleapis 189's `GoogleAuth({ credentials })` deprecation warning** (`driveService.ts` read-only client): now a `JWT` client from the key's email and private
+      key, the replacement the library names and what the write, Calendar and Gmail clients already use. No warning is emitted any more.
 - [ ] `pdf.scanCharge.test.ts` "scanPdfContentStreamsAsync and the cooperative text scan the same" is timing-sensitive and already flaky on
       untouched `main` (5 of 8 runs failed): it expects a 6,000-stream scan to outlast one 20 ms slice, which a fast machine does not.
 - [ ] **Drive auto-folder creation** on Role and Candidate creation — every
@@ -414,10 +418,11 @@ live.
       fail-closed 503, invalidated by `POST`/`PATCH /api/users`). `is_active` first; persona followed on 2026-11-16 (below).
 - [x] **Dependabot vulnerability alerts enabled (repository setting, 2026-11-05).** Not a file; see CLAUDE.md "CI".
 - [ ] **Branch protection requiring `CI passed`** — recommended in CLAUDE.md; a repository setting, not recorded as done.
-- [ ] **The nightly `integration.yml` is red** until `hms-tests-final/tests/db/17-user-lifecycle.spec.ts` (lines 197 and 303) and
-      `tests/e2e/09-user-management.spec.ts` (line 479) are updated to the live `is_active` check, and `backend/src/routes/auth.test.ts`'s "characterization:
-      authentication does not ask the database…" is rewritten (it passes vacuously). Measured 2026-11-05: `api` + `db` nightly selection 772 tests,
-      756 passed, 1 failed, 14 not run behind it.
+- [x] **The nightly `integration.yml` was red from 2026-11-14 to 2026-11-16, and it was NOT the stale pins** (those were rewritten earlier: `db/17`, `e2e/09`,
+      `auth.test.ts`; the note that said otherwise was wrong). Its single failure was `api/00-test-infrastructure` "against a local URL the api, db, e2e,
+      smoke projects all list tests": the self-test captures `playwright test --list --reporter=json` through `spawnSync`, whose default `maxBuffer` is 1 MiB; the
+      listing passed 1 MiB at about 1,100 tests, the child was killed with `ENOBUFS` and `status` was `null`. It failed on every machine (so also locally, where it was
+      noted as "fails on main too"). Fixed 2026-11-16 with `maxBuffer: 256 MiB`, and the assertion now prints the spawn error. Spec 00: 33 of 33.
 - [ ] **Two `e2e/13-help-and-info-markers` checks failed on a fresh local stack** ("Candidates: marker 2 of 7", "Dashboard (Hiring Manager): marker 8 of 13":
       the opened popover is reported covered or clipped by the page card), alone as well as in the full run. Find out whether they need more rows than a
       fresh database has or are a real clipping defect (a related one is already pinned "as TODAY": the Gender header popover is cut off by the table card

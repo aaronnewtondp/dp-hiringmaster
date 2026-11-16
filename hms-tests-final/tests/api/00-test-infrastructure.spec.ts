@@ -327,13 +327,18 @@ test.describe('playwright.config.ts: the project set, and the live-tag gate', ()
   };
   const cli = require.resolve('@playwright/test/cli');
   const list = (extra: Record<string, string>, ...args: string[]) =>
-    spawnSync(process.execPath, [cli, 'test', '--list', ...args], { cwd: process.cwd(), env: cleanEnv(extra), encoding: 'utf8', timeout: 90_000 });
+    spawnSync(process.execPath, [cli, 'test', '--list', ...args], {
+      cwd: process.cwd(), env: cleanEnv(extra), encoding: 'utf8', timeout: 90_000,
+      // The default maxBuffer is 1 MiB. The JSON listing of every test passed that (about 1.1 MB at ~1,100 tests), so the child was killed with ENOBUFS and
+      // `status` was null: this file's two project-set tests failed on every machine, and the nightly stayed red because of them (2026-11-14 to 16).
+      maxBuffer: 256 * 1024 * 1024,
+    });
 
   type JsonSuite = { specs?: { title: string; tests: { projectName: string }[] }[]; suites?: JsonSuite[] };
   /** Every (project, test title) pair of a `--list --reporter=json` run. */
   const listed = (extra: Record<string, string>, ...args: string[]) => {
     const r = list(extra, '--reporter=json', ...args);
-    expect(r.status, r.stderr).toBe(0);
+    expect(r.status, r.error ? String(r.error) : r.stderr).toBe(0);
     const out: { project: string; title: string }[] = [];
     const walk = (s: JsonSuite) => {
       for (const spec of s.specs ?? []) for (const t of spec.tests) out.push({ project: t.projectName, title: spec.title });
