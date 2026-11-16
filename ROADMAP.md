@@ -411,7 +411,7 @@ live.
 - [x] **Help page and info markers (PRs #29, #30).** FAQ answers brought up to the system; every column and KPI marker says what its query counts, and
       the marker tests read the backend's real numbers (`frontend/src/test/backendSource.ts`).
 - [x] **A deactivated user loses access within seconds (PR #55, 2026-11-05).** `authenticate()` checks `users.is_active` live (15 s in-process cache,
-      fail-closed 503, invalidated by `POST`/`PATCH /api/users`). Only `is_active` is live; persona and name still come from the token (below).
+      fail-closed 503, invalidated by `POST`/`PATCH /api/users`). `is_active` first; persona followed on 2026-11-16 (below).
 - [x] **Dependabot vulnerability alerts enabled (repository setting, 2026-11-05).** Not a file; see CLAUDE.md "CI".
 - [ ] **Branch protection requiring `CI passed`** — recommended in CLAUDE.md; a repository setting, not recorded as done.
 - [ ] **The nightly `integration.yml` is red** until `hms-tests-final/tests/db/17-user-lifecycle.spec.ts` (lines 197 and 303) and
@@ -463,9 +463,12 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       `range_max` NaN, with no validation of the range (`compBenchmark.test.ts`, "CURRENT BEHAVIOUR").
 
 *Access control and workflow rules*
-- [ ] **Persona and name are taken from the token** (`authenticate()` in `middleware/auth.ts`; `issueToken` in `routes/auth.ts`), so a demotion (or promotion) only
-      takes effect at the person's next sign-in, up to `JWT_EXPIRES_IN` (24 h) later; only `is_active` is live since PR #55. Re-read `persona` (and `name`) in the
-      same cached lookup, or shorten the token. Pinned by the two persona tests in `db/17` (`e2e/09` line 479 mixes this with the deactivation check and needs splitting).
+- [x] **Persona is read live, not from the token (2026-11-16).** `authenticate()` reads `users.persona` in the same cached lookup as `is_active`
+      (`SELECT is_active, persona FROM users WHERE id=$1`, 15 s cache, invalidated by `POST`/`PATCH /api/users`) and uses it over the token's, so a demotion or
+      promotion acts at once on the instance that handled the PATCH and within 15 s elsewhere. A NULL or unknown persona in the row is "no opinion" and the token's
+      stays. **Still from the token:** `name` and `email` (a rename reaches the person at their next sign-in; HM role matching compares the token name) and the
+      sign-in response's `user` object, so the UI's menu keeps the old persona until the person signs in again, while every API call already enforces the new one.
+      Pinned by `auth.activeCheck.test.ts` and the two persona tests in `db/17`; `forgeToken` now defaults to a seeded user holding the forged persona.
 - [ ] **HR priority override does not require a reason although the test says it does.** `PATCH /api/applications/:id/notes` accepts `hr_priority_override` with no
       `hr_priority_override_reason` (200; the activity line just ends in an empty reason), while `api/08-misc` is titled "HR priority override requires a reason"
       and asserts `[400, 200]` ("backend may not validate this yet"), so it cannot fail. Decide the rule; make the test exact.

@@ -34,7 +34,11 @@ export function isSmokeAccount(email: unknown): boolean {
 // are cached, never a database error: a failed lookup fails CLOSED (503) and is retried on the next request.
 export const ACCESS_CACHE_TTL_MS = 15_000;
 export const ACCESS_CACHE_MAX_ENTRIES = 1000;
-const accessCache = new Map<string, { active: boolean; at: number }>();
+// The same answer carries the account's CURRENT persona (2026-11-16): the token's persona was fixed at sign-in, so a demotion (a
+// Leadership user made a Hiring Manager) used to take up to 24 h to reach the person. authenticate() now uses this value over the
+// token's, so a role change is live within the TTL (immediate on the instance that handled the PATCH, which invalidates the cache).
+const PERSONAS: readonly Persona[] = ['hr_recruiter', 'hiring_manager', 'leadership', 'super_admin'];
+const accessCache = new Map<string, { active: boolean; persona: Persona | null; at: number }>();
 // Bumped by every invalidateUserAccess(): a lookup that was already in flight when an invalidation happened may have read the
 // row BEFORE the update committed, so its answer is used for that one request but never cached (it would otherwise put a stale
 // "active" back for a full TTL right after a deactivation).
@@ -47,22 +51,27 @@ export function invalidateUserAccess(userId?: string): void {
   else accessCache.delete(String(userId));
 }
 
-async function isUserActive(userId: string): Promise<boolean> {
+interface UserAccess { active: boolean; persona: Persona | null }
+
+async function lookupUserAccess(userId: string): Promise<UserAccess> {
   const now = Date.now();
   const hit = accessCache.get(userId);
-  if (hit && now - hit.at < ACCESS_CACHE_TTL_MS) return hit.active;
+  if (hit && now - hit.at < ACCESS_CACHE_TTL_MS) return { active: hit.active, persona: hit.persona };
   const epoch = accessEpoch;
-  const row = await queryOne<{ is_active: boolean }>('SELECT is_active FROM users WHERE id=$1', [userId]);
+  const row = await queryOne<{ is_active: boolean; persona?: unknown }>('SELECT is_active, persona FROM users WHERE id=$1', [userId]);
   const active = row?.is_active === true;
-  if (epoch !== accessEpoch) return active;
+  // Anything that is not one of the four known personas (a NULL, a value from a future migration) is "no opinion": the token's persona stays.
+  const persona = PERSONAS.find(p => p === row?.persona) ?? null;
+  const answer = { active, persona };
+  if (epoch !== accessEpoch) return answer;
   if (accessCache.size >= ACCESS_CACHE_MAX_ENTRIES && !accessCache.has(userId)) {
     // Hard cap: drop the oldest entry (Map keeps insertion order); entries are re-inserted on refresh so this is oldest-written.
     const oldest = accessCache.keys().next().value;
     if (oldest !== undefined) accessCache.delete(oldest);
   }
   accessCache.delete(userId);
-  accessCache.set(userId, { active, at: now });
-  return active;
+  accessCache.set(userId, { ...answer, at: now });
+  return answer;
 }
 
 // ─── Verify JWT, confirm the account is still active, attach user to request ───
@@ -97,19 +106,21 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
       return;
     }
 
-    let active: boolean;
+    let access: UserAccess;
     try {
-      active = await isUserActive(payload.userId);
+      access = await lookupUserAccess(payload.userId);
     } catch {
       delete req.user;
       res.status(503).json({ error: 'Could not verify account status' });
       return;
     }
-    if (!active) {
+    if (!access.active) {
       delete req.user;
       res.status(401).json({ error: 'Account is deactivated or no longer exists' });
       return;
     }
+    // The database is the authority on the persona; the token only says who signed in. (`name` and `email` still come from the token.)
+    if (access.persona && access.persona !== payload.persona) req.user = { ...payload, persona: access.persona };
     next();
   } catch {
     if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });

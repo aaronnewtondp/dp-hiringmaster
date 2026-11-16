@@ -106,7 +106,7 @@ test.describe('PATCH /api/interviews/:id/feedback — a round that lists intervi
       expect(res.status(), `${who} is listed`).toBe(200);
     }
     // Deeksha is a real Hiring Manager (seed.sql) who is not on this round: a token for her is refused.
-    const deeksha = forgeToken({ email: 'deeksha@digitalpaani.com', persona: 'hiring_manager', name: 'Deeksha Chaturvedi' });
+    const deeksha = forgeToken({ email: 'deeksha@digitalpaani.com', persona: 'hiring_manager', name: 'Deeksha Chaturvedi', userId: 'a0000000-0000-0000-0000-000000000005' });
     const outsider = await authed(request, deeksha).patch(`/api/interviews/${round.id}/feedback`, feedback());
     expect(outsider.status()).toBe(403);
     expect((await storedRound(hr, application.id, round.id)).feedback_status).toBe('Submitted');
