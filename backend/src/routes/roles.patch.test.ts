@@ -25,7 +25,9 @@ vi.mock('../services/pdf/roleClosureSummary.js', () => ({ renderRoleClosureSumma
 vi.mock('../services/driveService.js', () => ({ uploadJdPdf: h.uploadJdPdf }));
 vi.mock('../services/compBenchmark.js', () => ({ getCompBenchmark: h.getCompBenchmark }));
 
-import rolesRouter from './roles.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import rolesRouter, { ROLE_STATUSES } from './roles.js';
 import { fakeDb } from '../test/fakeDb.js';
 import { ApiClient, ALL_PERSONAS, TEST_JWT_SECRET, TEST_USERS, buildApp, setEnv, type Actor } from '../test/routeHarness.js';
 import type { Persona } from '../types/index.js';
@@ -448,13 +450,41 @@ describe('POST / — who may create or request a role', () => {
   };
   const insertParams = () => fakeDb.one(SQL.insertRole).params;
 
-  it.each(ALL_PERSONAS)('%s may create/request a role: 201, always as a Draft (status is not taken from the body), created_by is the acting user', async persona => {
+  it.each(ALL_PERSONAS)('%s may create/request a role: 201, always as a Draft (an explicit status "Draft" is fine), created_by is the acting user', async persona => {
     programInsert();
-    const res = await create(persona, { ...BODY, status: 'Approved' });
+    const res = await create(persona, { ...BODY, status: 'Draft' });
     expect(res.status).toBe(201);
     expect(insertParams()[0]).toBe('Sr. Backend Developer');
     expect(insertParams()[21]).toBe(TEST_USERS[persona].userId);
     expect(fakeDb.one(SQL.insertRole).sql).not.toMatch(/status|approver_name|approval_date|start_date/);
+  });
+
+  it.each(ALL_PERSONAS)('%s naming any other status is refused 400 before any write: a new role is always a Draft, and the caller is told instead of getting a silent Draft', async persona => {
+    programInsert();
+    for (const status of ['Approved', 'Live – Sourcing', 'Closed – Filled']) {
+      const res = await create(persona, { ...BODY, status });
+      expect([status, res.status, res.body.error]).toEqual([status, 400, 'A new role is always created as a Draft; change its status afterwards']);
+    }
+    for (const status of ['Bogus', '', 'draft', 7, true, ['Approved'], {}]) {
+      const res = await create(persona, { ...BODY, status });
+      expect([JSON.stringify(status), res.status, res.body.error]).toEqual([JSON.stringify(status), 400, 'status is not a valid role status; a new role is always created as a Draft']);
+    }
+    nothingWritten();
+  });
+
+  it('an absent or null status is the normal case: 201 and a Draft', async () => {
+    for (const body of [BODY, { ...BODY, status: null }, { ...BODY, status: undefined }]) {
+      fakeDb.reset(); programInsert();
+      expect((await create('hr_recruiter', body)).status).toBe(201);
+    }
+  });
+
+  it('the status list used to word the 400 is exactly the CHECK in schema.sql', () => {
+    const schema = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8');
+    const table = schema.slice(schema.search(/CREATE TABLE (IF NOT EXISTS )?roles \(/));
+    const start = table.indexOf('CHECK (status IN (');
+    const listed = [...table.slice(start, table.indexOf('))', start)).matchAll(/'([^']+)'/g)].map(m => m[1]);
+    expect([...ROLE_STATUSES]).toEqual(listed);
   });
 
   it('a token with a persona outside the four is 403 "Only HR, Leadership, or a Hiring Manager can create/request a role"', async () => {
