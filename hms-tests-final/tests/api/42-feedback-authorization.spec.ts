@@ -213,11 +213,11 @@ test.describe('PATCH /api/interviews/:id/feedback — behaviour that is NOT a ru
     expect(submissions).toHaveLength(2);
   });
 
-  test('TODAY: an out-of-range value (overall_assessment) is a 500 from the CHECK constraint, not a 400, and the round stays Pending', async ({ request }) => {
+  test('an out-of-range value (overall_assessment) is a 400 (the CHECK constraint, mapped by the error handler) and the round stays Pending', async ({ request }) => {
     const { hr, application, round } = await roundFor(request, [ALEX]);
     const res = await authed(request, await getToken(request, 'hm_alex')).patch(`/api/interviews/${round.id}/feedback`, feedback({ overall_assessment: 'Excellent' }));
-    expect(res.status()).toBe(500);
-    expect((await res.json()).error).toBe('Internal server error');
+    expect(res.status()).toBe(400);
+    expect((await res.json()).error).toBe('One of the submitted values is missing, the wrong type, or not allowed.');
     // The transaction rolled back: no half-written round and no activity row.
     const stored = await storedRound(hr, application.id, round.id);
     expect(stored.feedback_status).toBe('Pending');

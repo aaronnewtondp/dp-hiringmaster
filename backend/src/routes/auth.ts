@@ -39,7 +39,7 @@ function issueToken(user: User & { avatar_url?: string | null }) {
 // ─── POST /api/auth/login — email + password ──────────────────────────────────
 router.post('/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
-  if (!email || !password) {
+  if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
     res.status(400).json({ error: 'Email and password required' });
     return;
   }

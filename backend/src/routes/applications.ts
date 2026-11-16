@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
 import { authenticate, requireHR, stripRestrictedFields, isHRTier, canSeeCompForRole } from '../middleware/auth.js';
-import { Application, SLA_HOURS, Candidate, Role } from '../types/index.js';
+import { Application, SLA_HOURS, STAGE_ORDER, Candidate, Role } from '../types/index.js';
 import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
 import { parseRoleFilters, buildRoleFilterSql, toArray } from '../utils/roleFilters.js';
 import { STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
@@ -271,6 +271,10 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
     res.status(403).json({ error: 'HR access required' });
     return;
   }
+
+  // Only a real stage may be written (applications.stage is plain TEXT, so nothing else would stop a made-up or retired name). Checked after
+  // the persona gate so an unauthorised caller learns nothing about which names exist.
+  if (typeof new_stage !== 'string' || !STAGE_ORDER.includes(new_stage)) { res.status(400).json({ error: 'Unknown stage' }); return; }
 
   // Every scheduled interview/assignment round must have feedback submitted
   // before advancing further — skip_reason is the existing, deliberate

@@ -333,7 +333,7 @@ describe('PATCH /:id/feedback — moving the candidate on by itself after positi
     it('advance only for outcome "Approved for Next Round" with a weighted total above 2.5', async () => {
       programRound(ASSIGNMENT_ROUND, APP_AT('Assignment Round'));
       expect((await feedback('hr_recruiter', rubric('Approved for Next Round', 4), 'IR0002')).body.auto_advanced).toEqual({ from: 'Assignment Round', to: 'Founders Round' });
-      for (const [outcome, score] of [['Rejected', 5], ['Approved for Next Round', 2], ['Approved for Next Round', 2.5], ['Approved with Concerns', 5]] as const) {
+      for (const [outcome, score] of [['Rejected', 5], ['Approved for Next Round', 2], ['Approved for Next Round', 1], ['Approved with Concerns', 5]] as const) {
         fakeDb.reset(); programRound(ASSIGNMENT_ROUND, APP_AT('Assignment Round'));
         const res = await feedback('hr_recruiter', rubric(outcome, score), 'IR0002');
         expect([outcome, score, res.body.auto_advanced]).toEqual([outcome, score, null]);
@@ -347,11 +347,29 @@ describe('PATCH /:id/feedback — moving the candidate on by itself after positi
     });
   });
 
-  it('characterization: scores are not range-checked — a score of 99 passes the "above 2.5" test, so an out-of-range value advances the candidate', async () => {
-    programRound(ROUND, APP_AT('Interview Round 1'));
-    const res = await feedback('hiring_manager', { ...STANDARD_FEEDBACK, scores_per_area: { a: 99 }, round_recommendation: 'Proceed' });
-    expect(fakeDb.one(SQL.standardUpdate).params[2]).toBe(99);
-    expect(res.body.auto_advanced).toEqual({ from: 'Interview Round 1', to: 'Interview Round 2' });
+  it('scores must be 1-5: an out-of-range, non-numeric or malformed score is a 400 before anything is stored or advanced (a 99 used to pass the "above 2.5" test and advance the candidate)', async () => {
+    const bad: Array<Record<string, unknown>> = [
+      { scores_per_area: { a: 99 } }, { scores_per_area: { a: 0 } }, { scores_per_area: { a: 'five' } }, { scores_per_area: { a: 3, b: null } },
+      { scores_per_area: [3, 4] }, { scores_per_area: 'x' }, { scores_per_area: { a: NaN } },
+    ];
+    for (const extra of bad) {
+      fakeDb.reset(); programRound(ROUND, APP_AT('Interview Round 1'));
+      const res = await feedback('hiring_manager', { ...STANDARD_FEEDBACK, ...extra, round_recommendation: 'Proceed' });
+      expect([JSON.stringify(extra), res.status]).toEqual([JSON.stringify(extra), 400]);
+      expect(fakeDb.writes()).toEqual([]);
+    }
+    fakeDb.reset(); programRound(ROUND, APP_AT('Interview Round 1'));
+    const ok = await feedback('hiring_manager', { ...STANDARD_FEEDBACK, scores_per_area: { a: 5, b: 1 }, round_recommendation: 'Proceed' });
+    expect(ok.status).toBe(200);
+  });
+
+  it('assignment scores must be whole numbers 1-5 (the columns are INTEGER with a CHECK): 0, 6, 2.5 and strings are a 400, nothing written', async () => {
+    for (const v of [0, 6, 2.5, '4', -1]) {
+      fakeDb.reset(); programRound(ASSIGNMENT_ROUND, APP_AT('Assignment Round'));
+      const res = await feedback('hr_recruiter', { assignment_outcome: 'Approved for Next Round', score_technical_accuracy: v, score_problem_solving: 4, score_clarity: 4, score_practical_thinking: 4, score_completeness: 4 }, 'IR0002');
+      expect([String(v), res.status]).toEqual([String(v), 400]);
+      expect(fakeDb.writes()).toEqual([]);
+    }
   });
 });
 

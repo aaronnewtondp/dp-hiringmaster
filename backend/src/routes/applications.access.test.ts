@@ -198,12 +198,13 @@ describe('POST /:id/stage — who may move an application where', () => {
     });
   });
 
-  it('characterization: new_stage is not checked against STAGE_ORDER — an HR-tier user can write any string as a stage (the column is plain TEXT)', async () => {
-    program();
-    const res = await stage('hr_recruiter', { new_stage: 'Interview – Round 3' });          // a retired stage name
-    expect(res.status).toBe(200);
-    expect(fakeDb.one(SQL.stageUpdate).params[0]).toBe('Interview – Round 3');
-    expect(fakeDb.one(SQL.stageUpdate).params[1]).toBe(SLA_HOURS.INTERVIEW_FEEDBACK);       // and the "Interview" prefix even earns it an interview SLA
+  it('new_stage must be one of STAGE_ORDER: a retired or made-up name, or a non-string, is a 400 and nothing is written (the column is plain TEXT, so nothing else would stop it)', async () => {
+    for (const new_stage of ['Interview – Round 3', 'Screening', 'Resume Review', 'Shortlisted', 'applied and screened', 42, ['Joined'], {}]) {
+      fakeDb.reset(); program();
+      const res = await stage('hr_recruiter', { new_stage });
+      expect([JSON.stringify(new_stage), res.status, res.body.error]).toEqual([JSON.stringify(new_stage), 400, 'Unknown stage']);
+      expect(fakeDb.writes()).toEqual([]);
+    }
   });
 });
 
