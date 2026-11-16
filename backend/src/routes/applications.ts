@@ -637,14 +637,21 @@ router.patch('/:id/notes', requireHR, async (req: Request, res: Response) => {
   }
   if (!updates.length) { res.status(400).json({ error: 'No valid fields' }); return; }
 
-  // Setting or changing the HR priority override needs a non-blank reason (trimmed), checked before any
-  // write. Clearing it (null, an empty string or 'Normal') needs none. A body that carries only the
-  // reason is not an override change.
+  // Setting or CHANGING the HR priority override needs a non-blank reason (trimmed), checked before any write. The reason may arrive in this
+  // request or already be stored on the application: the candidate page sends only the keys that changed, so moving the select from High to
+  // Critical carries no reason of its own. Re-sending the value that is already stored is not a change and needs none; clearing the override
+  // (null, an empty string or 'Normal') needs none; a body that carries only the reason is not an override change.
   const overrideValue = req.body.hr_priority_override;
   const clearsOverride = overrideValue === null || overrideValue === '' || overrideValue === 'Normal';
+  let effectiveReason: string | null = typeof req.body.hr_priority_override_reason === 'string' && req.body.hr_priority_override_reason.trim()
+    ? req.body.hr_priority_override_reason : null;
   if (overrideValue !== undefined && !clearsOverride) {
-    const reason = req.body.hr_priority_override_reason;
-    if (typeof reason !== 'string' || !reason.trim()) {
+    const stored = await queryOne<{ hr_priority_override: string | null; hr_priority_override_reason: string | null }>(
+      'SELECT hr_priority_override, hr_priority_override_reason FROM applications WHERE id=$1', [req.params.id]);
+    const storedReason = stored?.hr_priority_override_reason?.trim() ? stored.hr_priority_override_reason : null;
+    effectiveReason = effectiveReason ?? storedReason;
+    const unchanged = stored?.hr_priority_override === overrideValue;
+    if (!effectiveReason && !unchanged) {
       res.status(400).json({ error: 'hr_priority_override_reason is required when setting an HR priority override' });
       return;
     }
@@ -669,7 +676,7 @@ router.patch('/:id/notes', requireHR, async (req: Request, res: Response) => {
     const app = await queryOne<Application>('SELECT candidate_id, role_id FROM applications WHERE id=$1', [req.params.id]);
     await transaction(async (client) => {
       await logActivity(client, String(req.params.id), app!.candidate_id, app!.role_id,
-        'Priority Override Set', `HR Priority → ${req.body.hr_priority_override}: ${req.body.hr_priority_override_reason || ''}`,
+        'Priority Override Set', `HR Priority → ${req.body.hr_priority_override}: ${effectiveReason || ''}`,
         null, req.body.hr_priority_override, req.user!.userId, req.user!.name
       );
     });

@@ -890,6 +890,42 @@ describe('PATCH /:id/notes and POST /:id/retry-scoring (HR-tier)', () => {
     noWrite();
   });
 
+  describe('notes: the override reason may already be stored (the candidate page sends only the keys that changed)', () => {
+    const SEL = /^SELECT hr_priority_override, hr_priority_override_reason FROM applications WHERE id=\$1$/;
+    const actRow = () => fakeDb.whenOne(/^SELECT candidate_id, role_id FROM applications WHERE id=\$1$/, { candidate_id: 'C9001', role_id: 'R9001' });
+
+    it('changing only the select, with a reason already on record, is accepted and the activity line carries the stored reason', async () => {
+      program(); actRow();
+      fakeDb.whenOne(SEL, { hr_priority_override: 'High', hr_priority_override_reason: 'Referral from CEO' });
+      const res = await notes('hr_recruiter', { hr_priority_override: 'Critical' });
+      expect([res.status, res.body]).toEqual([200, { success: true }]);
+      expect(fakeDb.one(SQL.activity).params[4]).toBe('HR Priority → Critical: Referral from CEO');
+    });
+
+    it('a reason in the request wins over the stored one', async () => {
+      program(); actRow();
+      fakeDb.whenOne(SEL, { hr_priority_override: 'High', hr_priority_override_reason: 'old reason' });
+      expect((await notes('hr_recruiter', { hr_priority_override: 'Critical', hr_priority_override_reason: 'new reason' })).status).toBe(200);
+      expect(fakeDb.one(SQL.activity).params[4]).toBe('HR Priority → Critical: new reason');
+    });
+
+    it('re-sending the value that is already stored is not a change: no reason needed, even with none on record', async () => {
+      program(); actRow();
+      fakeDb.whenOne(SEL, { hr_priority_override: 'High', hr_priority_override_reason: null });
+      expect((await notes('hr_recruiter', { hr_priority_override: 'High' })).status).toBe(200);
+    });
+
+    it('a CHANGE with no reason in the request and none (or a blank one) on record is still 400, and nothing is written', async () => {
+      for (const stored of [{ hr_priority_override: 'High', hr_priority_override_reason: null }, { hr_priority_override: 'High', hr_priority_override_reason: '   ' }, { hr_priority_override: null, hr_priority_override_reason: null }]) {
+        fakeDb.reset(); program();
+        fakeDb.whenOne(SEL, stored);
+        const res = await notes('hr_recruiter', { hr_priority_override: 'Critical' });
+        expect([JSON.stringify(stored), res.status]).toEqual([JSON.stringify(stored), 400]);
+        expect(fakeDb.statements().join('\n')).not.toMatch(/UPDATE applications SET/);
+      }
+    });
+  });
+
   it('notes: clearing the override (null, empty string, Normal) needs no reason; an empty string is stored as NULL; a reason alone is not an override change', async () => {
     for (const [v, stored] of [[null, null], ['', null], ['Normal', 'Normal']] as const) {
       fakeDb.reset(); program();
