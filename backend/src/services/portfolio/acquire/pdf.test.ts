@@ -874,13 +874,22 @@ describe('worker packaging - pdf-parse loads pdf.worker.mjs by a path no tracer 
     expect(matches(vercel.functions['api/index.ts'].includeFiles!, WORKER_FILE)).toBe(true);
   });
 
-  it('the main API ships what the PDF child process loads, too: resume parsing runs the sandbox there (pdf-parse\'s CommonJS entry and pdf.worker.mjs), and no Chromium; it uses a plain "*" glob (the style that already ships the Chromium binaries in production), not braces, because the file that works today must not depend on a pattern form that has never run on Vercel', () => {
+  it('the main API ships what the PDF child process loads, too (pdf-parse\'s CommonJS entry and pdf.worker.mjs), and no Chromium. A brace glob since 2026-11-16: pdfkit 0.20 needed its font files added and the worker\'s brace glob had been proven on Vercel', () => {
     const include = vercel.functions['api/index.ts'].includeFiles!;
     expect(typeof include).toBe('string');
-    expect(include).not.toContain('{');
     expect(matches(include, 'node_modules/pdf-parse/dist/pdf-parse/cjs/index.cjs')).toBe(true);
     expect(matches(include, WORKER_FILE)).toBe(true);
     expect(matches(include, 'node_modules/@sparticuz/chromium/bin/chromium.br')).toBe(false);
+  });
+
+  it('the main API ships pdfkit\'s fonts: pdfkit 0.20 loads them through a #standard-fonts import no tracer follows, and a missing one crashed EVERY request at boot (2026-11-16)', () => {
+    const include = vercel.functions['api/index.ts'].includeFiles!;
+    // The hand-written matcher above needs a slash for "**/", which the real glob does not, so expand the real pattern on disk.
+    const shipped = new Set((fs as unknown as { globSync: (p: string, o: { cwd: string }) => string[] }).globSync(include, { cwd: root }));
+    expect(shipped.has('node_modules/pdfkit/js/standard-fonts/Helvetica.cjs')).toBe(true);
+    const chunk = fs.readdirSync(path.join(root, 'node_modules/pdfkit/js/standard-fonts/chunks')).filter(f => f.endsWith('.cjs'));
+    expect(chunk.length).toBeGreaterThan(0);
+    for (const f of chunk) expect(shipped.has(`node_modules/pdfkit/js/standard-fonts/chunks/${f}`)).toBe(true);
   });
 
   it('the matcher used here rejects what it should', () => {
