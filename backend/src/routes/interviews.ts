@@ -591,6 +591,10 @@ router.post('/:id/assignment-submit', requireHR, async (req: Request, res: Respo
 
   const round = await queryOne<InterviewRound>('SELECT * FROM interview_rounds WHERE id=$1', [req.params.id]);
   if (!round) { res.status(404).json({ error: 'Round not found' }); return; }
+  if (round.round_type !== 'Assignment') {
+    res.status(400).json({ error: 'This round is not configured as an Assignment round' });
+    return;
+  }
 
   await transaction(async (client) => {
     await client.query(

@@ -63,11 +63,22 @@ test.describe('POST /api/applications/:id/screening', () => {
     expect(await pendingRows(application.id)).toHaveLength(rowsBefore);
   });
 
-  test('a Hiring Manager is not scoped to their own roles here: Satyadev may shortlist on a role Alex owns (the rule is the persona, not the role)', async ({ request }) => {
-    // Pinned as the code behaves: the route checks persona + the value only, never roles.hiring_manager_name.
-    const { application } = await newApplicationAt(request, 'Applied and Screened', 'R006');
+  test('a Hiring Manager is scoped to the roles that name them: Satyadev gets 403 on a role Alex owns, decided before any write', async ({ request }) => {
+    const { application } = await newApplicationAt(request, 'Interview Round 1', 'R006');
+    const rowsBefore = await pendingRows(application.id);
     const res = await authed(request, await getToken(request, 'hm_satyadev')).post(`/api/applications/${application.id}/screening`, { new_screening_status: 'HM Shortlisted' });
-    expect(res.status()).toBe(200);
+    expect(res.status()).toBe(403);
+    expect((await res.json()).error).toBe('Only the Hiring Manager named on this role (or HR/Leadership) can shortlist for it.');
+    expect((await applicationRow(application.id)).recruiter_screening_status).toBe('New');
+    expect(await pendingRows(application.id)).toEqual(rowsBefore);
+  });
+
+  test('Satyadev may shortlist on his own role (R002), and a Hiring Manager gets 403 for it the other way round', async ({ request }) => {
+    const { application } = await newApplicationAt(request, 'Applied and Screened', 'R002');
+    const alex = await authed(request, await getToken(request, 'hm_alex')).post(`/api/applications/${application.id}/screening`, { new_screening_status: 'HM Shortlisted' });
+    expect(alex.status()).toBe(403);
+    const sat = await authed(request, await getToken(request, 'hm_satyadev')).post(`/api/applications/${application.id}/screening`, { new_screening_status: 'HM Shortlisted' });
+    expect(sat.status()).toBe(200);
     expect((await applicationRow(application.id)).recruiter_screening_status).toBe('HM Shortlisted');
   });
 
@@ -125,14 +136,32 @@ test.describe('POST /api/applications/:id/screening', () => {
     expect((await activityOf(hr, application.id)).map(a => a.event_type)).not.toContain('Recruiter Screening Status Changed');
   });
 
-  test('TODAY: setting HM Shortlisted twice is not idempotent — each call opens another "Schedule interview" row for HR', async ({ request }) => {
+  test('setting HM Shortlisted twice is idempotent: the repeat is a 200 unchanged:true that writes no second "Schedule interview" row and no second activity row', async ({ request }) => {
     const { hr, application } = await newApplicationAt(request, 'Applied and Screened', 'R006');
+    const first = await hr.post(`/api/applications/${application.id}/screening`, { new_screening_status: 'HM Shortlisted' });
+    expect(first.status()).toBe(200);
+    expect(await first.json()).toEqual({ success: true, new_screening_status: 'HM Shortlisted' });
     for (let i = 0; i < 2; i++) {
       const res = await hr.post(`/api/applications/${application.id}/screening`, { new_screening_status: 'HM Shortlisted' });
       expect(res.status()).toBe(200);
+      const body = await res.json();
+      expect(body).toMatchObject({ success: true, new_screening_status: 'HM Shortlisted', unchanged: true });
+      expect(body.application.id).toBe(application.id);
     }
     const open = (await pendingRows(application.id)).filter(r => r.action_type === 'Schedule interview' && !r.resolved);
-    expect(open).toHaveLength(2);
+    expect(open).toHaveLength(1);
+    const events = (await activityOf(hr, application.id)).filter(a => a.event_type === 'Recruiter Screening Status Changed');
+    expect(events).toHaveLength(1);
+  });
+
+  test('two simultaneous HM Shortlisted requests leave exactly one open "Schedule interview" row (the UPDATE decides, not a read-then-write)', async ({ request }) => {
+    const { application } = await newApplicationAt(request, 'Applied and Screened', 'R006');
+    const hr = authed(request, await getToken(request, 'hr'));
+    const hm = authed(request, await getToken(request, 'hm_alex'));
+    const out = await Promise.all([hr, hm].map(api => api.post(`/api/applications/${application.id}/screening`, { new_screening_status: 'HM Shortlisted' })));
+    for (const r of out) expect(r.status()).toBe(200);
+    const open = (await pendingRows(application.id)).filter(r => r.action_type === 'Schedule interview' && !r.resolved);
+    expect(open).toHaveLength(1);
   });
 });
 

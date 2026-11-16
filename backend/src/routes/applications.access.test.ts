@@ -51,7 +51,8 @@ const SQL = {
   statusUpdate: /^UPDATE applications SET status=\$1, rejection_reason_cat=\$2, rejection_reason_detail=\$3, withdrawal_reason_cat=\$4, withdrawal_reason_detail=\$5, last_updated=NOW\(\)/,
   resolveAllPending: /^UPDATE pending_actions SET resolved=true, resolved_at=NOW\(\) WHERE application_id=\$1 AND resolved=false$/,
   candidateEmail: /^SELECT email FROM candidates WHERE id=\$1$/,
-  screeningUpdate: /^UPDATE applications SET recruiter_screening_status=\$1, last_updated=NOW\(\) WHERE id=\$2$/,
+  screeningUpdate: /^UPDATE applications SET recruiter_screening_status=\$1, last_updated=NOW\(\) WHERE id=\$2( AND recruiter_screening_status IS DISTINCT FROM \$1)?$/,
+  screeningRole: /^SELECT hiring_manager_name FROM roles WHERE id = \$1$/,
   resolveHmReview: /^UPDATE pending_actions SET resolved=true, resolved_at=NOW\(\) WHERE application_id=\$1 AND action_type='HM shortlist review' AND resolved=false$/,
   scheduleInterview: /^INSERT INTO pending_actions \(owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue\) VALUES \('HR \/ Recruiter'/,
   founderUpdate: /^UPDATE applications SET founder_review_flag=\$1, founder_review_note=\$2, founder_review_set_by=\$3, founder_review_set_at=NOW\(\), last_updated=NOW\(\) WHERE id=\$4$/,
@@ -67,6 +68,8 @@ interface Scenario {
   refChecks?: string | null;
   updated?: Record<string, unknown>;
   candidateEmail?: string | null;
+  roleHm?: string | null;
+  screeningUnchanged?: boolean;
 }
 /** Program the statements the routes read. A field left out means "nothing there" (no band, no pending feedback, no reference check). */
 function program(s: Scenario = {}) {
@@ -79,6 +82,9 @@ function program(s: Scenario = {}) {
   fakeDb.whenOne(SQL.candidateName, { full_name: 'Candidate Example' });
   fakeDb.whenOne(SQL.roleTitle, { title: 'Quality Assurance Engineer' });
   fakeDb.whenOne(SQL.updatedRow, { ...UPDATED_ROW, ...(s.updated ?? {}) });
+  fakeDb.whenOne(SQL.screeningRole, { hiring_manager_name: s.roleHm === undefined ? 'Test Hiring Manager' : s.roleHm });
+  // The screening UPDATE answers one row (it changed) unless a scenario says the stored status already equals the new one.
+  fakeDb.when(SQL.screeningUpdate, s.screeningUnchanged ? [] : [{ id: APP_ID }]);
   fakeDb.whenOne(SQL.candidateEmail, s.candidateEmail === undefined ? { email: 'candidate@example.test' } : { email: s.candidateEmail });
 }
 
@@ -622,7 +628,7 @@ describe('POST /:id/screening — recruiter_screening_status', () => {
     nothingWritten();
   });
 
-  it('a hiring_manager may set HM Shortlisted — and only HM Shortlisted', async () => {
+  it('a hiring_manager named on the role may set HM Shortlisted — and only HM Shortlisted', async () => {
     program();
     const ok = await screening('hiring_manager', { new_screening_status: 'HM Shortlisted' });
     expect(ok.status).toBe(200);
@@ -635,6 +641,42 @@ describe('POST /:id/screening — recruiter_screening_status', () => {
     }
   });
 
+  describe('a Hiring Manager is scoped to the roles that name them', () => {
+    const SCOPE_ERROR = { error: 'Only the Hiring Manager named on this role (or HR/Leadership) can shortlist for it.' };
+
+    it('a Hiring Manager named on ANOTHER role gets 403, decided before any write', async () => {
+      program({ roleHm: 'Someone Else' });
+      const res = await screening('hiring_manager', { new_screening_status: 'HM Shortlisted' });
+      expect([res.status, res.body]).toEqual([403, SCOPE_ERROR]);
+      nothingWritten();
+    });
+
+    it('a role with no Hiring Manager named (null or blank) refuses every Hiring Manager', async () => {
+      for (const roleHm of [null, '', '   ']) {
+        fakeDb.reset(); program({ roleHm });
+        expect([roleHm, (await screening('hiring_manager', { new_screening_status: 'HM Shortlisted' })).status]).toEqual([roleHm, 403]);
+        nothingWritten();
+      }
+    });
+
+    it('a co-Hiring-Manager field ("A, B") admits each listed person, case and spacing aside, and not a partial name', async () => {
+      for (const roleHm of ['Test Hiring Manager, Piyush Negi', 'Piyush Negi & Test Hiring Manager', '  test   HIRING manager ']) {
+        fakeDb.reset(); program({ roleHm });
+        expect([roleHm, (await screening('hiring_manager', { new_screening_status: 'HM Shortlisted' })).status]).toEqual([roleHm, 200]);
+      }
+      for (const roleHm of ['Test Hiring', 'Test Hiring Managers', 'Hiring Manager']) {
+        fakeDb.reset(); program({ roleHm });
+        expect([roleHm, (await screening('hiring_manager', { new_screening_status: 'HM Shortlisted' })).status]).toEqual([roleHm, 403]);
+        nothingWritten();
+      }
+    });
+
+    it.each(HR_TIER)('%s is not scoped by the role (a Leadership user who is not the named HM still may)', async persona => {
+      program({ roleHm: 'Someone Else' });
+      expect((await screening(persona, { new_screening_status: 'HM Shortlisted' })).status).toBe(200);
+    });
+  });
+
   it.each(HR_TIER)('%s may set any value, HM Shortlisted included', async persona => {
     for (const value of ['New', 'Under Recruiter Review', 'Awaiting HM Review', 'HM Shortlisted']) {
       fakeDb.reset(); program();
@@ -642,6 +684,44 @@ describe('POST /:id/screening — recruiter_screening_status', () => {
       expect([persona, value, res.status]).toEqual([persona, value, 200]);
       expect(fakeDb.one(SQL.screeningUpdate).params[0]).toBe(value);
     }
+  });
+
+  describe("repeating 'HM Shortlisted' is a no-op", () => {
+    it('writes no activity row and no pending action, answers 200 unchanged:true with the application (restricted fields stripped for a Hiring Manager)', async () => {
+      program({ app: { recruiter_screening_status: 'HM Shortlisted' }, screeningUnchanged: true });
+      const res = await screening('hiring_manager', { new_screening_status: 'HM Shortlisted' });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ success: true, new_screening_status: 'HM Shortlisted', unchanged: true });
+      expect(res.body.application.id).toBe(APP_ID);
+      expect(fakeDb.find(SQL.activity)).toEqual([]);
+      expect(fakeDb.find(SQL.resolveHmReview)).toEqual([]);
+      expect(fakeDb.find(SQL.scheduleInterview)).toEqual([]);
+    });
+
+    it('is decided by the UPDATE itself (IS DISTINCT FROM), so two simultaneous requests cannot both raise the action', async () => {
+      program();
+      await screening('hr_recruiter', { new_screening_status: 'HM Shortlisted' });
+      expect(fakeDb.one(SQL.screeningUpdate).sql).toContain('IS DISTINCT FROM');
+    });
+
+    it('a repeat by HR is the same no-op; the first change still writes everything', async () => {
+      program({ app: { recruiter_screening_status: 'HM Shortlisted' }, screeningUnchanged: true });
+      const res = await screening('hr_recruiter', { new_screening_status: 'HM Shortlisted' });
+      expect(res.body.unchanged).toBe(true);
+      expect(fakeDb.find(SQL.scheduleInterview)).toEqual([]);
+      fakeDb.reset(); program();
+      const first = await screening('hr_recruiter', { new_screening_status: 'HM Shortlisted' });
+      expect(first.body).toEqual({ success: true, new_screening_status: 'HM Shortlisted' });
+      expect(fakeDb.find(SQL.scheduleInterview)).toHaveLength(1);
+    });
+
+    it('other values are untouched: a repeat still writes and logs as before (it never raised an action)', async () => {
+      program({ app: { recruiter_screening_status: 'Under Recruiter Review' } });
+      const res = await screening('hr_recruiter', { new_screening_status: 'Under Recruiter Review' });
+      expect(res.body).toEqual({ success: true, new_screening_status: 'Under Recruiter Review' });
+      expect(fakeDb.one(SQL.screeningUpdate).sql).not.toContain('IS DISTINCT FROM');
+      expect(fakeDb.find(SQL.activity)).toHaveLength(1);
+    });
   });
 
   it('the old and new values are logged against the acting user', async () => {

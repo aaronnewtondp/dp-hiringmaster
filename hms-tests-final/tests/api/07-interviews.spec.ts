@@ -199,10 +199,16 @@ test.describe('Interviews API', () => {
       expect(rounds.find((r: { id: string }) => r.id === round.id).assignment_submission_link).toBeNull();
     });
 
-    test('TODAY: assignment-submit does not check the round type — a Standard round accepts a submission too (200)', async ({ request }) => {
-      const { api, round } = await setupInterviewRound(request);
+    test('assignment-submit refuses a Standard round (400, the same wording as assignment-send) and stores nothing', async ({ request }) => {
+      const { api, application, round } = await setupInterviewRound(request);
       const subRes = await api.post(`/api/interviews/${round.id}/assignment-submit`, { submission_link: 'https://github.com/test/submission' });
-      expect(subRes.status()).toBe(200);
+      expect(subRes.status()).toBe(400);
+      expect((await subRes.json()).error).toBe('This round is not configured as an Assignment round');
+      const { rounds } = await (await api.get(`/api/interviews?application_id=${application.id}`)).json();
+      const stored = rounds.find((r: { id: string }) => r.id === round.id);
+      expect(stored.assignment_submission_link ?? null).toBeNull();
+      const body = await (await api.get(`/api/applications/${application.id}`)).json();
+      expect(body.application.assignment_submission_link ?? null).toBeNull();
     });
 
     // Regression guard for the exact weighted rubric in PATCH /:id/feedback:
