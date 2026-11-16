@@ -458,8 +458,10 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       already `text[]`, and `ADD COLUMN gender` without `IF NOT EXISTS`). Pinned by `db/16`.
 - [ ] **`pending_actions` has foreign keys to `applications` and `roles` with no index on `application_id` / `role_id`**, so every delete of an application or
       role scans the table (`hms-tests-final/tests/helpers/sourcing-db.ts` `purgeRolesFast` exists because of it; pinned by `db/16`).
-- [ ] **`db.transaction()` can mask the original error** (`backend/src/db/index.ts`): its `catch` awaits `client.query('ROLLBACK')` before rethrowing, so a failed
+- [x] **`db.transaction()` can mask the original error** (`backend/src/db/index.ts`): its `catch` awaits `client.query('ROLLBACK')` before rethrowing, so a failed
       ROLLBACK (a dropped connection) replaces the real error, and `client.release()` returns the broken client to the pool without `release(err)`.
+      **Fixed 2026-11-16:** the original error is always rethrown, a failed ROLLBACK is logged with `console.error` and the client is released with `release(err)` so pg discards it
+      (a clean rollback still releases normally); pinned in `db/index.test.ts`.
 - [ ] **`roleIngest` edge cases** (`backend/src/routes/roleIngest.ts`): `num_openings:"abc"` becomes `parseInt` NaN and the insert fails with a 500 (the sequence
       value is burned); `"0"` and `"-2"` are stored as given; the dedup key is `timestamp|email`, a row with neither has the key `|` and skips the lookup (a re-fired
       trigger creates duplicates), and `requisition_source_row` has no unique index, so two concurrent posts of one row can both insert; the role id is padded to
@@ -477,12 +479,15 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
 - [ ] **HR priority override does not require a reason although the test says it does.** `PATCH /api/applications/:id/notes` accepts `hr_priority_override` with no
       `hr_priority_override_reason` (200; the activity line just ends in an empty reason), while `api/08-misc` is titled "HR priority override requires a reason"
       and asserts `[400, 200]` ("backend may not validate this yet"), so it cannot fail. Decide the rule; make the test exact.
-- [ ] **The Hiring Manager is not scoped on `POST /api/applications/:id/screening`.** Any Hiring Manager can set `HM Shortlisted` on any application, whatever the
+- [x] **The Hiring Manager is not scoped on `POST /api/applications/:id/screening`.** Any Hiring Manager can set `HM Shortlisted` on any application, whatever the
       role's `hiring_manager_name` (verified: a Hiring Manager named on another role did it), unlike comp visibility and the dashboard, which are per role.
-- [ ] **`HM Shortlisted` is not idempotent** (same route): repeating it resolves nothing new but inserts another open "Schedule interview" action each time (three
+      **Fixed 2026-11-16:** a Hiring Manager may set `HM Shortlisted` only on a role whose `hiring_manager_name` names them (`canSeeCompForRole`, co-Hiring-Managers included), else 403 before any write; HR-tier is unchanged.
+- [x] **`HM Shortlisted` is not idempotent** (same route): repeating it resolves nothing new but inserts another open "Schedule interview" action each time (three
       calls, three open rows), because the route never compares the old and new status.
-- [ ] **`POST /api/interviews/:id/assignment-submit` does not check the round type**: a Standard round accepts an assignment submission (it writes the submission
+      **Fixed 2026-11-16:** the UPDATE carries `AND recruiter_screening_status IS DISTINCT FROM $1`; a repeat writes nothing and answers 200 `{unchanged:true, application}` (also closes the simultaneous-double-click race on this route).
+- [x] **`POST /api/interviews/:id/assignment-submit` does not check the round type**: a Standard round accepts an assignment submission (it writes the submission
       onto the round and the application). `assignment-send` does check (400 "not configured as an Assignment round").
+      **Fixed 2026-11-16:** `assignment-submit` answers the same 400, before any write.
 - [ ] **A candidate with no e-mail gets an inconsistent answer when an Assignment round is created** (`attemptAssignmentEmail`): the row stores
       "Candidate has no email on file." while the response says "Candidate has no email on file — cannot send assignment.", and, unlike a failed send, no
       "Assignment Email Failed" activity-log row is written.

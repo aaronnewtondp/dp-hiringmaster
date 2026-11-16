@@ -357,8 +357,14 @@ actually listed in (`interview_rounds.interviewer_emails`) — enforced in
 outcome, shortlist a candidate straight from `Applied and Screened` to `Interview Round 1`
 (this one stage transition is open to every persona, not HR-tier-gated — see
 the Application state model section below), and set
-`recruiter_screening_status` specifically to `'HM Shortlisted'` (every other
-screening-status value is HR-tier only, per `POST /applications/:id/screening`
+`recruiter_screening_status` specifically to `'HM Shortlisted'` — **per role
+since 2026-11-16**: only on an application whose role names them
+(`canSeeCompForRole`, the same whole-name rule as comp visibility, so a co-Hiring-Manager
+field `A, B` works; any other role is 403 before any write, a name that does not match the
+role's text is refused too, HR can still set it), and repeating it is a no-op
+(`200 {unchanged:true}`, no second "Schedule interview" action or activity row; decided by
+the UPDATE's own `IS DISTINCT FROM`, so simultaneous requests cannot both raise it)
+(every other screening-status value is HR-tier only, per `POST /applications/:id/screening`
 — note this is a different field from `stage`, untouched by the shortlist
 change above). A round with no `interviewer_emails` set at all (e.g.
 Assignment rounds) has no assignee to check, so feedback on those stays open

@@ -556,26 +556,40 @@ router.post('/:id/screening', async (req: Request, res: Response) => {
   if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
 
   // HR-tier can set any screening status; a Hiring Manager can set only the
-  // one transition they own (HM Shortlisted); everyone else (interviewer)
-  // can set none. Previously only the HM Shortlisted value was gated at
-  // all — every other value was silently open to any persona.
-  const isHMShortlistByHM = new_screening_status === 'HM Shortlisted' && req.user!.persona === 'hiring_manager';
-  if (!isHRTier(req.user!.persona) && !isHMShortlistByHM) {
-    res.status(403).json({ error: 'Only HR/Leadership can set this screening status.' });
-    return;
+  // one transition they own (HM Shortlisted), and only on a role that names
+  // them (same whole-name rule as comp visibility, co-Hiring-Managers included);
+  // everyone else can set none. Decided before any write.
+  if (!isHRTier(req.user!.persona)) {
+    if (new_screening_status !== 'HM Shortlisted' || req.user!.persona !== 'hiring_manager') {
+      res.status(403).json({ error: 'Only HR/Leadership can set this screening status.' });
+      return;
+    }
+    const roleRow = await queryOne<{ hiring_manager_name: string | null }>(
+      'SELECT hiring_manager_name FROM roles WHERE id = $1', [app.role_id]
+    );
+    if (!canSeeCompForRole(req.user!.persona, req.user!.name, roleRow?.hiring_manager_name)) {
+      res.status(403).json({ error: 'Only the Hiring Manager named on this role (or HR/Leadership) can shortlist for it.' });
+      return;
+    }
   }
 
-  await transaction(async (client) => {
-    await client.query(
-      'UPDATE applications SET recruiter_screening_status=$1, last_updated=NOW() WHERE id=$2',
+  // Repeating 'HM Shortlisted' resolves nothing new: it used to add another open
+  // "Schedule interview" action and another activity row each time. The check is the
+  // UPDATE's own WHERE clause, so two simultaneous shortlists cannot both pass it.
+  // Other values keep their behaviour (a repeat of those creates no duplicate action).
+  const isShortlist = new_screening_status === 'HM Shortlisted';
+  const changed = await transaction(async (client) => {
+    const upd = await client.query(
+      `UPDATE applications SET recruiter_screening_status=$1, last_updated=NOW() WHERE id=$2${isShortlist ? ' AND recruiter_screening_status IS DISTINCT FROM $1' : ''}`,
       [new_screening_status, req.params.id]
     );
+    if (isShortlist && upd.rowCount === 0) return false;
     await logActivity(client, app.id, app.candidate_id, app.role_id,
       'Recruiter Screening Status Changed', `Screening → ${new_screening_status}`,
       app.recruiter_screening_status, new_screening_status, req.user!.userId, req.user!.name
     );
     // If HM Shortlisted, resolve HM pending action and create HR schedule action
-    if (new_screening_status === 'HM Shortlisted') {
+    if (isShortlist) {
       await client.query(
         `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
          WHERE application_id=$1 AND action_type='HM shortlist review' AND resolved=false`,
@@ -589,7 +603,17 @@ router.post('/:id/screening', async (req: Request, res: Response) => {
         [req.params.id, cand.rows[0]?.full_name, role.rows[0]?.title]
       );
     }
+    return true;
   });
+
+  if (!changed) {
+    const current = await queryOne<Application>('SELECT * FROM applications WHERE id = $1', [req.params.id]);
+    res.json({
+      success: true, new_screening_status, unchanged: true,
+      application: current ? stripRestrictedFields(current as unknown as Record<string, unknown>, req.user!.persona, isHRTier(req.user!.persona)) : null,
+    });
+    return;
+  }
 
   res.json({ success: true, new_screening_status });
 });

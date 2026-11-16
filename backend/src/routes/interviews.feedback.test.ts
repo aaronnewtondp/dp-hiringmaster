@@ -637,4 +637,17 @@ describe('POST /:id/assignment-send (retry) and /:id/assignment-submit — HR-ti
     expect(fakeDb.one(/^UPDATE applications SET assignment_submission_link=\$1, last_updated=NOW\(\) WHERE id=\$2$/).params).toEqual(['https://x.example.test/answer', APP_ID]);
     expect(fakeDb.tx).toEqual({ started: 1, committed: 1, rolledBack: 0 });
   });
+
+  it('assignment-submit: a non-Assignment round answers the same 400 as assignment-send, with nothing written', async () => {
+    for (const round_type of ['Standard', 'Founders', 'Reference', null]) {
+      fakeDb.reset(); programRetry({ ...ASSIGNMENT_ROUND, round_type });
+      const res = await api.post('/api/interviews/IR0002/assignment-submit', { as: 'hr_recruiter', body: { submission_link: 'https://x.example.test/answer' } });
+      expect([round_type, res.status, res.body]).toEqual([round_type, 400, { error: 'This round is not configured as an Assignment round' }]);
+      expect(fakeDb.writes()).toEqual([]);
+      expect(fakeDb.tx.started).toBe(0);
+    }
+    fakeDb.reset(); programRetry({ ...ASSIGNMENT_ROUND, round_type: 'Standard' });
+    const send = await api.post('/api/interviews/IR0002/assignment-send', { as: 'hr_recruiter', body: { mail_body_content: 'x', assignment_link: 'https://x.example.test' } });
+    expect(send.body).toEqual({ error: 'This round is not configured as an Assignment round' });
+  });
 });
