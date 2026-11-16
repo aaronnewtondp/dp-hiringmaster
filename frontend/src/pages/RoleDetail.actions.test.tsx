@@ -278,6 +278,35 @@ describe('RoleDetail — approving a role', () => {
     await waitFor(() => expect(button('Approve Role')).toBeNull());
   });
 
+  describe('the JD generation that the Approve Role button carries (it used to be ignored: a failed generation was invisible there)', () => {
+    const approve = async (response: unknown) => {
+      rolesUpdate.mockResolvedValue({ data: response });
+      mount();
+      fireEvent.click(await screen.findByRole('button', { name: 'Approve Role' }));
+      await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledWith('Role approved'));
+    };
+
+    it('jdGeneration.generated: a second success message says both JDs were generated', async () => {
+      await approve({ role: serverRole, jdGeneration: { generated: true } });
+      expect(vi.mocked(toast.success).mock.calls.map(c => c[0])).toEqual(['Role approved', 'Long-form and social JDs generated']);
+      expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+    });
+
+    it('a generation that failed: the role IS approved, and an error says why, in the same words as the Change status window', async () => {
+      await approve({ role: serverRole, jdGeneration: { generated: false, error: 'Drive quota exceeded' } });
+      expect(vi.mocked(toast.success).mock.calls.map(c => c[0])).toEqual(['Role approved']);
+      expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith('JD generation failed: Drive quota exceeded');
+      await waitFor(() => expect(rolesGet.mock.calls.length).toBeGreaterThanOrEqual(2));      // the role is still re-read, so the page shows the approval
+    });
+
+    it('no jdGeneration (a role whose JD was written by hand, or one that already has links): no message about JDs, good or bad', async () => {
+      await approve({ role: serverRole });
+      expect(vi.mocked(toast.success).mock.calls.map(c => c[0])).toEqual(['Role approved']);
+      expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+    });
+  });
+
   it('while it is being saved the button says "Approving…", is disabled and cannot send a second request', async () => {
     const d = deferred<{ data: unknown }>();
     rolesUpdate.mockReturnValue(d.promise);
