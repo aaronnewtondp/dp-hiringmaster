@@ -520,9 +520,9 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       a 403); a role's activity timeline does not refresh after Change status; the bulk over-budget reason is sent for, and stored on, every selected row; bulk
       withdraw stores its reason in the rejection column; clearing a user's Department in Edit does not clear it; the first tap on an info marker on a phone
       opens nothing (`e2e/10`, `e2e/11`, `e2e/14`, `e2e/09`, `e2e-mobile/15`).
-- [ ] **Approve Role hides a JD-generation failure** (`RoleDetail.tsx` `handleApprove`): the PATCH returns `jdGeneration` (30 s of Claude, two PDFs, two Drive
-      uploads, awaited inline) but the button only toasts "Role approved", so a failed generation is invisible there; the Change status modal
-      (`handleStatusUpdate`) does show it, and the "Links & Assets" card just shows no JD link.
+- [x] **Approve Role hid a JD-generation failure** (`RoleDetail.tsx` `handleApprove`). Fixed 2026-11-16: the PATCH returns `jdGeneration` (30 s of Claude, two PDFs, two Drive
+      uploads, awaited inline) and the button now reports it through the same `reportJdGeneration` the Change status window uses ("Long-form and social JDs generated",
+      or "JD generation failed: <reason>" while the role stays approved; nothing for a role whose JD is hand-written or already has links). Pinned by `RoleDetail.actions.test.tsx`.
 
 ---
 

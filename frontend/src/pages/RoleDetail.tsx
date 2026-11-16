@@ -70,11 +70,24 @@ export default function RoleDetail() {
   // check in roles.ts exactly.
   const canApproveThisRole = canHR;
 
+  // The PATCH that moves a role to Approved awaits JD generation inline (30 s of Claude, two PDFs, two Drive uploads) and returns the outcome as
+  // `jdGeneration`; it is only present for that transition, so every other status change says nothing about JDs. Both ways of approving (the Approve
+  // Role button and the Change status window) go through this one function: the button used to ignore the field, so a failed generation was
+  // invisible there and the role simply showed no JD link.
+  const reportJdGeneration = (jdGeneration: { generated?: boolean; error?: string } | undefined) => {
+    if (jdGeneration?.generated) {
+      toast.success('Long-form and social JDs generated');
+    } else if (jdGeneration && !jdGeneration.generated) {
+      toast.error(`JD generation failed: ${jdGeneration.error}`);
+    }
+  };
+
   const handleApprove = async () => {
     setApproving(true);
     try {
-      await rolesApi.update(id!, { status: 'Approved' });
+      const res = await rolesApi.update(id!, { status: 'Approved' });
       toast.success('Role approved');
+      reportJdGeneration(res.data?.jdGeneration);
       qc.invalidateQueries({ queryKey: ['role', id] });
       qc.invalidateQueries({ queryKey: ['role-activity', id] });
       // Approving makes the server seed this role's draft sourcing plan (before it responds), so the cached "no plan" is stale.
@@ -164,17 +177,8 @@ export default function RoleDetail() {
     try {
       const res = await rolesApi.update(id!, { status: statusValue });
       toast.success(`Status updated to ${statusValue}`);
-      // jdGeneration is only present when this status change was the
-      // Draft/Under-Review → Approved transition (see roles.ts) — the PATCH
-      // now awaits generation inline rather than firing it in the
-      // background, so this is the first point a failure is ever visible
-      // instead of silently leaving jd_drive_link null forever.
-      const jdGeneration = res.data?.jdGeneration;
-      if (jdGeneration?.generated) {
-        toast.success('Long-form and social JDs generated');
-      } else if (jdGeneration && !jdGeneration.generated) {
-        toast.error(`JD generation failed: ${jdGeneration.error}`);
-      }
+      // jdGeneration is only present when this status change was the Draft/Under-Review → Approved transition (see roles.ts).
+      reportJdGeneration(res.data?.jdGeneration);
       setShowStatusModal(false);
       qc.invalidateQueries({ queryKey: ['role', id] });
       // On Hold pauses the sourcing plan, Closed closes it, reopening returns it to draft — all done server-side before it responds.
