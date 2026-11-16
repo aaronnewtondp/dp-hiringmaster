@@ -342,6 +342,24 @@ router.patch('/:id/feedback', async (req: Request, res: Response) => {
     score_clarity, score_practical_thinking, score_completeness, assignment_notes,
   } = req.body;
 
+  // A submission must say SOMETHING. An empty body used to be accepted: it marked the round Submitted with every field NULL, which also
+  // resolved the overdue-feedback breach, so a stray or scripted PATCH silenced the SLA with no feedback on record. "Something" is judged on the
+  // fields this round type actually stores: the assignment outcome/scores/notes for an Assignment round, the form's fields for any other.
+  const filled = (v: unknown): boolean =>
+    v === undefined || v === null ? false
+    : typeof v === 'string' ? v.trim() !== ''
+    : Array.isArray(v) ? v.some(filled)
+    : typeof v === 'object' ? Object.keys(v as object).length > 0
+    : true;
+  const submitted = isAssignment
+    ? [assignment_outcome, score_technical_accuracy, score_problem_solving, score_clarity, score_practical_thinking, score_completeness, assignment_notes]
+    : [eval_areas_assessed, scores_per_area, confidence_level, overall_assessment, strengths_observed, key_concerns,
+       unresolved_questions, suggested_probe_areas, round_recommendation, notes];
+  if (!submitted.some(filled)) {
+    res.status(400).json({ error: 'Feedback is empty: fill in at least one field before submitting.' });
+    return;
+  }
+
   // Scores are 1-5 (the assignment columns carry a CHECK for it; the per-area scores live in JSONB and carried none, so a 99 used to be
   // averaged in and could trip the "above 2.5" auto-advance). Refuse anything else here, before it is stored or acted on.
   const outOfScale = (v: unknown) => typeof v !== 'number' || !Number.isFinite(v) || v < 1 || v > 5;

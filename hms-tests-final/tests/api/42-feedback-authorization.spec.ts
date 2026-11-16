@@ -213,6 +213,19 @@ test.describe('PATCH /api/interviews/:id/feedback — behaviour that is NOT a ru
     expect(submissions).toHaveLength(2);
   });
 
+  test('an EMPTY submission is a 400 and changes nothing: the round stays Pending and no "Interview Feedback Submitted" row is written (it used to mark the round Submitted with every field empty)', async ({ request }) => {
+    const { hr, application, round } = await roundFor(request, [ALEX]);
+    const alex = authed(request, await getToken(request, 'hm_alex'));
+    for (const body of [{}, { notes: '  ', eval_areas_assessed: [] }]) {
+      const res = await alex.patch(`/api/interviews/${round.id}/feedback`, body);
+      expect(res.status(), JSON.stringify(body)).toBe(400);
+      expect((await res.json()).error).toBe('Feedback is empty: fill in at least one field before submitting.');
+    }
+    const stored = await storedRound(hr, application.id, round.id);
+    expect(stored.feedback_status).toBe('Pending');
+    expect((await activityOf(hr, application.id)).map(a => a.event_type)).not.toContain('Interview Feedback Submitted');
+  });
+
   test('an out-of-range value (overall_assessment) is a 400 (the CHECK constraint, mapped by the error handler) and the round stays Pending', async ({ request }) => {
     const { hr, application, round } = await roundFor(request, [ALEX]);
     const res = await authed(request, await getToken(request, 'hm_alex')).patch(`/api/interviews/${round.id}/feedback`, feedback({ overall_assessment: 'Excellent' }));

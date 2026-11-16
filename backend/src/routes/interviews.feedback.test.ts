@@ -233,14 +233,34 @@ describe('PATCH /:id/feedback — what a submission writes', () => {
     expect(fakeDb.find(SQL.appStage)).toEqual([]);
   });
 
-  it('characterization: the body is not validated — an empty submission is accepted, marks the round Submitted with empty fields, and resolves the overdue-feedback breach', async () => {
-    programRound();
-    const res = await feedback('hiring_manager', {});
-    expect(res.status).toBe(200);
-    const u = fakeDb.one(SQL.standardUpdate);
-    expect(u.params.slice(0, 11).every(p => p == null)).toBe(true);                // every field of the form is empty (undefined is bound as NULL)
-    expect(u.sql).toContain(`feedback_status='Submitted'`);
-    expect(fakeDb.find(SQL.resolveFeedbackDue)).toHaveLength(1);
+  it('an empty submission is refused 400 and nothing is written: no Submitted mark, no breach resolved (it used to silence the overdue-feedback SLA with no feedback on record)', async () => {
+    for (const body of [{}, { notes: '   ' }, { strengths_observed: '', eval_areas_assessed: [], scores_per_area: {} }, { confidence_level: null, round_recommendation: undefined }, { eval_areas_assessed: ['', '  '] }]) {
+      fakeDb.reset(); programRound();
+      const res = await feedback('hiring_manager', body);
+      expect([JSON.stringify(body), res.status, res.body.error]).toEqual([JSON.stringify(body), 400, 'Feedback is empty: fill in at least one field before submitting.']);
+      nothingWritten();
+    }
+  });
+
+  it('any one real field is enough to submit (the rest may stay empty)', async () => {
+    for (const body of [{ notes: 'ran long' }, { round_recommendation: 'Hold' }, { scores_per_area: { Communication: 3 } }, { eval_areas_assessed: ['Communication'] }]) {
+      fakeDb.reset(); programRound();
+      const res = await feedback('hiring_manager', body);
+      expect([JSON.stringify(body), res.status]).toEqual([JSON.stringify(body), 200]);
+      expect(fakeDb.find(SQL.resolveFeedbackDue)).toHaveLength(1);
+    }
+  });
+
+  it('on an Assignment round the assignment fields decide: standard-form fields alone are "empty" there (they are never stored), an outcome, a score or notes is enough', async () => {
+    const asg = { ...ROUND, round_type: 'Assignment' };
+    fakeDb.reset(); programRound(asg);
+    const only = await feedback('hr_recruiter', { notes: 'x', overall_assessment: 'y', round_recommendation: 'Proceed' });
+    expect([only.status, only.body.error]).toEqual([400, 'Feedback is empty: fill in at least one field before submitting.']);
+    nothingWritten();
+    for (const body of [{ assignment_outcome: 'Pass' }, { score_technical_accuracy: 4 }, { assignment_notes: 'solid' }]) {
+      fakeDb.reset(); programRound(asg);
+      expect([JSON.stringify(body), (await feedback('hr_recruiter', body)).status]).toEqual([JSON.stringify(body), 200]);
+    }
   });
 });
 

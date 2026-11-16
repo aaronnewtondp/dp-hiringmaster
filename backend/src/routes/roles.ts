@@ -14,6 +14,9 @@ import { ALL_BREACH_ACTION_TYPES } from '../jobs/slaChecker.js';
 import { isNamedHiringManager, normalizeHiringManagerInput, splitHiringManagerNames } from '../utils/hiringManagers.js';
 import { onRoleSaved } from '../services/sourcingPlans.js';
 
+// The values roles.status admits (schema.sql's CHECK; roles.createStatus.test.ts fails if the two drift). Used only to word the 400 for a create body that names a status.
+export const ROLE_STATUSES: readonly string[] = ['Draft', 'Under Review', 'Approved', 'Live – Sourcing', 'On Hold', 'Closed – Filled', 'Closed – Cancelled'];
+
 const router = Router();
 router.use(authenticate);
 
@@ -135,6 +138,19 @@ router.post('/', async (req: Request, res: Response) => {
 
   if (!title || !priority) {
     res.status(400).json({ error: 'title and priority are required' });
+    return;
+  }
+
+  // A new role is ALWAYS a Draft: HR moves it on with PATCH (approval is HR-tier only, even for the role's own Hiring Manager). The body's
+  // `status` used to be ignored, so a caller sending "Approved" got a 201 and a Draft and never learned it had not been approved; an unknown
+  // value was swallowed the same way. Anything but an absent value or "Draft" is now refused.
+  const requestedStatus = req.body.status;
+  if (requestedStatus !== undefined && requestedStatus !== null && requestedStatus !== 'Draft') {
+    res.status(400).json({
+      error: typeof requestedStatus === 'string' && ROLE_STATUSES.includes(requestedStatus)
+        ? 'A new role is always created as a Draft; change its status afterwards'
+        : 'status is not a valid role status; a new role is always created as a Draft',
+    });
     return;
   }
 
