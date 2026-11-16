@@ -8,7 +8,7 @@ const h = vi.hoisted(() => ({ query: vi.fn(), create: vi.fn() }));
 vi.mock('../db/index.js', () => ({ query: (...a: unknown[]) => h.query(...a), queryOne: vi.fn(), transaction: vi.fn(), pool: {} }));
 vi.mock('@anthropic-ai/sdk', () => ({ default: class { messages = { create: h.create }; } }));
 
-import { getCompBenchmark } from './compBenchmark.js';
+import { getCompBenchmark, validateAiBenchmark } from './compBenchmark.js';
 
 type Row = {
   id: string; role_category: string; experience_range: string;
@@ -208,10 +208,16 @@ describe('getCompBenchmark: the model is the last resort', () => {
     expect([out.range_min, out.range_max, out.rationale]).toEqual([10, 15, 'r']);
   });
 
-  it('string numbers in the reply become numbers; the currency is always the literal "LPA"', async () => {
-    h.create.mockResolvedValue(aiReply({ range_min: '12', range_max: '20.5', rationale: 'r', currency: 'USD' }));
+  it('the currency is always the literal "LPA", whatever the reply says', async () => {
+    h.create.mockResolvedValue(aiReply({ range_min: 12, range_max: 20.5, rationale: 'r', currency: 'USD' }));
     const out = await getCompBenchmark(role());
     expect([out.range_min, out.range_max, out.currency]).toEqual([12, 20.5, 'LPA']);
+  });
+
+  it('equal bounds and a zero minimum are valid', async () => {
+    h.create.mockResolvedValue(aiReply({ range_min: 0, range_max: 0, rationale: 'r' }));
+    const out = await getCompBenchmark(role());
+    expect([out.range_min, out.range_max]).toEqual([0, 0]);
   });
 
   it.each([[undefined], ['']])('a missing or empty rationale (%j) gets the default sentence', async rationale => {
@@ -224,18 +230,56 @@ describe('getCompBenchmark: the model is the last resort', () => {
     await expect(getCompBenchmark(role())).rejects.toThrow(SyntaxError);
   });
 
-  it('CURRENT BEHAVIOUR: a reply with no text block parses as "{}" and returns NaN bounds (no validation of the model range)', async () => {
+  it('a reply with no text block is a FAILED benchmark (it rejects; no NaN bounds)', async () => {
     h.create.mockResolvedValue({ content: [] });
-    const out = await getCompBenchmark(role());
-    expect(out.source).toBe('ai_estimate');
-    expect(Number.isNaN(out.range_min)).toBe(true);
-    expect(Number.isNaN(out.range_max)).toBe(true);
+    await expect(getCompBenchmark(role())).rejects.toThrow(/no text block/);
   });
 
-  it('CURRENT BEHAVIOUR: an inverted model range (max below min) is returned as given', async () => {
-    h.create.mockResolvedValue(aiReply({ range_min: 30, range_max: 10, rationale: 'r' }));
-    const out = await getCompBenchmark(role());
-    expect([out.range_min, out.range_max]).toEqual([30, 10]);
+  it('a reply whose only block is not text is a failed benchmark', async () => {
+    h.create.mockResolvedValue({ content: [{ type: 'tool_use', id: 'x', name: 'n', input: {} }] });
+    await expect(getCompBenchmark(role())).rejects.toThrow(/no text block/);
+  });
+
+  it.each([
+    ['an empty object', {}],
+    ['a missing range_max', { range_min: 10, rationale: 'r' }],
+    ['a missing range_min', { range_max: 10, rationale: 'r' }],
+    ['a null bound', { range_min: null, range_max: 10 }],
+    ['a string bound', { range_min: '12', range_max: 20 }],
+    ['a numeric-string max', { range_min: 12, range_max: '20.5' }],
+    ['a negative minimum', { range_min: -1, range_max: 10 }],
+    ['a negative maximum', { range_min: -5, range_max: -1 }],
+    ['an inverted range', { range_min: 30, range_max: 10 }],
+    ['a boolean bound', { range_min: true, range_max: 10 }],
+    ['a non-string rationale', { range_min: 1, range_max: 2, rationale: 5 }],
+  ])('%s is a failed benchmark', async (_n, body) => {
+    h.create.mockResolvedValue(aiReply(body));
+    await expect(getCompBenchmark(role())).rejects.toThrow(/Compensation benchmark/);
+  });
+
+  it.each([
+    ['NaN', '{"range_min": NaN, "range_max": 10}'],
+    ['Infinity', '{"range_min": 1, "range_max": Infinity}'],
+  ])('%s written in the reply is not JSON and fails', async (_n, text) => {
+    h.create.mockResolvedValue(aiReply(text));
+    await expect(getCompBenchmark(role())).rejects.toThrow(SyntaxError);
+  });
+
+  it.each([['null', 'null'], ['an array', '[1,2]'], ['a number', '5']])('%s as the reply is a failed benchmark', async (_n, text) => {
+    h.create.mockResolvedValue(aiReply(text));
+    await expect(getCompBenchmark(role())).rejects.toThrow(/not a JSON object/);
+  });
+
+  describe('validateAiBenchmark', () => {
+    it('refuses non-finite numbers directly (Infinity, -Infinity, NaN)', () => {
+      for (const bad of [Infinity, -Infinity, NaN]) {
+        expect(() => validateAiBenchmark({ range_min: bad, range_max: 10 })).toThrow();
+        expect(() => validateAiBenchmark({ range_min: 1, range_max: bad })).toThrow();
+      }
+    });
+    it('accepts a valid reply unchanged', () => {
+      expect(validateAiBenchmark({ range_min: 18, range_max: 28, rationale: 'x' })).toEqual({ source: 'ai_estimate', range_min: 18, range_max: 28, currency: 'LPA', rationale: 'x' });
+    });
   });
 
   it('an SDK error is not swallowed', async () => {

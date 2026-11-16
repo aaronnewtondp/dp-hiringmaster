@@ -5,7 +5,7 @@ import express from 'express';
 
 // POST /api/roles/ingest: the Requisition Form's Apps Script webhook. Authenticated by a shared secret header, not a JWT. Pinned here: the secret
 // gate (nothing touches the database without it), the dedup key, and how a form row becomes a Draft role. The database is answered from canned rows.
-const h = vi.hoisted(() => ({ query: vi.fn(), queryOne: vi.fn(), transaction: vi.fn(), clientQuery: vi.fn() }));
+const h = vi.hoisted(() => ({ query: vi.fn(), queryOne: vi.fn(), transaction: vi.fn(), clientQuery: vi.fn(), found: null as null | { id: string; title: string } }));
 vi.mock('../db/index.js', () => ({
   query: (...a: unknown[]) => h.query(...a),
   queryOne: (...a: unknown[]) => h.queryOne(...a),
@@ -13,7 +13,7 @@ vi.mock('../db/index.js', () => ({
   pool: {},
 }));
 
-import router, { mapPriority, parseVacancyReason } from './roleIngest.js';
+import router, { mapPriority, parseVacancyReason, parseNumOpenings, MAX_NUM_OPENINGS } from './roleIngest.js';
 
 const SECRET = 'test-only-role-ingest-secret';
 let server: http.Server;
@@ -44,10 +44,11 @@ const FORM = { timestamp: '2026-10-14 10:00:00', email: 'requester@example.test'
 beforeEach(() => {
   vi.stubEnv('ROLE_INGEST_SECRET', SECRET);
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  h.found = null;
   h.query.mockReset().mockResolvedValue([]);
   h.queryOne.mockReset().mockResolvedValue(null);
   h.clientQuery.mockReset().mockImplementation(async (sql: string) => {
-    if (norm(sql).includes("nextval('seq_role')")) return { rows: [{ n: '7' }] };
+    if (norm(sql).startsWith('SELECT id, title FROM roles WHERE requisition_source_row')) return { rows: h.found ? [h.found] : [] };
     if (norm(sql).startsWith('INSERT INTO roles')) return { rows: [{ id: 'R007', title: 'Synthetic Role', status: 'Draft' }] };
     return { rows: [] };
   });
@@ -146,13 +147,23 @@ describe('validation and dedup', () => {
     expect(h.queryOne).not.toHaveBeenCalled();
   });
 
-  it('dedups on "timestamp|email": the key is looked up, and a repeat answers 200 with the existing role and creates nothing', async () => {
-    h.queryOne.mockResolvedValueOnce({ id: 'R001', title: 'Synthetic Role' });
+  it('dedups on "timestamp|email": the key is looked up inside the transaction, and a repeat answers 200 with the existing role and creates nothing', async () => {
+    h.found = { id: 'R001', title: 'Synthetic Role' };
     const r = await ingest(FORM);
     expect(r.status).toBe(200);
     expect(r.json).toEqual({ message: 'Already ingested — skipped duplicate', role_id: 'R001' });
-    expect(h.queryOne.mock.calls[0][1]).toEqual(['2026-10-14 10:00:00|requester@example.test']);
-    expect(h.transaction).not.toHaveBeenCalled();
+    const lookup = h.clientQuery.mock.calls.find(c => norm(c[0]).startsWith('SELECT id, title FROM roles'))!;
+    expect(lookup[1]).toEqual(['2026-10-14 10:00:00|requester@example.test']);
+    expect(h.clientQuery.mock.calls.some(c => norm(c[0]).startsWith('INSERT'))).toBe(false);
+  });
+
+  it('same-key posts are serialised: the advisory lock on the key is taken BEFORE the lookup and the insert', async () => {
+    await ingest(FORM);
+    const sqls = h.clientQuery.mock.calls.map(c => norm(c[0]));
+    expect(sqls[0]).toBe('SELECT pg_advisory_xact_lock(hashtext($1))');
+    expect(h.clientQuery.mock.calls[0][1]).toEqual(['role-ingest:2026-10-14 10:00:00|requester@example.test']);
+    expect(sqls[1]).toMatch(/^SELECT id, title FROM roles WHERE requisition_source_row/);
+    expect(sqls[2]).toMatch(/^INSERT INTO roles/);
   });
 
   it('the key is stored on the new role so the next fire of the trigger finds it', async () => {
@@ -161,18 +172,43 @@ describe('validation and dedup', () => {
     expect(params[params.length - 1]).toBe('2026-10-14 10:00:00|requester@example.test');
   });
 
-  it('a row with neither timestamp nor e-mail has the blank key "|" and skips the duplicate lookup (so it can create duplicates)', async () => {
-    await ingest({ job_title: 'Synthetic Role' });
-    expect(h.queryOne).not.toHaveBeenCalled();
-    const params = insertCall()[1] as unknown[];
-    expect(params[params.length - 1]).toBe('|');
+  it.each([
+    ['neither field', {}],
+    ['both empty', { timestamp: '', email: '' }],
+    ['both blank', { timestamp: '  ', email: '\t' }],
+    ['both null', { timestamp: null, email: null }],
+  ])('a row with %s cannot be de-duplicated: 400, nothing is written and no transaction (no sequence value) is opened', async (_n, extra) => {
+    const r = await ingest({ job_title: 'Synthetic Role', ...extra });
+    expect(r.status).toBe(400);
+    expect(String(r.json?.error)).toMatch(/de-duplicated/);
+    expect(h.transaction).not.toHaveBeenCalled();
+    expect(h.clientQuery).not.toHaveBeenCalled();
   });
 
   it('a timestamp alone, or an e-mail alone, is enough to make a lookup key', async () => {
     await ingest({ job_title: 'R', timestamp: 'T1' });
-    expect(h.queryOne.mock.calls[0][1]).toEqual(['T1|']);
+    expect(h.clientQuery.mock.calls.find(c => norm(c[0]).startsWith('SELECT id, title'))![1]).toEqual(['T1|']);
+    h.clientQuery.mockClear();
     await ingest({ job_title: 'R', email: 'a@example.test' });
-    expect(h.queryOne.mock.calls[1][1]).toEqual(['|a@example.test']);
+    expect(h.clientQuery.mock.calls.find(c => norm(c[0]).startsWith('SELECT id, title'))![1]).toEqual(['|a@example.test']);
+  });
+});
+
+describe('parseNumOpenings', () => {
+  it.each([[undefined], [null], [''], ['   ']])('%j keeps the default of 1', raw => { expect(parseNumOpenings(raw)).toBe(1); });
+  it.each([['3', 3], [' 4 ', 4], ['08', 8], [2, 2], ['1', 1], [String(MAX_NUM_OPENINGS), MAX_NUM_OPENINGS]])('%j is %s', (raw, n) => { expect(parseNumOpenings(raw)).toBe(n); });
+  it.each([['abc'], ['0'], [0], ['-2'], [-2], ['1.5'], [1.5], ['3.9'], ['1e3'], ['0x10'], ['3 openings'], [NaN], [Infinity], [String(MAX_NUM_OPENINGS + 1)], ['99999999999999999999'], [true], [[3]], [{}]])('%j is invalid', raw => {
+    expect(parseNumOpenings(raw)).toBeNull();
+  });
+});
+
+describe('an invalid num_openings is refused BEFORE anything is written', () => {
+  it.each(['abc', '0', '-2', '1.5', String(MAX_NUM_OPENINGS + 1)])('%j: 400, no transaction, so no sequence value is consumed', async bad => {
+    const r = await ingest({ ...FORM, num_openings: bad });
+    expect(r.status).toBe(400);
+    expect(String(r.json?.error)).toMatch(/num_openings must be a whole number/);
+    expect(h.transaction).not.toHaveBeenCalled();
+    expect(h.clientQuery).not.toHaveBeenCalled();
   });
 });
 
@@ -193,15 +229,12 @@ describe('how a form row becomes a Draft role', () => {
     expect(norm(insertCall()[0])).not.toContain('start_date');
   });
 
-  it('the role id is "R" plus the sequence number padded to 3 digits, and never truncated past 999', async () => {
-    h.clientQuery.mockImplementation(async (sql: string) => (norm(sql).includes("nextval('seq_role')") ? { rows: [{ n: '7' }] } : { rows: [{ id: 'R007', title: 'T' }] }));
+  it('the role id is NOT built in the route: the INSERT leaves id out so the column default (format_seq_id, 4-digit pad) applies, like POST /roles', async () => {
     await ingest(FORM);
-    expect((insertCall()[1] as unknown[])[0]).toBe('R007');
-
-    h.clientQuery.mockClear();
-    h.clientQuery.mockImplementation(async (sql: string) => (norm(sql).includes("nextval('seq_role')") ? { rows: [{ n: '1042' }] } : { rows: [{ id: 'R1042', title: 'T' }] }));
-    await ingest(FORM);
-    expect((insertCall()[1] as unknown[])[0]).toBe('R1042');
+    const sql = norm(insertCall()[0]);
+    expect(sql).toMatch(/^INSERT INTO roles \( title,/);
+    expect(sql).not.toMatch(/\(\s*id\b/);
+    expect(h.clientQuery.mock.calls.some(c => norm(c[0]).includes('nextval'))).toBe(false);
   });
 
   it('maps every form field to its column, in order', async () => {
@@ -212,28 +245,28 @@ describe('how a form row becomes a Draft role', () => {
       yoe_required: '5-8', ctc_band: 'band', kpi_expectations: 'kpi', additional_remarks: 'remarks', target_closure_date: '2026-12-01',
     });
     expect(insertCall()[1]).toEqual([
-      'R007', 'Synthetic Role', 'Engineering', 'Test Manager', 'P0', 3, 'Pune',
+      'Synthetic Role', 'Engineering', 'Test Manager', 'P0', 3, 'Pune',
       'New', ['A', 'B'], 'Full-time', 'B.Tech', 'Must', 'Nice', '5-8', 'band', 'kpi', 'remarks', '2026-12-01', 'T|e@example.test',
     ]);
   });
 
   it('every optional field that is absent is stored as null; priority defaults to P1 and openings to 1', async () => {
     await ingest({ job_title: 'Only A Title', timestamp: 'T' });
-    expect(insertCall()[1]).toEqual(['R007', 'Only A Title', null, null, 'P1', 1, null, null, null, null, null, null, null, null, null, null, null, null, 'T|']);
+    expect(insertCall()[1]).toEqual(['Only A Title', null, null, 'P1', 1, null, null, null, null, null, null, null, null, null, null, null, null, 'T|']);
   });
 
   it('an empty-string field is stored as null, not as ""', async () => {
-    await ingest({ job_title: 'T', department: '', location: '', must_have_skills: '', ctc_band: '' });
+    await ingest({ ...FORM, job_title: 'T', department: '', location: '', must_have_skills: '', ctc_band: '' });
     const p = insertCall()[1] as unknown[];
-    expect([p[2], p[6], p[11], p[14]]).toEqual([null, null, null, null]);
+    expect([p[1], p[5], p[10], p[13]]).toEqual([null, null, null, null]);
   });
 
-  it('num_openings is read as a decimal integer ("08" is 8, "3.9" is 3)', async () => {
-    await ingest({ job_title: 'T', num_openings: '08' });
-    expect((insertCall()[1] as unknown[])[5]).toBe(8);
+  it('num_openings is read as a decimal integer ("08" is 8; a JSON number is accepted)', async () => {
+    await ingest({ ...FORM, num_openings: '08' });
+    expect((insertCall()[1] as unknown[])[4]).toBe(8);
     h.clientQuery.mockClear();
-    await ingest({ job_title: 'T', num_openings: '3.9' });
-    expect((insertCall()[1] as unknown[])[5]).toBe(3);
+    await ingest({ ...FORM, num_openings: 5 });
+    expect((insertCall()[1] as unknown[])[4]).toBe(5);
   });
 
   describe('the Hiring Manager field is stored canonically ("A, B"), whatever delimiter the form used', () => {
@@ -244,30 +277,31 @@ describe('how a form row becomes a Draft role', () => {
       ['  Test   One  ', 'Test One'],
       ['A, B, and C', 'A, B, C'],
     ])('%j is stored as %j', async (typed, stored) => {
-      await ingest({ job_title: 'T', hiring_manager: typed });
-      expect((insertCall()[1] as unknown[])[3]).toBe(stored);
+      await ingest({ ...FORM, job_title: 'T', hiring_manager: typed });
+      expect((insertCall()[1] as unknown[])[2]).toBe(stored);
     });
 
     it.each([[''], ['   '], [undefined], [',;&']])('%j is stored as null (no Hiring Manager)', async typed => {
-      await ingest({ job_title: 'T', hiring_manager: typed });
-      expect((insertCall()[1] as unknown[])[3]).toBeNull();
+      await ingest({ ...FORM, job_title: 'T', hiring_manager: typed });
+      expect((insertCall()[1] as unknown[])[2]).toBeNull();
     });
   });
 
   it('a priority the form sent in any case is normalised; an unknown one becomes P1', async () => {
-    await ingest({ job_title: 'T', priority_level: ' p3 ' });
-    expect((insertCall()[1] as unknown[])[4]).toBe('P3');
+    await ingest({ ...FORM, job_title: 'T', priority_level: ' p3 ' });
+    expect((insertCall()[1] as unknown[])[3]).toBe('P3');
     h.clientQuery.mockClear();
-    await ingest({ job_title: 'T', priority_level: 'Urgent' });
-    expect((insertCall()[1] as unknown[])[4]).toBe('P1');
+    await ingest({ ...FORM, job_title: 'T', priority_level: 'Urgent' });
+    expect((insertCall()[1] as unknown[])[3]).toBe('P1');
   });
 
   it('the role is created inside one transaction (id, role and activity row together)', async () => {
     await ingest(FORM);
     expect(h.transaction).toHaveBeenCalledTimes(1);
     const sqls = h.clientQuery.mock.calls.map(c => norm(c[0]));
-    expect(sqls[0]).toContain("nextval('seq_role')");
-    expect(sqls[1]).toMatch(/^INSERT INTO roles/);
-    expect(sqls[2]).toMatch(/^INSERT INTO activity_log/);
+    expect(sqls[0]).toContain('pg_advisory_xact_lock');
+    expect(sqls[1]).toMatch(/^SELECT id, title FROM roles/);
+    expect(sqls[2]).toMatch(/^INSERT INTO roles/);
+    expect(sqls[3]).toMatch(/^INSERT INTO activity_log/);
   });
 });

@@ -832,7 +832,11 @@ Requisition Form → Sheet → Apps Script (`onFormSubmit` trigger) → HTTP POS
 `/api/roles/ingest`, authenticated via a shared secret header (`x-ingest-
 secret`), not JWT (Apps Script can't hold a user session). Dedup via a
 `requisition_source_row` key (`timestamp|email` from the sheet row) so a
-re-fired trigger never creates a duplicate role. The Apps Script source lives
+re-fired trigger never creates a duplicate role. A row with neither a timestamp nor an
+e-mail is a 400 (no key), same-key posts are serialised by `pg_advisory_xact_lock`
+(there is no unique index on that column), `num_openings` must be a whole number 1-500
+(else 400, validated before any write) and the role id comes from the column default
+(`format_seq_id`, 4 digits), not from the route. The Apps Script source lives
 outside this repo, in the Google Sheet's own Script editor — there is no local
 copy to keep in sync beyond the reference version kept in
 `docs/RequisitionFormTrigger.gs.js` (if present).

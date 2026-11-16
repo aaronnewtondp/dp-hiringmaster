@@ -462,12 +462,18 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       ROLLBACK (a dropped connection) replaces the real error, and `client.release()` returns the broken client to the pool without `release(err)`.
       **Fixed 2026-11-16:** the original error is always rethrown, a failed ROLLBACK is logged with `console.error` and the client is released with `release(err)` so pg discards it
       (a clean rollback still releases normally); pinned in `db/index.test.ts`.
-- [ ] **`roleIngest` edge cases** (`backend/src/routes/roleIngest.ts`): `num_openings:"abc"` becomes `parseInt` NaN and the insert fails with a 500 (the sequence
+- [x] **`roleIngest` edge cases** (`backend/src/routes/roleIngest.ts`): `num_openings:"abc"` becomes `parseInt` NaN and the insert fails with a 500 (the sequence
       value is burned); `"0"` and `"-2"` are stored as given; the dedup key is `timestamp|email`, a row with neither has the key `|` and skips the lookup (a re-fired
       trigger creates duplicates), and `requisition_source_row` has no unique index, so two concurrent posts of one row can both insert; the role id is padded to
       3 digits (`R013`) where the column default pads to 4 (`R0009`).
-- [ ] **`compBenchmark` can produce NaN bounds** (`services/compBenchmark.ts`): a model reply with no text block parses as `{}` and returns `range_min` /
+      **Fixed 2026-11-16:** `num_openings` is validated before anything is written (a positive whole number, 1-500, a numeric string accepted; empty keeps 1; anything else 400);
+      a row with neither a usable timestamp nor e-mail is a 400; same-key posts are serialised with `pg_advisory_xact_lock(hashtext(key))` around the lookup and insert
+      (no schema change, no unique index), so a concurrent duplicate answers the existing role; the INSERT leaves `id` out so the column default (`format_seq_id`, 4 digits) applies.
+      Existing role ids are unchanged. Pinned in `roleIngest.test.ts` and `api/09-role-ingestion.spec.ts`.
+- [x] **`compBenchmark` can produce NaN bounds** (`services/compBenchmark.ts`): a model reply with no text block parses as `{}` and returns `range_min` /
       `range_max` NaN, with no validation of the range (`compBenchmark.test.ts`, "CURRENT BEHAVIOUR").
+      **Fixed 2026-11-16:** a reply with no text block, non-JSON, or bounds that are not finite non-negative numbers with min <= max now throws (`validateAiBenchmark`), which
+      `GET /roles/:id/comp-benchmark` already answers as 500 "Compensation benchmarking failed". Nothing is stored (the route only returns the result). Numeric strings are no longer coerced.
 
 *Access control and workflow rules*
 - [x] **Persona is read live, not from the token (2026-11-16).** `authenticate()` reads `users.persona` in the same cached lookup as `is_active`
