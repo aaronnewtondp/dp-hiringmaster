@@ -18,7 +18,7 @@ import HiringFunnelSnapshot from './HiringFunnelSnapshot.tsx';
 
 const cand = (over: Record<string, unknown> = {}) => ({
   application_id: 'A0001', candidate_id: 'C0001', candidate_name: 'Test Candidate', role_id: 'R001', role_title: 'Quality Assurance Engineer',
-  owner: 'HR / Recruiter', stage: 'Offer Accepted', overdue_hours: b.joiningRiskStoredHours, ...over,
+  owner: 'HR / Recruiter', stage: 'Offer Accepted', overdue_hours: 6.5 * 24, ...over,
 });
 
 const SNAPSHOT: HiringFunnelSnapshotStage[] = [
@@ -54,8 +54,8 @@ describe('HiringFunnelSnapshot — owners', () => {
     fireEvent.click(type);
     expect(await screen.findByText('SLA Owner: HR/Admin')).toBeInTheDocument();
     expect(screen.queryByText(/HR \/ Recruiter/)).not.toBeInTheDocument();
-    // a joining-risk breach is stored with a constant number of hours (checkJoiningRisk), so its card always reads the same days, whatever the real delay
-    expect(screen.getByText(`Overdue ${b.joiningRiskStoredHours / 24}D`)).toBeInTheDocument();
+    // a joining-risk breach is stored with the real hours past the 5-day window at the moment it was flagged (checkJoiningRisk), so the card reads that delay (rounded up to whole days: 6.5 days is "7D")
+    expect(screen.getByText('Overdue 7D')).toBeInTheDocument();
   });
 });
 
@@ -66,9 +66,8 @@ describe('HiringFunnelSnapshot — the marker', () => {
     fireEvent.mouseEnter(heading.parentElement!.querySelector('[aria-label="More info"]')!);
     const tip = heading.parentElement!.querySelector('div.absolute')!.textContent!;
     expect(tip).toContain('how far past its SLA limit each one was when HMS last checked');
-    expect(tip).toContain(`'Joining risk — no contact' always shows ${b.joiningRiskStoredHours / 24}D`);
-    expect(b.joiningRiskStoredHours / 24, 'the marker says the figure is the joining-risk number of days').toBe(b.joiningRiskDays);
-    expect(tip).toContain("'Assignment deadline breached' shows how late it was when it was first flagged");
+    expect(tip).toContain("'Joining risk — no contact' and 'Assignment deadline breached' show how late they were when they were first flagged");
+    expect(tip).not.toContain("always shows");
     expect(tip).not.toContain('how far past its SLA limit each one is ');
   });
 });
