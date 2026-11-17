@@ -979,6 +979,10 @@ interface ResultMeta {
 interface ModelLink {
   relevance?: Relevance; attribution?: Attribution; coverage?: Coverage; campaignsSeen?: number;
   summary: string; credited: boolean | null; influence: boolean;
+  /** The model returned a non-empty creditQuote (checked or not). Never the text itself: only a quote that passed verifiedCredit is stored. */
+  creditQuoteGiven: boolean;
+  /** The credit line, only when it passed verifiedCredit (in the link's own text, a role word, a different full name), after the fairness filter. */
+  creditQuote?: string;
 }
 
 // ─── Whose work it is: what code requires before the model's "someone else's" stands ───────────────────────
@@ -1076,11 +1080,17 @@ function buildResult(a: MarketingAnalyzeInput, asm: Assembled, parsed: RawMarket
     const shown = shownByRef.get(key);
     if (!l || !shown || modelLinks.has(key)) continue;   // only for refs we sent; the first entry for a ref wins
     let attribution = oneOf<Attribution>(l.attribution, ATTRIBUTION);
+    const creditQuoteRaw = (l as { creditQuote?: unknown }).creditQuote;
+    const creditQuoteGiven = typeof creditQuoteRaw === 'string' && creditQuoteRaw.trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim() !== '';
+    // Recorded for measurement only (is it filled at all, and how often does it hold up); nothing below reads it back.
+    const creditQuote = creditQuoteGiven && verifiedCredit(creditQuoteRaw, shown.text)
+      ? fair.one(clip((creditQuoteRaw as string).trim(), 240)) || undefined
+      : undefined;
     // Someone else's work needs a positive signal, all of it: a different full name credited in a line quoted from the link's own text AND our own
     // check having searched readable text for the candidate's name without finding it. With the name found, or the question open (a partial match,
     // an image-only file, a name in another script), the label counts as "cannot tell": no cap, no flag.
     if (attribution === 'other_person') {
-      const why = otherPersonRefusal(shown, (l as unknown as { creditQuote?: unknown }).creditQuote);
+      const why = otherPersonRefusal(shown, creditQuoteRaw);
       if (why !== null) {
         attribution = 'unknown';
         auditNotes.push(`${flagRef(shown.item)}: labelled as someone else's work ${why}; treated as unknown`);
@@ -1095,6 +1105,8 @@ function buildResult(a: MarketingAnalyzeInput, asm: Assembled, parsed: RawMarket
       // "Credited to someone else" is a claim only a stood label backs: without one it is "cannot tell".
       credited: typeof l.candidateCredited === 'boolean' ? (l.candidateCredited === false && attribution !== 'other_person' ? null : l.candidateCredited) : null,
       influence: l.attemptsToInfluenceReviewer === true,
+      creditQuoteGiven,
+      ...(creditQuote ? { creditQuote } : {}),
     });
   }
   const attributionOf = (i: Acquired) => modelLinks.get(refKey(i.ref))?.attribution;
@@ -1166,6 +1178,8 @@ function buildResult(a: MarketingAnalyzeInput, asm: Assembled, parsed: RawMarket
     if (m.summary) rec.summary = m.summary;
     rec.belongsToCandidate = m.credited;
     rec.attemptsToInfluenceReviewer = m.influence;
+    rec.creditQuoteGiven = m.creditQuoteGiven;
+    if (m.creditQuote) rec.creditQuote = m.creditQuote;
     return rec;
   });
 

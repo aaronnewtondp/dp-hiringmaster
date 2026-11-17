@@ -204,7 +204,7 @@ live.
       tier; three are now below 4.0. **Decision (Aaron, 2026-10-25): keep the fold policy as it is** (`'always'`;
       the `upside_only` knob stays in code, unused). No spot-check by the hiring manager is scheduled. Numbers,
       outcomes and what the real worker showed: CLAUDE.md "Production state"; steps and queries: the runbook.
-- [ ] **Work-sample review — follow-ups, not built.** cap `candidates.full_name` at ingest; network-level egress
+- [ ] **Work-sample review — follow-ups, not built.** (**Fixed 2026-11-17:** `candidates.full_name` is capped at 200 characters in all creation paths and PATCH, and each link's `creditQuoteGiven` / verified `creditQuote` is stored; see CLAUDE.md known gaps (26) and the creditQuote notes.) Still open: network-level egress
       filtering or a validating proxy for the browser (socket/popup/teardown SSRF is only mitigated for R019 and not
       at all for R007's capture); the form's privacy-notice check and the optional dedicated Anthropic key
       (`PORTFOLIO_ANTHROPIC_API_KEY`) are not recorded as settled before the backfill; whether the quote matcher is
