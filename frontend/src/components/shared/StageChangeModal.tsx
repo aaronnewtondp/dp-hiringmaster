@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { applicationsApi } from '../../services/api.ts';
+import { isSkippableStageGate, apiErrorMessage } from '../../utils/stageGate.ts';
 import { Application, STAGES, OVER_BUDGET_SHORTLIST_REASONS } from '../../types/index.ts';
 
 // Single-application stage change — shared by CandidateDetail.tsx and
@@ -13,8 +14,6 @@ interface StageChangeModalProps {
   onClose: () => void;
   onUpdated: () => void;
 }
-
-const SKIPPABLE_GATE = /^(Feedback is still pending for|Add at least one reference check before advancing)/;
 
 export default function StageChangeModal({ application, onClose, onUpdated }: StageChangeModalProps) {
   const [stageValue, setStageValue] = useState(application.stage);
@@ -54,9 +53,9 @@ export default function StageChangeModal({ application, onClose, onUpdated }: St
       onUpdated();
       onClose();
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      const msg = apiErrorMessage(err);
       toast.error(msg || 'Failed to update stage');
-      if (msg && SKIPPABLE_GATE.test(msg)) setGateMessage(msg);
+      if (isSkippableStageGate(msg)) setGateMessage(msg!);
     }
     setSaving(false);
   };

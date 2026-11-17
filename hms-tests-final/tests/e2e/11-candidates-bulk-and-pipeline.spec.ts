@@ -15,7 +15,7 @@ import { authed, getToken, uid } from '../helpers/api';
 import { withDb } from '../helpers/db';
 import {
   test, expect, Cleanup, createRole, createApplicant, moveToStage, getApp, dialogWith, toastWith, recordRequests, queryValues,
-  isPost, hrApi, setRoleStatus, Applicant,
+  isPost, hrApi, setRoleStatus, Applicant, createStandardRound,
 } from '../helpers/e2e-candidates';
 import type { Page, APIRequestContext, Locator } from '@playwright/test';
 
@@ -240,6 +240,37 @@ test.describe('Active Candidates: bulk stage', () => {
     const res = await (await hrApi(request)).post(`/api/applications/${b.people[0].appId}/stage`, { new_stage: 'Interview Round 1', budget_exception_reason_cat: 'Leadership-approved exception' });
     expect(res.status()).toBe(200);
     expect((await getApp(request, b.people[0].appId)).budget_exception_reason_cat).toBeFalsy();
+  });
+
+  test('a row refused for pending feedback is listed; HR retries just that row with a written reason: skip_reason is sent only then and logged', async ({ page, request }) => {
+    const b = await makeBatch(request, ['M', 'F', 'U']);
+    const pending = b.people[1];
+    await createStandardRound(request, pending.appId, { round_name: `Bulk Pending ${b.marker}` });
+    const posts = recordRequests(page, isPost('/stage'));
+    await openCandidates(page, 'hr', b, 3);
+    await headerCheckbox(page).check();
+    await page.getByRole('button', { name: 'Change Stage' }).click();
+    const dialog = dialogWith(page, 'Update stage');
+    await dialog.getByRole('combobox').selectOption('Interview Round 2');
+    await dialog.getByRole('button', { name: 'Update', exact: true }).click();
+
+    // The others moved; the dialog stays open and lists the refused row with the server's reason and a reason box.
+    await expect(toastWith(page, '2 of 3 updated to Interview Round 2')).toBeVisible();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId('bulk-refused-list')).toContainText(pending.name);
+    await expect(dialog.getByTestId('bulk-refused-list')).toContainText('Feedback is still pending for');
+    expect((await getApp(request, pending.appId)).stage).toBe('Applied and Screened');
+    for (const body of posts.bodies()) expect(body).toEqual({ new_stage: 'Interview Round 2' });   // never a skip_reason on the first attempt
+
+    await dialog.getByLabel('Reason to proceed anyway').fill('Panel feedback was given verbally');
+    await dialog.getByRole('button', { name: 'Retry 1', exact: true }).click();
+    await expect(toastWith(page, '1 of 1 updated to Interview Round 2')).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    expect(posts.bodies().length).toBe(4);
+    expect(posts.bodies()[3]).toEqual({ new_stage: 'Interview Round 2', skip_reason: 'Panel feedback was given verbally' });
+    expect((await getApp(request, pending.appId)).stage).toBe('Interview Round 2');
+    const detail = await (await (await hrApi(request)).get(`/api/applications/${pending.appId}`)).json() as { activity: unknown };
+    expect(JSON.stringify(detail.activity)).toContain('Stage skipped to Interview Round 2. Reason: Panel feedback was given verbally');
   });
 
   test('a row the server refuses is reported in the count and the others still move', async ({ page, request }) => {
