@@ -1812,6 +1812,12 @@ describe('runMarketingReview: a review that is not scored carries nothing the mo
       expect(out).toMatchObject({ isPortfolio: true, belongsToCandidate: null });
     });
 
+    it('also drops the credit evidence the model gave (creditQuote, creditQuoteGiven): a not-scored review keeps nothing the model said about a link', () => {
+      const [out] = withoutModelJudgement([judged(A1, { creditQuoteGiven: true, creditQuote: 'Concept and direction: Jonathan Whitfield' })]);
+      expect(out).not.toHaveProperty('creditQuote');
+      expect(out).not.toHaveProperty('creditQuoteGiven');
+    });
+
     it('isPortfolio, which the analyzer derives from the model\'s relevance rating ("irrelevant" -> false), goes back to its neutral true', () => {
       const [out] = withoutModelJudgement([judged(A1, { relevance: 'irrelevant', isPortfolio: false, belongsToCandidate: false })]);
       expect(out).toMatchObject({ isPortfolio: true, belongsToCandidate: null });
@@ -1915,6 +1921,16 @@ describe('runMarketingReview: a review that is not scored carries nothing the mo
       expect(rec).not.toHaveProperty('attribution');
       expect(rec).not.toHaveProperty('campaignsSeen');
       expect(rec).toMatchObject({ ref: 'L1', relevance: 'irrelevant', isPortfolio: false, belongsToCandidate: null });
+    });
+
+    it('... and the credit line the model quoted (creditQuote, creditQuoteGiven), which backs the attribution that is dropped', async () => {
+      vi.mocked(analyzeMarketing).mockImplementation(async input => analysisOf({
+        portfolios: input.acquired.map(a => judged(a, { relevance: 'irrelevant', isPortfolio: false, creditQuoteGiven: true, creditQuote: 'Concept and direction: Jonathan Whitfield' })),
+      }));
+      expect(await runWith([DOC])).toEqual({ ran: true, status: 'no_portfolio' });
+      const [rec] = applied().out.analysis!.portfolios;
+      expect(rec).not.toHaveProperty('creditQuote');
+      expect(rec).not.toHaveProperty('creditQuoteGiven');
     });
   });
 

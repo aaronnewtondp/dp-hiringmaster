@@ -78,6 +78,14 @@ describe('EditableSection — read mode', () => {
     expect(valueOf('Drive link')).toBe('—');
   });
 
+  it('a text field with maxLength stops the input at it; one without has no limit', () => {
+    mount([text('name', 'Name', { maxLength: 25 }), text('other', 'Other')], { name: 'Test Name', other: 'x' });
+    edit();
+    const [name, other] = screen.getAllByRole('textbox');
+    expect(name).toHaveAttribute('maxlength', '25');
+    expect(other).not.toHaveAttribute('maxlength');
+  });
+
   it('displayKey shows ANOTHER key\'s value (an id stored, a name shown)', () => {
     mount([text('agency_id', 'Agency', { displayKey: 'agency_name' })], { agency_id: 'AGN9001', agency_name: 'Test Agency' });
     expect(valueOf('Agency')).toBe('Test Agency');

@@ -21,6 +21,8 @@ export interface FieldConfig {
   readOnly?: boolean;
   /** Read-mode only: render the value as a clickable external link instead of plain text (e.g. Drive links). Editing still shows a plain text input. */
   linkify?: boolean;
+  /** Text inputs only: the browser stops typing at this many characters (the server enforces its own limit regardless). */
+  maxLength?: number;
   /** Read-mode only: format/display this OTHER key's value instead of `key` — e.g. show a joined name while `key` itself stores the foreign id. */
   displayKey?: string;
   /** Only shown (read mode: against `data`; edit mode: against the live `draft`, so it reacts as the user changes the other field) when that key's value equals this value. Cleared to null on save whenever the condition doesn't hold, even if a stale value is sitting in the draft. */
@@ -277,6 +279,7 @@ export default function EditableSection({ title, data: rawData, fields, onSave, 
                   type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'}
                   className="input"
                   value={draft[f.key] as string}
+                  maxLength={f.type === 'text' ? f.maxLength : undefined}
                   onChange={e => setDraft(d => ({ ...d, [f.key]: e.target.value }))}
                 />
               )}

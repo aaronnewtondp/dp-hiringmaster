@@ -3,6 +3,7 @@ import { transaction } from '../db/index.js';
 import { Candidate } from '../types/index.js';
 import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
 import { classifyGender } from '../utils/genderClassifier.js';
+import { truncateFullName } from '../utils/candidateName.js';
 import { isSourcingEnabled, normalizeSourceTag } from '../utils/sourcingConfig.js';
 
 const router = Router();
@@ -43,13 +44,16 @@ router.post('/ingest', async (req: Request, res: Response) => {
   }
 
   const {
-    email, full_name, phone, linkedin_url, current_ctc_fixed, current_ctc_variable, current_esops,
+    email, full_name: rawFullName, phone, linkedin_url, current_ctc_fixed, current_ctc_variable, current_esops,
     expected_ctc, notice_period_days, current_company, current_industry,
     current_designation, current_location, years_of_experience, resume_drive_link,
     languages_known, role_applied_for, preferred_location, qualifications_note,
     screening_answers, source_tag,
   } = req.body;
 
+  // A name with no characters in it is a missing name (400, as before); a LONG one is never a reason to lose an applicant: it is cleaned
+  // (whitespace collapsed) and cut to FULL_NAME_MAX_CHARS with a console.warn (utils/candidateName.ts).
+  const full_name = truncateFullName(rawFullName, 'candidate-ingest');
   if (!email || !full_name) {
     res.status(400).json({ error: 'email and full_name are required' });
     return;

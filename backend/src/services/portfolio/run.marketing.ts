@@ -206,7 +206,7 @@ function withAnalyzerReasons(items: Acquired[], analysis: PortfolioAnalysisResul
  * basis, handler, facts, the access notes and the flag for text aimed at a reviewer. (`isPortfolio` and `belongsToCandidate` are
  * derived from that judgement and go back to their neutral values.) The card counts a link as read only when it has a coverage.
  */
-const MODEL_LINK_FIELDS = ['relevance', 'attribution', 'campaignsSeen', 'summary', 'coverage'] as const;
+const MODEL_LINK_FIELDS = ['relevance', 'attribution', 'campaignsSeen', 'summary', 'coverage', 'creditQuoteGiven', 'creditQuote'] as const;
 
 export function withoutModelJudgement(records: readonly PortfolioReviewed[], shownReason?: string): PortfolioReviewed[] {
   return records.map(rec => {
@@ -230,6 +230,8 @@ function withoutWorkClaims(analysis: PortfolioAnalysisResult): PortfolioAnalysis
       const out: PortfolioReviewed = { ...rec, belongsToCandidate: null };
       delete out.attribution;
       delete out.campaignsSeen;
+      delete out.creditQuoteGiven;   // a credit line beside "not marketing work" would contradict the rating, like the attribution it backs
+      delete out.creditQuote;
       return out;
     }),
   };

@@ -1443,6 +1443,7 @@ describe('per-link records', () => {
       signals: { brokenLinksChecked: 0, brokenLinks: 0, brokenLinkSamples: [], consoleErrors: 0, failedRequests: 0, mobileOverflow: null, loadMs: null, truncated: false },
       ref: 'L1', handler: 'document', outcome: 'ok', basis: 'artifact', facts: ['PDF, 18 of 18 pages read'],
       relevance: 'work_sample', attribution: 'led_team', campaignsSeen: 3, coverage: 'full', summary: 'A deck of three launches',
+      creditQuoteGiven: false,
     });
   });
 
@@ -2250,6 +2251,31 @@ describe('someone else\'s work needs a quoted credit AND a name search that real
       expect(res.portfolios[0].attribution, String(creditQuote)).toBe('unknown');
       expect(res.portfolios[0].belongsToCandidate, String(creditQuote)).toBeNull();
     }
+  });
+
+  it('records whether the model gave a creditQuote (creditQuoteGiven) and keeps the line ONLY when it passed the code check; scores and caps are untouched', async () => {
+    // verified: in the link's own text, a role word, a different full name
+    const ok = await run(fullStrong([someoneElse('L1', { campaignsSeen: 5 })]), { acquired: [credited('L1')] });
+    expect(ok.portfolios[0]).toMatchObject({ creditQuoteGiven: true, creditQuote: CREDIT_LINE });
+    expect(cap2(ok)).toBe(true);
+    // given but rejected: the flag is true, the rejected text is NOT stored anywhere in the record
+    const rejected = await run(fullStrong([someoneElse('L1', { creditQuote: 'Concept and direction: Someone Else, Creative Director', campaignsSeen: 5 })]), { acquired: [credited('L1')] });
+    expect(rejected.portfolios[0].creditQuoteGiven).toBe(true);
+    expect(rejected.portfolios[0].creditQuote).toBeUndefined();
+    expect(JSON.stringify(rejected.portfolios[0])).not.toContain('Someone Else');
+    // not given: empty, whitespace, only quote marks, absent, not a string
+    for (const creditQuote of [undefined, '', '   ', '""', 7, null]) {
+      const res = await run(fullStrong([someoneElse('L1', { creditQuote, campaignsSeen: 5 })]), { acquired: [credited('L1')] });
+      expect(res.portfolios[0].creditQuoteGiven, String(creditQuote)).toBe(false);
+      expect(res.portfolios[0].creditQuote, String(creditQuote)).toBeUndefined();
+    }
+    // a verified quote on a link whose label did NOT stand (the name appears) is still recorded: it measures the model, and changes nothing
+    const line = 'Concept and direction: Sreya Ghosal, Creative Director';
+    const text = `Brand playbook for a water utility. ${line}. Five campaigns shown: Clean Water Week, Jal Diwas, Monsoon Ready.`;
+    const label = await run(fullStrong([someoneElse('L1', { creditQuote: line, campaignsSeen: 5 })]), { ...mock('Shreya Ghoshal'), acquired: [item('L1', { text })] });
+    expect(label.portfolios[0].attribution).toBe('unknown');
+    expect(label.portfolios[0].creditQuoteGiven).toBe(true);
+    expect(cap2(label)).toBe(false);
   });
 
   it('an image-only item (no text layer) and a bio-only item can never be "someone else\'s": the name was not really searched', async () => {

@@ -87,6 +87,10 @@ export interface PortfolioReviewed {
   attribution?: 'candidate_owned' | 'led_team' | 'employer_or_client' | 'unattributed' | 'other_person' | 'unknown';
   campaignsSeen?: number;
   summary?:     string;
+  // The model's per-link "credited to someone else" evidence, recorded so its fill rate can be measured (SQL over portfolio_analyses.analysis). Nothing reads them back: no score, cap or outcome depends on them.
+  // creditQuoteGiven: the model returned a non-empty creditQuote for this link (verified or not). creditQuote: the line itself, ONLY when it passed the code's check.
+  creditQuoteGiven?: boolean;
+  creditQuote?: string;
   facts?:       string[];   // our own measurements, e.g. 'PDF, 18 of 18 pages read'
   reason?:      string;     // plain-language reason shown to HR when the link was not (fully) reviewed
 }

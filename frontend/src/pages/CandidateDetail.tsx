@@ -26,6 +26,7 @@ import LinkifiedText from '../components/shared/LinkifiedText.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { canSubmitRoundFeedback } from '../utils/feedbackAccess.ts';
 import { isNamedHiringManager } from '../utils/hiringManagers.ts';
+import { FULL_NAME_MAX_CHARS } from '../utils/candidateName.ts';
 import { SLA_FLAG_INFO, lastUpdatedInfo } from '../utils/columnInfo.ts';
 import { formatDistanceToNow, format } from 'date-fns';
 
@@ -373,7 +374,7 @@ export default function CandidateDetail() {
             data={candidate}
             onSave={saveCandidateFields}
             fields={[
-              { key: 'full_name', label: 'Full Name', type: 'text' },
+              { key: 'full_name', label: 'Full Name', type: 'text', maxLength: FULL_NAME_MAX_CHARS },
               { key: 'email', label: 'Email', type: 'text' },
               { key: 'phone', label: 'Phone', type: 'text' },
               { key: 'linkedin_url', label: 'LinkedIn', type: 'text', linkify: true },

@@ -35,6 +35,7 @@ import * as XLSX from 'xlsx';
 import { query, queryOne, pool } from '../db/index.js';
 import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
 import { classifyGender } from '../utils/genderClassifier.js';
+import { truncateFullName } from '../utils/candidateName.js';
 import { Candidate } from '../types/index.js';
 
 interface ParsedRow {
@@ -135,7 +136,8 @@ function parseWorkbook(filePath: string): ParsedRow[] {
   const parsed: ParsedRow[] = [];
 
   for (const row of rows) {
-    const name = cleanText(row['Name']);
+    // Cleaned and capped like every candidate-creation path (utils/candidateName.ts); an export never aborts for a long name.
+    const name = truncateFullName(cleanText(row['Name']), 'naukri-import');
     const email = cleanEmail(row['Email ID']);
     const phone = cleanText(row['Phone Number']);
     const applicationDate = parseApplicationDate(row['Date of application']);
