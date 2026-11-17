@@ -443,6 +443,9 @@ export default function MyTasks() {
           onSuccess={() => {
             refetchPending();
             qc.invalidateQueries({ queryKey: ['interview-rounds'] });
+            // positive feedback can auto-advance the application: the lists that show its stage must follow
+            qc.invalidateQueries({ queryKey: ['applications'] });
+            qc.invalidateQueries({ queryKey: ['candidate'] });
           }}
         />
       )}

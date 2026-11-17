@@ -649,6 +649,7 @@ describe('Help — questions added after the October 2026 audit', () => {
     expect(t).toMatch(/Every interview or assignment round already created for the application must have its feedback submitted/);
     expect(t).toMatch(/A candidate leaving Reference Check needs at least one reference check on file/);
     expect(t).toMatch(/needs an over-budget reason/);
+    expect(t).toMatch(/Reason to proceed anyway/);
     expect(t).toMatch(/HMS doesn't generate offer letters or a pre-joining document checklist/);
   });
 
