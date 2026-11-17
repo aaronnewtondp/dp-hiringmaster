@@ -169,7 +169,7 @@ test.describe('Stage modal', () => {
     await expect(dialog.getByRole('button', { name: 'Update', exact: true })).toBeDisabled();
   });
 
-  test('TODAY the Stage modal has no skip-reason control: a move blocked by pending feedback shows the server\'s reason and waits for the feedback', async ({ page, request }) => {
+  test('a move blocked by pending feedback shows the server\'s reason, waits for the feedback, and then goes through without any bypass', async ({ page, request }) => {
     const a = await arrange(request, { stage: 'Interview Round 1' });
     const round = await createStandardRound(request, a.appId, { round_name: `Pending Round ${a.role.id}` });
     const posts = recordRequests(page, isPost(`/api/applications/${a.appId}/stage`));
@@ -178,23 +178,48 @@ test.describe('Stage modal', () => {
     await stageButton(page).click();
     const dialog = dialogWith(page, 'Update stage');
     await dialog.getByRole('combobox').selectOption('Interview Round 2');
+    // no reason box until the server has refused
+    await expect(dialog.getByRole('textbox')).toHaveCount(0);
     await dialog.getByRole('button', { name: 'Update', exact: true }).click();
 
-    // The server's own message names the round; the modal stays open and the stage does not move.
+    // The server's own message names the round; the modal stays open, the stage does not move, and the bypass reason box appears.
     await expect(toastWith(page, 'Feedback is still pending for')).toContainText(round.round_name);
     await expect(dialog).toBeVisible();
     expect((await getApp(request, a.appId)).stage).toBe('Interview Round 1');
-    // The only inputs are the stage and (for an over-budget move) the budget reason: nothing lets HR give a reason to skip the gate.
-    await expect(dialog.getByRole('combobox')).toHaveCount(1);
-    await expect(dialog.getByRole('textbox')).toHaveCount(0);
+    await expect(dialog.getByLabel('Reason to proceed anyway')).toBeVisible();
 
+    // Feedback arrives; the box is left empty, so the retry is the plain request and the server lets it through.
     await submitFeedbackViaApi(request, round.id);
     await dialog.getByRole('button', { name: 'Update', exact: true }).click();
     await expect(toastWith(page, 'Stage updated to Interview Round 2')).toBeVisible();
     await expect(dialog).toHaveCount(0);
-    // Both attempts carried exactly the same body: the UI never sends skip_reason (the API supports it; no screen offers it).
     expect(posts.bodies()).toEqual([{ new_stage: 'Interview Round 2' }, { new_stage: 'Interview Round 2' }]);
     expect((await getApp(request, a.appId)).stage).toBe('Interview Round 2');
+  });
+
+  test('a written reason in the Stage modal bypasses the pending-feedback block: skip_reason is sent, the stage moves and the reason is in the activity log', async ({ page, request }) => {
+    const a = await arrange(request, { stage: 'Interview Round 1' });
+    await createStandardRound(request, a.appId, { round_name: `Bypass Round ${a.role.id}` });
+    const posts = recordRequests(page, isPost(`/api/applications/${a.appId}/stage`));
+    await open(page, 'hr', a);
+
+    await stageButton(page).click();
+    const dialog = dialogWith(page, 'Update stage');
+    await dialog.getByRole('combobox').selectOption('Interview Round 2');
+    await dialog.getByRole('button', { name: 'Update', exact: true }).click();
+    await expect(toastWith(page, 'Feedback is still pending for')).toBeVisible();
+    await dialog.getByLabel('Reason to proceed anyway').fill('Panel feedback was given verbally');
+    await dialog.getByRole('button', { name: 'Update', exact: true }).click();
+
+    await expect(toastWith(page, 'Stage updated to Interview Round 2')).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    expect(posts.bodies()).toEqual([
+      { new_stage: 'Interview Round 2' },
+      { new_stage: 'Interview Round 2', skip_reason: 'Panel feedback was given verbally' },
+    ]);
+    expect((await getApp(request, a.appId)).stage).toBe('Interview Round 2');
+    const detail = await (await (await hrApi(request)).get(`/api/applications/${a.appId}`)).json() as { activity: Array<{ description?: string; action_description?: string }> };
+    expect(JSON.stringify(detail.activity)).toContain('Stage skipped to Interview Round 2. Reason: Panel feedback was given verbally');
   });
 
   test('Reference Check: leaving the stage needs a reference; the Add modal validates, records it, and unblocks the move', async ({ page, request }) => {
@@ -540,7 +565,7 @@ test.describe('Interview rounds: feedback', () => {
     await expect(stageBadge(page, 'Interview Round 2')).toBeVisible();
   });
 
-  test('TODAY after an auto-advance the candidate page keeps showing the old stage until it is reloaded', async ({ page, request }) => {
+  test('after an auto-advance the candidate page shows the new stage without a reload', async ({ page, request }) => {
     const a = await arrange(request, { stage: 'Interview Round 1' });
     const round = await createStandardRound(request, a.appId, { round_name: `Stale ${a.role.id}`, focus_areas: ['Technical Knowledge'] });
     await open(page, 'hr', a);
@@ -551,13 +576,10 @@ test.describe('Interview rounds: feedback', () => {
     await expect(toastWith(page, 'Positive feedback — candidate auto-advanced to Interview Round 2')).toBeVisible();
     await expect.poll(async () => (await getApp(request, a.appId)).stage).toBe('Interview Round 2');
 
-    // The feedback modal only refreshes the rounds, not the candidate: the badge (and the strip above it) still say Interview Round 1.
+    // The feedback modal refreshes the candidate as well as the rounds: the badge follows with no reload.
     await expect(roundRow(page, round.round_name)).toContainText('Submitted');
-    await expect(stageBadge(page, 'Interview Round 1')).toBeVisible();
-    await expect(stageBadge(page, 'Interview Round 2')).toHaveCount(0);
-    await page.reload();
-    await expectCandidatePage(page, a.name);
     await expect(stageBadge(page, 'Interview Round 2')).toBeVisible();
+    await expect(stageBadge(page, 'Interview Round 1')).toHaveCount(0);
   });
 
   test('a low score with Proceed does not advance: the 2.5 midpoint rule', async ({ page, request }) => {
@@ -773,7 +795,7 @@ test.describe('Assignment round', () => {
     await expect.poll(async () => (await getApp(request, a.appId)).stage).toBe('Founders Round');
     await page.reload();
     await expectCandidatePage(page, a.name);
-    await expect(stageBadge(page, 'Founders Round')).toBeVisible();   // (until this reload the page still showed Assignment Round: see the TODAY test above)
+    await expect(stageBadge(page, 'Founders Round')).toBeVisible();
   });
 });
 

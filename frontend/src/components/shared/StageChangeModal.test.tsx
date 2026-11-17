@@ -181,3 +181,75 @@ describe('StageChangeModal — failure and the busy state', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 });
+
+describe('StageChangeModal — the reason to proceed past a blocked move (skip_reason)', () => {
+  const refuse = (error: string) => h.advanceStage.mockRejectedValueOnce({ response: { data: { error } } });
+  const reasonBox = () => screen.queryByLabelText('Reason to proceed anyway') as HTMLTextAreaElement | null;
+  const PENDING = 'Feedback is still pending for: Round 1. Submit feedback for these rounds before advancing this candidate.';
+
+  it('offers no reason box until the server refuses a move for a pending-feedback or missing-reference check', async () => {
+    mount();
+    expect(reasonBox()).toBeNull();
+    chooseStage('Interview Round 2');
+    refuse(PENDING);
+    fireEvent.click(update());
+    expect(await screen.findByLabelText('Reason to proceed anyway')).toBeInTheDocument();
+    expect(h.toastError).toHaveBeenCalledWith(PENDING);
+  });
+
+  it('shows it for the missing-reference refusal too', async () => {
+    mount({ stage: 'Reference Check' });
+    chooseStage('Pre-Joining Documents');
+    refuse('Add at least one reference check before advancing this candidate.');
+    fireEvent.click(update());
+    expect(await screen.findByLabelText('Reason to proceed anyway')).toBeInTheDocument();
+  });
+
+  it('does not show it for any other refusal', async () => {
+    mount();
+    chooseStage('Interview Round 2');
+    refuse('HR access required');
+    fireEvent.click(update());
+    await waitFor(() => expect(h.toastError).toHaveBeenCalledWith('HR access required'));
+    expect(reasonBox()).toBeNull();
+  });
+
+  it('a written reason is sent as skipReason (trimmed), and the move then goes through', async () => {
+    const { onClose } = mount();
+    chooseStage('Interview Round 2');
+    refuse(PENDING);
+    fireEvent.click(update());
+    const box = await screen.findByLabelText('Reason to proceed anyway');
+    fireEvent.change(box, { target: { value: '  Feedback given verbally  ' } });
+    fireEvent.click(update());
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(h.advanceStage).toHaveBeenNthCalledWith(1, 'A9001', 'Interview Round 2', NO_BUDGET);
+    expect(h.advanceStage).toHaveBeenNthCalledWith(2, 'A9001', 'Interview Round 2', { ...NO_BUDGET, skipReason: 'Feedback given verbally' });
+  });
+
+  it('changing the target stage after a refusal hides the box and drops the typed reason: it is never sent for the new stage', async () => {
+    mount();
+    chooseStage('Interview Round 2');
+    refuse(PENDING);
+    fireEvent.click(update());
+    const box = await screen.findByLabelText('Reason to proceed anyway');
+    fireEvent.change(box, { target: { value: 'Feedback given verbally' } });
+    chooseStage('Offer Discussion');
+    expect(reasonBox()).toBeNull();
+    fireEvent.click(update());
+    await waitFor(() => expect(h.toastSuccess).toHaveBeenCalledWith('Stage updated to Offer Discussion'));
+    const opts = h.advanceStage.mock.calls[1][2] as { skipReason?: string };
+    expect(opts.skipReason).toBeUndefined();
+  });
+
+  it('an empty or blank reason sends the plain request again (no bypass)', async () => {
+    mount();
+    chooseStage('Interview Round 2');
+    refuse(PENDING);
+    fireEvent.click(update());
+    fireEvent.change(await screen.findByLabelText('Reason to proceed anyway'), { target: { value: '   ' } });
+    fireEvent.click(update());
+    await waitFor(() => expect(h.advanceStage).toHaveBeenCalledTimes(2));
+    expect(h.advanceStage).toHaveBeenNthCalledWith(2, 'A9001', 'Interview Round 2', NO_BUDGET);
+  });
+});

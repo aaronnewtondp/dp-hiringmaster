@@ -232,6 +232,16 @@ export default function CandidateDetail() {
     qc.invalidateQueries({ queryKey: ['candidate', id] });
   };
 
+  // Submitting feedback or recording an assignment outcome can auto-advance the application (the server moves the stage and
+  // the toast says so), so the candidate and the shared applications lists are refreshed too, not just the rounds: otherwise
+  // the stage badge and strip keep the old stage until a reload.
+  const refreshAfterRoundOutcome = () => {
+    qc.invalidateQueries({ queryKey: ['interview-rounds'] });
+    qc.invalidateQueries({ queryKey: ['candidate', id] });
+    qc.invalidateQueries({ queryKey: ['applications'] });
+    refetchRounds();
+  };
+
   const handleFounderFlag = async () => {
     setSaving(true);
     try {
@@ -988,11 +998,11 @@ export default function CandidateDetail() {
       )}
 
       {outcomeRound && (
-        <AssignmentOutcomeModal round={outcomeRound} onClose={() => setOutcomeRound(null)} onSuccess={() => { qc.invalidateQueries({ queryKey: ['interview-rounds'] }); refetchRounds(); }} />
+        <AssignmentOutcomeModal round={outcomeRound} onClose={() => setOutcomeRound(null)} onSuccess={refreshAfterRoundOutcome} />
       )}
 
       {feedbackRound && (
-        <InterviewFeedbackModal round={feedbackRound} onClose={() => setFeedbackRound(null)} onSuccess={() => { qc.invalidateQueries({ queryKey: ['interview-rounds'] }); refetchRounds(); }} />
+        <InterviewFeedbackModal round={feedbackRound} onClose={() => setFeedbackRound(null)} onSuccess={refreshAfterRoundOutcome} />
       )}
 
       {scheduleAppId && (

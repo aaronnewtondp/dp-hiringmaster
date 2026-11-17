@@ -241,6 +241,16 @@ describe('Candidate page — interview rounds', () => {
     await waitFor(() => expect(h.roundsList.mock.calls.length).toBeGreaterThan(before));
   });
 
+  it('feedback that auto-advances the application shows the new stage without a reload (the candidate is refetched, not only the rounds)', async () => {
+    await show(application('A9001', { stage: 'Interview Round 1' }), { A9001: [STANDARD] });
+    fireEvent.click(await screen.findByRole('button', { name: 'Submit feedback' }));
+    h.get.mockResolvedValue({ data: { candidate: candidate(), applications: [application('A9001', { stage: 'Interview Round 2' })] } });
+    const before = h.get.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'succeed-feedback' }));
+    await waitFor(() => expect(h.get.mock.calls.length).toBeGreaterThan(before));
+    await waitFor(() => expect(screen.getAllByText('Interview Round 2').length).toBeGreaterThan(0));
+  });
+
   it('a submitted round shows its verdict and score, and expands to the full written feedback', async () => {
     await show(application('A9001', { stage: 'Interview Round 1' }), { A9001: [round('IR1', {
       feedback_status: 'Submitted', overall_assessment: 'Strong', round_recommendation: 'Proceed', overall_round_score: 4.5,
