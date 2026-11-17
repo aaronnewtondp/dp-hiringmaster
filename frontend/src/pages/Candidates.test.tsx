@@ -459,13 +459,11 @@ describe('Active Candidates — what a Hiring Manager is given', () => {
     expect(screen.queryByText('Over Budget')).not.toBeInTheDocument();
   });
 
-  it('the Unmatched Candidates panel opens but offers no way to link or delete anyone', async () => {
-    h.unmatched.mockResolvedValue({ data: { submissions: [unmatchedRow(1, { suggested_role_id: 'R9001', suggested_role_title: 'Test Role Alpha' })], total: 1 } });
+  it('there is no Unmatched Candidates panel, and the unmatched list is never requested (the route is HR-tier)', async () => {
+    h.unmatched.mockResolvedValue({ data: { submissions: [unmatchedRow(1)], total: 1 } });
     await showList();
-    fireEvent.click(await screen.findByText('Unmatched Candidates (1)'));
-    expect(await screen.findByText('Test Unmatched 1')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Link to/ })).not.toBeInTheDocument();
-    expect(screen.queryByTitle('Delete candidate')).not.toBeInTheDocument();
+    expect(h.unmatched).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Unmatched Candidates/)).not.toBeInTheDocument();
   });
 
   it.each(['hr_recruiter', 'leadership', 'super_admin'] as const)('%s does get the checkboxes, the bulk bar and the Add candidate link', async persona => {

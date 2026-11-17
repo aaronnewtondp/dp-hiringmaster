@@ -453,7 +453,7 @@ Founder-flagged list. Now, for the `leadership` persona only:
   windows**, so a role with a big pile of unreviewed applicants (one 'Resume Shortlist
   Pending' row each) can't push the Leadership alerts out, nor old Leadership rows the
   Hiring Manager rows.
-- `GET /applications` takes `or_role_id` (repeatable), meaningful only with
+- `GET /applications` takes `or_role_id` (an array; axios sends it as `or_role_id[]=R019`, which Express's `qs` reads back), meaningful only with
   `founder_flag=true`: the filter becomes founder-flagged **OR** on those roles, and
   Founder-flagged rows are ranked first so a capped window (Ready for Review sends
   `limit=500`) never drops them for a big role. My Tasks sends it from `hm_roles`, so

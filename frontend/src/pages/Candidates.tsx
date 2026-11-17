@@ -165,9 +165,12 @@ export default function Candidates() {
   // via the merged "Unmatched Candidates" panel (GET /api/candidates/
   // unmatched, see backend/src/utils/unmatchedCandidates.ts). Real
   // server-side pagination, not a client-filtered flat page.
+  // The route is HR-tier only (requireHR), so a Hiring Manager never asks:
+  // the request would always be a 403, and the panel is not theirs to see.
   const { data: unmatchedData, isLoading: unmatchedLoading } = useQuery<{ data: { submissions: UnmatchedCandidate[]; total: number } }>({
     queryKey: ['candidates', 'unmatched', unmatchedOffset],
     queryFn:  () => candidatesApi.unmatched({ limit: String(UNMATCHED_PAGE_SIZE), offset: String(unmatchedOffset) }),
+    enabled:  canHR,
   });
 
   useEffect(() => {
@@ -360,7 +363,7 @@ export default function Candidates() {
           applications never belongs to any role, so this is meaningless
           (always empty) once a Role filter is active — hide it rather than
           show a confusing "0", same as before the merge). */}
-      {roleIds.length === 0 && (unmatchedTotal > 0 || unmatchedLoading) && (
+      {canHR && roleIds.length === 0 && (unmatchedTotal > 0 || unmatchedLoading) && (
         <div className="card border-amber-200">
           <div
             role="button"

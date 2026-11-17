@@ -526,13 +526,17 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       message (`api.test.ts`). **Fixed 2026-11-16:** a 401 from `/auth/login` or `/auth/google` is rejected to the caller with no redirect and no storage clearing, so Login shows the server's message; every other 401 is unchanged.
 - [x] **The "Add agency" button has no handler** (`pages/Agencies.tsx`): it is drawn for every persona, including one who cannot load the list, and does nothing
       (`pages.smoke.test.tsx`, `e2e/16`). **Fixed 2026-11-16:** the dead button was removed (agencies cannot be added from the UI; `POST /api/agencies` still exists server-side).
-- [ ] **Axios array parameters are bracket-serialized** (`gender[]=UNKNOWN`, `or_role_id[]=R019`), not repeated keys as the comments in `services/api.ts` say.
+- [x] **Axios array parameters are bracket-serialized** (`gender[]=UNKNOWN`, `or_role_id[]=R019`), not repeated keys as the comments in `services/api.ts` say.
       Express's `qs` reads both, so nothing is broken, but anything that matches request URLs (a proxy rule, a Playwright route) must use the real form.
-- [ ] **`frontend/tsconfig.json` has duplicate keys** (`strict`, `noUnusedLocals`, `noUnusedParameters` each appear twice); `strict` is false.
-- [ ] **`Candidates.tsx` calls `GET /api/candidates/unmatched` for every persona** (the query has no `enabled`), although the route is HR-tier only: a Hiring Manager's
+      **Fixed 2026-11-17:** the wire format is kept (`api.test.ts` pins it); the `services/api.ts` comments already say bracket form, and the last wrong wordings (CLAUDE.md's "`or_role_id` (repeatable)", the e2e `queryValues` helper comment) now state the real form.
+- [x] **`frontend/tsconfig.json` has duplicate keys** (`strict`, `noUnusedLocals`, `noUnusedParameters` each appear twice); `strict` is false.
+      **Fixed 2026-11-17:** no duplicate keys remain in `frontend/tsconfig.json` or `tsconfig.node.json` (the effective values are unchanged: `strict`, `noUnusedLocals`, `noUnusedParameters` all false); `tsc --noEmit` and `npm run build` behave as before.
+- [x] **`Candidates.tsx` calls `GET /api/candidates/unmatched` for every persona** (the query has no `enabled`), although the route is HR-tier only: a Hiring Manager's
       page makes a request that is always a 403 (verified).
-- [ ] **A failed background refresh replaces the whole Dashboard** (`pages/Dashboard.tsx`): the `error || !data` test shows "Failed to load dashboard" even
+      **Fixed 2026-11-17:** the query is `enabled: canHR` and the panel renders only for HR-tier (Hiring Managers make no request and see no panel); Help and the User Access Guide say so (`Candidates.unmatched.test.tsx`, `Candidates.test.tsx`, `pages.smoke.test.tsx`).
+- [x] **A failed background refresh replaces the whole Dashboard** (`pages/Dashboard.tsx`): the `error || !data` test shows "Failed to load dashboard" even
       though react-query still holds the last good `data` when a `refetchInterval` refresh fails.
+      **Fixed 2026-11-17:** "Failed to load dashboard" shows only when there is no data; when a refresh fails with data in hand the page stays and an amber notice with Retry says the numbers may be out of date (`Dashboard.test.tsx`).
 - [x] **A Hiring Manager sees a Recruitment Mode filter with no options** on the Dashboard: the `roles/filter-options` query is disabled for them
       (`enabled: !isLockedToOwnRole`), but the filter is still drawn, with an empty list. **Fixed 2026-11-16:** the filter is no longer drawn for a Hiring Manager, and a remembered mode is ignored for them.
 - [ ] **Smaller pinned UI behaviours** (each in the listed spec's header): the Stage modal has no skip-reason control; a candidate page keeps the old stage until
