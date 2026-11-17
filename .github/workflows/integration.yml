@@ -3,11 +3,11 @@ name: Integration (API and database specs)
 # The Playwright `api` and `db` projects against a real backend and a real Postgres, with NO credentials. Nightly and on demand,
 # never on a pull request. No repository secret is needed: the ingest and JWT secrets are generated per run.
 #
-# What it runs: every spec in hms-tests-final/tests/api and tests/db EXCEPT the tests listed in EXCLUDE below. Measured on 2026-11-14
-# with no credentials and a fresh database: the two projects hold 924 tests that are not tagged @live; the EXCLUDE list below leaves
-# out the few that need a real key or a long-lived database, and a run of this job passed 920 and skipped 1 (the real Google
-# Calendar round trip, api/15) in about 40 seconds. Left out on purpose,
-# so a red run here means a real regression and not a missing key:
+# What it runs: every spec in hms-tests-final/tests/api and tests/db EXCEPT the tests tagged @live (see EXCLUDE below). Measured on
+# 2026-11-17 with no credentials (a test-stack.sh stack: empty environment, SOURCING_ENABLED=true) and a fresh database each run: the two
+# projects hold 932 tests that are not tagged @live; three full runs with EXCLUDE = '@live' alone passed 931 and skipped 1 (the real
+# Google Calendar round trip, api/15) in 1-2.3 minutes. Left out on purpose, so a red run here means a real regression and not a
+# missing key:
 #   * browser specs (tests/e2e, tests/e2e-mobile): not in this job; they run in the second job, `e2e`, below (a production build served
 #     by `vite preview`, `playwright install --with-deps chromium`, --project=e2e --project=e2e-mobile, same Postgres service and
 #     per-run secrets, no credentials).
@@ -17,19 +17,20 @@ name: Integration (API and database specs)
 #
 # EXCLUDE (a Playwright --grep-invert regex over the full test title, which includes the file name). A command-line --grep-invert
 # REPLACES playwright.config.ts's own `grepInvert: /@live/`, so `@live` has to be in this regex or the tests that need a real key
-# would run here. Each entry and why:
-#   @live                                                       every test tagged @live (needs a real Anthropic key or Google
-#                                                                credentials; skipped by the config unless TEST_LIVE=1). Today: db/07,
-#                                                                "a candidate with NO readable resume ... (the creation-time hook, with a
-#                                                                real model)", plus the two e2e ones that this job does not run anyway.
-#   JD Generation + ResumeIQ scoring (real external calls)      api/10, 2 tests, NOT tagged @live: real Claude, PDF render and Drive upload
-#                                                                (the second test needs the first one's role, so the whole block goes)
-#   every candidate entry carries application_id                api/19: asserts the funnel snapshot is NON-empty, which only holds on a
-#                                                                long-lived dev database that already has SLA breaches; a fresh one has none
-#   falls back to a live AI estimate                            api/30: NOT tagged @live; real Claude (the endpoint answers 500 without a key)
-# Dropped from the previous list because they no longer fail: db/17's two old-token tests (rewritten to pin the 401 since PR #55), db/05 (builds its e-mails from a per-run id and a counter now),
-# db/07's two "needs a real base score" tests (they write the base scores by SQL now; only the creation-time hook needs the model,
-# and its test is tagged @live) and db/15's queue-error test.
+# would run here. The one entry:
+#   @live   every test tagged @live (needs a real Anthropic key or Google credentials; skipped by the config unless TEST_LIVE=1).
+#           Today: db/07 "a candidate with NO readable resume ... (the creation-time hook, with a real model)", api/10 "role Approved ->
+#           real JD generation ...", api/30 "brand-new role with a unique title falls back to a live AI estimate", plus the two e2e
+#           ones that this job does not run anyway.
+# Dropped on 2026-11-17 (measured, 5 fresh-database runs of api/10 + api/19 + api/30 with '@live' only, then 3 full runs: all green):
+#   JD Generation + ResumeIQ scoring (real external calls)   api/10: its real-key test is tagged @live now; the two that remain are
+#                                                             offline tests of the same contract and need no key
+#   every candidate entry carries application_id             api/19: the test creates and backdates its own breach, so it no longer
+#                                                             depends on a long-lived dev database
+#   falls back to a live AI estimate                         api/30: it matched only the @live-tagged test, so it was redundant
+# Dropped earlier: db/17's two old-token tests (rewritten to pin the 401 since PR #55), db/05 (builds its e-mails from a per-run id and a
+# counter now), db/07's two "needs a real base score" tests (they write the base scores by SQL now; only the creation-time hook needs the
+# model, and its test is tagged @live) and db/15's queue-error test.
 # Remove an entry when its cause is fixed; do not add one without a measured reason.
 
 on:
@@ -78,7 +79,7 @@ jobs:
       PGUSER: hms_user
       PGPASSWORD: hms_password
       PGDATABASE: dp_hms
-      EXCLUDE: '@live|JD Generation \+ ResumeIQ scoring \(real external calls\)|every candidate entry carries application_id|falls back to a live AI estimate'
+      EXCLUDE: '@live'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
