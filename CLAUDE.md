@@ -202,9 +202,9 @@ smoke accounts.
 - **`@live` / `TEST_LIVE`.** A test that needs a real Anthropic key or Google credentials carries `@live` in its title and is dropped by `grepInvert`
   unless `TEST_LIVE=1`: today three — `db/07` "a candidate with NO readable resume gets the base score untouched … (the creation-time hook, with a
   real model)", `e2e/03` "Approving a role generates a JD and a Drive link appears", `e2e/14` "a role with no internal benchmark gets an AI
-  estimate". Everything else runs with no credentials (a stack has none, see below). Two older specs still make real calls when credentials exist
-  and skip or fail without them: `api/10-jd-generation-and-scoring` (2 tests, Claude + Drive) and the one real Calendar round trip in
-  `api/15` / `e2e/06` (guarded by `hasCalendarCredentials()`, deletes its event in a `finally`).
+  estimate". Everything else runs with no credentials (a stack has none, see below). `api/10-jd-generation-and-scoring`'s real-key test (Claude + Drive) is `@live` too (its other two tests are offline), and
+  the nightly excludes only `@live`; other `@live` tests exist, `grep -rn "@live" hms-tests-final/tests` lists them. One older spec still makes a real call when credentials exist
+  and skips without them: the real Calendar round trip in `api/15` / `e2e/06` (guarded by `hasCalendarCredentials()`, deletes its event in a `finally`).
 - **The isolated test stack — `hms-tests-final/scripts/test-stack.sh`.** `bash scripts/test-stack.sh up|down|status|env|preview|restart|reset N`
   (`N` = 0..9; `up N --no-frontend` for api/db only). Each index is a disposable stack: a throw-away Postgres container `hms-pw-db-N`
   (`postgres:16-alpine`, data on tmpfs, schema.sql then seed.sql applied), the backend
