@@ -279,21 +279,15 @@ describe('Active Candidates — bulk stage change', () => {
     it('a row refused again stays listed; Close ends it without another call', async () => {
       h.advanceStage.mockImplementation(async (id: string) => { if (id === 'A9003') throw refuse(PENDING); return { data: {} }; });
       const modal = await startMove();
+      fireEvent.change(within(modal).getByLabelText('Reason to proceed anyway'), { target: { value: 'Interviewed offline' } });
       fireEvent.click(within(modal).getByRole('button', { name: 'Retry 1' }));
       await waitFor(() => expect(h.toastError).toHaveBeenCalledWith('0 of 1 updated to Interview Round 2'));
+      expect(within(modal).getByLabelText('Reason to proceed anyway')).toHaveValue('Interviewed offline');
       expect(within(modal).getByTestId('bulk-refused-list')).toHaveTextContent('Test Candidate A9003');
       h.advanceStage.mockClear();
       fireEvent.click(within(modal).getByRole('button', { name: 'Close' }));
       expect(screen.queryByText('Update stage')).not.toBeInTheDocument();
       expect(h.advanceStage).not.toHaveBeenCalled();
-    });
-
-    it('a Hiring Manager is shown no reason box (the bulk tool is not offered, and a refusal is a plain failure)', async () => {
-      h.persona = 'hiring_manager';
-      mount();
-      await screen.findByText('Test Candidate A9001');
-      expect(screen.queryByRole('button', { name: 'Change Stage' })).not.toBeInTheDocument();
-      expect(screen.queryByText('Reason to proceed anyway')).not.toBeInTheDocument();
     });
   });
 

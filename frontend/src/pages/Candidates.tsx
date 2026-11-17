@@ -327,8 +327,8 @@ export default function Candidates() {
     if (refused.length > 0) {
       // Stay open: list the rows refused for a skippable check so HR can retry just those with a reason. Rows refused for any other
       // reason stay failed (counted in the toast above) and are not offered again.
+      // The typed reason is kept: a row refused again must not make HR retype it.
       setBulkRefused(refused);
-      setBulkSkipReason('');
       return;
     }
     closeBulkStageModal();
