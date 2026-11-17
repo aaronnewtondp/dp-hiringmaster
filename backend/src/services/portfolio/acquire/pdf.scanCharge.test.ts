@@ -288,7 +288,7 @@ describe('the real passes take the deadline', () => {
     expect(await scanDocumentTextCooperatively(text)).toBeNull();
   });
 
-  it('the cooperative scan gives the synchronous scan\'s verdict AND does the same work, while really handing the event loop turns (deterministic: counted turns on a slow clock, not wall time)', async () => {
+  it('the cooperative scan gives the synchronous scan\'s verdict AND does the same work, while really handing the event loop turns (the verdict and tally are deterministic; the yielding check counts real timer turns on a slow clock)', async () => {
     const benign = deflateSync(Buffer.from('BT (word) Tj ET '));
     const clean = manyStreams('/Filter /FlateDecode', benign, 3_000);   // under the scan's 4,000-stream stop, so the planted stream below is reached
     // the same file with ONE planted instruction in the last stream (off the page, as OFF_PAGE_BAD is), so a pass that stopped early could not find it
@@ -310,7 +310,7 @@ describe('the real passes take the deadline', () => {
         clock.restore();
         clock = undefined;
       }
-      expect(turns).toBeGreaterThan(10);               // timers only run when the loop is given a turn: a pass that never yielded would leave this at 0
+      expect(turns).toBeGreaterThan(10);               // counted over real timers, so wall-clock dependent: they only run when the loop is given a turn, and a pass that never yielded leaves this at 0 (measured 173-241 against a threshold of 10)
     }
     expect(scanPdfContentStreams(clean).hit).toBeNull();
     expect(scanPdfContentStreams(planted).hit).not.toBeNull();   // the planted file really does carry something to find
