@@ -423,10 +423,20 @@ live.
       smoke projects all list tests": the self-test captures `playwright test --list --reporter=json` through `spawnSync`, whose default `maxBuffer` is 1 MiB; the
       listing passed 1 MiB at about 1,100 tests, the child was killed with `ENOBUFS` and `status` was `null`. It failed on every machine (so also locally, where it was
       noted as "fails on main too"). Fixed 2026-11-16 with `maxBuffer: 256 MiB`, and the assertion now prints the spawn error. Spec 00: 33 of 33.
-- [ ] **Two `e2e/13-help-and-info-markers` checks failed on a fresh local stack** ("Candidates: marker 2 of 7", "Dashboard (Hiring Manager): marker 8 of 13":
-      the opened popover is reported covered or clipped by the page card), alone as well as in the full run. Find out whether they need more rows than a
-      fresh database has or are a real clipping defect (a related one is already pinned "as TODAY": the Gender header popover is cut off by the table card
-      when the list has a single row).
+- [x] **Two `e2e/13-help-and-info-markers` checks failed on a fresh local stack** ("Candidates: marker 2 of 7", "Dashboard (Hiring Manager): marker 8 of 13").
+      **Fixed 2026-11-17:** not a clipping defect and not a data-volume dependence. The test helper `readMarkerByHover` used `scrollIntoViewIfNeeded()`, which scrolls
+      the least it can and so leaves a marker on the viewport's bottom edge; the popover hangs BELOW its marker, so it then lay wholly under the fold
+      (`popoverReachable`: "entirely outside the viewport"). Which markers hit it depends on the window height and the page length. Measured on a fresh stack with the
+      old helper: Dashboard (HR and Hiring Manager) failed on 2 markers at 500 px and 900 px, 1 at 600 px, 2 at 768 px, none at 650-720/800 px (the default 720 passes,
+      which is why it varied by machine); with 45 extra candidates the default height still passed, so row count is not the cause; with the marker centred, every
+      non-header marker passed at all eight heights. The helper now centres the marker (as a person scrolling to read it would); no component changed. New test "on a
+      short window every non-header popover is fully on screen" (500 px) fails with the old helper and passes now. The related Gender header clipping below is a
+      different cause and stays open.
+- [ ] **A table-header info popover is cut off by the table card when the list is short** (Candidates, Archived Pipeline, Ready for Review with a single row; pinned as
+      "TODAY" in `e2e/13`). Cause: the table wrapper is `card overflow-x-auto`, and a non-visible `overflow-x` makes `overflow-y` clip too, so a popover hanging below the
+      header row is cut at the card's bottom edge when there are no rows to hang over. Roles and Agencies are fine with several rows. A fix means rendering the popover
+      outside the card (a portal with fixed positioning in `InfoTooltip`, which the tests and every page that finds it as the next sibling would have to follow) or giving the
+      card a minimum height; neither was done because both change a shared component or the look.
 - [x] **The nightly is green again (2026-11-17).** The 02:00 IST run on `76788d5` passed after the two causes of the 2026-11-16 red were fixed (`spawnSync` ENOBUFS in `api/00`, the stale `e2e/09` pin, #106/#108); nothing else is known to fail it.
 - [ ] **The nightly `EXCLUDE` list may be longer than it needs to be.** On 2026-11-05, on a fresh stack with no credentials, `db/07` (all 17 tests, the three excluded ones
       included), `db/05-aging-roles-no-movement` (13), `api/19-pending-actions-regressions` (9, the excluded "every candidate entry carries application_id" included)
