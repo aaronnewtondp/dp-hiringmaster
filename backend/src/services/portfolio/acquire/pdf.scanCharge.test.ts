@@ -7,8 +7,8 @@ import {
 } from './pdf.js';
 import type { PdfWorkTally } from './pdf.js';
 import type { PdfReadResult } from './pdfSandbox.js';
-import { MB, OFF_PAGE_BAD, buildPdf, onePage } from './pdf.fixtures.js';
-import { manyStreams, pageWith } from './pdf.cpu.fixtures.js';
+import { MB, OFF_PAGE_BAD, buildPdf, onePage, streamBody } from './pdf.fixtures.js';
+import { manyStreams, obj, pageWith } from './pdf.cpu.fixtures.js';
 import { deflateSync } from 'zlib';
 import { advancingClock, scaled } from '../../../testing/timing.js';
 
@@ -286,6 +286,34 @@ describe('the real passes take the deadline', () => {
     expect(await scanPdfContentStreamsAsync(few)).toMatchObject({ hit: null });
     expect(await scanDocumentTextCooperatively(text, Date.now() + 600_000)).toBeNull();
     expect(await scanDocumentTextCooperatively(text)).toBeNull();
+  });
+
+  it('the cooperative scan gives the synchronous scan\'s verdict AND does the same work, while really handing the event loop turns (the verdict and tally are deterministic; the yielding check counts real timer turns on a slow clock)', async () => {
+    const benign = deflateSync(Buffer.from('BT (word) Tj ET '));
+    const clean = manyStreams('/Filter /FlateDecode', benign, 3_000);   // under the scan's 4,000-stream stop, so the planted stream below is reached
+    // the same file with ONE planted instruction in the last stream (off the page, as OFF_PAGE_BAD is), so a pass that stopped early could not find it
+    const planted = Buffer.concat([clean, obj(20_000, streamBody('/Filter /FlateDecode', deflateSync(Buffer.from(OFF_PAGE_BAD))))]);
+
+    for (const bytes of [clean, planted]) {
+      const syncTally: PdfWorkTally = {};
+      const asyncTally: PdfWorkTally = {};
+      const expected = scanPdfContentStreams(bytes, syncTally);
+      clock = advancingClock(PDF_SLICE_MS + 1);        // every step ends a slice, so EVERY step is followed by a turn of the event loop
+      let turns = 0;
+      const ticker = setInterval(() => { turns++; }, 0);
+      try {
+        const actual = await scanPdfContentStreamsAsync(bytes, asyncTally);
+        expect(actual).toEqual(expected);
+        expect(asyncTally).toEqual(syncTally);         // the same amount of work: no step skipped, none repeated
+      } finally {
+        clearInterval(ticker);
+        clock.restore();
+        clock = undefined;
+      }
+      expect(turns).toBeGreaterThan(10);               // counted over real timers, so wall-clock dependent: they only run when the loop is given a turn, and a pass that never yielded leaves this at 0 (measured 173-241 against a threshold of 10)
+    }
+    expect(scanPdfContentStreams(clean).hit).toBeNull();
+    expect(scanPdfContentStreams(planted).hit).not.toBeNull();   // the planted file really does carry something to find
   });
 
   it('preparePdf turns an abandoned pass into the neutral "took too long to read", never a throw (what a direct caller sees; the orchestrator has given up on the item by then)', async () => {
