@@ -438,11 +438,9 @@ live.
       outside the card (a portal with fixed positioning in `InfoTooltip`, which the tests and every page that finds it as the next sibling would have to follow) or giving the
       card a minimum height; neither was done because both change a shared component or the look.
 - [x] **The nightly is green again (2026-11-17).** The 02:00 IST run on `76788d5` passed after the two causes of the 2026-11-16 red were fixed (`spawnSync` ENOBUFS in `api/00`, the stale `e2e/09` pin, #106/#108); nothing else is known to fail it.
-- [ ] **The nightly `EXCLUDE` list may be longer than it needs to be.** On 2026-11-05, on a fresh stack with no credentials, `db/07` (all 17 tests, the three excluded ones
-      included), `db/05-aging-roles-no-movement` (13), `api/19-pending-actions-regressions` (9, the excluded "every candidate entry carries application_id" included)
-      and the excluded `db/15` "a Drive PDF + a website: pending" all passed when run on their own, once each, although `integration.yml`'s header says they need a
-      real key, a long-lived database, a multi-line queue error or are racy. Re-measure a few times, then trim the regex (do not add an entry without a measured
-      reason, as the header says).
+- [x] **The nightly `EXCLUDE` list was longer than it needed to be.** **Fixed 2026-11-17:** measured on a disposable stack with no credentials: `api/10` + `api/19` + `api/30` five times on a fresh database
+      each (15 passed, 5 of 5), then the whole `api` + `db` selection three times with `--grep-invert '@live'` alone (931 passed, 1 skipped each time, 1-2.3 minutes). The regex is now just `@live`: the
+      three other entries were stale (`api/10`'s real-key test and `api/30`'s live-estimate test are tagged `@live` already, `api/19`'s test builds its own breach). `integration.yml`'s header carries the measurement.
 - [x] Stale comments in the CI files fixed: the "659 tests" count (`.github/README.md`, CLAUDE.md), `audit.yml`'s "Dependabot alerts are off", and the
       `frontend/src/services/api.ts` comments about axios array params (bracket form `key[]=a&key[]=b`; `api.test.ts` pins the real format).
 

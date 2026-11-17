@@ -279,9 +279,10 @@ PR; `.github/workflows/integration.yml` runs the `api` + `db` projects nightly a
 
 ## A note on real external calls (real cost, real time)
 
-`tests/api/10-jd-generation-and-scoring.spec.ts` (2 tests) is the one spec that triggers real, paid external calls without an `@live` tag: Anthropic (JD
-content generation and ResumeIQ scoring against the generated JD) and Google Drive (PDF upload), about 30-60 s each. Without credentials it fails or
-times out: expected in that setup, not a suite bug (the nightly workflow excludes it). The `@live` tests above are the other three.
+`tests/api/10-jd-generation-and-scoring.spec.ts` has one test that triggers real, paid external calls: Anthropic (JD content generation and ResumeIQ
+scoring against the generated JD) and Google Drive (PDF upload), about 30-60 s. It is tagged `@live`, so it is dropped unless `TEST_LIVE=1`; the spec's
+other two tests are offline and pass on a stack with no credentials. The nightly workflow excludes `@live` and nothing else of this spec. Other `@live`
+tests exist besides the ones listed above: `grep -rn "@live" tests` is the list.
 
 `tests/api/15-calendar-integration.spec.ts` and `tests/e2e/06-schedule-round.spec.ts` each contain one real Google Calendar call: scheduling a Standard
 round with a real `scheduled_date` + `interviewer_emails` creates a real event through the service account's domain-wide delegation, impersonating
