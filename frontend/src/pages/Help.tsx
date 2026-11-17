@@ -105,7 +105,7 @@ const GROUPS: Array<{ title: string; gated?: 'sourcing'; sections: Section[] }> 
             flip direction (starts descending); sorting only reorders whatever rows are currently
             visible after your filters. HR/Admin, Leadership and Super Admin also see <strong>Add candidate</strong> (see the question below) and can tick rows to use <strong>Change Stage</strong> or <strong>Change Status</strong> on several candidates at once (rejecting or withdrawing asks for reasons, and rejecting can send the optional e-mail).</p>
             <p className="mt-2">An amber <strong>Unmatched Candidates</strong> banner can
-            appear above the table. It lists every candidate with no application to any role,
+            appear above the table for HR/Admin, Leadership and Super Admin (a Hiring Manager does not see it). It lists every candidate with no application to any role,
             either because a resume was added directly (or an old application was removed), or
             because they applied through the Job Application Form and the role they picked did
             not match exactly one role that isn't closed. A match means the same title, ignoring

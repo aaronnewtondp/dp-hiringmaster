@@ -86,7 +86,7 @@ export default function Dashboard() {
   // this persona anyway, so sending it would just be misleading.
   if (roleIds.length && !isLockedToOwnRole) filterParams.role_id = roleIds;
 
-  const { data, isLoading, error } = useQuery<{ data: DashboardData }>({
+  const { data, isLoading, error, refetch, isFetching } = useQuery<{ data: DashboardData }>({
     queryKey: ['dashboard', departments, locations, modes, filterPriorities, roleIds],
     queryFn:  () => dashboardApi.get(filterParams),
     refetchInterval: DASHBOARD_REFRESH_MS,
@@ -95,7 +95,9 @@ export default function Dashboard() {
   if (isLoading) return (
     <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>
   );
-  if (error || !data) return (
+  // Only a load with nothing to show replaces the page. When a background refresh fails, react-query keeps the last good `data`:
+  // the page stays and a notice (below) says the numbers may be out of date.
+  if (!data) return (
     <EmptyState title="Failed to load dashboard" message="Check your connection and try again" />
   );
 
@@ -129,6 +131,17 @@ export default function Dashboard() {
           </p>
         </div>
       </div>
+
+      {error && (
+        <div role="alert" data-testid="dashboard-refresh-error"
+             className="flex items-center justify-between gap-3 flex-wrap rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <span>Couldn't refresh the dashboard — the numbers below may be out of date.</span>
+          <button type="button" onClick={() => { void refetch(); }} disabled={isFetching}
+                  className="text-xs font-medium underline hover:no-underline disabled:opacity-50">
+            {isFetching ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      )}
 
       {/* Master filters — every section below reflects these */}
       <div className="flex items-center gap-2 flex-wrap">

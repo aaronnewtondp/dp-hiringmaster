@@ -310,14 +310,20 @@ describe.each(PERSONAS)('as %s', persona => {
     }
   });
 
-  it('Candidates — Unmatched Candidates panel: everyone sees the candidate; "Link to role", the suggested-role shortcut and "Delete candidate" only for HR-tier', async () => {
+  it('Candidates — Unmatched Candidates panel: HR-tier only (with "Link to role", the suggested-role shortcut and "Delete candidate"); a Hiring Manager never requests it', async () => {
     h.state.unmatched = true;
     mountAs(persona, <Candidates />);
+    if (!who.hr) {
+      await screen.findByText('Synthetic Candidate One');
+      expect(asked('candidates.unmatched')).toHaveLength(0);
+      expect(screen.queryByText(/Unmatched Candidates/)).toBeNull();
+      return;
+    }
     fireEvent.click(await screen.findByText('Unmatched Candidates (1)'));              // the panel is collapsed on load
     expect(await screen.findByRole('link', { name: 'Synthetic Unlinked' })).toHaveAttribute('href', '/candidates/C9010');
-    expect(present(screen.queryByRole('button', { name: 'Link to role' }))).toBe(who.hr);
-    expect(present(screen.queryByRole('button', { name: 'Link to Smoke Test Engineer' }))).toBe(who.hr);
-    expect(present(screen.queryByTitle('Delete candidate'))).toBe(who.hr);
+    expect(present(screen.queryByRole('button', { name: 'Link to role' }))).toBe(true);
+    expect(present(screen.queryByRole('button', { name: 'Link to Smoke Test Engineer' }))).toBe(true);
+    expect(present(screen.queryByTitle('Delete candidate'))).toBe(true);
   });
 
   // ── TalentPool ─────────────────────────────────────────────────────────────────────────────────
