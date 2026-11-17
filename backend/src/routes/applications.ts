@@ -239,10 +239,16 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
   // path (single-row, bulk, either page) actually goes through. "Shortlist"
   // now means advancing straight to Interview Round 1 (the old intermediate
   // 'Shortlisted' stage was retired — see STAGE_ORDER).
+  // The reason is stored (and named in the activity log) ONLY for this one case: a move to Interview Round 1 of an application that is really
+  // 15%+ over the band. A client that sends it for any other row or stage (the bulk move sends one reason for the whole selection) has it
+  // ignored here, so an in-band candidate never carries an "over-budget exception". When the comparison cannot be made (no band, no expected
+  // CTC, a band with no number) the row is NOT over budget by isSeverelyOverBudget's own rule, so nothing is stored for it either.
+  let storeBudgetReason = false;
   if (new_stage === 'Interview Round 1') {
     const candidate = await queryOne<{ expected_ctc: number }>('SELECT expected_ctc FROM candidates WHERE id=$1', [app.candidate_id]);
     const role      = await queryOne<{ ctc_band: string }>('SELECT ctc_band FROM roles WHERE id=$1', [app.role_id]);
-    if (isSeverelyOverBudget(candidate?.expected_ctc, role?.ctc_band) && !budget_exception_reason_cat) {
+    storeBudgetReason = isSeverelyOverBudget(candidate?.expected_ctc, role?.ctc_band);
+    if (storeBudgetReason && !budget_exception_reason_cat) {
       res.status(400).json({ error: "This candidate's expected CTC is 15%+ over the role's band — select a reason before shortlisting." });
       return;
     }
@@ -290,6 +296,8 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
   }
 
   const slaHours = getSlaHours(new_stage, app.ai_fit_score);
+  const storedReasonCat: string | null = storeBudgetReason ? (budget_exception_reason_cat || null) : null;
+  const storedReasonDetail: string | null = storeBudgetReason ? (budget_exception_reason_detail || null) : null;
 
   // Dashboard's Time to Fill is a literal AVG(offer_accepted_date -
   // role.start_date) — nothing ever stamped this column on the stage
@@ -325,7 +333,7 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
        budget_exception_reason_cat=COALESCE($4, budget_exception_reason_cat),
        budget_exception_reason_detail=COALESCE($5, budget_exception_reason_detail)
        WHERE id=$3`,
-      [new_stage, slaHours, req.params.id, budget_exception_reason_cat || null, budget_exception_reason_detail || null]
+      [new_stage, slaHours, req.params.id, storedReasonCat, storedReasonDetail]
     );
     // A stage-SLA pending_action (Idle Candidate, Resume Shortlist Pending,
     // Interview 1/2 Feedback Due, etc.) is only ever valid for the stage it
@@ -350,7 +358,7 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
     await logActivity(client, app.id, app.candidate_id, app.role_id,
       'Stage Changed',
       skip_reason ? `Stage skipped to ${new_stage}. Reason: ${skip_reason}`
-        : budget_exception_reason_cat ? `Stage → ${new_stage} (over-budget exception: ${budget_exception_reason_cat})`
+        : storedReasonCat ? `Stage → ${new_stage} (over-budget exception: ${storedReasonCat})`
         : `Stage → ${new_stage}`,
       app.stage, new_stage, req.user!.userId, req.user!.name
     );

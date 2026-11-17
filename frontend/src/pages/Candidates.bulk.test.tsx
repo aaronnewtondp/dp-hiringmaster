@@ -111,7 +111,7 @@ describe('Active Candidates — bulk stage change', () => {
     expect(h.advanceStage).not.toHaveBeenCalled();
   });
 
-  it('once a reason is picked, it and the trimmed detail go to every candidate in the batch', async () => {
+  it('once a reason is picked, it and the trimmed detail go only with the candidate who is 15%+ over, not the in-band one selected beside them', async () => {
     await showList();
     const modal = openStageModal('Test Candidate A9001', 'Test Candidate A9002');
     fireEvent.change(within(modal).getByDisplayValue('Applied and Screened'), { target: { value: 'Interview Round 1' } });
@@ -123,7 +123,23 @@ describe('Active Candidates — bulk stage change', () => {
     await waitFor(() => expect(h.advanceStage).toHaveBeenCalledTimes(2));
     const opts = { budgetExceptionReasonCat: OVER_BUDGET_SHORTLIST_REASONS[1], budgetExceptionReasonDetail: 'approved by the founders' };
     expect(h.advanceStage).toHaveBeenCalledWith('A9001', 'Interview Round 1', opts);
-    expect(h.advanceStage).toHaveBeenCalledWith('A9002', 'Interview Round 1', opts);
+    expect(h.advanceStage).toHaveBeenCalledWith('A9002', 'Interview Round 1', { budgetExceptionReasonCat: undefined, budgetExceptionReasonDetail: undefined });
+  });
+
+  it('two over-budget candidates both carry the reason; the panel counts them', async () => {
+    h.list.mockResolvedValue({ data: { applications: [...APPS, app('A9010', { candidate_name: 'Test Candidate A9010', is_severely_over_budget: true })] } });
+    await showList();
+    await screen.findByText('Test Candidate A9010');
+    const modal = openStageModal('Test Candidate A9001', 'Test Candidate A9010', 'Test Candidate A9002');
+    fireEvent.change(within(modal).getByDisplayValue('Applied and Screened'), { target: { value: 'Interview Round 1' } });
+    expect(within(modal).getByText(/2 candidates who are over/)).toBeInTheDocument();
+    fireEvent.change(within(modal).getByDisplayValue('Select reason'), { target: { value: OVER_BUDGET_SHORTLIST_REASONS[0] } });
+    fireEvent.click(within(modal).getByRole('button', { name: 'Update' }));
+    await waitFor(() => expect(h.advanceStage).toHaveBeenCalledTimes(3));
+    const withReason = { budgetExceptionReasonCat: OVER_BUDGET_SHORTLIST_REASONS[0], budgetExceptionReasonDetail: undefined };
+    expect(h.advanceStage).toHaveBeenCalledWith('A9001', 'Interview Round 1', withReason);
+    expect(h.advanceStage).toHaveBeenCalledWith('A9010', 'Interview Round 1', withReason);
+    expect(h.advanceStage).toHaveBeenCalledWith('A9002', 'Interview Round 1', { budgetExceptionReasonCat: undefined, budgetExceptionReasonDetail: undefined });
   });
 
   it('a blank detail is sent as nothing, not as an empty string', async () => {

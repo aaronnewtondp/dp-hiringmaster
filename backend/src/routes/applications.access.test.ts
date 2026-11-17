@@ -236,6 +236,25 @@ describe('POST /:id/stage — the over-budget gate (15% over the role\'s band ne
     expect(fakeDb.one(SQL.activity).params[4]).toBe('Stage → Interview Round 1 (over-budget exception: Rare skill set)');
   });
 
+  it('a reason sent for a row that is NOT 15%+ over is ignored: nothing stored, nothing in the activity text (the bulk move sends one reason for every selected row)', async () => {
+    for (const sc of [{ expectedCtc: under, ctcBand: BAND }, { expectedCtc: over, ctcBand: null }, { expectedCtc: null, ctcBand: BAND }, { expectedCtc: over, ctcBand: 'negotiable' }]) {
+      fakeDb.reset();
+      program(sc);
+      const res = await stage('hr_recruiter', { new_stage: 'Interview Round 1', budget_exception_reason_cat: 'Rare skill set', budget_exception_reason_detail: 'x' });
+      expect([JSON.stringify(sc), res.status]).toEqual([JSON.stringify(sc), 200]);
+      expect(fakeDb.one(SQL.stageUpdate).params).toEqual(['Interview Round 1', SLA_HOURS.INTERVIEW_FEEDBACK, APP_ID, null, null]);
+      expect(fakeDb.one(SQL.activity).params[4]).toBe('Stage → Interview Round 1');
+    }
+  });
+
+  it('a reason sent with any other stage is ignored even for a 15%+ over-budget candidate', async () => {
+    program({ app: { stage: 'Interview Round 1' }, expectedCtc: over, ctcBand: BAND });
+    const res = await stage('hr_recruiter', { new_stage: 'Interview Round 2', budget_exception_reason_cat: 'Rare skill set' });
+    expect(res.status).toBe(200);
+    expect(fakeDb.one(SQL.stageUpdate).params.slice(3)).toEqual([null, null]);
+    expect(fakeDb.one(SQL.activity).params[4]).toBe('Stage → Interview Round 2');
+  });
+
   it('just under the threshold needs no reason; with no band, or no expected CTC, the gate cannot be evaluated and does not fire', async () => {
     for (const s of [{ expectedCtc: under, ctcBand: BAND }, { expectedCtc: over, ctcBand: null }, { expectedCtc: null, ctcBand: BAND }, { expectedCtc: over, ctcBand: 'negotiable' }]) {
       fakeDb.reset();

@@ -275,6 +275,10 @@ export default function Candidates() {
   const bulkNeedsBudgetReason = bulkStageValue === 'Interview Round 1' &&
     all.some(a => selectedIds.has(a.id) && a.is_severely_over_budget);
 
+  // The reason answers "why shortlist this over-budget person", so it goes only with the rows that really are 15%+ over (the server ignores it
+  // for any other row, and does not trust this filter either).
+  const overBudgetIds = new Set(all.filter(a => selectedIds.has(a.id) && a.is_severely_over_budget).map(a => a.id));
+
   const handleBulkStage = async () => {
     if (bulkNeedsBudgetReason && !bulkBudgetReasonCat) {
       toast.error('Select a reason before shortlisting — at least one selected candidate is 15%+ over budget');
@@ -286,8 +290,8 @@ export default function Candidates() {
     for (let i = 0; i < ids.length; i += BULK_CONCURRENCY) {
       const batch = ids.slice(i, i + BULK_CONCURRENCY);
       const settled = await Promise.allSettled(batch.map(id => applicationsApi.advanceStage(id, bulkStageValue, {
-        budgetExceptionReasonCat: bulkNeedsBudgetReason ? bulkBudgetReasonCat : undefined,
-        budgetExceptionReasonDetail: bulkNeedsBudgetReason ? bulkBudgetReasonDetail.trim() || undefined : undefined,
+        budgetExceptionReasonCat: bulkNeedsBudgetReason && overBudgetIds.has(id) ? bulkBudgetReasonCat : undefined,
+        budgetExceptionReasonDetail: bulkNeedsBudgetReason && overBudgetIds.has(id) ? bulkBudgetReasonDetail.trim() || undefined : undefined,
       })));
       succeeded += settled.filter(r => r.status === 'fulfilled').length;
     }
@@ -690,7 +694,8 @@ export default function Candidates() {
             {bulkNeedsBudgetReason && (
               <div className="mb-4 legacy-space-y-3 p-3 bg-amber-50 border border-amber-100 rounded-lg">
                 <p className="text-xs text-amber-800">
-                  At least one selected candidate is 15%+ over the role's compensation band — select a reason to proceed.
+                  At least one selected candidate is 15%+ over the role's compensation band — select a reason to proceed. It is recorded only for
+                  the {overBudgetIds.size === 1 ? 'one candidate who is' : `${overBudgetIds.size} candidates who are`} over, not for the others.
                 </p>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1.5">Reason <span className="text-red-500">*</span></label>
