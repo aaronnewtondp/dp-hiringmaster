@@ -429,7 +429,7 @@ live.
       (`popoverReachable`: "entirely outside the viewport"). Which markers hit it depends on the window height and the page length. Measured on a fresh stack with the
       old helper: Dashboard (HR and Hiring Manager) failed on 2 markers at 500 px and 900 px, 1 at 600 px, 2 at 768 px, none at 650-720/800 px (the default 720 passes,
       which is why it varied by machine); with 45 extra candidates the default height still passed, so row count is not the cause; with the marker centred, every
-      non-header marker passed at all eight heights. The helper now centres the marker (as a person scrolling to read it would); no component changed. New test "on a
+      non-header marker passed at all eight heights (that height sweep was run on the Dashboard only; the Candidates "marker 2 of 7" failure was not re-measured at other heights, it is covered by the same helper change and the new 500 px test). The helper now centres the marker (as a person scrolling to read it would); no component changed. New test "on a
       short window every non-header popover is fully on screen" (500 px) fails with the old helper and passes now. The related Gender header clipping below is a
       different cause and stays open.
 - [ ] **A table-header info popover is cut off by the table card when the list is short** (Candidates, Archived Pipeline, Ready for Review with a single row; pinned as
