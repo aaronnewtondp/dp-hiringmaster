@@ -12,6 +12,7 @@
  * Wording is asserted only where it is a button or label the test clicks, or an error message the server owns; Help text and tooltips never.
  *
  * Tests whose title contains TODAY pin what the product does now where that looks unintended; each is listed in the run report.
+ * (Fixed 2026-11-17, no longer pinned here: a Hiring Manager not on a round is not offered Submit feedback, and sees no edit pencils on a candidate.)
  */
 import { gotoAs } from '../helpers/e2e';
 import { authed, getToken, USERS } from '../helpers/api';
@@ -614,18 +615,19 @@ test.describe('Interview rounds: feedback', () => {
     expect((await getRounds(request, a.appId))[0].feedback_status).toBe('Submitted');
   });
 
-  test('TODAY a Hiring Manager not listed on the round still sees Submit feedback; the server refuses and the modal says why', async ({ page, request }) => {
+  test('a Hiring Manager not listed on the round is not offered Submit feedback; the server refuses it too, and one listed (or a round with nobody listed) is', async ({ page, request }) => {
     const a = await arrange(request, { stage: 'Interview Round 1' });
     const round = await createStandardRound(request, a.appId, { round_name: `HM other ${a.role.id}`, interviewer_emails: [USERS.hm_alex.email], focus_areas: ['Technical Knowledge'] });
     await open(page, 'hm_satyadev', a);                                    // Satyadev is not on this round
-    await roundRow(page, round.round_name).getByRole('button', { name: 'Submit feedback' }).click();   // TODAY: the button is not hidden
-    const dialog = dialogWith(page, /Interview Feedback/);
-    await fillFeedback(page, dialog, { 'Technical Knowledge': 3 }, 'Hold');
-    await dialog.getByRole('button', { name: 'Submit feedback' }).click();
+    await expect(roundRow(page, round.round_name)).toBeVisible();
+    await expect(roundRow(page, round.round_name).getByRole('button', { name: 'Submit feedback' })).toHaveCount(0);
 
-    await expect(toastWith(page, 'You are not an assigned interviewer for this round.')).toBeVisible();
-    await expect(dialog).toBeVisible();                                    // the modal stays open on a refusal
+    const refused = await authed(request, await getToken(request, 'hm_satyadev')).patch(`/api/interviews/${round.id}/feedback`, { overall_assessment: 'E2E not allowed' });
+    expect(refused.status(), await refused.text()).toBe(403);
     expect((await getRounds(request, a.appId))[0].feedback_status).toBe('Pending');
+
+    await open(page, 'hm_alex', a);                                        // Alex is listed: the button is there
+    await expect(roundRow(page, round.round_name).getByRole('button', { name: 'Submit feedback' })).toBeVisible();
   });
 });
 
@@ -826,16 +828,15 @@ test.describe('Persona differences on the candidate page', () => {
     await expect(applicationsCard(page)).not.toContainText('₹');
   });
 
-  test('TODAY a Hiring Manager still sees the edit pencils; saving is refused by the server and nothing changes', async ({ page, request }) => {
+  test('a Hiring Manager sees no edit pencils on the candidate page, and the server refuses a profile edit from one anyway', async ({ page, request }) => {
     const a = await arrange(request, { candidate: { phone: '+91 91111 11111' } });
     await open(page, 'hm_alex', a);
-    const identity = sectionCard(page, 'Identity');
-    await identity.getByRole('button', { name: 'Edit Identity' }).click();               // TODAY: not hidden for a Hiring Manager
-    await identity.locator('label:text-is("Phone") + input').fill('+91 92222 22222');
-    await identity.getByRole('button', { name: 'Save' }).click();
-    await expect(toastWith(page, 'Failed to update Identity')).toBeVisible();
-    const res = await authed(request, await getToken(request, 'hr')).get(`/api/candidates/${a.candidate.id}`);
-    expect((await res.json()).candidate.phone).toBe('+91 91111 11111');
+    await expect(sectionCard(page, 'Identity')).toContainText('Phone');                  // the section is shown, read-only
+    await expect(page.getByRole('button', { name: /^Edit / })).toHaveCount(0);
+    const res = await authed(request, await getToken(request, 'hm_alex')).patch(`/api/candidates/${a.candidate.id}`, { phone: '+91 92222 22222' });
+    expect(res.status()).toBe(403);
+    const check = await authed(request, await getToken(request, 'hr')).get(`/api/candidates/${a.candidate.id}`);
+    expect((await check.json()).candidate.phone).toBe('+91 91111 11111');
   });
 
   test('the server refuses what the Hiring Manager page hides: founder flag, notes and a status change after Applied and Screened are 403, and an HR reject without a reason is 400', async ({ request }) => {

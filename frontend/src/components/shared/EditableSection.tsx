@@ -44,6 +44,8 @@ interface EditableSectionProps {
       role). Omitted entirely (no visual change) for every caller that
       doesn't pass it. */
   tooltip?: ReactNode;
+  /** false = read-only view: no edit pencil (the server would refuse every save, e.g. a Hiring Manager on a role or a candidate). Defaults to true. */
+  canEdit?: boolean;
 }
 
 type DraftValue = string | boolean | string[];
@@ -107,7 +109,7 @@ function fromDraftValue(draft: DraftValue, type: FieldType): unknown {
  * per-section, matching ROADMAP.md's "per field or per section" scope for
  * Roles/Candidates/Agencies inline editing).
  */
-export default function EditableSection({ title, data: rawData, fields, onSave, pendingLabels, tooltip }: EditableSectionProps) {
+export default function EditableSection({ title, data: rawData, fields, onSave, pendingLabels, tooltip, canEdit = true }: EditableSectionProps) {
   const data = rawData as Record<string, unknown>;
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState<Record<string, DraftValue>>({});
@@ -177,7 +179,7 @@ export default function EditableSection({ title, data: rawData, fields, onSave, 
           <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
           {tooltip && <InfoTooltip align="left" text={tooltip} />}
         </div>
-        {!isEditing && (
+        {!isEditing && canEdit && (
           <button onClick={startEdit} className="text-gray-400 hover:text-dp-600 p-1" title={`Edit ${title}`}>
             <Pencil className="w-3.5 h-3.5" />
           </button>

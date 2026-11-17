@@ -359,3 +359,16 @@ describe('EditableSection — required and dependent fields', () => {
     expect(onSave.mock.calls[0][0]).not.toHaveProperty('agency');
   });
 });
+
+describe('EditableSection — canEdit', () => {
+  it('canEdit={false} shows the values but no edit pencil', () => {
+    render(<EditableSection title={TITLE} data={{ name: 'Test Name' }} fields={[text('name', 'Name')]} onSave={vi.fn(async () => {})} canEdit={false} />);
+    expect(valueOf('Name')).toBe('Test Name');
+    expect(screen.queryByTitle(`Edit ${TITLE}`)).toBeNull();
+  });
+
+  it('the pencil is there by default', () => {
+    mount([text('name', 'Name')], { name: 'Test Name' });
+    expect(screen.getByTitle(`Edit ${TITLE}`)).toBeInTheDocument();
+  });
+});

@@ -620,10 +620,10 @@ describe('Help — questions added after the October 2026 audit', () => {
     expect(t).toMatch(/an Approved role isn't offered until then/);
   });
 
-  it('candidate page: what is where, and that the pencil is shown to everyone but saving is HR/Admin, Leadership and Super Admin only', () => {
+  it('candidate page: what is where, and that the pencil is shown only to HR/Admin, Leadership and Super Admin', () => {
     mount();
     const t = answerTo('What is on a candidate\'s page?');
-    expect(t).toMatch(/only HR\/Admin, Leadership and Super Admin can save changes — for anyone else the save is refused/);
+    expect(t).toMatch(/shown only to HR\/Admin, Leadership and Super Admin \(a Hiring Manager sees these sections read-only\)/);
     expect(t).toMatch(/The Activity timeline at the bottom logs every change/);
   });
 

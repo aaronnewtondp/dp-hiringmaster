@@ -222,8 +222,8 @@ smoke accounts.
   is ~0.5 s each). `tests/api/00-test-infrastructure.spec.ts` and `tests/e2e/00-test-infrastructure.spec.ts` are the self-tests of all this.
 - **Specs that pin a product defect "as TODAY".** A test whose title contains `TODAY` asserts what the product does now where that looks
   unintended, so a fix turns it red on purpose and the test is changed with the fix: `db/16-schema-replay` (8), `db/17-user-lifecycle` (8),
-  `e2e/09-user-management` (3), `e2e/10-candidate-actions` (5), `e2e/12-my-tasks` (1),
-  `e2e/13-help-and-info-markers` (3), `e2e/14-role-detail-actions` (2), `e2e/16-lists-and-forms` (2), `e2e-mobile/15-responsive-and-pwa` (1); each
+  `e2e/09-user-management` (3), `e2e/10-candidate-actions` (2), `e2e/12-my-tasks` (1),
+  `e2e/13-help-and-info-markers` (3), `e2e/16-lists-and-forms` (2), `e2e-mobile/15-responsive-and-pwa` (1); each
   file header lists what it pins, and `ROADMAP.md` lists the product issues. **Stale pins on the `is_active` check: none left (closed 2026-11-16).** PR #55 made `authenticate()` check `is_active` live; the three Playwright pins that still asserted the old behaviour (`db/17` twice, `e2e/09` once) were rewritten to pin the 401, and `backend/src/routes/auth.test.ts`'s false "characterization: authentication does not ask the database…" was replaced by tests of the live check (inactive and missing row 401, a database failure 503; `beforeEach` calls `invalidateUserAccess()` because the 15 s cache would otherwise leak one test's answer into the next). The two persona-change pins in `db/17` (a promotion or demotion reaches the person only at the next sign-in) are still true and still say `TODAY`.
 - **What a run looks like today** (2026-11-05, one fresh stack from `origin/main`, nothing credentialed): `api` + `db` with the nightly exclusions
   (772 tests): 756 passed, 1 failed (a `db/17` pin that was stale then and is fixed now), 14 not run (its serial cascade), 1 skipped, in 38 s. `e2e` (220): 212 passed, 3
@@ -369,7 +369,10 @@ the UPDATE's own `IS DISTINCT FROM`, so simultaneous requests cannot both raise 
 change above). A round with no `interviewer_emails` set at all (e.g.
 Assignment rounds) has no assignee to check, so feedback on those stays open
 to any persona — this isn't a residual gap, it's the correct behavior when
-nobody was specifically assigned. **A Hiring Manager cannot approve a
+nobody was specifically assigned. The candidate page mirrors that rule (`frontend/src/utils/feedbackAccess.ts`
+`canSubmitRoundFeedback`): "Submit feedback" / "Record outcome" are not shown to a Hiring Manager who may not use them, and
+`EditableSection`'s `canEdit` hides the edit pencils on roles and candidate-profile sections for anyone outside HR-tier
+(both PATCH routes are HR-tier). **A Hiring Manager cannot approve a
 role — not even their own.** `PATCH /roles/:id` is `isHRTier`-gated
 end to end (no `isHmForThisRole` carve-out); approver name and date are
 captured from the acting HR-tier user and Open Date copies from Approval

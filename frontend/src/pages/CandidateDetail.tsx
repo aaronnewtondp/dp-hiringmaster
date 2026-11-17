@@ -24,6 +24,7 @@ import InfoTooltip from '../components/shared/InfoTooltip.tsx';
 import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import LinkifiedText from '../components/shared/LinkifiedText.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { canSubmitRoundFeedback } from '../utils/feedbackAccess.ts';
 import { isNamedHiringManager } from '../utils/hiringManagers.ts';
 import { SLA_FLAG_INFO, lastUpdatedInfo } from '../utils/columnInfo.ts';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -356,6 +357,7 @@ export default function CandidateDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="legacy-space-y-4">
           <EditableSection
+            canEdit={canHR}
             title="Identity"
             tooltip="Source is how this candidate was found, and it feeds Source quality on the Dashboard. Candidates who arrive through the Job Application Form are recorded as LinkedIn when they have no Source yet. What an applicant says on the form's “How did you hear about this opening?” is kept separately, on the application, and is shown on the Sourcing page. Sourcing Agency appears when the Source is Agency, and it is what the Agency Repository counts as a hire."
             data={candidate}
@@ -381,6 +383,7 @@ export default function CandidateDetail() {
             ]}
           />
           <EditableSection
+            canEdit={canHR}
             title="Current Role"
             data={{ ...candidate, preferred_location: applications[0]?.preferred_location }}
             onSave={async (changes) => {
@@ -407,6 +410,7 @@ export default function CandidateDetail() {
             ]}
           />
           <EditableSection
+            canEdit={canHR}
             title="Compensation"
             data={candidate}
             onSave={saveCandidateFields}
@@ -417,6 +421,7 @@ export default function CandidateDetail() {
             ]}
           />
           <EditableSection
+            canEdit={canHR}
             title="Resume & Tags"
             data={candidate}
             onSave={saveCandidateFields}
@@ -665,11 +670,11 @@ export default function CandidateDetail() {
                                         </button>
                                       )
                                     ) : !round.assignment_outcome ? (
-                                      <button onClick={() => setOutcomeRound({ ...round, candidate_name: candidate.full_name, role_title: app.role_title })} className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium shrink-0 ml-3">
+                                      canSubmitRoundFeedback(user, round) && <button onClick={() => setOutcomeRound({ ...round, candidate_name: candidate.full_name, role_title: app.role_title })} className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium shrink-0 ml-3">
                                         <MessageSquare className="w-3.5 h-3.5" /> Record outcome
                                       </button>
                                     ) : null
-                                  ) : round.feedback_status !== 'Submitted' && (
+                                  ) : round.feedback_status !== 'Submitted' && canSubmitRoundFeedback(user, round) && (
                                     <button onClick={() => setFeedbackRound({ ...round, candidate_name: candidate.full_name, role_title: app.role_title })} className="flex items-center gap-1.5 text-xs text-dp-600 hover:text-dp-800 font-medium shrink-0 ml-3">
                                       <MessageSquare className="w-3.5 h-3.5" /> Submit feedback
                                     </button>
@@ -812,6 +817,7 @@ export default function CandidateDetail() {
                         {canHR ? (
                           hasScreeningNotes(app) || screeningNotesOpen.has(app.id) ? (
                             <EditableSection
+                              canEdit={canHR}
                               title="Screening & Risk Notes"
                               tooltip="Priority Override is a note for the team: it is saved and shown in the activity timeline, but it does not change SLA timers, sorting or any queue. Tags here belong to this application only; the Tag filter on Archived Pipeline searches the candidate's HR Tags (under Resume & Tags), not these."
                               data={app}

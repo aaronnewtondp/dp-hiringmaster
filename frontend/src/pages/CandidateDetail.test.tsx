@@ -219,11 +219,17 @@ describe('Candidate page — what each persona is given', () => {
     expect(screen.getByRole('button', { name: 'Add Application' })).toBeInTheDocument();
   });
 
-  it('a Hiring Manager is offered the edit pencils on the profile sections (the server refuses their save, HR only)', async () => {
+  it('a Hiring Manager is not offered the edit pencils on the profile sections (PATCH /candidates/:id is HR-only on the server)', async () => {
     h.persona = 'hiring_manager';
     await show();
-    // Documented, not endorsed: PATCH /candidates/:id is HR-only on the server.
-    expect(screen.getAllByTitle(/^Edit /).length).toBeGreaterThan(0);
+    expect(screen.queryAllByTitle(/^Edit /)).toHaveLength(0);
+    expect(within(section('Identity')).getByText('Full Name')).toBeInTheDocument();   // the sections themselves are still shown, read-only
+  });
+
+  it.each(['hr_recruiter', 'leadership', 'super_admin'] as const)('%s keeps the edit pencils on the profile sections', async (persona) => {
+    h.persona = persona;
+    await show();
+    for (const t of ['Identity', 'Current Role', 'Compensation', 'Resume & Tags']) expect(screen.getByTitle(`Edit ${t}`)).toBeInTheDocument();
   });
 });
 
@@ -273,14 +279,10 @@ describe('Candidate page — who sees compensation', () => {
     expect(comp.getByText('Notice Period (days)')).toBeInTheDocument();
   });
 
-  it('...and editing that section for them shows and sends only the notice period', async () => {
+  it('...and the section has no edit pencil for them at all (the server refuses every Hiring Manager save)', async () => {
     await showWith('Test Manager One', 'hiring_manager', 'Test Manager Other');
-    fireEvent.click(screen.getByTitle('Edit Compensation'));
-    const comp = within(section('Compensation'));
-    expect(comp.getAllByRole('spinbutton')).toHaveLength(1);
-    fireEvent.change(comp.getByDisplayValue('30'), { target: { value: '45' } });
-    fireEvent.click(comp.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(h.update).toHaveBeenCalledWith('C9001', { notice_period_days: 45 }));
+    expect(screen.queryByTitle('Edit Compensation')).toBeNull();
+    expect(h.update).not.toHaveBeenCalled();
   });
 
   it('the CTC line and the Over Budget badge show for HR when expected is above the top of the band', async () => {
