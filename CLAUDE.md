@@ -93,6 +93,12 @@ Docker (immediate fix) *and* appended to `schema.sql` (permanent fix), in that
 order, every time. Skipping the third step means the next `docker-compose down
 -v` silently reintroduces a bug that was already "fixed."
 
+**`schema.sql` is re-runnable (2026-11-17).** Applying it to a database that already has it succeeds and changes nothing: tables and indexes are `IF NOT EXISTS`,
+triggers are dropped before they are created, the `vacancy_reason` `TEXT[]` conversion sits in a guarded `DO` block, and the `gender` column is `IF NOT EXISTS`. **Keep it that way:**
+a new statement must be guarded the same way (a plain `CREATE TABLE`, `CREATE INDEX`, `ADD COLUMN` or `CREATE TRIGGER` fails the second apply). Pinned by `db/16-schema-replay`
+("applying schema.sql a second time": no errors, identical structure) and by `.github/ci/apply-db.sh`, which re-applies the file with `ON_ERROR_STOP` in the CI `database` job.
+It also carries `idx_pending_actions_application_id` / `_role_id` (the foreign-key indexes; `purgeRolesFast` in `tests/helpers/sourcing-db.ts` is kept as a batching helper).
+
 **Security state of production Supabase (found 2026-10-19).** *Closed:* the seed password hash was removed from the 8 production
 users that still had one (`UPDATE … SET password_hash = NULL`), so every production account is Google-only. The only password-login accounts in production are the two read-only smoke-test accounts (created 2026-10-19, see Testing).
 *Known and accepted — not being addressed (Aaron's decision, 2026-10-19):* the 17 pre-existing public tables have row level security OFF and the `anon`/`authenticated` roles hold table privileges, so the project's public Supabase key can read and modify candidate data through the Data API (established from the privilege catalog; not exercised through the API). The backend connects as role `postgres` (owner, BYPASSRLS). The 8 `sourcing_*` tables were created with RLS on.
@@ -221,7 +227,7 @@ smoke accounts.
   `smoke-env.ts`, `calendar.ts`, `sourcing-db.ts` (`purgeRolesFast`: `pending_actions` has foreign keys with no index, so deleting rows one by one
   is ~0.5 s each). `tests/api/00-test-infrastructure.spec.ts` and `tests/e2e/00-test-infrastructure.spec.ts` are the self-tests of all this.
 - **Specs that pin a product defect "as TODAY".** A test whose title contains `TODAY` asserts what the product does now where that looks
-  unintended, so a fix turns it red on purpose and the test is changed with the fix: `db/16-schema-replay` (8), `db/17-user-lifecycle` (8),
+  unintended, so a fix turns it red on purpose and the test is changed with the fix: `db/16-schema-replay` (1), `db/17-user-lifecycle` (8),
   `e2e/09-user-management` (1), `e2e/10-candidate-actions` (2), `e2e/12-my-tasks` (1),
   `e2e/13-help-and-info-markers` (3), `e2e/16-lists-and-forms` (2); each
   file header lists what it pins, and `ROADMAP.md` lists the product issues. **Stale pins on the `is_active` check: none left (closed 2026-11-16).** PR #55 made `authenticate()` check `is_active` live; the three Playwright pins that still asserted the old behaviour (`db/17` twice, `e2e/09` once) were rewritten to pin the 401, and `backend/src/routes/auth.test.ts`'s false "characterization: authentication does not ask the database…" was replaced by tests of the live check (inactive and missing row 401, a database failure 503; `beforeEach` calls `invalidateUserAccess()` because the 15 s cache would otherwise leak one test's answer into the next). The two persona-change pins in `db/17` (a promotion or demotion reaches the person only at the next sign-in) are still true and still say `TODAY`.
