@@ -42,11 +42,12 @@ function UserModal({ user, onClose, onSuccess }: {
     if (!name.trim())  { toast.error('Name is required');  return; }
     if (!email.trim()) { toast.error('Email is required'); return; }
 
+    // A blank department is sent as '' on Edit (the API stores NULL for it, so the old one is cleared); on Add it is left out.
     const fields = {
       name:       name.trim(),
       email:      email.trim(),
       persona,
-      department: department.trim() || undefined,
+      department: isNew ? (department.trim() || undefined) : department.trim(),
     };
 
     setSaving(true);

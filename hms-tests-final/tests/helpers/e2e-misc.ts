@@ -112,7 +112,10 @@ export async function popoverReachable(popover: Locator): Promise<{ ok: boolean;
  * again, asserting the popover closes. Throws a descriptive error when no popover opens.
  */
 export async function readMarkerByHover(page: Page, marker: Locator, what: string, opts: { checkReachable?: boolean } = {}): Promise<string> {
-  await marker.scrollIntoViewIfNeeded();
+  // Centre the marker in the viewport, as a person scrolling to read it would: scrollIntoViewIfNeeded scrolls the least it can, which leaves a
+  // marker on the viewport's bottom edge, and its popover (which hangs BELOW it) then lies entirely under the fold. That is where "marker 2 of 7" /
+  // "marker 8 of 13" failed: it depended on the viewport height and on how tall the page above was (rows loaded), not on a clipped popover.
+  await marker.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'nearest' }));
   await marker.hover();
   const popover = markerPopover(marker);
   await expect(popover, `${what}: hovering the marker did not open a popover`).toBeVisible();

@@ -4,11 +4,12 @@ import candidateIngestRoutes from './routes/candidateIngest.js';
  * Express server entry point.
  *
  * CHANGES from Docker version:
- *  1. node-cron is NOT started here — Vercel Cron calls /api/cron/* instead.
+ *  1. No in-process scheduler runs here — Vercel Cron calls /api/cron/* instead.
  *  2. The app is exported as default so api/index.ts can re-export it to Vercel.
  *  3. app.listen() only runs when executed directly (local dev), not on Vercel.
  */
 import 'dotenv/config';
+import { errorResponseFor } from './utils/httpErrors.js';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -82,10 +83,18 @@ app.use('/api/users',            usersRouter);
 app.use('/api/sourcing',         sourcingRouter);
 app.use('/api/sourcing',         sourcingDetailRouter);   // plan detailing (templates, company directory, outreach, check-ins, overview) — additive
 
-// Error handler
+// Error handler. A request the client got wrong is a 4xx, not a 500 (and says nothing about the database):
+//  * Postgres rejecting a value the route did not validate itself: CHECK violation (23514), bad text representation such as a non-numeric
+//    number or a malformed uuid (22P02), number out of range (22003), value too long (22001), invalid date/time (22007, 22008) -> 400;
+//    a unique violation (23505) -> 409. Which field is deliberately not echoed.
+//  * errors Express/body-parser raise with their own 4xx status (malformed JSON, body too large) keep that status.
+// Everything else is the generic 500.
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('[server] Unhandled error:', err);
-  res.status(500).json({ error: 'Internal server error' });
+  const out = errorResponseFor(err);
+  if (out.status >= 500) console.error('[server] Unhandled error:', err);
+  else console.warn('[server] Rejected request:', (err as { code?: string }).code ?? (err as { type?: string }).type ?? out.status);
+  if (res.headersSent) return;
+  res.status(out.status).json({ error: out.error });
 });
 
 // Local dev only — Vercel does NOT call app.listen()
@@ -97,11 +106,5 @@ if (!isVercel) {
   });
 }
 
-
-// Global async error handler — catches all unhandled async route errors
-app.use((err: Error, req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
-  console.error('[ERROR]', err.message, err.stack?.split('\n')[1]);
-  res.status(500).json({ error: 'Internal server error', detail: err.message });
-});
 
 export default app;

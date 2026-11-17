@@ -71,9 +71,8 @@ describe('SLA windows: the frontend figures are the ones in jobs/slaChecker.ts',
   it('the assignment deadline is the send time plus the backend number of hours', () => {
     expect(SLA_ASSIGNMENT_DEADLINE_HOURS).toBe(b.slaAssignmentDeadlineHours);
   });
-  it('joining risk is the backend number of days, and its task is stored as that many days of hours (the card reads "Overdue 5D")', () => {
+  it('joining risk is the backend number of days (its task is stored with the real hours past that window, not a constant: the card reads how late it was when first flagged)', () => {
     expect(SLA_JOINING_RISK_DAYS).toBe(b.joiningRiskDays);
-    expect(b.joiningRiskStoredHours).toBe(b.joiningRiskDays * 24);
   });
   it('the SLA sweep runs at most once per the backend number of minutes', () => {
     expect(SLA_CHECK_THROTTLE_MINUTES).toBe(b.slaCheckThrottleMinutes);

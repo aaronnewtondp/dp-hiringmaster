@@ -186,12 +186,11 @@ describe('Agencies — agreement link', () => {
   });
 });
 
-describe('Agencies — the Add agency button', () => {
-  it('is shown, and pressing it does not write anything on its own', async () => {
+describe('Agencies — no Add agency button', () => {
+  it('is not drawn (it had no handler), and the list is unaffected', async () => {
     mount();
     await screen.findByText('Test Agency One');
-    fireEvent.click(screen.getByRole('button', { name: /Add agency/ }));
+    expect(screen.queryByRole('button', { name: /Add agency/ })).toBeNull();
     expect(create).not.toHaveBeenCalled();
-    expect(screen.getByText('Test Agency One')).toBeInTheDocument();       // and the list is still there
   });
 });

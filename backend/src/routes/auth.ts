@@ -39,7 +39,7 @@ function issueToken(user: User & { avatar_url?: string | null }) {
 // ─── POST /api/auth/login — email + password ──────────────────────────────────
 router.post('/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
-  if (!email || !password) {
+  if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
     res.status(400).json({ error: 'Email and password required' });
     return;
   }
@@ -85,13 +85,15 @@ router.post('/google', async (req: Request, res: Response) => {
   }
 
   // 1. Verify the ID token with Google
-  let payload: { email?: string; sub?: string; name?: string; picture?: string; hd?: string };
+  let payload: { email?: string; email_verified?: boolean; sub?: string; name?: string; picture?: string; hd?: string };
   try {
     const ticket = await googleClient.verifyIdToken({
       idToken:  credential,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
-    payload = ticket.getPayload()!;
+    const verified = ticket.getPayload();
+    if (!verified) throw new Error('ID token has no payload');
+    payload = verified;
   } catch (err) {
     console.error('[auth/google] Token verification failed:', err);
     res.status(401).json({ error: 'Invalid Google credential' });
@@ -110,6 +112,19 @@ router.post('/google', async (req: Request, res: Response) => {
     return;
   }
 
+  // 2b. The address must be verified by Google, and the account must belong to the company's Workspace (`hd`): the e-mail
+  //     suffix alone is not proof of either (an unverified secondary address, or a consumer account that merely lists one).
+  if (payload.email_verified !== true) {
+    res.status(403).json({ error: 'Your Google account\'s e-mail address is not verified.' });
+    return;
+  }
+  if (payload.hd !== ALLOWED_DOMAIN) {
+    res.status(403).json({
+      error: `Only @${ALLOWED_DOMAIN} accounts can access this system.`,
+    });
+    return;
+  }
+
   // 3. Look up the user by email
   //    Users must be pre-created by an HR admin — Google OAuth is just the auth method.
   const user = await queryOne<User & { google_id?: string | null; avatar_url?: string | null }>(
@@ -120,6 +135,16 @@ router.post('/google', async (req: Request, res: Response) => {
   if (!user) {
     res.status(403).json({
       error: 'Your @digitalpaani.com account is not registered in HMS. Ask HR to create your account.',
+    });
+    return;
+  }
+
+  // 3b. A user already linked to one Google account is not re-linked to another by presenting the same e-mail. Google's `sub`
+  //     is stable for an account; if a person really did get a new Google account, an admin clears users.google_id.
+  if (user.google_id && user.google_id !== googleId) {
+    console.warn('[auth/google] Google subject does not match the one linked to user', user.id);
+    res.status(403).json({
+      error: 'This HMS account is linked to a different Google account. Ask HR to reset the link.',
     });
     return;
   }

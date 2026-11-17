@@ -227,15 +227,14 @@ describe('the route table is exactly the documented one', () => {
   });
 
   it('apart from routes and routers the app holds only the documented middleware, in this order — a plain app.use(path, handler) would answer outside the table above', () => {
-    // body parsers / helmet / cors, then the two rate limiters (the second pair of '<anonymous>' at the end are the 404 and the error
-    // handler). A new entry here means someone mounted a handler that listRoutes cannot enumerate: give it authenticate and a row in
+    // body parsers / helmet / cors, then the two rate limiters (the final '<anonymous>' is the error handler; the 404 is Express's own). A new entry here means someone mounted a handler that listRoutes cannot enumerate: give it authenticate and a row in
     // GATES by making it a router, or write it down here on purpose.
     expect(listMiddleware(app)).toEqual([
       { path: '*', name: 'helmetMiddleware' },
       { path: '*', name: 'corsMiddleware' }, { path: '*', name: 'jsonParser' },
       { path: '*', name: '<anonymous>' },   // server.ts: req.body defaults to {} (Express 5 leaves it undefined on a bodyless request)
       { path: '/api/auth', name: '<anonymous>' }, { path: '/api', name: '<anonymous>' },
-      { path: '*', name: '<anonymous>' }, { path: '*', name: '<anonymous>' },
+      { path: '*', name: '<anonymous>' },
     ]);
   });
 
@@ -548,12 +547,40 @@ describe('while SOURCING_ENABLED is not "true"', () => {
 
 // ─── 8. known gaps, pinned as they are today ─────────────────────────────────────────────────────────────────────
 describe('characterization (what the code does today; see productIssues in the task report)', () => {
-  it('GET /api/candidates/:id/edit-log is open to a hiring_manager and returns the raw log rows — including old and new values of the compensation fields that GET /api/candidates/:id hides from that persona', async () => {
-    const row = { id: 1, candidate_id: 'C9001', field_name: 'expected_ctc', old_value: '1000000', new_value: '1400000', changed_by_name: 'Test Recruiter' };
-    fakeDb.when(/FROM candidate_edit_log/, [row]);
-    const res = await api.get('/api/candidates/C9001/edit-log', { as: 'hiring_manager' });
-    expect(res.status).toBe(200);
-    expect(res.body.logs).toEqual([row]);
+  // (Fixed: GET /api/candidates/:id/edit-log used to hand a hiring_manager the raw rows, compensation old/new values included.)
+  describe('GET /api/candidates/:id/edit-log hides compensation rows from a Hiring Manager who is not named on one of the candidate\'s roles', () => {
+    const comp = { id: 1, candidate_id: 'C9001', field_name: 'expected_ctc', old_value: '1000000', new_value: '1400000', changed_by_name: 'Test Recruiter' };
+    const other = { id: 2, candidate_id: 'C9001', field_name: 'notice_period_days', old_value: '30', new_value: '60', changed_by_name: 'Test Recruiter' };
+    const rows = [comp, { ...comp, id: 3, field_name: 'current_ctc_fixed' }, { ...comp, id: 4, field_name: 'current_ctc_variable' }, { ...comp, id: 5, field_name: 'current_esops' }, other];
+
+    it('an unrelated hiring_manager gets the non-compensation rows only', async () => {
+      fakeDb.when(/FROM candidate_edit_log/, rows);
+      fakeDb.when(/FROM applications a JOIN roles r/, [{ hiring_manager_name: 'Someone Else' }]);
+      const res = await api.get('/api/candidates/C9001/edit-log', { as: 'hiring_manager' });
+      expect(res.status).toBe(200);
+      expect(res.body.logs).toEqual([other]);
+    });
+    it('a hiring_manager with no application on the candidate sees no compensation rows either', async () => {
+      fakeDb.when(/FROM candidate_edit_log/, rows);
+      fakeDb.when(/FROM applications a JOIN roles r/, []);
+      const res = await api.get('/api/candidates/C9001/edit-log', { as: 'hiring_manager' });
+      expect(res.body.logs).toEqual([other]);
+    });
+    it('the named Hiring Manager of one of the candidate\'s roles (one of several names) sees everything', async () => {
+      fakeDb.when(/FROM candidate_edit_log/, rows);
+      fakeDb.when(/FROM applications a JOIN roles r/, [{ hiring_manager_name: 'Someone Else' }, { hiring_manager_name: 'Test Hiring Manager, Another Person' }]);
+      const res = await api.get('/api/candidates/C9001/edit-log', { as: 'hiring_manager' });
+      expect(res.body.logs).toEqual(rows);
+    });
+    it('HR-tier personas see everything and are not even asked which roles the candidate is on', async () => {
+      for (const as of ['hr_recruiter', 'leadership', 'super_admin'] as const) {
+        fakeDb.reset();
+        fakeDb.when(/FROM candidate_edit_log/, rows);
+        const res = await api.get('/api/candidates/C9001/edit-log', { as });
+        expect(res.body.logs, as).toEqual(rows);
+        expect(fakeDb.calls.some(c => /FROM applications a JOIN roles r/.test(c.sql)), as).toBe(false);
+      }
+    });
   });
 
   it('requireLeadership is exported but no route is mounted with it: across all routes a hiring_manager is never told "Leadership access required"', async () => {

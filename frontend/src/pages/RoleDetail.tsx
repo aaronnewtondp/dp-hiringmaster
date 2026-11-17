@@ -70,11 +70,24 @@ export default function RoleDetail() {
   // check in roles.ts exactly.
   const canApproveThisRole = canHR;
 
+  // The PATCH that moves a role to Approved awaits JD generation inline (30 s of Claude, two PDFs, two Drive uploads) and returns the outcome as
+  // `jdGeneration`; it is only present for that transition, so every other status change says nothing about JDs. Both ways of approving (the Approve
+  // Role button and the Change status window) go through this one function: the button used to ignore the field, so a failed generation was
+  // invisible there and the role simply showed no JD link.
+  const reportJdGeneration = (jdGeneration: { generated?: boolean; error?: string } | undefined) => {
+    if (jdGeneration?.generated) {
+      toast.success('Long-form and social JDs generated');
+    } else if (jdGeneration && !jdGeneration.generated) {
+      toast.error(`JD generation failed: ${jdGeneration.error}`);
+    }
+  };
+
   const handleApprove = async () => {
     setApproving(true);
     try {
-      await rolesApi.update(id!, { status: 'Approved' });
+      const res = await rolesApi.update(id!, { status: 'Approved' });
       toast.success('Role approved');
+      reportJdGeneration(res.data?.jdGeneration);
       qc.invalidateQueries({ queryKey: ['role', id] });
       qc.invalidateQueries({ queryKey: ['role-activity', id] });
       // Approving makes the server seed this role's draft sourcing plan (before it responds), so the cached "no plan" is stale.
@@ -164,19 +177,12 @@ export default function RoleDetail() {
     try {
       const res = await rolesApi.update(id!, { status: statusValue });
       toast.success(`Status updated to ${statusValue}`);
-      // jdGeneration is only present when this status change was the
-      // Draft/Under-Review → Approved transition (see roles.ts) — the PATCH
-      // now awaits generation inline rather than firing it in the
-      // background, so this is the first point a failure is ever visible
-      // instead of silently leaving jd_drive_link null forever.
-      const jdGeneration = res.data?.jdGeneration;
-      if (jdGeneration?.generated) {
-        toast.success('Long-form and social JDs generated');
-      } else if (jdGeneration && !jdGeneration.generated) {
-        toast.error(`JD generation failed: ${jdGeneration.error}`);
-      }
+      // jdGeneration is only present when this status change was the Draft/Under-Review → Approved transition (see roles.ts).
+      reportJdGeneration(res.data?.jdGeneration);
       setShowStatusModal(false);
       qc.invalidateQueries({ queryKey: ['role', id] });
+      // The change is logged as a "Status Changed" activity row; the timeline is its own query, so refresh it like handleApprove does.
+      qc.invalidateQueries({ queryKey: ['role-activity', id] });
       // On Hold pauses the sourcing plan, Closed closes it, reopening returns it to draft — all done server-side before it responds.
       qc.invalidateQueries({ queryKey: ['sourcing-plan', id] });
     } catch { toast.error('Failed to update status'); }
@@ -248,6 +254,7 @@ export default function RoleDetail() {
       {/* Role details — all fields inline-editable, per-section Save/Cancel */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <EditableSection
+          canEdit={canHR}
           title="Basic Info"
           data={role}
           onSave={saveRoleFields}
@@ -264,6 +271,7 @@ export default function RoleDetail() {
           ]}
         />
         <EditableSection
+          canEdit={canHR}
           title="Requirements"
           data={role}
           onSave={saveRoleFields}
@@ -278,6 +286,7 @@ export default function RoleDetail() {
         />
         {canHR && <CompBenchmarkPanel roleId={role.id} />}
         <EditableSection
+          canEdit={canHR}
           title="Description"
           data={role}
           onSave={saveRoleFields}
@@ -288,6 +297,7 @@ export default function RoleDetail() {
           ]}
         />
         <EditableSection
+          canEdit={canHR}
           title="Dates"
           tooltip="Open Date is set automatically when the role is approved and can't be edited. Close Target is when the role should be filled: the Age flag on the Roles page and the Dashboard counts the days past it, so moving it out clears an alert."
           data={role}
@@ -300,7 +310,7 @@ export default function RoleDetail() {
         <div className="card p-5 legacy-space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-900">Approval</h2>
-            {!editingNote && (
+            {!editingNote && canHR && (
               <button onClick={() => { setNoteDraft(role.approval_note || ''); setEditingNote(true); }} className="text-gray-400 hover:text-dp-600 p-1" title="Edit Approval Note">
                 <Pencil className="w-3.5 h-3.5" />
               </button>
@@ -366,6 +376,7 @@ export default function RoleDetail() {
         </div>
         <div className="legacy-space-y-2">
           <EditableSection
+            canEdit={canHR}
             title="Links & Assets"
             tooltip="Long-form and Social JD are generated automatically when a role is Approved. While it is still Approved, HR can re-run them with Regenerate JD (it overwrites both links); once the role moves on they can't be regenerated here. Some roles have a long-form JD written outside the system — for those the link points straight at that document, Regenerate JD doesn't appear, and ResumeIQ scores against it. Assignment Link is the brief emailed to the candidate by Send Assignment."
             data={role}

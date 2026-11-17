@@ -250,20 +250,14 @@ test.describe('cron routes — the CRON_SECRET gate', () => {
     }
   });
 
-  test('TODAY: Vercel Cron issues GET, and one of the two scheduled paths answers 404, so the daily e-mail digest never fires', async ({ request }) => {
-    // backend/vercel.json "crons". Vercel Cron calls each path with GET. sourcing-check accepts GET (401 without the secret = the
-    // route exists and is gated); email-digest is registered with router.post only. Fixing the route (add router.get) flips this test.
+  test('every path scheduled in vercel.json answers GET (Vercel Cron issues GET): gated by the secret, never a 404; the retired email-digest is not scheduled', async ({ request }) => {
     const vercel = JSON.parse(fs.readFileSync(path.join(process.cwd(), '..', 'backend', 'vercel.json'), 'utf8'));
     const cronPaths: string[] = vercel.crons.map((c: { path: string }) => c.path);
-    expect(cronPaths.sort()).toEqual(['/api/cron/email-digest', '/api/cron/sourcing-check']);
-
-    const unreachableByGet: string[] = [];
+    expect(cronPaths.sort()).toEqual(['/api/cron/sourcing-check']);
     for (const p of cronPaths) {
       const res = await rawStatus(request, 'GET', p);
-      if (res.status === 404) unreachableByGet.push(p);
-      else expect(res.status, `GET ${p} should at least be gated`).toBe(401);
+      expect(res.status, `GET ${p} should be gated, not missing`).toBe(401);
     }
-    expect(unreachableByGet).toEqual(['/api/cron/email-digest']);
   });
 });
 

@@ -20,7 +20,7 @@ describe('getSlaHours: the hours stored for an application entering a stage', ()
     ['Founders Round', 48],
     ['Reference Check', 48],
     ['Offer Released', 48],
-    ['Assignment Round', 72],            // falls through to the idle value: ASSIGNMENT_SEND / ASSIGNMENT_EVALUATE are not used here
+    ['Assignment Round', 48],            // one of the five score-tiered stages (24 from fit 75); it used to fall through to the idle value 72
     ['Pre-Joining Documents', 72],
     ['Offer Discussion', 72],
     ['Offer Accepted', 72],
@@ -44,13 +44,16 @@ describe('getSlaHours: the hours stored for an application entering a stage', ()
     expect(getSlaHours('Pre-Interview')).toBe(SLA_HOURS.IDLE);       // only a prefix counts
   });
 
-  it.each([[null], [undefined], [0], [10], [74], [74.9], [75], [80], [100]])('a fit score of %j does not change the Applied and Screened value today (high-fit and normal are both 48)', score => {
-    expect(getSlaHours('Applied and Screened', score)).toBe(48);
-    expect(SLA_HOURS.RESUME_REVIEW_HIGH_FIT).toBe(SLA_HOURS.RESUME_REVIEW_NORMAL);
+  it.each([[null, 48], [undefined, 48], [0, 48], [10, 48], [74, 48], [74.9, 48], [75, 24], [80, 24], [100, 24]])('a fit score of %j stores %i hours at Applied and Screened (24 from fit 75, as the engine breaches)', (score, hours) => {
+    expect(getSlaHours('Applied and Screened', score)).toBe(hours);
   });
 
-  it('the fit score is ignored at every other stage', () => {
-    for (const stage of STAGE_ORDER.filter(s => s !== 'Applied and Screened')) expect(getSlaHours(stage, 99)).toBe(getSlaHours(stage, null));
+  it('the fit score tiers exactly the five SOP stages and is ignored at every other stage', () => {
+    const tiered = ['Applied and Screened', 'Interview Round 1', 'Interview Round 2', 'Founders Round', 'Assignment Round'];
+    for (const stage of STAGE_ORDER) {
+      if (tiered.includes(stage)) expect([stage, getSlaHours(stage, 99)]).toEqual([stage, 24]);
+      else expect([stage, getSlaHours(stage, 99)]).toEqual([stage, getSlaHours(stage, null)]);
+    }
   });
 
   it('KNOWN DIVERGENCE (pinned so a change is deliberate): the stored idle value is 72h while the engine\'s Idle Candidate breach is 48h', () => {

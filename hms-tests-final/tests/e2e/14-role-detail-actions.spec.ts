@@ -7,6 +7,9 @@
  * Data: written by SQL (helpers/e2e-roles.ts) — a role's JD source, a stored review and a portfolio flag have no API — and removed in
  * afterAll. No Anthropic key, no Google: JD (re)generation cannot succeed here, so what is asserted is that the page shows what the server
  * reports; the one test that needs a real model is tagged @live.
+ *
+ * No test here pins a defect "as TODAY" any more. (Fixed 2026-11-17: the activity timeline refreshes after Change status, and a Hiring
+ * Manager is not offered the edit pencils on a role page; both are asserted as the fixed behaviour below.)
  */
 import { test, expect, Page } from '@playwright/test';
 import { Client } from 'pg';
@@ -150,19 +153,17 @@ test.describe('Change status and the closure summary', () => {
     expect((await api('hm_satyadev')).status(), 'another Hiring Manager may not').toBe(403);
   });
 
-  test('TODAY: the activity timeline on the page does not refresh after Change status (approving does) — the new entry shows after a reload', async ({ page }) => {
+  test('the activity timeline on the page refreshes after Change status: the new entry shows without a reload', async ({ page }) => {
     const role = await fx.role('timeline');
     await openRole(page, 'hr', role);
     await expect(page.getByText('No activity logged yet')).toBeVisible();
     await changeStatusTo(page, 'On Hold');
     await expect(page.getByText('Status updated to On Hold')).toBeVisible();
     await expect(statusDialog(page)).toHaveCount(0);
-    // the timeline query is not invalidated by handleStatusUpdate (RoleDetail.tsx), unlike handleApprove: still empty
-    await expect(page.getByText('No activity logged yet')).toBeVisible();
-    await page.reload();
     const timeline = page.locator('div.card').filter({ has: page.getByRole('heading', { name: 'Activity timeline' }) });
     await expect(timeline).toContainText('Status Changed');
     await expect(timeline).toContainText('Status → On Hold');
+    await expect(page.getByText('No activity logged yet')).toHaveCount(0);
   });
 });
 
@@ -248,18 +249,13 @@ test.describe('A Hiring Manager cannot approve a role — not even their own', (
     expect(approvals.rowCount).toBe(0);
   });
 
-  test('TODAY: the page still offers a Hiring Manager the edit pencils, but every save is refused (403): an error toast, edit mode stays open, nothing changes', async ({ page }) => {
+  test('a Hiring Manager is not offered the edit pencils on the role page, and the server refuses a save from one (403)', async ({ page }) => {
     const role = await fx.role('hm-pencil', { hm: 'Alex' });
     await openRole(page, 'hm_alex', role);
-    const basic = sectionCard(page, 'Basic Info');
-    await basic.getByRole('button', { name: 'Edit Basic Info' }).click();
-    await basic.locator('label:text-is("Location") + select').selectOption('Bangalore');
-    const patches: number[] = [];
-    page.on('response', r => { if (r.request().method() === 'PATCH' && r.url().endsWith(`/roles/${role.id}`)) patches.push(r.status()); });
-    await basic.getByRole('button', { name: 'Save' }).click();
-    await expect(page.getByText('Failed to update Basic Info')).toBeVisible();
-    await expect(basic.getByRole('button', { name: 'Save' })).toBeVisible();                                                              // still editing
-    expect(patches).toEqual([403]);
+    await expect(sectionCard(page, 'Basic Info')).toContainText('Location');                  // the section is shown, read-only
+    await expect(page.getByRole('button', { name: /^Edit / })).toHaveCount(0);
+    const res = await authed(page.request, await getToken(page.request, 'hm_alex')).patch(`/api/roles/${role.id}`, { location: 'Bangalore' });
+    expect(res.status()).toBe(403);
     expect((await roleRow(role.id)).location).toBe('Gurgaon');
   });
 });

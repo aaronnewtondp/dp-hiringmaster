@@ -387,11 +387,10 @@ test.describe('PWA install surface (production build)', () => {
 
 // ── Info markers on touch ────────────────────────────────────────────────────────────────────────────────────────────────────────
 test.describe('info markers on a touch screen', () => {
-  // InfoTooltip opens on mouseenter AND toggles on click. A tap fires both, in that order: the emulated mouseenter opens the popover and the
-  // click then toggles it shut, so the FIRST tap shows nothing; the second tap (the pointer is already "inside") toggles it open.
-  // Measured with real touch events (touchstart, touchend, mouseover, mouseenter, mousedown, mouseup, click): closed / open / closed.
-  // When a marker opens on the first tap, this test fails: rename it and assert that.
-  test('TODAY: the first tap on an info marker leaves its popover closed, the second opens it, the third closes it, and a tap elsewhere closes an open one', async ({ page }) => {
+  // InfoTooltip opens on a real mouse's hover and toggles on click. A tap fires an emulated mouseenter and then the click; the marker now ignores a
+  // mouseenter that follows a touch or pen pointerenter, so the click alone opens it: the FIRST tap opens, the second closes (it used to be
+  // closed / open / closed, because the emulated mouseenter opened it and the click shut it again).
+  test('the first tap on an info marker opens its popover, the second closes it, and a tap elsewhere or Escape closes an open one', async ({ page }) => {
     await loginViaApi(page, 'hr');
     await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
     await page.waitForLoadState('networkidle');
@@ -400,15 +399,18 @@ test.describe('info markers on a touch screen', () => {
     const popover = markerPopover(marker);
 
     await marker.tap();
-    await expect(popover, 'TODAY: a first tap does not show the popover').toHaveCount(0);
+    await expect(popover, 'a first tap shows the popover').toBeVisible();
     await marker.tap();
-    await expect(popover, 'a second tap shows it').toBeVisible();
-    await marker.tap();
-    await expect(popover, 'a third tap hides it again').toHaveCount(0);
+    await expect(popover, 'a second tap hides it').toHaveCount(0);
 
     await marker.tap();
     await expect(popover).toBeVisible();
     await heading.tap();                                                                       // a tap anywhere else closes an open popover
+    await expect(popover).toHaveCount(0);
+
+    await marker.tap();
+    await expect(popover).toBeVisible();
+    await page.keyboard.press('Escape');
     await expect(popover).toHaveCount(0);
   });
 });

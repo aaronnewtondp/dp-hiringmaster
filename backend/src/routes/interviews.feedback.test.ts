@@ -233,14 +233,34 @@ describe('PATCH /:id/feedback — what a submission writes', () => {
     expect(fakeDb.find(SQL.appStage)).toEqual([]);
   });
 
-  it('characterization: the body is not validated — an empty submission is accepted, marks the round Submitted with empty fields, and resolves the overdue-feedback breach', async () => {
-    programRound();
-    const res = await feedback('hiring_manager', {});
-    expect(res.status).toBe(200);
-    const u = fakeDb.one(SQL.standardUpdate);
-    expect(u.params.slice(0, 11).every(p => p == null)).toBe(true);                // every field of the form is empty (undefined is bound as NULL)
-    expect(u.sql).toContain(`feedback_status='Submitted'`);
-    expect(fakeDb.find(SQL.resolveFeedbackDue)).toHaveLength(1);
+  it('an empty submission is refused 400 and nothing is written: no Submitted mark, no breach resolved (it used to silence the overdue-feedback SLA with no feedback on record)', async () => {
+    for (const body of [{}, { notes: '   ' }, { strengths_observed: '', eval_areas_assessed: [], scores_per_area: {} }, { confidence_level: null, round_recommendation: undefined }, { eval_areas_assessed: ['', '  '] }]) {
+      fakeDb.reset(); programRound();
+      const res = await feedback('hiring_manager', body);
+      expect([JSON.stringify(body), res.status, res.body.error]).toEqual([JSON.stringify(body), 400, 'Feedback is empty: fill in at least one field before submitting.']);
+      nothingWritten();
+    }
+  });
+
+  it('any one real field is enough to submit (the rest may stay empty)', async () => {
+    for (const body of [{ notes: 'ran long' }, { round_recommendation: 'Hold' }, { scores_per_area: { Communication: 3 } }, { eval_areas_assessed: ['Communication'] }]) {
+      fakeDb.reset(); programRound();
+      const res = await feedback('hiring_manager', body);
+      expect([JSON.stringify(body), res.status]).toEqual([JSON.stringify(body), 200]);
+      expect(fakeDb.find(SQL.resolveFeedbackDue)).toHaveLength(1);
+    }
+  });
+
+  it('on an Assignment round the assignment fields decide: standard-form fields alone are "empty" there (they are never stored), an outcome, a score or notes is enough', async () => {
+    const asg = { ...ROUND, round_type: 'Assignment' };
+    fakeDb.reset(); programRound(asg);
+    const only = await feedback('hr_recruiter', { notes: 'x', overall_assessment: 'y', round_recommendation: 'Proceed' });
+    expect([only.status, only.body.error]).toEqual([400, 'Feedback is empty: fill in at least one field before submitting.']);
+    nothingWritten();
+    for (const body of [{ assignment_outcome: 'Pass' }, { score_technical_accuracy: 4 }, { assignment_notes: 'solid' }]) {
+      fakeDb.reset(); programRound(asg);
+      expect([JSON.stringify(body), (await feedback('hr_recruiter', body)).status]).toEqual([JSON.stringify(body), 200]);
+    }
   });
 });
 
@@ -333,7 +353,7 @@ describe('PATCH /:id/feedback — moving the candidate on by itself after positi
     it('advance only for outcome "Approved for Next Round" with a weighted total above 2.5', async () => {
       programRound(ASSIGNMENT_ROUND, APP_AT('Assignment Round'));
       expect((await feedback('hr_recruiter', rubric('Approved for Next Round', 4), 'IR0002')).body.auto_advanced).toEqual({ from: 'Assignment Round', to: 'Founders Round' });
-      for (const [outcome, score] of [['Rejected', 5], ['Approved for Next Round', 2], ['Approved for Next Round', 2.5], ['Approved with Concerns', 5]] as const) {
+      for (const [outcome, score] of [['Rejected', 5], ['Approved for Next Round', 2], ['Approved for Next Round', 1], ['Approved with Concerns', 5]] as const) {
         fakeDb.reset(); programRound(ASSIGNMENT_ROUND, APP_AT('Assignment Round'));
         const res = await feedback('hr_recruiter', rubric(outcome, score), 'IR0002');
         expect([outcome, score, res.body.auto_advanced]).toEqual([outcome, score, null]);
@@ -347,28 +367,44 @@ describe('PATCH /:id/feedback — moving the candidate on by itself after positi
     });
   });
 
-  it('characterization: scores are not range-checked — a score of 99 passes the "above 2.5" test, so an out-of-range value advances the candidate', async () => {
-    programRound(ROUND, APP_AT('Interview Round 1'));
-    const res = await feedback('hiring_manager', { ...STANDARD_FEEDBACK, scores_per_area: { a: 99 }, round_recommendation: 'Proceed' });
-    expect(fakeDb.one(SQL.standardUpdate).params[2]).toBe(99);
-    expect(res.body.auto_advanced).toEqual({ from: 'Interview Round 1', to: 'Interview Round 2' });
+  it('scores must be 1-5: an out-of-range, non-numeric or malformed score is a 400 before anything is stored or advanced (a 99 used to pass the "above 2.5" test and advance the candidate)', async () => {
+    const bad: Array<Record<string, unknown>> = [
+      { scores_per_area: { a: 99 } }, { scores_per_area: { a: 0 } }, { scores_per_area: { a: 'five' } }, { scores_per_area: { a: 3, b: null } },
+      { scores_per_area: [3, 4] }, { scores_per_area: 'x' }, { scores_per_area: { a: NaN } },
+    ];
+    for (const extra of bad) {
+      fakeDb.reset(); programRound(ROUND, APP_AT('Interview Round 1'));
+      const res = await feedback('hiring_manager', { ...STANDARD_FEEDBACK, ...extra, round_recommendation: 'Proceed' });
+      expect([JSON.stringify(extra), res.status]).toEqual([JSON.stringify(extra), 400]);
+      expect(fakeDb.writes()).toEqual([]);
+    }
+    fakeDb.reset(); programRound(ROUND, APP_AT('Interview Round 1'));
+    const ok = await feedback('hiring_manager', { ...STANDARD_FEEDBACK, scores_per_area: { a: 5, b: 1 }, round_recommendation: 'Proceed' });
+    expect(ok.status).toBe(200);
+  });
+
+  it('assignment scores must be whole numbers 1-5 (the columns are INTEGER with a CHECK): 0, 6, 2.5 and strings are a 400, nothing written', async () => {
+    for (const v of [0, 6, 2.5, '4', -1]) {
+      fakeDb.reset(); programRound(ASSIGNMENT_ROUND, APP_AT('Assignment Round'));
+      const res = await feedback('hr_recruiter', { assignment_outcome: 'Approved for Next Round', score_technical_accuracy: v, score_problem_solving: 4, score_clarity: 4, score_practical_thinking: 4, score_completeness: 4 }, 'IR0002');
+      expect([String(v), res.status]).toEqual([String(v), 400]);
+      expect(fakeDb.writes()).toEqual([]);
+    }
   });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('POST / — creating a round (HR-tier) and the Assignment e-mail', () => {
   const APP_LOOKUP = /^SELECT a\.candidate_id, a\.role_id, c\.full_name AS candidate_name, c\.email AS candidate_email/;
-  const NEXT_ID = /^SELECT id FROM interview_rounds ORDER BY id DESC LIMIT 1$/;
-  const INSERT_ROUND = /^INSERT INTO interview_rounds \(id, application_id, round_name, round_type, round_number,/;
+  const INSERT_ROUND = /^INSERT INTO interview_rounds \(application_id, round_name, round_type, round_number,/;
   const CANDIDATE = { candidate_id: 'C9001', role_id: 'R9001', candidate_name: 'Candidate Example', candidate_email: 'candidate@example.test', role_title: 'Quality Assurance Engineer', candidate_resume_link: null };
   const create = (as: Actor, body: Record<string, unknown>) => api.post('/api/interviews', { as, body });
 
-  function programCreate(candidate: Record<string, unknown> | null = CANDIDATE, lastId: string | null = null) {
+  function programCreate(candidate: Record<string, unknown> | null = CANDIDATE) {
     fakeDb.whenOne(APP_LOOKUP, candidate);
-    fakeDb.whenOne(NEXT_ID, lastId ? { id: lastId } : null);
     fakeDb.when(INSERT_ROUND, p => [{
-      id: p[0], application_id: p[1], round_name: p[2], round_type: p[3], round_number: p[4], interviewer_emails: p[5], scheduled_date: p[6],
-      interview_mode: p[7], focus_areas: p[8], duration_minutes: p[9], assignment_mail_body: p[10], assignment_cc: p[11], assignment_link: p[12],
+      id: 'IR0001', application_id: p[0], round_name: p[1], round_type: p[2], round_number: p[3], interviewer_emails: p[4], scheduled_date: p[5],
+      interview_mode: p[6], focus_areas: p[7], duration_minutes: p[8], assignment_mail_body: p[9], assignment_cc: p[10], assignment_link: p[11],
     }]);
     fakeDb.whenOne(/^SELECT candidate_id, role_id FROM applications WHERE id=\$1$/, { candidate_id: 'C9001', role_id: 'R9001' });
   }
@@ -411,23 +447,17 @@ describe('POST / — creating a round (HR-tier) and the Assignment e-mail', () =
     nothingWritten();
   });
 
-  describe('round ids (nextRoundId)', () => {
-    it.each([[null, 'IR0001'], ['IR0001', 'IR0002'], ['IR0009', 'IR0010'], ['IR0999', 'IR1000'], ['IR9999', 'IR10000']])('after %s the next round is %s (zero-padded to four digits, never truncated)', async (last, next) => {
-      programCreate(CANDIDATE, last);
+  describe('round ids', () => {
+    it('the id comes from the column default (seq_interview), not from MAX+1: the INSERT carries no id, no SELECT of the latest id runs, and it is one statement', async () => {
+      programCreate();
       const res = await create('hr_recruiter', STANDARD);
-      expect(res.body.round.id).toBe(next);
-      expect(fakeDb.one(INSERT_ROUND).params[0]).toBe(next);
-      expect(fakeDb.one(NEXT_ID).inTransaction).toBe(true);
-    });
-
-    it('characterization: the "last" id is the greatest as TEXT, so once IR10000 exists the latest is again IR9999 and the next id issued is IR10000 — an id that already exists', async () => {
-      const existing = ['IR9998', 'IR9999', 'IR10000'];
-      fakeDb.whenOne(APP_LOOKUP, CANDIDATE);
-      fakeDb.when(NEXT_ID, () => [{ id: [...existing].sort().reverse()[0] }]);          // what ORDER BY id DESC returns for text ids
-      fakeDb.when(INSERT_ROUND, p => [{ id: p[0] }]);
-      const res = await create('hr_recruiter', STANDARD);
-      expect(existing).toContain(res.body.round.id);
-      expect(res.body.round.id).toBe('IR10000');
+      expect(res.status).toBe(201);
+      expect(res.body.round.id).toBe('IR0001');
+      const ins = fakeDb.one(INSERT_ROUND);
+      expect(ins.sql).not.toMatch(/\(\s*id\b/);
+      expect(ins.params).not.toContain('IR0001');
+      expect(ins.inTransaction).toBe(true);
+      expect(fakeDb.calls.some(c => /SELECT id FROM interview_rounds ORDER BY id DESC/.test(c.sql))).toBe(false);
     });
   });
 
@@ -517,13 +547,18 @@ describe('POST / — creating a round (HR-tier) and the Assignment e-mail', () =
       expect(fakeDb.tx.committed).toBe(1);
     });
 
-    it('a candidate with no e-mail address gets nothing sent; the reason is stored and returned', async () => {
-      programCreate({ ...CANDIDATE, candidate_email: null });
+    it.each([[null], [''], ['   ']])('a candidate whose e-mail is %j gets nothing sent; ONE message is stored, logged and returned, the round exists (201)', async (mail) => {
+      programCreate({ ...CANDIDATE, candidate_email: mail });
       const res = await create('hr_recruiter', ASSIGNMENT);
       expect(res.status).toBe(201);
+      expect(res.body.round.id).toBe('IR0001');
       expect(h.sendAssignmentEmail).not.toHaveBeenCalled();
-      expect(res.body.email).toEqual({ sent: false, error: 'Candidate has no email on file — cannot send assignment.' });
+      expect(res.body.email).toEqual({ sent: false, error: 'Candidate has no email on file.' });
+      expect(res.body.round.assignment_email_error).toBe('Candidate has no email on file.');
       expect(fakeDb.one(/^UPDATE interview_rounds SET assignment_email_error=\$1, updated_at=NOW\(\) WHERE id=\$2$/).params).toEqual(['Candidate has no email on file.', 'IR0001']);
+      const log = fakeDb.find(SQL.feedbackLog).filter(c => c.params.includes('Assignment Email Failed'));
+      expect(log).toHaveLength(1);
+      expect(log[0].params).toEqual([APP_ID, 'C9001', 'R9001', 'Assignment Email Failed', 'Candidate has no email on file.', null, expect.any(String), expect.any(String)]);
     });
   });
 });
@@ -587,6 +622,18 @@ describe('POST /:id/assignment-send (retry) and /:id/assignment-submit — HR-ti
     expect(fakeDb.one(/^UPDATE interview_rounds SET assignment_email_error=\$1, updated_at=NOW\(\) WHERE id=\$2$/).params).toEqual(['still failing', 'IR0002']);
   });
 
+  it.each([[null], ['  ']])('a retry for a candidate whose e-mail is %j sends nothing and answers, stores and logs the same single message as creation', async (mail) => {
+    programRetry(ASSIGNMENT_ROUND, { candidate_name: 'Candidate Example', candidate_email: mail, role_title: 'Quality Assurance Engineer' });
+    const res = await retry('hr_recruiter');
+    expect(res.status).toBe(200);
+    expect(h.sendAssignmentEmail).not.toHaveBeenCalled();
+    expect(res.body.email).toEqual({ sent: false, error: 'Candidate has no email on file.' });
+    expect(fakeDb.one(/^UPDATE interview_rounds SET assignment_email_error=\$1, updated_at=NOW\(\) WHERE id=\$2$/).params).toEqual(['Candidate has no email on file.', 'IR0002']);
+    const log = fakeDb.find(SQL.feedbackLog).filter(c => c.params.includes('Assignment Email Failed'));
+    expect(log).toHaveLength(1);
+    expect(log[0].params.slice(0, 5)).toEqual([ASSIGNMENT_ROUND.application_id, 'C9001', 'R9001', 'Assignment Email Failed', 'Candidate has no email on file.']);
+  });
+
   it('characterization: nothing stops a retry on a round whose e-mail already went out — the "only before it has been sent" rule lives in the UI, the API sends again', async () => {
     programRetry({ ...ASSIGNMENT_ROUND, assignment_send_date: '2026-10-28T10:00:00.000Z' });
     const res = await retry('hr_recruiter');
@@ -606,5 +653,18 @@ describe('POST /:id/assignment-send (retry) and /:id/assignment-submit — HR-ti
     expect(fakeDb.one(/^UPDATE interview_rounds SET assignment_submission_date=NOW\(\), assignment_submission_link=\$1, updated_at=NOW\(\) WHERE id=\$2$/).params).toEqual(['https://x.example.test/answer', 'IR0002']);
     expect(fakeDb.one(/^UPDATE applications SET assignment_submission_link=\$1, last_updated=NOW\(\) WHERE id=\$2$/).params).toEqual(['https://x.example.test/answer', APP_ID]);
     expect(fakeDb.tx).toEqual({ started: 1, committed: 1, rolledBack: 0 });
+  });
+
+  it('assignment-submit: a non-Assignment round answers the same 400 as assignment-send, with nothing written', async () => {
+    for (const round_type of ['Standard', 'Founders', 'Reference', null]) {
+      fakeDb.reset(); programRetry({ ...ASSIGNMENT_ROUND, round_type });
+      const res = await api.post('/api/interviews/IR0002/assignment-submit', { as: 'hr_recruiter', body: { submission_link: 'https://x.example.test/answer' } });
+      expect([round_type, res.status, res.body]).toEqual([round_type, 400, { error: 'This round is not configured as an Assignment round' }]);
+      expect(fakeDb.writes()).toEqual([]);
+      expect(fakeDb.tx.started).toBe(0);
+    }
+    fakeDb.reset(); programRetry({ ...ASSIGNMENT_ROUND, round_type: 'Standard' });
+    const send = await api.post('/api/interviews/IR0002/assignment-send', { as: 'hr_recruiter', body: { mail_body_content: 'x', assignment_link: 'https://x.example.test' } });
+    expect(send.body).toEqual({ error: 'This round is not configured as an Assignment round' });
   });
 });

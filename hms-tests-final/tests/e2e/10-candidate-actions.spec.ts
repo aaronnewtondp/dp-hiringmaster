@@ -12,6 +12,7 @@
  * Wording is asserted only where it is a button or label the test clicks, or an error message the server owns; Help text and tooltips never.
  *
  * Tests whose title contains TODAY pin what the product does now where that looks unintended; each is listed in the run report.
+ * (Fixed 2026-11-17, no longer pinned here: a Hiring Manager not on a round is not offered Submit feedback, and sees no edit pencils on a candidate.)
  */
 import { gotoAs } from '../helpers/e2e';
 import { authed, getToken, USERS } from '../helpers/api';
@@ -168,7 +169,7 @@ test.describe('Stage modal', () => {
     await expect(dialog.getByRole('button', { name: 'Update', exact: true })).toBeDisabled();
   });
 
-  test('TODAY the Stage modal has no skip-reason control: a move blocked by pending feedback shows the server\'s reason and waits for the feedback', async ({ page, request }) => {
+  test('a move blocked by pending feedback shows the server\'s reason, waits for the feedback, and then goes through without any bypass', async ({ page, request }) => {
     const a = await arrange(request, { stage: 'Interview Round 1' });
     const round = await createStandardRound(request, a.appId, { round_name: `Pending Round ${a.role.id}` });
     const posts = recordRequests(page, isPost(`/api/applications/${a.appId}/stage`));
@@ -177,23 +178,48 @@ test.describe('Stage modal', () => {
     await stageButton(page).click();
     const dialog = dialogWith(page, 'Update stage');
     await dialog.getByRole('combobox').selectOption('Interview Round 2');
+    // no reason box until the server has refused
+    await expect(dialog.getByRole('textbox')).toHaveCount(0);
     await dialog.getByRole('button', { name: 'Update', exact: true }).click();
 
-    // The server's own message names the round; the modal stays open and the stage does not move.
+    // The server's own message names the round; the modal stays open, the stage does not move, and the bypass reason box appears.
     await expect(toastWith(page, 'Feedback is still pending for')).toContainText(round.round_name);
     await expect(dialog).toBeVisible();
     expect((await getApp(request, a.appId)).stage).toBe('Interview Round 1');
-    // The only inputs are the stage and (for an over-budget move) the budget reason: nothing lets HR give a reason to skip the gate.
-    await expect(dialog.getByRole('combobox')).toHaveCount(1);
-    await expect(dialog.getByRole('textbox')).toHaveCount(0);
+    await expect(dialog.getByLabel('Reason to proceed anyway')).toBeVisible();
 
+    // Feedback arrives; the box is left empty, so the retry is the plain request and the server lets it through.
     await submitFeedbackViaApi(request, round.id);
     await dialog.getByRole('button', { name: 'Update', exact: true }).click();
     await expect(toastWith(page, 'Stage updated to Interview Round 2')).toBeVisible();
     await expect(dialog).toHaveCount(0);
-    // Both attempts carried exactly the same body: the UI never sends skip_reason (the API supports it; no screen offers it).
     expect(posts.bodies()).toEqual([{ new_stage: 'Interview Round 2' }, { new_stage: 'Interview Round 2' }]);
     expect((await getApp(request, a.appId)).stage).toBe('Interview Round 2');
+  });
+
+  test('a written reason in the Stage modal bypasses the pending-feedback block: skip_reason is sent, the stage moves and the reason is in the activity log', async ({ page, request }) => {
+    const a = await arrange(request, { stage: 'Interview Round 1' });
+    await createStandardRound(request, a.appId, { round_name: `Bypass Round ${a.role.id}` });
+    const posts = recordRequests(page, isPost(`/api/applications/${a.appId}/stage`));
+    await open(page, 'hr', a);
+
+    await stageButton(page).click();
+    const dialog = dialogWith(page, 'Update stage');
+    await dialog.getByRole('combobox').selectOption('Interview Round 2');
+    await dialog.getByRole('button', { name: 'Update', exact: true }).click();
+    await expect(toastWith(page, 'Feedback is still pending for')).toBeVisible();
+    await dialog.getByLabel('Reason to proceed anyway').fill('Panel feedback was given verbally');
+    await dialog.getByRole('button', { name: 'Update', exact: true }).click();
+
+    await expect(toastWith(page, 'Stage updated to Interview Round 2')).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    expect(posts.bodies()).toEqual([
+      { new_stage: 'Interview Round 2' },
+      { new_stage: 'Interview Round 2', skip_reason: 'Panel feedback was given verbally' },
+    ]);
+    expect((await getApp(request, a.appId)).stage).toBe('Interview Round 2');
+    const detail = await (await (await hrApi(request)).get(`/api/applications/${a.appId}`)).json() as { activity: Array<{ description?: string; action_description?: string }> };
+    expect(JSON.stringify(detail.activity)).toContain('Stage skipped to Interview Round 2. Reason: Panel feedback was given verbally');
   });
 
   test('Reference Check: leaving the stage needs a reference; the Add modal validates, records it, and unblocks the move', async ({ page, request }) => {
@@ -321,7 +347,7 @@ test.describe('Status modal: reject, withdraw, hold', () => {
     await expect(dialogWith(page, 'Rejection reason').getByRole('listitem')).toHaveCount(0);   // one reason is plain text, not a list
   });
 
-  test('TODAY withdraw needs exactly one reason (a dropdown, no e-mail draft) and the reason is stored in the rejection column', async ({ page, request }) => {
+  test('withdraw needs exactly one reason (a dropdown, no e-mail draft) and the reason is stored in the withdrawal column', async ({ page, request }) => {
     const a = await arrange(request);
     const posts = recordRequests(page, isPost(`/api/applications/${a.appId}/status`));
     await open(page, 'hr', a);
@@ -338,12 +364,12 @@ test.describe('Status modal: reject, withdraw, hold', () => {
     await dialog.getByRole('button', { name: 'Update', exact: true }).click();
 
     await expect(toastWith(page, 'Status updated to Withdrawn')).toBeVisible();
-    expect(posts.bodies()).toEqual([{ new_status: 'Withdrawn', rejection_reason_cats: ['Process too slow'], rejection_reason_cat: 'Process too slow' }]);
+    expect(posts.bodies()).toEqual([{ new_status: 'Withdrawn', withdrawal_reason_cat: 'Process too slow' }]);
     const app = await getApp(request, a.appId);
     expect(app.status).toBe('Withdrawn');
-    // TODAY: the UI sends a withdrawal's reason in the REJECTION fields, so withdrawal_reason_cat (which the API supports) stays empty.
-    expect(app.rejection_reason_cat).toBe('Process too slow');
-    expect(app.withdrawal_reason_cat).toBeNull();
+    // The withdrawal's reason is stored in the withdrawal column; the rejection column stays empty.
+    expect(app.withdrawal_reason_cat).toBe('Process too slow');
+    expect(app.rejection_reason_cat).toBeNull();
   });
 
   test('Hold for Future sends no reasons even after Rejected was ticked, and Active brings the application back', async ({ page, request }) => {
@@ -539,7 +565,7 @@ test.describe('Interview rounds: feedback', () => {
     await expect(stageBadge(page, 'Interview Round 2')).toBeVisible();
   });
 
-  test('TODAY after an auto-advance the candidate page keeps showing the old stage until it is reloaded', async ({ page, request }) => {
+  test('after an auto-advance the candidate page shows the new stage without a reload', async ({ page, request }) => {
     const a = await arrange(request, { stage: 'Interview Round 1' });
     const round = await createStandardRound(request, a.appId, { round_name: `Stale ${a.role.id}`, focus_areas: ['Technical Knowledge'] });
     await open(page, 'hr', a);
@@ -550,13 +576,10 @@ test.describe('Interview rounds: feedback', () => {
     await expect(toastWith(page, 'Positive feedback — candidate auto-advanced to Interview Round 2')).toBeVisible();
     await expect.poll(async () => (await getApp(request, a.appId)).stage).toBe('Interview Round 2');
 
-    // The feedback modal only refreshes the rounds, not the candidate: the badge (and the strip above it) still say Interview Round 1.
+    // The feedback modal refreshes the candidate as well as the rounds: the badge follows with no reload.
     await expect(roundRow(page, round.round_name)).toContainText('Submitted');
-    await expect(stageBadge(page, 'Interview Round 1')).toBeVisible();
-    await expect(stageBadge(page, 'Interview Round 2')).toHaveCount(0);
-    await page.reload();
-    await expectCandidatePage(page, a.name);
     await expect(stageBadge(page, 'Interview Round 2')).toBeVisible();
+    await expect(stageBadge(page, 'Interview Round 1')).toHaveCount(0);
   });
 
   test('a low score with Proceed does not advance: the 2.5 midpoint rule', async ({ page, request }) => {
@@ -614,18 +637,19 @@ test.describe('Interview rounds: feedback', () => {
     expect((await getRounds(request, a.appId))[0].feedback_status).toBe('Submitted');
   });
 
-  test('TODAY a Hiring Manager not listed on the round still sees Submit feedback; the server refuses and the modal says why', async ({ page, request }) => {
+  test('a Hiring Manager not listed on the round is not offered Submit feedback; the server refuses it too, and one listed (or a round with nobody listed) is', async ({ page, request }) => {
     const a = await arrange(request, { stage: 'Interview Round 1' });
     const round = await createStandardRound(request, a.appId, { round_name: `HM other ${a.role.id}`, interviewer_emails: [USERS.hm_alex.email], focus_areas: ['Technical Knowledge'] });
     await open(page, 'hm_satyadev', a);                                    // Satyadev is not on this round
-    await roundRow(page, round.round_name).getByRole('button', { name: 'Submit feedback' }).click();   // TODAY: the button is not hidden
-    const dialog = dialogWith(page, /Interview Feedback/);
-    await fillFeedback(page, dialog, { 'Technical Knowledge': 3 }, 'Hold');
-    await dialog.getByRole('button', { name: 'Submit feedback' }).click();
+    await expect(roundRow(page, round.round_name)).toBeVisible();
+    await expect(roundRow(page, round.round_name).getByRole('button', { name: 'Submit feedback' })).toHaveCount(0);
 
-    await expect(toastWith(page, 'You are not an assigned interviewer for this round.')).toBeVisible();
-    await expect(dialog).toBeVisible();                                    // the modal stays open on a refusal
+    const refused = await authed(request, await getToken(request, 'hm_satyadev')).patch(`/api/interviews/${round.id}/feedback`, { overall_assessment: 'E2E not allowed' });
+    expect(refused.status(), await refused.text()).toBe(403);
     expect((await getRounds(request, a.appId))[0].feedback_status).toBe('Pending');
+
+    await open(page, 'hm_alex', a);                                        // Alex is listed: the button is there
+    await expect(roundRow(page, round.round_name).getByRole('button', { name: 'Submit feedback' })).toBeVisible();
   });
 });
 
@@ -771,7 +795,7 @@ test.describe('Assignment round', () => {
     await expect.poll(async () => (await getApp(request, a.appId)).stage).toBe('Founders Round');
     await page.reload();
     await expectCandidatePage(page, a.name);
-    await expect(stageBadge(page, 'Founders Round')).toBeVisible();   // (until this reload the page still showed Assignment Round: see the TODAY test above)
+    await expect(stageBadge(page, 'Founders Round')).toBeVisible();
   });
 });
 
@@ -826,16 +850,15 @@ test.describe('Persona differences on the candidate page', () => {
     await expect(applicationsCard(page)).not.toContainText('₹');
   });
 
-  test('TODAY a Hiring Manager still sees the edit pencils; saving is refused by the server and nothing changes', async ({ page, request }) => {
+  test('a Hiring Manager sees no edit pencils on the candidate page, and the server refuses a profile edit from one anyway', async ({ page, request }) => {
     const a = await arrange(request, { candidate: { phone: '+91 91111 11111' } });
     await open(page, 'hm_alex', a);
-    const identity = sectionCard(page, 'Identity');
-    await identity.getByRole('button', { name: 'Edit Identity' }).click();               // TODAY: not hidden for a Hiring Manager
-    await identity.locator('label:text-is("Phone") + input').fill('+91 92222 22222');
-    await identity.getByRole('button', { name: 'Save' }).click();
-    await expect(toastWith(page, 'Failed to update Identity')).toBeVisible();
-    const res = await authed(request, await getToken(request, 'hr')).get(`/api/candidates/${a.candidate.id}`);
-    expect((await res.json()).candidate.phone).toBe('+91 91111 11111');
+    await expect(sectionCard(page, 'Identity')).toContainText('Phone');                  // the section is shown, read-only
+    await expect(page.getByRole('button', { name: /^Edit / })).toHaveCount(0);
+    const res = await authed(request, await getToken(request, 'hm_alex')).patch(`/api/candidates/${a.candidate.id}`, { phone: '+91 92222 22222' });
+    expect(res.status()).toBe(403);
+    const check = await authed(request, await getToken(request, 'hr')).get(`/api/candidates/${a.candidate.id}`);
+    expect((await check.json()).candidate.phone).toBe('+91 91111 11111');
   });
 
   test('the server refuses what the Hiring Manager page hides: founder flag, notes and a status change after Applied and Screened are 403, and an HR reject without a reason is 400', async ({ request }) => {

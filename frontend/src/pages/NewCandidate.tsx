@@ -1,5 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { FULL_NAME_MAX_CHARS } from '../utils/candidateName.ts';
 import toast from 'react-hot-toast';
 import { useQuery } from '@tanstack/react-query';
 import { candidatesApi, rolesApi, agenciesApi } from '../services/api.ts';
@@ -123,7 +124,7 @@ export default function NewCandidate() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Full Name *</label>
-              <input className="input" value={form.full_name} onChange={e => set('full_name', e.target.value)} required placeholder="First Last" />
+              <input className="input" value={form.full_name} onChange={e => set('full_name', e.target.value)} required maxLength={FULL_NAME_MAX_CHARS} placeholder="First Last" />
             </div>
             <div>
               <label className="label">Email *</label>

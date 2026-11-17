@@ -183,14 +183,14 @@ test.describe('Role Activity Timeline', () => {
       expect(application.role_id).toBe(role.id);
 
       // Advance stage away from the default 'Applied and Screened' so logActivity actually
-      // writes a 'Stage Changed' row against this role_id. Any free-text
-      // stage string exercises the same logActivity() call — there's no
+      // writes a 'Stage Changed' row against this role_id. Any valid
+      // stage exercises the same logActivity() call — there's no
       // per-stage special-casing to dodge here anymore: ResumeIQ scoring
       // isn't tied to a particular stage transition at all now ('Resume
       // Review' was retired — see STAGE_ORDER), it already ran
       // synchronously at application-creation time via createCandidateWithApp.
       const stageRes = await authed(request, token).post(`/api/applications/${application.id}/stage`, {
-        new_stage: 'Screening',
+        new_stage: 'Interview Round 1',
       });
       expect(stageRes.status()).toBe(200);
 

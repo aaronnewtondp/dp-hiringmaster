@@ -9,8 +9,8 @@
 //
 // MEASURED on 2026-10-29 (109 production files) with the three type-aware rules at their defaults: 89 findings, ALL of one
 // kind, no-misused-promises "voidReturnArgument": 87 are Express route handlers (async functions passed to router.get/post/...,
-// which is correct here because Express 5 forwards a rejected async handler to the error handler) and 2 are node-cron callbacks in jobs/scheduler.ts
-// (dead code: nothing imports startScheduler, and both bodies are try/catch). No-floating-promises: 0. Await-thenable: 0.
+// which is correct here because Express 5 forwards a rejected async handler to the error handler) and 2 were node-cron callbacks in jobs/scheduler.ts
+// (dead code, deleted 2026-11-16; the run is now at zero findings and CI fails on any). No-floating-promises: 0. Await-thenable: 0.
 // Hence the two scoped decisions below. Everything else is the plain default.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

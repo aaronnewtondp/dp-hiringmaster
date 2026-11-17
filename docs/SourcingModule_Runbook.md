@@ -120,8 +120,8 @@ Before enabling in production, also re-run the existing dashboard / ingestion / 
 
 * Vercel **Hobby** allows one cron run a day and its terms are non-commercial; the engine therefore also runs when the dashboard,
   the Sourcing page or the My Tasks queue is opened (throttled to once every 3 minutes per instance).
-* The existing `/api/cron/email-digest` is registered as POST but Vercel Cron issues GET, so it has never fired. Left alone on
-  purpose: "fixing" it would switch on a dormant SMTP e-mail nobody expects.
+* The old `/api/cron/email-digest` entry was removed from `vercel.json` on 2026-11-15 (it was POST-only while Vercel Cron issues GET, so it
+  never fired; switching it on would have e-mailed every open pending action over SMTP). The route remains as a manual endpoint.
 * Outbound prospecting (company lists, Sheets sync, templated outreach) is phase P4 and not built yet; agency/referral one-click
   automation is P3. Both are specified in the PRD.
 * **The Hiring Manager view is not fully redacted (left as is on purpose).** For the role's own Hiring Manager, `GET

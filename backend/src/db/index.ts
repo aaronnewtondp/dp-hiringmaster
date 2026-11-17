@@ -61,16 +61,25 @@ export async function transaction<T>(
   fn: (client: pg.PoolClient) => Promise<T>
 ): Promise<T> {
   const client = await pool.connect();
+  // Set when ROLLBACK itself fails: the connection is then in an unknown state and must not go back to the pool.
+  let brokenBy: Error | undefined;
   try {
     await client.query('BEGIN');
     const result = await fn(client);
     await client.query('COMMIT');
     return result;
   } catch (err) {
-    await client.query('ROLLBACK');
+    // The ORIGINAL error is what the caller must see, whatever happens to the ROLLBACK.
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackErr) {
+      brokenBy = rollbackErr instanceof Error ? rollbackErr : new Error(String(rollbackErr));
+      console.error('[db] ROLLBACK failed; discarding the connection:', brokenBy.message);
+    }
     throw err;
   } finally {
-    client.release();
+    // release(err) makes pg destroy the client instead of returning it to the pool.
+    if (brokenBy) client.release(brokenBy); else client.release();
   }
 }
 

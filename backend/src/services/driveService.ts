@@ -10,8 +10,12 @@ let driveClient: ReturnType<typeof google.drive> | null = null;
 function getDriveClient() {
   if (driveClient) return driveClient;
   const credentials = getGoogleCredentials();
-  const auth = new google.auth.GoogleAuth({
-    credentials,
+  // A JWT client built from the key's email and private key, as the write client below and the Calendar/Gmail services do. This used to be
+  // `new google.auth.GoogleAuth({ credentials })`, which googleapis 189 (google-auth-library 11) warns is deprecated; JWT is the replacement it names,
+  // and it is the same service-account flow (no `subject`: this client reads as the service account itself, scope drive.readonly).
+  const auth = new google.auth.JWT({
+    email: credentials.client_email,
+    key: credentials.private_key,
     scopes: ['https://www.googleapis.com/auth/drive.readonly'],
   });
   driveClient = google.drive({ version: 'v3', auth });

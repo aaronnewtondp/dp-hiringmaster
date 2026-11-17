@@ -5,14 +5,15 @@
 // check-then-insert paths are racy by construction:
 //   * POST /candidates/:id/applications   SELECT existing -> INSERT, backstop UNIQUE(candidate_id, role_id)
 //   * POST /candidates/ingest             SELECT candidate by e-mail -> INSERT, backstop UNIQUE(email) / UNIQUE(candidate_id, role_id)
-//   * POST /interviews                    id = last id + 1 computed in JS (nextRoundId), backstop the primary key
+//   * POST /interviews                    (was: id = last id + 1 computed in JS; now the id is the column default, seq_interview, so no race)
 // and a stage move reads the old stage OUTSIDE its transaction.
 //
 // Each race has two kinds of test:
 //   * an INVARIANT that must hold whatever the timing (no duplicate rows, no ghost rows, exactly one winner, ids unique) — a failure is a bug;
-//   * a `TODAY:` test that pins the way the LOSER fails right now (HTTP 500 "Internal server error" where the sequential path says 409/200).
-//     A race is timing, so each TODAY test repeats the race up to RACE_TRIES times and passes as soon as the loser is seen to fail with a 500
-//     (in practice on the first or second try, also under CPU load). If a fix makes the loser's answer clean, it fails with a message that
+//   * a `TODAY:` test that pins the way the LOSER fails right now: since 2026-11-15 a lost unique-constraint race is the generic 409 "That value already
+//     exists." (it was a 500 "Internal server error"; the sequential path says "Already linked" / 200 "Already ingested"), and a double shortlist still
+//     leaves two open rows. A race is timing, so each TODAY test repeats the race up to RACE_TRIES times and passes as soon as the loser is seen to fail
+//     that way (in practice on the first or second try, also under CPU load). If a fix makes the loser's answer clean, it fails with a message that
 //     says to flip it to the clean contract. Nothing here is fixed by this spec.
 // ─────────────────────────────────────────────────────────────────────────────
 import { test, expect } from '@playwright/test';
@@ -23,7 +24,7 @@ import { withDb } from '../helpers/db';
 test.afterAll(retireTrackedApplications);   // leave no open pending rows behind (see helpers/api-specs.ts)
 
 const RACE_TRIES = 10;
-const FLIP_HINT = (what: string) => `${what} no longer fails with a 500 in ${RACE_TRIES} tries: the race is probably fixed — replace this TODAY test with the clean contract.`;
+const FLIP_HINT = (what: string) => `${what} no longer fails the way it is pinned to (the generic 409, or two open rows) in ${RACE_TRIES} tries: the race is probably fixed — replace this TODAY test with the clean contract.`;
 
 type Api = ReturnType<typeof authed>;
 
@@ -102,7 +103,7 @@ test.describe('id series stay unique under 15 simultaneous creations', () => {
   });
 });
 
-test.describe('POST /api/interviews x15 on one application (the round id is last-id + 1 computed in JS)', () => {
+test.describe('POST /api/interviews x15 on one application (the round id comes from seq_interview)', () => {
 
   async function batch(request: Parameters<typeof newApplicationAt>[0]) {
     const { hr, application } = await newApplicationAt(request, 'Interview Round 1', 'R006');
@@ -117,10 +118,10 @@ test.describe('POST /api/interviews x15 on one application (the round id is last
     return { hr, application, statuses, ids };
   }
 
-  test('whatever the timing: every answer is 201 or 500, the 201s have distinct IR-ids, and no row or activity is left behind by a failed one', async ({ request }) => {
+  test('every one of the 15 simultaneous creations is 201 with a distinct IR-id, and each has its round and its activity row', async ({ request }) => {
     const { hr, application, statuses, ids } = await batch(request);
-    for (const s of statuses) expect([201, 500]).toContain(s);
-    expect(ids.length).toBeGreaterThan(0);
+    for (const s of statuses) expect(s).toBe(201);
+    expect(ids).toHaveLength(15);
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) expect(id).toMatch(/^IR\d{4,}$/);
 
@@ -128,15 +129,6 @@ test.describe('POST /api/interviews x15 on one application (the round id is last
     expect(stored.map(r => r.id).sort()).toEqual([...ids].sort());                       // exactly the winners, no ghost rows
     const scheduled = (await activityOf(hr, application.id)).filter(a => a.event_type === 'Interview Round Scheduled');
     expect(scheduled).toHaveLength(ids.length);                                          // the activity row rolled back with its round
-  });
-
-  test('TODAY: simultaneous creations collide on the computed id — some requests fail with a 500 although nothing is wrong with them', async ({ request }) => {
-    let seen500 = false;
-    for (let attempt = 0; attempt < 3 && !seen500; attempt++) {
-      const { statuses } = await batch(request);
-      seen500 = statuses.includes(500);
-    }
-    expect(seen500, FLIP_HINT('Concurrent round creation')).toBe(true);
   });
 });
 
@@ -153,14 +145,14 @@ test.describe('POST /api/candidates/:id/applications — the same candidate link
     expect(await second.json()).toMatchObject({ error: 'Already linked to this role', application_id: (await first.json()).application.id });
   });
 
-  test('whatever the timing: exactly one 201, the other answer is 409 or 500, and exactly ONE application and ONE "Application Created" row exist', async ({ request }) => {
+  test('whatever the timing: exactly one 201, the other answer is 409, and exactly ONE application and ONE "Application Created" row exist', async ({ request }) => {
     for (let pair = 0; pair < 4; pair++) {
       const { candidate, role, bodies } = await raceTwoLinks(request);
       const winners = bodies.filter(b => b.status === 201);
       const losers = bodies.filter(b => b.status !== 201);
       expect(winners, `pair ${pair}`).toHaveLength(1);
       expect(losers, `pair ${pair}`).toHaveLength(1);
-      expect([409, 500]).toContain(losers[0].status);
+      expect(losers[0].status).toBe(409);
 
       const rows = await withDb(async c => ({
         apps: (await c.query('SELECT id FROM applications WHERE candidate_id = $1 AND role_id = $2', [candidate.id, role.id])).rows,
@@ -171,16 +163,13 @@ test.describe('POST /api/candidates/:id/applications — the same candidate link
     }
   });
 
-  test('TODAY: the losing double-submit is a 500 "Internal server error", not the 409 the sequential path gives (the UNIQUE constraint is the only guard)', async ({ request }) => {
-    let loser500 = false;
-    for (let attempt = 0; attempt < RACE_TRIES && !loser500; attempt++) {
+  test('TODAY: the losing double-submit is a 409 with the generic "That value already exists." (the UNIQUE constraint is the only guard), not the "Already linked to this role" body the sequential path gives', async ({ request }) => {
+    let loser409 = false;
+    for (let attempt = 0; attempt < RACE_TRIES && !loser409; attempt++) {
       const { statuses, bodies } = await raceTwoLinks(request);
-      if (statuses.includes(500)) {
-        loser500 = true;
-        expect(bodies.find(b => b.status === 500)!.body).toEqual({ error: 'Internal server error' });
-      }
+      if (statuses.includes(409) && bodies.some(b => b.status === 409 && (b.body as { error?: string }).error === 'That value already exists.')) loser409 = true;
     }
-    expect(loser500, FLIP_HINT('A double-submitted link-to-role')).toBe(true);
+    expect(loser409, FLIP_HINT('A double-submitted link-to-role')).toBe(true);
   });
 });
 
@@ -199,13 +188,13 @@ test.describe('POST /api/candidates/ingest — the Apps Script trigger fires twi
     expect(await second.json()).toEqual({ message: 'Already ingested — skipped duplicate', application_id: application.id });
   });
 
-  test('whatever the timing: exactly one 201, the other answer is 200 or 500, and exactly ONE candidate and ONE application exist for the e-mail', async ({ request }) => {
+  test('whatever the timing: exactly one 201, the other answer is 200 or 409, and exactly ONE candidate and ONE application exist for the e-mail', async ({ request }) => {
     for (let pair = 0; pair < 4; pair++) {
       const { email, role, bodies } = await raceTwoIngests(request);
       const winners = bodies.filter(b => b.status === 201);
       expect(winners, `pair ${pair}`).toHaveLength(1);
       const loser = bodies.find(b => b.status !== 201)!;
-      expect([200, 500]).toContain(loser.status);
+      expect([200, 409]).toContain(loser.status);
 
       const rows = await withDb(async c => ({
         candidates: (await c.query('SELECT id FROM candidates WHERE email = $1', [email])).rows,
@@ -216,16 +205,16 @@ test.describe('POST /api/candidates/ingest — the Apps Script trigger fires twi
     }
   });
 
-  test('TODAY: the losing duplicate of a brand-new applicant is a 500, not the 200 "Already ingested" a re-fire gets one second later', async ({ request }) => {
-    let loser500 = false;
-    for (let attempt = 0; attempt < RACE_TRIES && !loser500; attempt++) {
+  test('TODAY: the losing duplicate of a brand-new applicant is a 409 "That value already exists.", not the 200 "Already ingested" a re-fire gets one second later', async ({ request }) => {
+    let loser409 = false;
+    for (let attempt = 0; attempt < RACE_TRIES && !loser409; attempt++) {
       const { statuses, bodies } = await raceTwoIngests(request);
-      if (statuses.includes(500)) {
-        loser500 = true;
-        expect(bodies.find(b => b.status === 500)!.body).toEqual({ error: 'Internal server error' });
+      if (statuses.includes(409)) {
+        loser409 = true;
+        expect(bodies.find(b => b.status === 409)!.body).toEqual({ error: 'That value already exists.' });
       }
     }
-    expect(loser500, FLIP_HINT('A double-fired ingest of a new applicant')).toBe(true);
+    expect(loser409, FLIP_HINT('A double-fired ingest of a new applicant')).toBe(true);
   });
 });
 

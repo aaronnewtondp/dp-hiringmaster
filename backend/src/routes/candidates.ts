@@ -7,6 +7,7 @@ import { isSeverelyOverBudget } from '../utils/budget.js';
 import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
 import { fetchUnmatchedCandidates } from '../utils/unmatchedCandidates.js';
 import { classifyGender } from '../utils/genderClassifier.js';
+import { checkFullName, FULL_NAME_MAX_CHARS } from '../utils/candidateName.js';
 
 const router = Router();
 router.use(authenticate);
@@ -232,13 +233,20 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     preferred_location, source, sourced_by_agency_id,
   } = req.body;
 
-  if (!full_name) { res.status(400).json({ error: 'full_name required' }); return; }
+  const nameCheck = checkFullName(full_name);
+  if (!nameCheck.ok) {
+    res.status(400).json({
+      error: nameCheck.reason === 'empty' ? 'full_name required' : `full_name must be at most ${FULL_NAME_MAX_CHARS} characters`,
+    });
+    return;
+  }
+  const cleanName = nameCheck.name;
 
   // Auto-tagged from full_name — see genderClassifier.ts's own header for
   // methodology and why an unrecognized/ambiguous name deliberately stays
   // null ("Unknown") rather than being guessed. req.body.gender lets a
   // caller (e.g. a future form field) override this outright.
-  const gender = req.body.gender ?? classifyGender(full_name);
+  const gender = req.body.gender ?? classifyGender(cleanName);
 
   // Same gate as PATCH /:id — 'source' is optional, but 'Agency' requires
   // naming which agency sourced this candidate.
@@ -275,7 +283,7 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
        )
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
       [
-        full_name, email?.toLowerCase(), phone, linkedin_url,
+        cleanName, email?.toLowerCase(), phone, linkedin_url,
         current_ctc_fixed ?? null, current_ctc_variable ?? null, current_esops ?? null, expected_ctc ?? null,
         notice_period_days ?? null, current_company ?? null, current_industry ?? null, current_designation ?? null,
         current_location ?? null, years_of_experience ?? null, resume_drive_link ?? null, languages_known ?? null,
@@ -398,6 +406,17 @@ router.patch('/:id', requireHR, async (req: Request, res: Response) => {
     req.body.sourced_by_agency_id = null;
   }
 
+  if (req.body.full_name !== undefined) {
+    const nameCheck = checkFullName(req.body.full_name);
+    if (!nameCheck.ok) {
+      res.status(400).json({
+        error: nameCheck.reason === 'empty' ? 'full_name cannot be empty' : `full_name must be at most ${FULL_NAME_MAX_CHARS} characters`,
+      });
+      return;
+    }
+    req.body.full_name = nameCheck.name;
+  }
+
   const allowedFields = [
     'full_name','email','phone','linkedin_url','parsed_total_yoe',
     'parsed_skills','parsed_industries','parsed_education','job_stability_months',
@@ -487,8 +506,21 @@ router.delete('/:id', requireHR, async (req: Request, res: Response) => {
 });
 
 // ─── GET /api/candidates/:id/edit-log ─────────────────────────────────────────
+// A row logging a compensation edit carries the plaintext old/new value, so it follows the same rule as the candidate's own
+// CTC fields in GET /:id: HR-tier sees everything, a Hiring Manager sees those rows only when the candidate has an application
+// on a role they are the named Hiring Manager of. Excluded entirely (not redacted in place), as roles.ts does for ctc_band.
+export const CANDIDATE_COMP_FIELDS = ['current_ctc_fixed', 'current_ctc_variable', 'current_esops', 'expected_ctc'];
 router.get('/:id/edit-log', async (req: Request, res: Response) => {
-  const logs = await query(
+  const persona = req.user!.persona;
+  let canSeeComp = isHRTier(persona);
+  if (!canSeeComp) {
+    const roles = await query<{ hiring_manager_name: string | null }>(
+      `SELECT r.hiring_manager_name FROM applications a JOIN roles r ON r.id = a.role_id WHERE a.candidate_id = $1`,
+      [req.params.id]
+    );
+    canSeeComp = roles.some(r => canSeeCompForRole(persona, req.user!.name, r.hiring_manager_name));
+  }
+  const logs = await query<{ field_name?: string }>(
     `SELECT el.*, u.name AS changed_by_name
      FROM candidate_edit_log el
      LEFT JOIN users u ON u.id = el.changed_by
@@ -496,7 +528,7 @@ router.get('/:id/edit-log', async (req: Request, res: Response) => {
      ORDER BY el.changed_at DESC`,
     [req.params.id]
   );
-  res.json({ logs });
+  res.json({ logs: canSeeComp ? logs : logs.filter(l => !CANDIDATE_COMP_FIELDS.includes(String(l.field_name))) });
 });
 
 // ─── GET /api/candidates/:id/activity — full activity timeline ────────────────

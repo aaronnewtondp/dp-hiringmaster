@@ -212,7 +212,7 @@ tests/
 │   │                                              # weekly trackers, Close/Reopen, per-role target, plan history, AI-advice cache, the data migration. NEED SOURCING_ENABLED=true (skip themselves otherwise)
 │   ├── 15-marketing-work-review (68)             # R019 work-sample review (portfolio_review_kind = 'marketing_work'): schema, no API toggle, unscored outcomes, re-run guard, backfill; applications made by SQL, so no model or browser runs
 │   ├── 16-schema-replay (54)                     # builds a throw-away database from schema.sql + seed.sql, asserts the tables / RLS flags / nine id sequences / CHECKs / seed counts, applies schema.sql a second
-│   │                                              # time and compares; pins the seed and re-run defects "as TODAY". Needs a role with CREATEDB
+│   │                                              # time and compares (schema.sql is re-runnable, pinned as fixed); pins only the RLS-off state "as TODAY". Needs a role with CREATEDB
 │   └── 17-user-lifecycle (22)                    # Remove access (is_active, never a delete), personas and the super_admin rules, Google-only accounts; contains the pins that PR #55 made stale
 ├── smoke/  (38 tests)
 │   ├── production.spec.ts      # READ-ONLY API checks + auth-rejection checks, as the two smoke accounts (health, auth, roles, one role, dashboard, lists, persona gates, sourcing status)
@@ -237,10 +237,8 @@ There is no `e2e/15`: that number is the mobile spec. The list is written by han
 ### Specs that pin a product defect "as TODAY"
 
 A test whose title contains `TODAY` asserts what the product does now where that looks unintended, so a fix turns it red on purpose and the test is
-changed with the fix: `db/16-schema-replay` (8: seed.sql stops on `setval(…, 0)`, two sequences behind their tables, `schema.sql` not re-runnable, no index on
-`pending_actions`, RLS off on the 17 original tables), `db/17-user-lifecycle` (8), `e2e/09-user-management` (3), `e2e/10-candidate-actions` (5),
-`e2e/11-candidates-bulk-and-pipeline` (2), `e2e/12-my-tasks` (1), `e2e/13-help-and-info-markers` (3), `e2e/14-role-detail-actions` (2),
-`e2e/16-lists-and-forms` (3), `e2e-mobile/15-responsive-and-pwa` (1). `ROADMAP.md` lists the product issues behind them.
+changed with the fix: `db/16-schema-replay` (1: RLS off on the 17 original tables, known and accepted), `db/17-user-lifecycle` (8), `e2e/09-user-management` (1), `e2e/10-candidate-actions` (2),
+`e2e/12-my-tasks` (1), `e2e/13-help-and-info-markers` (3), `e2e/16-lists-and-forms` (2). `ROADMAP.md` lists the product issues behind them.
 
 **Stale pins as of 2026-11-05.** PR #55 made `authenticate()` check `users.is_active` live (15 s cache), but three tests still assert the old behaviour and fail
 on `main`: `db/17` "TODAY: the OLD token of the deactivated user still works …" (line 197) and "TODAY: a DEACTIVATED super_admin's old token still passes
@@ -281,9 +279,10 @@ PR; `.github/workflows/integration.yml` runs the `api` + `db` projects nightly a
 
 ## A note on real external calls (real cost, real time)
 
-`tests/api/10-jd-generation-and-scoring.spec.ts` (2 tests) is the one spec that triggers real, paid external calls without an `@live` tag: Anthropic (JD
-content generation and ResumeIQ scoring against the generated JD) and Google Drive (PDF upload), about 30-60 s each. Without credentials it fails or
-times out: expected in that setup, not a suite bug (the nightly workflow excludes it). The `@live` tests above are the other three.
+`tests/api/10-jd-generation-and-scoring.spec.ts` has one test that triggers real, paid external calls: Anthropic (JD content generation and ResumeIQ
+scoring against the generated JD) and Google Drive (PDF upload), about 30-60 s. It is tagged `@live`, so it is dropped unless `TEST_LIVE=1`; the spec's
+other two tests are offline and pass on a stack with no credentials. The nightly workflow excludes `@live` and nothing else of this spec. Other `@live`
+tests exist besides the ones listed above: `grep -rn "@live" tests` is the list.
 
 `tests/api/15-calendar-integration.spec.ts` and `tests/e2e/06-schedule-round.spec.ts` each contain one real Google Calendar call: scheduling a Standard
 round with a real `scheduled_date` + `interviewer_emails` creates a real event through the service account's domain-wide delegation, impersonating

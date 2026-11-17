@@ -7,7 +7,8 @@
 // applications.ts's old stage-change handler so every creation path shares
 // one implementation instead of re-deriving it.
 import { query, queryOne } from '../db/index.js';
-import { Application, Candidate, Role, SLA_HOURS } from '../types/index.js';
+import { Application, Candidate, Role } from '../types/index.js';
+import { getSlaHours } from '../jobs/slaChecker.js';
 import { scoreCandidate, priorityBucketFromScore } from './resumeIQ.js';
 import { fetchResumeText, fetchResumeTextAndLinks } from './driveService.js';
 import { LinkInput, pickPortfolioLinks } from './portfolio/links.js';
@@ -81,7 +82,7 @@ export async function runResumeIQScoring(applicationId: string): Promise<ResumeI
          score_avg=$17, score_strengths=$18, score_red_flags=$19,
          score_summary=$20, score_recommendation=$21, score_resume_read=$22,
          score_computed_at=NOW(), ai_fit_score=$23, ai_priority_bucket=$24,
-         sla_hours=$25
+         sla_hours = CASE WHEN stage=$27 THEN $25::int ELSE sla_hours END
        WHERE id=$26`,
       [
         result.technical.score, result.technical.note,
@@ -95,10 +96,11 @@ export async function runResumeIQScoring(applicationId: string): Promise<ResumeI
         result.avgScore, result.strengths, result.redFlags,
         result.summary, result.recommendation, result.resumeRead,
         aiFitScore, aiPriorityBucket,
-        // Refined SLA now the fit score is known — same threshold ResumeIQ
-        // scoring at the old 'Resume Review' stage used to apply.
-        result.avgScore >= 8 ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL,
+        // Refined SLA now the fit score is known: the SAME tiering the SLA engine breaches at (getSlaHours), for the stage the
+        // application is at. Only written while it is still at that stage (a move during the scoring keeps its own value).
+        getSlaHours(app.stage, aiFitScore),
         app.id,
+        app.stage,
       ]
     );
     await query(

@@ -51,7 +51,8 @@ const SQL = {
   statusUpdate: /^UPDATE applications SET status=\$1, rejection_reason_cat=\$2, rejection_reason_detail=\$3, withdrawal_reason_cat=\$4, withdrawal_reason_detail=\$5, last_updated=NOW\(\)/,
   resolveAllPending: /^UPDATE pending_actions SET resolved=true, resolved_at=NOW\(\) WHERE application_id=\$1 AND resolved=false$/,
   candidateEmail: /^SELECT email FROM candidates WHERE id=\$1$/,
-  screeningUpdate: /^UPDATE applications SET recruiter_screening_status=\$1, last_updated=NOW\(\) WHERE id=\$2$/,
+  screeningUpdate: /^UPDATE applications SET recruiter_screening_status=\$1, last_updated=NOW\(\) WHERE id=\$2( AND recruiter_screening_status IS DISTINCT FROM \$1)?$/,
+  screeningRole: /^SELECT hiring_manager_name FROM roles WHERE id = \$1$/,
   resolveHmReview: /^UPDATE pending_actions SET resolved=true, resolved_at=NOW\(\) WHERE application_id=\$1 AND action_type='HM shortlist review' AND resolved=false$/,
   scheduleInterview: /^INSERT INTO pending_actions \(owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue\) VALUES \('HR \/ Recruiter'/,
   founderUpdate: /^UPDATE applications SET founder_review_flag=\$1, founder_review_note=\$2, founder_review_set_by=\$3, founder_review_set_at=NOW\(\), last_updated=NOW\(\) WHERE id=\$4$/,
@@ -67,6 +68,8 @@ interface Scenario {
   refChecks?: string | null;
   updated?: Record<string, unknown>;
   candidateEmail?: string | null;
+  roleHm?: string | null;
+  screeningUnchanged?: boolean;
 }
 /** Program the statements the routes read. A field left out means "nothing there" (no band, no pending feedback, no reference check). */
 function program(s: Scenario = {}) {
@@ -79,6 +82,9 @@ function program(s: Scenario = {}) {
   fakeDb.whenOne(SQL.candidateName, { full_name: 'Candidate Example' });
   fakeDb.whenOne(SQL.roleTitle, { title: 'Quality Assurance Engineer' });
   fakeDb.whenOne(SQL.updatedRow, { ...UPDATED_ROW, ...(s.updated ?? {}) });
+  fakeDb.whenOne(SQL.screeningRole, { hiring_manager_name: s.roleHm === undefined ? 'Test Hiring Manager' : s.roleHm });
+  // The screening UPDATE answers one row (it changed) unless a scenario says the stored status already equals the new one.
+  fakeDb.when(SQL.screeningUpdate, s.screeningUnchanged ? [] : [{ id: APP_ID }]);
   fakeDb.whenOne(SQL.candidateEmail, s.candidateEmail === undefined ? { email: 'candidate@example.test' } : { email: s.candidateEmail });
 }
 
@@ -198,12 +204,13 @@ describe('POST /:id/stage — who may move an application where', () => {
     });
   });
 
-  it('characterization: new_stage is not checked against STAGE_ORDER — an HR-tier user can write any string as a stage (the column is plain TEXT)', async () => {
-    program();
-    const res = await stage('hr_recruiter', { new_stage: 'Interview – Round 3' });          // a retired stage name
-    expect(res.status).toBe(200);
-    expect(fakeDb.one(SQL.stageUpdate).params[0]).toBe('Interview – Round 3');
-    expect(fakeDb.one(SQL.stageUpdate).params[1]).toBe(SLA_HOURS.INTERVIEW_FEEDBACK);       // and the "Interview" prefix even earns it an interview SLA
+  it('new_stage must be one of STAGE_ORDER: a retired or made-up name, or a non-string, is a 400 and nothing is written (the column is plain TEXT, so nothing else would stop it)', async () => {
+    for (const new_stage of ['Interview – Round 3', 'Screening', 'Resume Review', 'Shortlisted', 'applied and screened', 42, ['Joined'], {}]) {
+      fakeDb.reset(); program();
+      const res = await stage('hr_recruiter', { new_stage });
+      expect([JSON.stringify(new_stage), res.status, res.body.error]).toEqual([JSON.stringify(new_stage), 400, 'Unknown stage']);
+      expect(fakeDb.writes()).toEqual([]);
+    }
   });
 });
 
@@ -227,6 +234,25 @@ describe('POST /:id/stage — the over-budget gate (15% over the role\'s band ne
     expect(res.status).toBe(200);
     expect(fakeDb.one(SQL.stageUpdate).params).toEqual(['Interview Round 1', SLA_HOURS.INTERVIEW_FEEDBACK, APP_ID, 'Rare skill set', 'Only one in the market']);
     expect(fakeDb.one(SQL.activity).params[4]).toBe('Stage → Interview Round 1 (over-budget exception: Rare skill set)');
+  });
+
+  it('a reason sent for a row that is NOT 15%+ over is ignored: nothing stored, nothing in the activity text (the bulk move sends one reason for every selected row)', async () => {
+    for (const sc of [{ expectedCtc: under, ctcBand: BAND }, { expectedCtc: over, ctcBand: null }, { expectedCtc: null, ctcBand: BAND }, { expectedCtc: over, ctcBand: 'negotiable' }]) {
+      fakeDb.reset();
+      program(sc);
+      const res = await stage('hr_recruiter', { new_stage: 'Interview Round 1', budget_exception_reason_cat: 'Rare skill set', budget_exception_reason_detail: 'x' });
+      expect([JSON.stringify(sc), res.status]).toEqual([JSON.stringify(sc), 200]);
+      expect(fakeDb.one(SQL.stageUpdate).params).toEqual(['Interview Round 1', SLA_HOURS.INTERVIEW_FEEDBACK, APP_ID, null, null]);
+      expect(fakeDb.one(SQL.activity).params[4]).toBe('Stage → Interview Round 1');
+    }
+  });
+
+  it('a reason sent with any other stage is ignored even for a 15%+ over-budget candidate', async () => {
+    program({ app: { stage: 'Interview Round 1' }, expectedCtc: over, ctcBand: BAND });
+    const res = await stage('hr_recruiter', { new_stage: 'Interview Round 2', budget_exception_reason_cat: 'Rare skill set' });
+    expect(res.status).toBe(200);
+    expect(fakeDb.one(SQL.stageUpdate).params.slice(3)).toEqual([null, null]);
+    expect(fakeDb.one(SQL.activity).params[4]).toBe('Stage → Interview Round 2');
   });
 
   it('just under the threshold needs no reason; with no band, or no expected CTC, the gate cannot be evaluated and does not fire', async () => {
@@ -325,6 +351,23 @@ describe('POST /:id/stage — what a move writes', () => {
     expect(plain).not.toMatch(/offer_sent_date|offer_accepted_date|status='Joined'/);
   });
 
+  it('starts the 5-day joining-risk clock on the move INTO Offer Accepted only: last_hr_contact = GREATEST(existing, today), never overwriting a more recent contact', async () => {
+    const sqlFor = async (from: string, to: string) => {
+      fakeDb.reset(); program({ app: { stage: from }, refChecks: '1' });
+      await stage('hr_recruiter', { new_stage: to });
+      return fakeDb.one(SQL.stageUpdate).sql;
+    };
+    expect(await sqlFor('Offer Released', 'Offer Accepted')).toContain('last_hr_contact=GREATEST(last_hr_contact, CURRENT_DATE)');
+    // reaching Offer Accepted again restarts the clock AND clears the flag raised for the previous acceptance (found in review)
+    expect(await sqlFor('Offer Released', 'Offer Accepted')).toContain('joining_risk_auto_flag=false');
+    for (const to of ['Offer Released', 'Joined', 'Interview Round 2']) {
+      expect(await sqlFor('Offer Discussion', to)).not.toContain('joining_risk_auto_flag');
+    }
+    for (const to of ['Offer Released', 'Joined', 'Interview Round 2']) {
+      expect(await sqlFor('Offer Discussion', to)).not.toContain('last_hr_contact');
+    }
+  });
+
   it('resets the SLA clock: stage_entry_time=NOW(), sla_breach=false, sla_hours from getSlaHours(new stage, fit score)', async () => {
     program({ app: { stage: 'Interview Round 1', ai_fit_score: 90 } });
     await stage('hr_recruiter', { new_stage: 'Assignment Round' });
@@ -332,7 +375,7 @@ describe('POST /:id/stage — what a move writes', () => {
     expect(u.sql).toContain('stage_entry_time=NOW()');
     expect(u.sql).toContain('sla_breach=false');
     expect(u.params[1]).toBe(getSlaHours('Assignment Round', 90));
-    expect(u.params[1]).toBe(SLA_HOURS.IDLE);
+    expect(u.params[1]).toBe(24);                 // Assignment Round is score-tiered: fit 90 stores the 24h window, as the engine breaches
   });
 
   it('resolves the stage-keyed pending actions of the OLD stage — all stage SLA types plus "HM shortlist review" — in the same transaction', async () => {
@@ -435,11 +478,13 @@ describe('POST /:id/status — Reject / Withdraw / Hold', () => {
   });
 
   describe('a reason is required to reject or withdraw (hard 400)', () => {
+    const REJECT_MSG = 'A rejection reason is required when rejecting a candidate (rejection_reason_cats or rejection_reason_cat)';
+    const WITHDRAW_MSG = 'A withdrawal reason is required when withdrawing a candidate (withdrawal_reason_cat)';
     it.each(['Rejected', 'Withdrawn'])('%s with no reason of any kind is 400, nothing written, and the same for a blank or non-text reason', async newStatus => {
       for (const body of [{}, { rejection_reason_cat: '' }, { rejection_reason_cat: '   ' }, { rejection_reason_cats: [] }, { rejection_reason_cats: ['', '  ', 3, null] }, { rejection_reason_cat: 42 }, { withdrawal_reason_cat: '' }]) {
         fakeDb.reset(); program();
         const res = await status('hr_recruiter', { new_status: newStatus, ...body });
-        expect([newStatus, JSON.stringify(body), res.status, res.body.error]).toEqual([newStatus, JSON.stringify(body), 400, 'A reason is required when rejecting or withdrawing a candidate']);
+        expect([newStatus, JSON.stringify(body), res.status, res.body.error]).toEqual([newStatus, JSON.stringify(body), 400, newStatus === 'Rejected' ? REJECT_MSG : WITHDRAW_MSG]);
         nothingWritten();
       }
     });
@@ -497,19 +542,50 @@ describe('POST /:id/status — Reject / Withdraw / Hold', () => {
     });
   });
 
-  describe('characterization: how the reason requirement is actually evaluated (see productIssues)', () => {
-    it('either kind of reason satisfies it for either status: a Rejected with only a withdrawal reason, and a Withdrawn with only rejection reasons, are accepted', async () => {
+  describe('each status needs its OWN kind of reason (400 before any write)', () => {
+    const noWrite = () => expect(fakeDb.statements().join('\n')).not.toMatch(/UPDATE applications SET status/);
+
+    it('Rejected with only a withdrawal reason is a 400 naming the rejection reason; nothing is written', async () => {
       program();
-      expect((await status('hr_recruiter', { new_status: 'Rejected', withdrawal_reason_cat: 'Accepted another offer' })).status).toBe(200);
-      expect(fakeDb.one(SQL.statusUpdate).params).toEqual(['Rejected', null, null, 'Accepted another offer', null, APP_ID]);   // a rejection stored with no rejection reason
-      fakeDb.reset(); program();
-      expect((await status('hr_recruiter', { new_status: 'Withdrawn', rejection_reason_cats: ['Skills gap'] })).status).toBe(200);
+      const res = await status('hr_recruiter', { new_status: 'Rejected', withdrawal_reason_cat: 'Accepted another offer' });
+      expect([res.status, res.body.error]).toEqual([400, 'A rejection reason is required when rejecting a candidate (rejection_reason_cats or rejection_reason_cat)']);
+      noWrite();
     });
 
-    it('a whitespace-only withdrawal_reason_cat counts as a reason (it is tested for truthiness, not cleaned like the rejection reasons)', async () => {
+    it('Withdrawn with only rejection reasons (array or string) is a 400 naming the withdrawal reason; nothing is written', async () => {
+      for (const body of [{ rejection_reason_cats: ['Skills gap'] }, { rejection_reason_cat: 'Skills gap' }]) {
+        fakeDb.reset(); program();
+        const res = await status('hr_recruiter', { new_status: 'Withdrawn', ...body });
+        expect([res.status, res.body.error]).toEqual([400, 'A withdrawal reason is required when withdrawing a candidate (withdrawal_reason_cat)']);
+        noWrite();
+      }
+    });
+
+    it('a blank withdrawal_reason_cat (empty, whitespace, non-string) is a 400', async () => {
+      for (const v of ['', '   ', '\t\n', 7, null, {}, ['x']]) {
+        fakeDb.reset(); program();
+        expect([String(v), (await status('hr_recruiter', { new_status: 'Withdrawn', withdrawal_reason_cat: v })).status]).toEqual([String(v), 400]);
+        noWrite();
+      }
+    });
+
+    it('a Rejected with only blank rejection reasons is a 400 even with a withdrawal reason', async () => {
       program();
-      expect((await status('hr_recruiter', { new_status: 'Withdrawn', withdrawal_reason_cat: '   ' })).status).toBe(200);
-      expect(fakeDb.one(SQL.statusUpdate).params[3]).toBe('   ');
+      expect((await status('hr_recruiter', { new_status: 'Rejected', rejection_reason_cats: [' ', ''], withdrawal_reason_cat: 'Personal reasons' })).status).toBe(400);
+      noWrite();
+    });
+
+    it('the withdrawal reason is stored trimmed', async () => {
+      program();
+      expect((await status('hr_recruiter', { new_status: 'Withdrawn', withdrawal_reason_cat: '  Personal reasons ' })).status).toBe(200);
+      expect(fakeDb.one(SQL.statusUpdate).params).toEqual(['Withdrawn', null, null, 'Personal reasons', null, APP_ID]);
+    });
+
+    it('a Hiring Manager rejecting from Applied and Screened still needs a rejection reason', async () => {
+      program();
+      const res = await status('hiring_manager', { new_status: 'Rejected', withdrawal_reason_cat: 'Personal reasons' });
+      expect(res.status).toBe(400);
+      noWrite();
     });
   });
 
@@ -621,7 +697,7 @@ describe('POST /:id/screening — recruiter_screening_status', () => {
     nothingWritten();
   });
 
-  it('a hiring_manager may set HM Shortlisted — and only HM Shortlisted', async () => {
+  it('a hiring_manager named on the role may set HM Shortlisted — and only HM Shortlisted', async () => {
     program();
     const ok = await screening('hiring_manager', { new_screening_status: 'HM Shortlisted' });
     expect(ok.status).toBe(200);
@@ -634,6 +710,42 @@ describe('POST /:id/screening — recruiter_screening_status', () => {
     }
   });
 
+  describe('a Hiring Manager is scoped to the roles that name them', () => {
+    const SCOPE_ERROR = { error: 'Only the Hiring Manager named on this role (or HR/Leadership) can shortlist for it.' };
+
+    it('a Hiring Manager named on ANOTHER role gets 403, decided before any write', async () => {
+      program({ roleHm: 'Someone Else' });
+      const res = await screening('hiring_manager', { new_screening_status: 'HM Shortlisted' });
+      expect([res.status, res.body]).toEqual([403, SCOPE_ERROR]);
+      nothingWritten();
+    });
+
+    it('a role with no Hiring Manager named (null or blank) refuses every Hiring Manager', async () => {
+      for (const roleHm of [null, '', '   ']) {
+        fakeDb.reset(); program({ roleHm });
+        expect([roleHm, (await screening('hiring_manager', { new_screening_status: 'HM Shortlisted' })).status]).toEqual([roleHm, 403]);
+        nothingWritten();
+      }
+    });
+
+    it('a co-Hiring-Manager field ("A, B") admits each listed person, case and spacing aside, and not a partial name', async () => {
+      for (const roleHm of ['Test Hiring Manager, Piyush Negi', 'Piyush Negi & Test Hiring Manager', '  test   HIRING manager ']) {
+        fakeDb.reset(); program({ roleHm });
+        expect([roleHm, (await screening('hiring_manager', { new_screening_status: 'HM Shortlisted' })).status]).toEqual([roleHm, 200]);
+      }
+      for (const roleHm of ['Test Hiring', 'Test Hiring Managers', 'Hiring Manager']) {
+        fakeDb.reset(); program({ roleHm });
+        expect([roleHm, (await screening('hiring_manager', { new_screening_status: 'HM Shortlisted' })).status]).toEqual([roleHm, 403]);
+        nothingWritten();
+      }
+    });
+
+    it.each(HR_TIER)('%s is not scoped by the role (a Leadership user who is not the named HM still may)', async persona => {
+      program({ roleHm: 'Someone Else' });
+      expect((await screening(persona, { new_screening_status: 'HM Shortlisted' })).status).toBe(200);
+    });
+  });
+
   it.each(HR_TIER)('%s may set any value, HM Shortlisted included', async persona => {
     for (const value of ['New', 'Under Recruiter Review', 'Awaiting HM Review', 'HM Shortlisted']) {
       fakeDb.reset(); program();
@@ -641,6 +753,44 @@ describe('POST /:id/screening — recruiter_screening_status', () => {
       expect([persona, value, res.status]).toEqual([persona, value, 200]);
       expect(fakeDb.one(SQL.screeningUpdate).params[0]).toBe(value);
     }
+  });
+
+  describe("repeating 'HM Shortlisted' is a no-op", () => {
+    it('writes no activity row and no pending action, answers 200 unchanged:true with the application (restricted fields stripped for a Hiring Manager)', async () => {
+      program({ app: { recruiter_screening_status: 'HM Shortlisted' }, screeningUnchanged: true });
+      const res = await screening('hiring_manager', { new_screening_status: 'HM Shortlisted' });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ success: true, new_screening_status: 'HM Shortlisted', unchanged: true });
+      expect(res.body.application.id).toBe(APP_ID);
+      expect(fakeDb.find(SQL.activity)).toEqual([]);
+      expect(fakeDb.find(SQL.resolveHmReview)).toEqual([]);
+      expect(fakeDb.find(SQL.scheduleInterview)).toEqual([]);
+    });
+
+    it('is decided by the UPDATE itself (IS DISTINCT FROM), so two simultaneous requests cannot both raise the action', async () => {
+      program();
+      await screening('hr_recruiter', { new_screening_status: 'HM Shortlisted' });
+      expect(fakeDb.one(SQL.screeningUpdate).sql).toContain('IS DISTINCT FROM');
+    });
+
+    it('a repeat by HR is the same no-op; the first change still writes everything', async () => {
+      program({ app: { recruiter_screening_status: 'HM Shortlisted' }, screeningUnchanged: true });
+      const res = await screening('hr_recruiter', { new_screening_status: 'HM Shortlisted' });
+      expect(res.body.unchanged).toBe(true);
+      expect(fakeDb.find(SQL.scheduleInterview)).toEqual([]);
+      fakeDb.reset(); program();
+      const first = await screening('hr_recruiter', { new_screening_status: 'HM Shortlisted' });
+      expect(first.body).toEqual({ success: true, new_screening_status: 'HM Shortlisted' });
+      expect(fakeDb.find(SQL.scheduleInterview)).toHaveLength(1);
+    });
+
+    it('other values are untouched: a repeat still writes and logs as before (it never raised an action)', async () => {
+      program({ app: { recruiter_screening_status: 'Under Recruiter Review' } });
+      const res = await screening('hr_recruiter', { new_screening_status: 'Under Recruiter Review' });
+      expect(res.body).toEqual({ success: true, new_screening_status: 'Under Recruiter Review' });
+      expect(fakeDb.one(SQL.screeningUpdate).sql).not.toContain('IS DISTINCT FROM');
+      expect(fakeDb.find(SQL.activity)).toHaveLength(1);
+    });
   });
 
   it('the old and new values are logged against the acting user', async () => {
@@ -743,6 +893,75 @@ describe('PATCH /:id/notes and POST /:id/retry-scoring (HR-tier)', () => {
     expect(fakeDb.statements().join('\n')).not.toContain('joining_risk_auto_flag');
   });
 
+  it('notes: setting or changing a priority override needs a non-blank reason (400 before any write); only the reason, or clearing, needs none', async () => {
+    const noWrite = () => expect(fakeDb.statements().join('\n')).not.toMatch(/UPDATE applications SET/);
+    for (const reason of [undefined, '', '   ', '\n', null, 5]) {
+      fakeDb.reset(); program();
+      const body: Record<string, unknown> = { hr_priority_override: 'Critical' };
+      if (reason !== undefined) body.hr_priority_override_reason = reason;
+      const res = await notes('hr_recruiter', body);
+      expect([String(reason), res.status, res.body.error]).toEqual([String(reason), 400, 'hr_priority_override_reason is required when setting an HR priority override']);
+      noWrite();
+    }
+    // other notes fields sent alongside do not rescue it, and nothing of them is written either
+    fakeDb.reset(); program();
+    expect((await notes('hr_recruiter', { hr_priority_override: 'High', hr_recruiter_summary: 'x' })).status).toBe(400);
+    noWrite();
+  });
+
+  describe('notes: the override reason may already be stored (the candidate page sends only the keys that changed)', () => {
+    const SEL = /^SELECT hr_priority_override, hr_priority_override_reason FROM applications WHERE id=\$1$/;
+    const actRow = () => fakeDb.whenOne(/^SELECT candidate_id, role_id FROM applications WHERE id=\$1$/, { candidate_id: 'C9001', role_id: 'R9001' });
+
+    it('changing only the select, with a reason already on record, is accepted and the activity line carries the stored reason', async () => {
+      program(); actRow();
+      fakeDb.whenOne(SEL, { hr_priority_override: 'High', hr_priority_override_reason: 'Referral from CEO' });
+      const res = await notes('hr_recruiter', { hr_priority_override: 'Critical' });
+      expect([res.status, res.body]).toEqual([200, { success: true }]);
+      expect(fakeDb.one(SQL.activity).params[4]).toBe('HR Priority → Critical: Referral from CEO');
+    });
+
+    it('a reason in the request wins over the stored one', async () => {
+      program(); actRow();
+      fakeDb.whenOne(SEL, { hr_priority_override: 'High', hr_priority_override_reason: 'old reason' });
+      expect((await notes('hr_recruiter', { hr_priority_override: 'Critical', hr_priority_override_reason: 'new reason' })).status).toBe(200);
+      expect(fakeDb.one(SQL.activity).params[4]).toBe('HR Priority → Critical: new reason');
+    });
+
+    it('re-sending the value that is already stored is not a change: no reason needed, even with none on record', async () => {
+      program(); actRow();
+      fakeDb.whenOne(SEL, { hr_priority_override: 'High', hr_priority_override_reason: null });
+      expect((await notes('hr_recruiter', { hr_priority_override: 'High' })).status).toBe(200);
+    });
+
+    it('a CHANGE with no reason in the request and none (or a blank one) on record is still 400, and nothing is written', async () => {
+      for (const stored of [{ hr_priority_override: 'High', hr_priority_override_reason: null }, { hr_priority_override: 'High', hr_priority_override_reason: '   ' }, { hr_priority_override: null, hr_priority_override_reason: null }]) {
+        fakeDb.reset(); program();
+        fakeDb.whenOne(SEL, stored);
+        const res = await notes('hr_recruiter', { hr_priority_override: 'Critical' });
+        expect([JSON.stringify(stored), res.status]).toEqual([JSON.stringify(stored), 400]);
+        expect(fakeDb.statements().join('\n')).not.toMatch(/UPDATE applications SET/);
+      }
+    });
+  });
+
+  it('notes: clearing the override (null, empty string, Normal) needs no reason; an empty string is stored as NULL; a reason alone is not an override change', async () => {
+    for (const [v, stored] of [[null, null], ['', null], ['Normal', 'Normal']] as const) {
+      fakeDb.reset(); program();
+      fakeDb.whenOne(/^SELECT candidate_id, role_id FROM applications WHERE id=\$1$/, { candidate_id: 'C9001', role_id: 'R9001' });
+      expect([String(v), (await notes('hr_recruiter', { hr_priority_override: v })).status]).toEqual([String(v), 200]);
+      expect(fakeDb.one(/^UPDATE applications SET hr_priority_override = \$1/).params).toEqual([stored, APP_ID]);
+    }
+    fakeDb.reset(); program();
+    expect((await notes('hr_recruiter', { hr_priority_override_reason: 'only a reason' })).status).toBe(200);
+  });
+
+  it('notes: the override reason is trimmed-checked but stored as sent; a valid pair is logged', async () => {
+    program();
+    fakeDb.whenOne(/^SELECT candidate_id, role_id FROM applications WHERE id=\$1$/, { candidate_id: 'C9001', role_id: 'R9001' });
+    expect((await notes('hr_recruiter', { hr_priority_override: 'High', hr_priority_override_reason: ' urgent ' })).status).toBe(200);
+  });
+
   it('notes: setting a priority override is logged with the reason, against the acting user', async () => {
     program();
     fakeDb.whenOne(/^SELECT candidate_id, role_id FROM applications WHERE id=\$1$/, { candidate_id: 'C9001', role_id: 'R9001' });
@@ -819,9 +1038,9 @@ describe('GET /:id and GET / — compensation is hidden from a hiring_manager un
 describe('getSlaHours — the sla_hours stored on an application at each stage change', () => {
   const H = SLA_HOURS;
   it.each([
-    ['Applied and Screened', H.RESUME_REVIEW_NORMAL], ['Interview Round 1', H.INTERVIEW_FEEDBACK], ['Interview Round 2', H.INTERVIEW_FEEDBACK],
+    ['Applied and Screened', 48], ['Interview Round 1', H.INTERVIEW_FEEDBACK], ['Interview Round 2', H.INTERVIEW_FEEDBACK],
     ['Founders Round', H.INTERVIEW_FEEDBACK], ['Reference Check', H.REF_INIT], ['Offer Released', H.OFFER_RELEASE],
-    ['Assignment Round', H.IDLE], ['Pre-Joining Documents', H.IDLE], ['Offer Discussion', H.IDLE], ['Offer Accepted', H.IDLE], ['Joined', H.IDLE],
+    ['Assignment Round', 48], ['Pre-Joining Documents', H.IDLE], ['Offer Discussion', H.IDLE], ['Offer Accepted', H.IDLE], ['Joined', H.IDLE],
     ['Interview Round 7', H.INTERVIEW_FEEDBACK], ['Interview – Round 3', H.INTERVIEW_FEEDBACK],
     ['interview round 1', H.IDLE], ['Resume Review', H.IDLE], ['Shortlisted', H.IDLE], ['', H.IDLE], ['Banana', H.IDLE],
   ])('%s → %i hours', (stageName, hours) => {
@@ -831,23 +1050,27 @@ describe('getSlaHours — the sla_hours stored on an application at each stage c
   it('every stage of STAGE_ORDER gets one of the documented values (a stage added without thinking about its SLA falls to the 72-hour idle default)', () => {
     const byStage = Object.fromEntries(STAGE_ORDER.map(s => [s, getSlaHours(s)]));
     expect(byStage).toEqual({
-      'Applied and Screened': 48, 'Interview Round 1': 48, 'Interview Round 2': 48, 'Assignment Round': 72, 'Founders Round': 48,
+      'Applied and Screened': 48, 'Interview Round 1': 48, 'Interview Round 2': 48, 'Assignment Round': 48, 'Founders Round': 48,
       'Reference Check': 48, 'Pre-Joining Documents': 72, 'Offer Discussion': 72, 'Offer Released': 48, 'Offer Accepted': 72, 'Joined': 72,
     });
   });
 
-  it('the fit score only matters at Applied and Screened, and the high-fit value equals the normal one (48 and 48)', () => {
-    for (const fit of [undefined, null, 0, 74, 74.99, 75, 100, NaN, -5]) {
+  it('the fit score tiers the five SOP stages (24 from fit 75) and matters nowhere else', () => {
+    for (const fit of [undefined, null, 0, 74, 74.99, NaN, -5]) {
       expect([fit, getSlaHours('Applied and Screened', fit)]).toEqual([fit, 48]);
       expect([fit, getSlaHours('Interview Round 1', fit)]).toEqual([fit, 48]);
       expect([fit, getSlaHours('Joined', fit)]).toEqual([fit, 72]);
     }
-    expect(SLA_HOURS.RESUME_REVIEW_HIGH_FIT).toBe(SLA_HOURS.RESUME_REVIEW_NORMAL);
+    for (const fit of [75, 100]) {
+      for (const st of ['Applied and Screened', 'Interview Round 1', 'Interview Round 2', 'Founders Round', 'Assignment Round']) expect([st, getSlaHours(st, fit)]).toEqual([st, 24]);
+      expect([fit, getSlaHours('Reference Check', fit)]).toEqual([fit, 48]);
+      expect([fit, getSlaHours('Joined', fit)]).toEqual([fit, 72]);
+    }
   });
 
-  it('characterization: for a high-fit candidate (fit >= 75) at Applied and Screened the STORED sla_hours is 48 but the SLA engine breaches at 24 (tieredStandardHours) — the two disagree since Hiring SOP v2.1', () => {
-    expect(getSlaHours('Applied and Screened', 80)).toBe(48);
+  it('for a high-fit candidate (fit >= 75) the stored sla_hours equals the engine\'s breach threshold (tieredStandardHours), above and below the line', () => {
+    expect(getSlaHours('Applied and Screened', 80)).toBe(24);
     expect(tieredStandardHours(80)).toBe(24);
-    expect(getSlaHours('Applied and Screened', 74)).toBe(tieredStandardHours(74));      // below the threshold they agree
+    expect(getSlaHours('Applied and Screened', 74)).toBe(tieredStandardHours(74));
   });
 });

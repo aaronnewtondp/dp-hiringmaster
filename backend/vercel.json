@@ -10,7 +10,7 @@
   "functions": {
     "api/index.ts": {
       "maxDuration": 60,
-      "includeFiles": "node_modules/pdf-parse/dist/pdf-parse/cjs/*"
+      "includeFiles": "node_modules/{pdf-parse/dist/pdf-parse/cjs/*,pdfkit/js/standard-fonts/**/*.cjs}"
     },
     "api/portfolio-worker.ts": {
       "maxDuration": 300,
@@ -27,10 +27,6 @@
     }
   },
   "crons": [
-    {
-      "path": "/api/cron/email-digest",
-      "schedule": "15 8 * * *"
-    },
     {
       "path": "/api/cron/sourcing-check",
       "schedule": "30 3 * * *"

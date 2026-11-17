@@ -199,7 +199,7 @@ export const isPost = (pathPart: string | RegExp) => (r: Request) =>
 export const isPatch = (pathPart: string | RegExp) => (r: Request) =>
   r.method() === 'PATCH' && (typeof pathPart === 'string' ? r.url().includes(pathPart) : pathPart.test(r.url()));
 
-/** All values of a query parameter, accepting axios' `name[]=a&name[]=b` and the plain repeated form. */
+/** All values of a query parameter, the real wire form is axios' bracket form `name[]=a&name[]=b`; the plain repeated `name=a&name=b` is accepted too. */
 export function queryValues(url: string, name: string): string[] {
   const u = new URL(url);
   return [...u.searchParams.getAll(name), ...u.searchParams.getAll(`${name}[]`)];

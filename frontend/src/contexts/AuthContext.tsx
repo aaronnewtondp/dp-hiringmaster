@@ -15,6 +15,22 @@ interface AuthContextType {
   isSuperAdmin:     boolean;
 }
 
+const PERSONAS: readonly string[] = ['hr_recruiter', 'hiring_manager', 'leadership', 'super_admin'];
+
+/** A stored user is trusted only if it is an object with a known persona and string id/email/name. */
+function parseStoredUser(raw: string): AuthUser | null {
+  try {
+    const v: unknown = JSON.parse(raw);
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+    const o = v as Record<string, unknown>;
+    if (typeof o.persona !== 'string' || !PERSONAS.includes(o.persona)) return null;
+    if (typeof o.id !== 'string' || typeof o.email !== 'string' || typeof o.name !== 'string') return null;
+    return v as AuthUser;
+  } catch {
+    return null;
+  }
+}
+
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -25,9 +41,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const storedToken = localStorage.getItem('hms_token');
     const storedUser  = localStorage.getItem('hms_user');
-    if (storedToken && storedUser) {
+    const parsed = storedToken && storedUser ? parseStoredUser(storedUser) : null;
+    if (storedToken && parsed) {
       setToken(storedToken);
-      setUser(JSON.parse(storedUser));
+      setUser(parsed);
+    } else if (storedToken || storedUser) {
+      // a half-written, corrupt or wrong-shaped session: drop it and start signed out
+      localStorage.removeItem('hms_token');
+      localStorage.removeItem('hms_user');
     }
     setLoading(false);
   }, []);

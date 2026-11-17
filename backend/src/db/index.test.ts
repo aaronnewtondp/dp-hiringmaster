@@ -171,12 +171,39 @@ describe('transaction', () => {
     expect(pg.log).toEqual(['BEGIN', 'ROLLBACK', 'RELEASE']);
   });
 
-  it('if the ROLLBACK itself fails, that error replaces the original, and the client is STILL released', async () => {
+  it('if the ROLLBACK itself fails, the ORIGINAL error is still thrown, the failure is logged, and release gets the rollback error (pg discards the connection)', async () => {
     const db = await setup();
     const rollbackErr = new Error('synthetic rollback failure');
+    const original = new Error('original');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     pg.client.query.mockImplementation(async (sql: string) => { pg.log.push(sql); if (sql === 'ROLLBACK') throw rollbackErr; return { rows: [] }; });
-    await expect(db.transaction(async () => { throw new Error('original'); })).rejects.toBe(rollbackErr);
+    await expect(db.transaction(async () => { throw original; })).rejects.toBe(original);
     expect(pg.log).toEqual(['BEGIN', 'ROLLBACK', 'RELEASE']);
+    expect(pg.client.release).toHaveBeenCalledTimes(1);
+    expect(pg.client.release).toHaveBeenCalledWith(rollbackErr);
+    expect(logged).toHaveBeenCalled();
+  });
+
+  it('a failing COMMIT whose ROLLBACK also fails still throws the COMMIT error and discards the connection', async () => {
+    const db = await setup();
+    const commitErr = new Error('synthetic commit failure');
+    const rollbackErr = new Error('synthetic rollback failure');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    pg.client.query.mockImplementation(async (sql: string) => {
+      pg.log.push(sql);
+      if (sql === 'COMMIT') throw commitErr;
+      if (sql === 'ROLLBACK') throw rollbackErr;
+      return { rows: [] };
+    });
+    await expect(db.transaction(async () => 'x')).rejects.toBe(commitErr);
+    expect(pg.client.release).toHaveBeenCalledWith(rollbackErr);
+  });
+
+  it('release() is called with NO argument when the ROLLBACK works (the connection is reused) and on success', async () => {
+    const db = await setup();
+    await db.transaction(async () => 1);
+    await expect(db.transaction(async () => { throw new Error('x'); })).rejects.toThrow('x');
+    expect(pg.client.release.mock.calls).toEqual([[], []]);
   });
 
   it('the client is released exactly once on success and exactly once on failure', async () => {

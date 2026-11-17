@@ -17,8 +17,8 @@ function flagsFromTheRealProvider(persona: string) {
   localStorage.setItem('hms_user', JSON.stringify({ id: 'u-test', name: 'Test Person', email: 'test.person@example.test', persona }));
   let seen: unknown = null;
   function Probe() {
-    const { user, canHR, canLead, isSuperAdmin } = useAuth();
-    seen = user ? { canHR, canLead, isSuperAdmin } : null;                // null until the stored user has been restored
+    const { canHR, canLead, isSuperAdmin } = useAuth();
+    seen = { canHR, canLead, isSuperAdmin };                              // a persona the app does not know is no longer adopted at all: signed out, every flag false
     return null;
   }
   render(<AuthProvider><Probe /></AuthProvider>);

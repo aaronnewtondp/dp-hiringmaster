@@ -122,14 +122,22 @@ describe('Active Candidates — the Unmatched Candidates panel', () => {
     expect(within(r2).getByRole('button', { name: 'Link to role' })).toBeInTheDocument();
   });
 
-  it('a Hiring Manager sees who is unmatched but is given no way to link or delete them', async () => {
+  it('a Hiring Manager makes no request for the unmatched list and gets no panel (the route is HR-tier, it would only ever be a 403)', async () => {
     h.persona = 'hiring_manager';
-    await open(2);
-    expect(await screen.findByText('Test Unmatched 1')).toBeInTheDocument();
-    expect(screen.getByText('u1@example.test')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Link to/ })).not.toBeInTheDocument();
-    expect(screen.queryByTitle('Delete candidate')).not.toBeInTheDocument();
+    await showList();
+    await waitFor(() => expect(h.list).toHaveBeenCalled());
+    expect(h.unmatched).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Unmatched Candidates/)).not.toBeInTheDocument();
   });
+
+  for (const persona of ['hr_recruiter', 'leadership', 'super_admin'] as const) {
+    it(`${persona} does make the request and gets the panel`, async () => {
+      h.persona = persona;
+      await open(2);
+      expect(h.unmatched).toHaveBeenCalledWith({ limit: '50', offset: '0' });
+      expect(await screen.findByText('Test Unmatched 1')).toBeInTheDocument();
+    });
+  }
 
   it('the one-click link posts the suggested role with the Job Application Form channel, drops the row and refreshes the list', async () => {
     await open(2);

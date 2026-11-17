@@ -211,7 +211,7 @@ db_container_running() { [ "$(docker inspect -f '{{.State.Running}}' "$DB_CONTAI
 # TCP, not the socket: the image's entrypoint runs a temporary socket-only server during init, which pg_isready over the socket accepts.
 db_accepts_connections() { docker exec "$DB_CONTAINER" pg_isready -h 127.0.0.1 -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; }
 
-# Healthy = running, accepting TCP connections, seeded (>= 7 roles) and the sequence workaround applied.
+# Healthy = running, accepting TCP connections, seeded (>= 7 roles) and its id sequences past the seeded ids.
 db_ready() {
   db_container_running && db_accepts_connections || return 1
   [ "$(psql_q -tAc "SELECT (SELECT count(*) FROM roles) >= 7 AND to_regclass('public.seq_eval_question') IS NOT NULL AND (SELECT last_value FROM seq_eval_question) >= 13" 2>/dev/null | tr -d ' \n' || true)" = "t" ]
@@ -240,32 +240,9 @@ db_create() {
     || die "schema.sql failed to apply"
 
   log "applying backend/src/db/seed.sql"
-  local err; err="$(mktemp "${TMPDIR:-/tmp}/stack-seed.XXXXXX")"
-  if psql_in -v ON_ERROR_STOP=1 -q -f - < "$REPO_ROOT/backend/src/db/seed.sql" >/dev/null 2>"$err"; then
-    :
-  else
-    # KNOWN DEFECT in seed.sql (reported, not fixed here): on an EMPTY database its closing block runs
-    # setval('seq_candidate', COALESCE(MAX(...), 0)) and 0 is below the sequence minimum, so psql stops there. Everything above it has
-    # already committed, and the setvals after it (seq_application, seq_interview, seq_agency, seq_assignment, seq_refcheck) are
-    # no-ops on a fresh database: those sequences START at their right values. docker-compose's init (ON_ERROR_STOP) dies on exactly
-    # this line. This script tolerates EXACTLY that one error; any other error in seed.sql still fails the stack.
-    local n_err; n_err="$(grep -c 'ERROR:' "$err" || true)"
-    if [ "$n_err" -eq 1 ] && grep -q -F 'setval: value 0 is out of bounds for sequence' "$err"; then
-      log "seed.sql stopped at its known closing setval(seq_candidate, 0) error (data is committed); continuing"
-    else
-      cat "$err" >&2; rm -f "$err"; die "seed.sql failed with an unexpected error"
-    fi
-  fi
-  rm -f "$err"
+  psql_in -v ON_ERROR_STOP=1 -q -f - < "$REPO_ROOT/backend/src/db/seed.sql" >/dev/null \
+    || die "seed.sql failed to apply"
 
-  # Workaround for the second known seed defect: seed.sql inserts Q001-Q013 and BEN001-BEN012 with explicit ids but never advances
-  # seq_eval_question / seq_comp_benchmark (schema.sql's "START 14" / "START 13" are CREATE SEQUENCE IF NOT EXISTS, so they do nothing
-  # after the earlier "START 1"), so the first insert that relies on the default id collides on the primary key. Same fix the CI branch uses.
-  log "advancing seq_eval_question / seq_comp_benchmark past the seeded ids"
-  psql_in -v ON_ERROR_STOP=1 -q >/dev/null <<'SQL' || die "sequence workaround failed"
-SELECT setval('seq_eval_question',  (SELECT MAX(substring(id from '[0-9]+')::int) FROM eval_questions));
-SELECT setval('seq_comp_benchmark', (SELECT MAX(substring(id from '[0-9]+')::int) FROM comp_benchmarks));
-SQL
   db_ready || die "the database is up but did not pass the readiness check after seeding"
   DB_RECREATED=1
 }

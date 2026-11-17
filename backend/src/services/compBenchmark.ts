@@ -100,15 +100,36 @@ sentences explaining the estimate.`;
   });
 
   const textBlock = response.content.find(b => b.type === 'text');
-  const rawText = textBlock && 'text' in textBlock ? textBlock.text : '{}';
-  const cleaned = rawText.replace(/```json|```/g, '').trim();
-  const parsed = JSON.parse(cleaned) as { range_min: number; range_max: number; rationale: string };
+  if (!textBlock || !('text' in textBlock) || typeof textBlock.text !== 'string') {
+    throw new Error('Compensation benchmark: the model reply has no text block');
+  }
+  const cleaned = textBlock.text.replace(/```json|```/g, '').trim();
+  return validateAiBenchmark(JSON.parse(cleaned));
+}
 
+// The model's answer is untrusted: both bounds must be finite, non-negative NUMBERS (a numeric string or a missing
+// field is refused, not coerced) with min <= max, and the rationale a string. Anything else throws, so the caller
+// treats it as a failed benchmark and nothing malformed is returned or stored.
+export function validateAiBenchmark(parsed: unknown): CompBenchmarkResult {
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Compensation benchmark: the model reply is not a JSON object');
+  }
+  const { range_min, range_max, rationale } = parsed as Record<string, unknown>;
+  const ok = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+  if (!ok(range_min) || !ok(range_max)) {
+    throw new Error('Compensation benchmark: range_min and range_max must be finite non-negative numbers');
+  }
+  if (range_min > range_max) {
+    throw new Error('Compensation benchmark: range_min is above range_max');
+  }
+  if (rationale !== undefined && rationale !== null && typeof rationale !== 'string') {
+    throw new Error('Compensation benchmark: rationale must be a string');
+  }
   return {
     source: 'ai_estimate',
-    range_min: Number(parsed.range_min),
-    range_max: Number(parsed.range_max),
+    range_min,
+    range_max,
     currency: 'LPA',
-    rationale: parsed.rationale || 'AI-estimated range — no internal benchmark data available for this role.',
+    rationale: (rationale as string | undefined) || 'AI-estimated range — no internal benchmark data available for this role.',
   };
 }

@@ -13,14 +13,23 @@ export default function InfoTooltip({ text, className = '', align = 'center', wi
 }) {
   const [show, setShow] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
+  // What the pointer that last entered the marker was. A tap on a phone is followed by emulated mouse events
+  // (mouseenter, then click): the emulated mouseenter used to open the popover and the click then toggled it shut, so the
+  // first tap showed nothing. A real mouse still opens it on hover; a touch or pen pointer opens it only through the click.
+  const pointerType = useRef('');
 
   useEffect(() => {
     if (!show) return;
     const onClickOutside = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setShow(false);
     };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShow(false); };
     document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClickOutside);
+      document.removeEventListener('keydown', onKey);
+    };
   }, [show]);
 
   const alignClass =
@@ -32,7 +41,8 @@ export default function InfoTooltip({ text, className = '', align = 'center', wi
     <span ref={ref} className={`relative inline-flex ${className}`}>
       <button
         type="button"
-        onMouseEnter={() => setShow(true)}
+        onPointerEnter={e => { pointerType.current = e.pointerType; }}
+        onMouseEnter={() => { if (pointerType.current !== 'touch' && pointerType.current !== 'pen') setShow(true); }}
         onMouseLeave={() => setShow(false)}
         onClick={e => { e.stopPropagation(); setShow(s => !s); }}
         className="text-gray-300 hover:text-dp-600 transition-colors"

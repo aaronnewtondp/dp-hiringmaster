@@ -128,7 +128,7 @@ test.describe('Dashboard audit fixes — SLA race, orphan sweep, funnel shape, s
     expect(rows[0].resolved).toBe(true);
   });
 
-  test('checkJoiningRisk successfully creates a pending_action for a fresh Offer Accepted / no-contact application', async ({ request }) => {
+  test('checkJoiningRisk successfully creates a pending_action once the 5 days since the acceptance have really passed (backdated)', async ({ request }) => {
     // Regression for a real, previously-undiscovered bug found while writing
     // this file: the INSERT below used to pass an extra, never-referenced
     // $2 placeholder (a stray leftover `null` in the params array) that the
@@ -148,6 +148,12 @@ test.describe('Dashboard audit fixes — SLA race, orphan sweep, funnel shape, s
     const stageRes = await api.post(`/api/applications/${application.id}/stage`, { new_stage: 'Offer Accepted' });
     expect(stageRes.status()).toBe(200);
 
+    // 2026-11-16: the move INTO Offer Accepted starts the 5-day clock (last_hr_contact = today), so a fresh acceptance is NOT flagged;
+    // the acceptance is backdated 6 days here, with the contact date cleared as it was on rows that predate the stamp.
+    await client.query(
+      `UPDATE applications SET last_hr_contact = NULL, stage_entry_time = NOW() - INTERVAL '6 days' WHERE id = $1`, [application.id]
+    );
+
     await runCronSlaCheck(request); // must not 500 — this is exactly what used to throw
 
     const { rows: appRows } = await client.query(
@@ -156,10 +162,48 @@ test.describe('Dashboard audit fixes — SLA race, orphan sweep, funnel shape, s
     expect(appRows[0].joining_risk_auto_flag).toBe(true);
 
     const { rows: actionRows } = await client.query(
-      `SELECT id FROM pending_actions WHERE application_id = $1 AND action_type = 'Joining risk — no contact' AND resolved = false`,
+      `SELECT id, description, hours_overdue FROM pending_actions WHERE application_id = $1 AND action_type = 'Joining risk — no contact' AND resolved = false`,
       [application.id]
     );
     expect(actionRows.length).toBe(1);
+    // real elapsed time past the 120 h line (about 24 h), not the old constant 120
+    expect(Number(actionRows[0].hours_overdue)).toBeGreaterThan(20);
+    expect(Number(actionRows[0].hours_overdue)).toBeLessThan(30);
+    expect(actionRows[0].description).toContain('since the offer was accepted');
+  });
+
+  test('a fresh move into Offer Accepted is NOT flagged: it stamps last_hr_contact = today and never overwrites a more recent contact', async ({ request }) => {
+    const hrToken = await getToken(request, 'hr');
+    const api = authed(request, hrToken);
+    const { application } = await createCandidateWithApp(request, hrToken, 'R006');
+
+    expect((await api.post(`/api/applications/${application.id}/stage`, { new_stage: 'Offer Accepted' })).status()).toBe(200);
+    const { rows: stamped } = await client.query(
+      `SELECT last_hr_contact = CURRENT_DATE AS today FROM applications WHERE id = $1`, [application.id]
+    );
+    expect(stamped[0].today).toBe(true);
+
+    await runCronSlaCheck(request);
+    const { rows: appRows } = await client.query(`SELECT joining_risk_auto_flag FROM applications WHERE id = $1`, [application.id]);
+    expect(appRows[0].joining_risk_auto_flag).toBe(false);
+    const { rows: actionRows } = await client.query(
+      `SELECT id FROM pending_actions WHERE application_id = $1 AND action_type = 'Joining risk — no contact'`, [application.id]
+    );
+    expect(actionRows.length).toBe(0);
+
+    // a contact dated in the future of today (more recent) survives a later move into Offer Accepted
+    const { application: second } = await createCandidateWithApp(request, hrToken, 'R006');
+    await client.query(`UPDATE applications SET last_hr_contact = CURRENT_DATE + 2 WHERE id = $1`, [second.id]);
+    expect((await api.post(`/api/applications/${second.id}/stage`, { new_stage: 'Offer Accepted' })).status()).toBe(200);
+    const { rows: kept } = await client.query(`SELECT last_hr_contact = CURRENT_DATE + 2 AS kept FROM applications WHERE id = $1`, [second.id]);
+    expect(kept[0].kept).toBe(true);
+
+    // an older contact is replaced (it is not a contact since the acceptance)
+    const { application: third } = await createCandidateWithApp(request, hrToken, 'R006');
+    await client.query(`UPDATE applications SET last_hr_contact = CURRENT_DATE - 9 WHERE id = $1`, [third.id]);
+    expect((await api.post(`/api/applications/${third.id}/stage`, { new_stage: 'Offer Accepted' })).status()).toBe(200);
+    const { rows: reset } = await client.query(`SELECT last_hr_contact = CURRENT_DATE AS today FROM applications WHERE id = $1`, [third.id]);
+    expect(reset[0].today).toBe(true);
   });
 
   test('hiring_funnel includes a stage even when every occupant has since been rejected, with the rejection counted', async ({ request }) => {
