@@ -251,8 +251,10 @@ live.
       allowed; a ~5x slower shared runner than a developer machine): its `floorMs` went from 60 to 150; a quadratic tokenizer is still caught by the 1 s backstop and the 5 MB bound.
 - [x] **googleapis 189's `GoogleAuth({ credentials })` deprecation warning** (`driveService.ts` read-only client): now a `JWT` client from the key's email and private
       key, the replacement the library names and what the write, Calendar and Gmail clients already use. No warning is emitted any more.
-- [ ] `pdf.scanCharge.test.ts` "scanPdfContentStreamsAsync and the cooperative text scan the same" is timing-sensitive and already flaky on
-      untouched `main` (5 of 8 runs failed): it expects a 6,000-stream scan to outlast one 20 ms slice, which a fast machine does not.
+- [x] **Fixed 2026-11-17:** `pdf.scanCharge.test.ts` "scanPdfContentStreamsAsync and the cooperative text scan the same" was timing-sensitive (it expected a
+      6,000-stream scan to outlast one 20 ms slice). PR #31 had already put the deadline assertions on a clock where every read is a slice later; a new test now
+      pins verdict + work-tally parity of the async scan against the sync scan and the real yielding by counting event-loop turns. 50/50 runs, 10/10 under 8 busy
+      processes; mutations (a driver that never yields; an async path that stops early) fail it.
 - [ ] **Drive auto-folder creation** on Role and Candidate creation — every
       role/candidate should get a Drive folder automatically; currently none
       do. (`driveService.ts` already has working Drive API access via the
