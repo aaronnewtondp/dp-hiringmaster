@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { query, queryOne, transaction } from '../db/index.js';
+import { transaction } from '../db/index.js';
 import { Role } from '../types/index.js';
 import { canonicalHiringManagerField } from '../utils/hiringManagers.js';
 
@@ -25,6 +25,21 @@ export function parseVacancyReason(raw: unknown): string[] | null {
   return s ? s.split(', ') : null;
 }
 
+// Upper bound for "Number of openings" on a requisition (a sanity cap, not a business rule).
+export const MAX_NUM_OPENINGS = 500;
+
+// num_openings from the form: absent/empty keeps the default of 1; otherwise a positive whole number (a JSON number or
+// a numeric string such as "3" or "08"). Anything else ("abc", "0", "-2", "1.5", "1e3", above the cap) is null = invalid.
+export function parseNumOpenings(raw: unknown): number | null {
+  if (raw === undefined || raw === null) return 1;
+  if (typeof raw === 'string' && raw.trim() === '') return 1;
+  let n: number;
+  if (typeof raw === 'number') n = raw;
+  else if (typeof raw === 'string' && /^\d+$/.test(raw.trim())) n = parseInt(raw.trim(), 10);
+  else return null;
+  return Number.isInteger(n) && n >= 1 && n <= MAX_NUM_OPENINGS ? n : null;
+}
+
 // ─── POST /api/roles/ingest ─────────────────────────────────────────────────────
 // Called by a Google Apps Script trigger bound to the Requisition Form's
 // response sheet, firing on every new form submission (onFormSubmit).
@@ -48,41 +63,49 @@ router.post('/ingest', async (req: Request, res: Response) => {
     return;
   }
 
-  const sourceRowKey = `${timestamp || ''}|${email || ''}`;
-  if (sourceRowKey.trim() !== '|') {
-    const existing = await queryOne<Role>(
-      'SELECT id, title FROM roles WHERE requisition_source_row = $1',
-      [sourceRowKey]
-    );
-    if (existing) {
-      res.status(200).json({ message: 'Already ingested — skipped duplicate', role_id: existing.id });
-      return;
-    }
+  // Validate EVERYTHING before the transaction opens: a bad value must not burn a sequence value or write a row.
+  const openings = parseNumOpenings(num_openings);
+  if (openings === null) {
+    res.status(400).json({ error: `num_openings must be a whole number from 1 to ${MAX_NUM_OPENINGS} (got ${JSON.stringify(num_openings)})` });
+    return;
   }
 
-  const role = await transaction(async (client) => {
-    const seq = await client.query(`SELECT nextval('seq_role') as n`);
-    const roleId = 'R' + String(seq.rows[0].n).padStart(3, '0');
+  // The dedup key is "timestamp|email". With neither a usable timestamp nor a usable e-mail the key would be "|" and
+  // a re-fired trigger could not be recognised, so the row is refused rather than risk a duplicate role.
+  const hasUsable = (v: unknown) => typeof v === 'string' ? v.trim() !== '' : (typeof v === 'number' && Number.isFinite(v));
+  if (!hasUsable(timestamp) && !hasUsable(email)) {
+    res.status(400).json({ error: 'timestamp or email is required: without one of them this submission cannot be de-duplicated' });
+    return;
+  }
+  const sourceRowKey = `${timestamp || ''}|${email || ''}`;
+
+  const outcome = await transaction(async (client) => {
+    // requisition_source_row has no unique index, so two concurrent posts of one row could both insert. Serialise
+    // same-key posts: the second waits for the first to commit, then finds its role in the lookup below.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`role-ingest:${sourceRowKey}`]);
+    const found = await client.query('SELECT id, title FROM roles WHERE requisition_source_row = $1', [sourceRowKey]);
+    if (found.rows[0]) return { existingId: found.rows[0].id as string };
 
     // start_date (Open Date) is deliberately left unset here — a Draft role
     // hasn't been approved yet, so its aging clock hasn't started. PATCH
     // /:id's approval branch (roles.ts) sets it automatically the day this
     // role is actually approved, same as a manually-created role.
+    // The id comes from the column default (format_seq_id, 4-digit pad), the same as POST /roles.
     const result = await client.query(
       `INSERT INTO roles (
-         id, title, department, hiring_manager_name, priority, status,
+         title, department, hiring_manager_name, priority, status,
          num_openings, location,
          new_or_replacement, vacancy_reason, appointment_type, qualification_required,
          must_have_skills, nice_to_have_skills, yoe_required, ctc_band,
          kpi_expectations, additional_remarks,
          target_closure_date, requisition_source_row
        )
-       VALUES ($1,$2,$3,$4,$5,'Draft',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+       VALUES ($1,$2,$3,$4,'Draft',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
        RETURNING *`,
       [
-        roleId, job_title, department || null, canonicalHiringManagerField(hiring_manager) || null,
+        job_title, department || null, canonicalHiringManagerField(hiring_manager) || null,
         mapPriority(priority_level),
-        num_openings ? parseInt(num_openings, 10) : 1,
+        openings,
         location || null,
         new_or_replacement || null, parseVacancyReason(vacancy_reason),
         appointment_type || null, qualification_required || null,
@@ -99,8 +122,14 @@ router.post('/ingest', async (req: Request, res: Response) => {
       [result.rows[0].id, `${result.rows[0].title} auto-created from Requisition Form submission`]
     );
 
-    return result.rows[0] as Role;
+    return { role: result.rows[0] as Role };
   });
+
+  if ('existingId' in outcome) {
+    res.status(200).json({ message: 'Already ingested — skipped duplicate', role_id: outcome.existingId });
+    return;
+  }
+  const role = outcome.role;
 
   console.log(`[Requisition Ingest] Created role ${role.id} — ${role.title}`);
   res.status(201).json({ role });
