@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reasonFields, splitReasons, REASON_DELIMITER } from './rejectionReasons.ts';
+import { reasonFields, statusReasonFields, splitReasons, REASON_DELIMITER } from './rejectionReasons.ts';
 import { REJECTION_REASONS } from '../types/index.ts';
 
 describe('reasonFields', () => {
@@ -17,6 +17,20 @@ describe('reasonFields', () => {
     const f = reasonFields(['A', 'B', 'C']);
     expect(splitReasons(f.rejection_reason_cat)).toEqual(['A', 'B', 'C']);
     expect(f.rejection_reason_cat).toBe(['A', 'B', 'C'].join(REASON_DELIMITER));
+  });
+});
+
+describe('statusReasonFields', () => {
+  it('Withdrawn sends its single reason in withdrawal_reason_cat and nothing in the rejection fields', () => {
+    expect(statusReasonFields('Withdrawn', ['Process too slow'])).toEqual({ withdrawal_reason_cat: 'Process too slow' });
+    expect(statusReasonFields('Withdrawn', [])).toEqual({});
+  });
+  it('Rejected sends the rejection fields, exactly as reasonFields does', () => {
+    expect(statusReasonFields('Rejected', ['A', 'B'])).toEqual(reasonFields(['A', 'B']));
+    expect(statusReasonFields('Rejected', [])).toEqual({});
+  });
+  it('any other status carries no reasons', () => {
+    for (const s of ['Hold for Future', 'Active', 'Closed']) expect(statusReasonFields(s, ['left over'])).toEqual({});
   });
 });
 

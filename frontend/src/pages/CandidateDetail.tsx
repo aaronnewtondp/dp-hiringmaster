@@ -9,7 +9,7 @@ import { StageBadge, StatusBadge, PriorityBadge, OverBudgetBadge, Spinner, Empty
 import PipelineProgress from '../components/shared/PipelineProgress.tsx';
 import RejectionEmailDraft, { RejectionEmailState } from '../components/shared/RejectionEmailDraft.tsx';
 import ReasonCheckboxList from '../components/shared/ReasonCheckboxList.tsx';
-import { reasonFields, splitReasons } from '../utils/rejectionReasons.ts';
+import { statusReasonFields, splitReasons } from '../utils/rejectionReasons.ts';
 import BackButton from '../components/shared/BackButton.tsx';
 import { isOverBudget } from '../utils/budget.ts';
 import EditableSection from '../components/shared/EditableSection.tsx';
@@ -269,7 +269,7 @@ export default function CandidateDetail() {
       const sendEmail = statusValue === 'Rejected' && rejectionEmail.enabled;
       const res = await applicationsApi.updateStatus(selectedAppId, {
         new_status: statusValue,
-        ...reasonFields(reasons),
+        ...statusReasonFields(statusValue, reasons),
         rejection_reason_detail: rejectionDetail || undefined,
         send_rejection_email: sendEmail || undefined,
         rejection_email_subject: sendEmail ? rejectionEmail.subject : undefined,

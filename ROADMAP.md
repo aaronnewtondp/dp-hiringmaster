@@ -482,9 +482,10 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       stays. **Still from the token:** `name` and `email` (a rename reaches the person at their next sign-in; HM role matching compares the token name) and the
       sign-in response's `user` object, so the UI's menu keeps the old persona until the person signs in again, while every API call already enforces the new one.
       Pinned by `auth.activeCheck.test.ts` and the two persona tests in `db/17`; `forgeToken` now defaults to a seeded user holding the forged persona.
-- [ ] **HR priority override does not require a reason although the test says it does.** `PATCH /api/applications/:id/notes` accepts `hr_priority_override` with no
+- [x] **HR priority override does not require a reason although the test says it does.** `PATCH /api/applications/:id/notes` accepts `hr_priority_override` with no
       `hr_priority_override_reason` (200; the activity line just ends in an empty reason), while `api/08-misc` is titled "HR priority override requires a reason"
       and asserts `[400, 200]` ("backend may not validate this yet"), so it cannot fail. Decide the rule; make the test exact.
+      **Fixed 2026-11-16:** setting or changing the override needs a non-blank (trimmed) `hr_priority_override_reason`, else 400 before any write; clearing it (`null`, `''` stored as NULL, or `'Normal'`) needs none, and a reason alone is not an override change. `api/08-misc` is exact now. The candidate page DOES set it (Screening & Risk Notes: a Priority Override select and a reason field, saved as only the keys that changed), so the reason may also already be stored on the application: a change with no reason in the request is accepted when a non-blank one is on record, re-sending the stored value is not a change, and the activity line carries the effective reason (found in review: the first version returned 400 for a select-only change).
 - [x] **The Hiring Manager is not scoped on `POST /api/applications/:id/screening`.** Any Hiring Manager can set `HM Shortlisted` on any application, whatever the
       role's `hiring_manager_name` (verified: a Hiring Manager named on another role did it), unlike comp visibility and the dashboard, which are per role.
       **Fixed 2026-11-16:** a Hiring Manager may set `HM Shortlisted` only on a role whose `hiring_manager_name` names them (`canSeeCompForRole`, co-Hiring-Managers included), else 403 before any write; HR-tier is unchanged.
@@ -499,8 +500,9 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       "Assignment Email Failed" activity-log row is written.
       **Fixed 2026-11-16:** one message ("Candidate has no email on file.") is stored, logged and returned, the same "Assignment Email Failed" activity row a failed send writes is added
       (create and `assignment-send` retry share the function), the response's round carries the error, and a blank or whitespace-only address counts as none.
-- [ ] **The rejection/withdrawal reason gate is looser than it reads**: either kind of reason satisfies either status (a `Rejected` with only a withdrawal reason
+- [x] **The rejection/withdrawal reason gate is looser than it reads**: either kind of reason satisfies either status (a `Rejected` with only a withdrawal reason
       is stored with no rejection reason), and a whitespace-only `withdrawal_reason_cat` counts (`applications.access.test.ts`).
+      **Fixed 2026-11-16:** `Rejected` needs a non-blank rejection reason and `Withdrawn` a non-blank (trimmed, stored trimmed) `withdrawal_reason_cat`, each a 400 before any write naming the missing one. The single and bulk Withdraw flows now send `withdrawal_reason_cat` (`statusReasonFields`), so withdrawals are stored in the withdrawal column. **Deploy the frontend first**: an old bundle sends a withdrawal's reason in the rejection fields and gets a 400 from the new backend.
 - [x] **`GET /api/candidates/:id/edit-log` returned raw compensation old/new values to a Hiring Manager.** Fixed 2026-11-15: HR-tier sees every row; a Hiring Manager sees the
       `current_ctc_fixed` / `current_ctc_variable` / `current_esops` / `expected_ctc` rows only when named on a role the candidate has an application on (the rule of `GET /:id`).
       Pinned in `routes.authMatrix.test.ts`. `requireLeadership` is still exported but mounted on no route.
@@ -535,8 +537,7 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       (`enabled: !isLockedToOwnRole`), but the filter is still drawn, with an empty list. **Fixed 2026-11-16:** the filter is no longer drawn for a Hiring Manager, and a remembered mode is ignored for them.
 - [ ] **Smaller pinned UI behaviours** (each in the listed spec's header): the Stage modal has no skip-reason control; a candidate page keeps the old stage until
       reloaded after an auto-advance; a Hiring Manager not on a round still sees "Submit feedback" and the edit pencils on roles and candidates (every save is
-      a 403); a role's activity timeline does not refresh after Change status; the bulk over-budget reason is sent for, and stored on, every selected row; bulk
-      withdraw stores its reason in the rejection column; clearing a user's Department in Edit does not clear it; the first tap on an info marker on a phone
+      a 403); a role's activity timeline does not refresh after Change status; the bulk over-budget reason is sent for, and stored on, every selected row; clearing a user's Department in Edit does not clear it; the first tap on an info marker on a phone
       opens nothing (`e2e/10`, `e2e/11`, `e2e/14`, `e2e/09`, `e2e-mobile/15`).
 - [x] **Approve Role hid a JD-generation failure** (`RoleDetail.tsx` `handleApprove`). Fixed 2026-11-16: the PATCH returns `jdGeneration` (30 s of Claude, two PDFs, two Drive
       uploads, awaited inline) and the button now reports it through the same `reportJdGeneration` the Change status window uses ("Long-form and social JDs generated",

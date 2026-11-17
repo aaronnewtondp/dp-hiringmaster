@@ -18,6 +18,17 @@ export function reasonFields(reasons: string[]): { rejection_reason_cats?: strin
   return { rejection_reason_cats: reasons, rejection_reason_cat: reasons.join(REASON_DELIMITER) };
 }
 
+/**
+ * Reason fields for a status change, per status: a withdrawal's single reason goes in
+ * `withdrawal_reason_cat` (the API requires exactly that field for Withdrawn), a rejection's
+ * in the rejection fields (`reasonFields`). Any other status carries none.
+ */
+export function statusReasonFields(status: string, reasons: string[]): { rejection_reason_cats?: string[]; rejection_reason_cat?: string; withdrawal_reason_cat?: string } {
+  if (status === 'Withdrawn') return reasons.length ? { withdrawal_reason_cat: reasons[0] } : {};
+  if (status === 'Rejected') return reasonFields(reasons);
+  return {};
+}
+
 export function splitReasons(stored: string | null | undefined): string[] {
   if (!stored) return [];
   return stored.split(REASON_DELIMITER.trim()).map(s => s.trim()).filter(Boolean);

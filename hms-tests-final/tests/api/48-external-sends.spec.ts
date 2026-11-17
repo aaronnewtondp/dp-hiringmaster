@@ -317,7 +317,7 @@ test.describe('POST /api/applications/:id/status — rejection e-mail validation
     const { hr, application } = await newApplicationAt(request, 'Applied and Screened', 'R006');
     const res = await hr.post(`/api/applications/${application.id}/status`, { new_status: 'Rejected', send_rejection_email: true });
     expect(res.status()).toBe(400);
-    expect((await res.json()).error).toBe('A reason is required when rejecting or withdrawing a candidate');
+    expect((await res.json()).error).toBe('A rejection reason is required when rejecting a candidate (rejection_reason_cats or rejection_reason_cat)');
   });
 
   test('with an address on file the rejection e-mail outcome and the stored columns agree (sent XOR error), and the status is committed either way', async ({ request }) => {

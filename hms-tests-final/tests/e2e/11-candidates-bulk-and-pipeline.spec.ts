@@ -307,7 +307,7 @@ test.describe('Active Candidates: bulk status', () => {
     await expect(rowOf(page, b.search)).toHaveCount(3);                               // Hold for Future is not archived: all three rows stay
   });
 
-  test('TODAY bulk withdraw takes one reason from a dropdown and stores it in the rejection column, like the single flow', async ({ page, request }) => {
+  test('bulk withdraw takes one reason from a dropdown and stores it in the withdrawal column, like the single flow', async ({ page, request }) => {
     const b = await makeBatch(request, ['M', 'F']);
     const posts = recordRequests(page, isPost('/status'));
     await openCandidates(page, 'hr', b, 2);
@@ -322,13 +322,13 @@ test.describe('Active Candidates: bulk status', () => {
     await expect(toastWith(page, '2 of 2 updated to Withdrawn')).toBeVisible();
 
     for (const body of posts.bodies()) {
-      expect(body).toEqual({ new_status: 'Withdrawn', rejection_reason_cats: ['Accepted another offer'], rejection_reason_cat: 'Accepted another offer' });
+      expect(body).toEqual({ new_status: 'Withdrawn', withdrawal_reason_cat: 'Accepted another offer' });
     }
     for (const p of b.people) {
       const app = await getApp(request, p.appId);
       expect(app.status).toBe('Withdrawn');
-      expect(app.rejection_reason_cat).toBe('Accepted another offer');
-      expect(app.withdrawal_reason_cat).toBeNull();                                  // TODAY: see the single-withdraw test in e2e/10
+      expect(app.withdrawal_reason_cat).toBe('Accepted another offer');
+      expect(app.rejection_reason_cat).toBeNull();
     }
   });
 });
