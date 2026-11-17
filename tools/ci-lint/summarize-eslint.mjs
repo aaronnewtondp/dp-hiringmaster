@@ -1,7 +1,7 @@
 // Turns ESLint's JSON report into GitHub annotations plus a job-summary table.
 //   node tools/ci-lint/summarize-eslint.mjs <eslint.json> [--fail]
-// Findings are NON-BLOCKING by default (exit 0): the run currently has 2 known findings, both in jobs/scheduler.ts (dead code,
-// try/catch bodies). Pass --fail to make any finding exit 1; do that once those two are gone (see ci.yml, job lint-async).
+// Without --fail findings are non-blocking (exit 0). ci.yml's lint-async job passes --fail since 2026-11-16 (the run is at ZERO findings:
+// the two old ones were in the deleted jobs/scheduler.ts), so any finding now exits 1.
 // A file ESLint could not parse (a fatal message) always exits 1: an unlinted file is not a clean file.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,7 +39,7 @@ for (const r of rows) byRule[r.rule] = (byRule[r.rule] ?? 0) + 1;
 const lines = [];
 lines.push('### Async-promise lint (backend/src, production files)');
 lines.push('');
-lines.push(`Files linted: ${report.length}. Findings: **${rows.length}**${rows.length ? ' (non-blocking, see ci.yml)' : ''}.`);
+lines.push(`Files linted: ${report.length}. Findings: **${rows.length}**${rows.length ? ' (blocking when run with --fail, as ci.yml does)' : ''}.`);
 if (rows.length) {
   lines.push('');
   lines.push('| File | Line | Rule |');

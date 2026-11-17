@@ -1,5 +1,5 @@
 import { transaction } from '../../db/index.js';
-import { SLA_HOURS } from '../../types/index.js';
+import { getSlaHours } from '../../jobs/slaChecker.js';
 import { priorityBucketFromScore } from '../resumeIQ.js';
 import { computeAvg } from './rubric.js';
 import { PortfolioAnalysisResult } from './types.js';
@@ -59,13 +59,14 @@ export async function applyPortfolioOutcome(
            score_portfolio=$1, score_portfolio_note=$2,
            score_avg=$3, ai_fit_score=$4, ai_priority_bucket=$5,
            score_summary=$6, score_red_flags=$7,
-           sla_hours = CASE WHEN stage='Applied and Screened' THEN $8::int ELSE sla_hours END,
+           sla_hours=$8,
            portfolio_analysis_status=$9, portfolio_analysis_error=$10, portfolio_analyzed_at=NOW()
          WHERE id=$11`,
         [
           out.score, out.note.slice(0, 120), value, Math.round(value * 10), priorityBucketFromScore(value),
           summary, flags,
-          value >= 8 ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL,
+          // the engine's own tiering for the stage the (row-locked) application is at now
+          getSlaHours(String(app.stage ?? ''), Math.round(value * 10)),
           out.status, out.message ?? null, applicationId,
         ],
       );

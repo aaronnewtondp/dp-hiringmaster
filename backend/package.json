@@ -1,7 +1,7 @@
 {
   "name": "dp-hms-backend",
   "version": "1.0.0",
-  "description": "DigitalPaani Hiring Management System \u2014 Backend",
+  "description": "DigitalPaani Hiring Management System — Backend",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
@@ -25,7 +25,6 @@
     "googleapis": "^189.0.0",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
-    "node-cron": "^3.0.3",
     "nodemailer": "^10.3.1",
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.20.2",
@@ -40,7 +39,6 @@
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.14.10",
-    "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^6.4.15",
     "@types/pdfkit": "^0.17.7",
     "@types/pg": "^8.23.1",

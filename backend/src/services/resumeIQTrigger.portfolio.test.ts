@@ -43,7 +43,6 @@ vi.mock('./portfolio/enqueue.js', () => ({
 }));
 
 import { runResumeIQScoring } from './resumeIQTrigger.js';
-import { SLA_HOURS } from '../types/index.js';
 
 afterAll(() => {
   if (savedKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = savedKey;
@@ -56,7 +55,7 @@ const READABLE_TEXT = 'Jane Doe — Senior product designer, ten years of shippi
 const SCREENING = [{ question: 'Why this role?', answer: 'I love water tech.' }];
 
 const APP = {
-  id: 'A0611', candidate_id: 'C1001', role_id: 'R007', score_avg: null,
+  id: 'A0611', candidate_id: 'C1001', role_id: 'R007', stage: 'Applied and Screened', score_avg: null,
   preferred_location: 'Mumbai', screening_answers: SCREENING,
 };
 const CANDIDATE = { id: 'C1001', full_name: 'Jane Doe', resume_drive_link: RESUME_URL };
@@ -216,13 +215,14 @@ describe('runResumeIQScoring — the 8-dimension score and what is passed to Cla
 
     expect(query).toHaveBeenCalledTimes(2);
     expect(sql(0)).toMatch(/^UPDATE applications SET score_technical=\$1, score_technical_note=\$2,/);
-    expect(sql(0)).toMatch(/score_computed_at=NOW\(\), ai_fit_score=\$23, ai_priority_bucket=\$24, sla_hours=\$25 WHERE id=\$26$/);
+    expect(sql(0)).toMatch(/score_computed_at=NOW\(\), ai_fit_score=\$23, ai_priority_bucket=\$24, sla_hours = CASE WHEN stage=\$27 THEN \$25::int ELSE sla_hours END WHERE id=\$26$/);
     expect(query.mock.calls[0][1]).toStrictEqual([
       7, 't', 8, 'e', 6, 'i', 7, 'c', 8, 'r', 7, 'tr', 6, 'l', 8, 'co',
       7.4, ['s1', 's2', 's3'], ['rf'], 'Good fit.', 'Yes', true,
       74, 'Review',
-      SLA_HOURS.RESUME_REVIEW_NORMAL,
+      48,
       'A0611',
+      'Applied and Screened',
     ]);
 
     expect(sql(1)).toMatch(/^INSERT INTO activity_log \(application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by_name\) VALUES \(\$1,\$2,\$3,'ResumeIQ Scoring Completed',\$4,\$5,'System'\)$/);
@@ -233,14 +233,15 @@ describe('runResumeIQScoring — the 8-dimension score and what is passed to Cla
     expect(preparePortfolioReview.mock.invocationCallOrder[0]).toBeGreaterThan(last);
   });
 
-  it('derives ai_fit_score = round(avg*10), the bucket from avg, and the SLA hours from avg >= 8', async () => {
+  it('derives ai_fit_score = round(avg*10), the bucket from avg, and the SLA hours from the engine tiering (fit >= 75)', async () => {
     scoreCandidate.mockResolvedValue(scored({ avgScore: 8.2 }));
     await runResumeIQScoring('A0611');
     const p = query.mock.calls[0][1] as unknown[];
     expect(p[16]).toBe(8.2);
     expect(p[22]).toBe(82);
     expect(p[23]).toBe('Strong Fit');
-    expect(p[24]).toBe(SLA_HOURS.RESUME_REVIEW_HIGH_FIT);
+    expect(p[24]).toBe(24);
+    expect(p[26]).toBe('Applied and Screened');
     expect(query.mock.calls[1][1]).toStrictEqual(['A0611', 'C1001', 'R007', 'Score: 82/100 (Strong Fit)', 'Strong Fit']);
   });
 });

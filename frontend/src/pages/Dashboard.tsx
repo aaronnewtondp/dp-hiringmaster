@@ -38,7 +38,7 @@ const SLA_BREACH_TYPES_INFO = (
       <li><b>Interview/Founders Feedback Due</b> (Hiring Manager) — feedback not submitted within {SLA_STANDARD_HOURS}h of the interview ({SLA_HIGH_SCORE_HOURS}h if fit score ≥{SLA_HIGH_SCORE_FIT}); feedback still outstanding {SLA_ESCALATION_HOURS}h after the interview also raises a Leadership-owned "Feedback Overdue — Leadership Escalation" alert alongside it</li>
       <li><b>Assignment Feedback Due</b> (Hiring Manager) — feedback not submitted within {SLA_ASSIGNMENT_FEEDBACK_HOURS}h of the assignment being sent (untouched by the score-tiering above)</li>
       <li><b>Assignment deadline breached</b> (HR/Admin) — the candidate hasn't submitted within {SLA_ASSIGNMENT_DEADLINE_HOURS}h of the assignment being sent</li>
-      <li><b>Joining risk — no contact</b> (HR/Admin) — a candidate at Offer Accepted whose last logged HR contact is more than {SLA_JOINING_RISK_DAYS} days old, or who has none logged (flagged at the next check, not after {SLA_JOINING_RISK_DAYS} days). There is no screen for logging HR contact yet, so it clears when the candidate joins or leaves Active.</li>
+      <li><b>Joining risk — no contact</b> (HR/Admin) — a candidate at Offer Accepted with no HR contact for more than {SLA_JOINING_RISK_DAYS} days, counted from the last logged contact or, if none, from the day the offer was accepted. There is no screen for logging HR contact yet, so it clears when the candidate joins or leaves Active.</li>
     </ul>
     <p>HR/Admin and Hiring Manager show who owns the overdue step. Top type / Top stage = the breach type and stage with the most open breaches. For a Hiring Manager this card counts only breaches assigned to them; the sections below show every breach on their roles.</p>
   </div>

@@ -16,10 +16,11 @@ vi.mock('../../db/index.js', () => ({ transaction: (...a: unknown[]) => txn(...a
 
 import { applyPortfolioOutcome, FLAG_PREFIX, SUMMARY_MARK } from './scoring.js';
 import type { PortfolioOutcome } from './scoring.js';
-import { SLA_HOURS } from '../../types/index.js';
 import { computeAvg } from './rubric.js';
 import { priorityBucketFromScore } from '../resumeIQ.js';
 import { jsonbSafeStringify } from './text.js';
+import { getSlaHours } from '../../jobs/slaChecker.js';
+import { STAGE_ORDER } from '../../types/index.js';
 import type { PortfolioAnalysisResult } from './types.js';
 
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
@@ -28,7 +29,7 @@ const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
 const SELECT_SQL = 'SELECT * FROM applications WHERE id=$1 FOR UPDATE';
 const APPLIED_UPDATE_SQL =
   "UPDATE applications SET score_portfolio=$1, score_portfolio_note=$2, score_avg=$3, ai_fit_score=$4, ai_priority_bucket=$5, " +
-  "score_summary=$6, score_red_flags=$7, sla_hours = CASE WHEN stage='Applied and Screened' THEN $8::int ELSE sla_hours END, " +
+  "score_summary=$6, score_red_flags=$7, sla_hours=$8, " +
   'portfolio_analysis_status=$9, portfolio_analysis_error=$10, portfolio_analyzed_at=NOW() WHERE id=$11';
 const STATUS_ONLY_UPDATE_SQL =
   'UPDATE applications SET portfolio_analysis_status=$1, portfolio_analysis_error=$2, portfolio_analyzed_at=NOW() WHERE id=$3';
@@ -133,7 +134,7 @@ describe('applyPortfolioOutcome — when the dimension is applied (score set, al
       'Review',                                                  // $5 ai_priority_bucket
       'Solid designer. Portfolio review: Strong case studies.',  // $6 score_summary
       ['Short tenures', 'Portfolio: Thin mobile layouts'],       // $7 score_red_flags
-      SLA_HOURS.RESUME_REVIEW_NORMAL,                            // $8 sla_hours (avg < 8)
+      48,                                                        // $8 sla_hours (fit 71 < 75: the standard window at Applied and Screened)
       'completed',                                               // $9 portfolio_analysis_status
       'one site was slow',                                       // $10 portfolio_analysis_error (the message)
       'A0611',                                                   // $11 application id
@@ -222,37 +223,32 @@ describe('applyPortfolioOutcome — when the dimension is applied (score set, al
     });
   });
 
-  describe('sla_hours', () => {
-    const saved = { high: SLA_HOURS.RESUME_REVIEW_HIGH_FIT, normal: SLA_HOURS.RESUME_REVIEW_NORMAL };
-    // Today both constants are 48, which makes the branch invisible by value — so give
-    // them distinct values for these tests (restored afterwards).
-    beforeEach(() => { SLA_HOURS.RESUME_REVIEW_HIGH_FIT = 11; SLA_HOURS.RESUME_REVIEW_NORMAL = 22; });
-    afterEach(() => { SLA_HOURS.RESUME_REVIEW_HIGH_FIT = saved.high; SLA_HOURS.RESUME_REVIEW_NORMAL = saved.normal; });
-
-    it('picks RESUME_REVIEW_HIGH_FIT when the new average is 8 or more', async () => {
-      const { calls: cs } = await apply(appRow(uniformBase(8)), outcome({ score: 8 }));       // avg 8.0
-      expect(appliedUpdate(cs)!.params[7]).toBe(11);
+  describe('sla_hours (the SLA engine\'s own tiering, getSlaHours, for the stage the locked row is at)', () => {
+    it('Applied and Screened: 24 when the new fit score is 75 or more, else 48', async () => {
+      const hi = await apply(appRow(uniformBase(8)), outcome({ score: 8 }));       // avg 8.0 -> fit 80
+      expect(appliedUpdate(hi.calls)!.params[7]).toBe(24);
+      const lo = await apply(appRow(uniformBase(8)), outcome({ score: 7 }));       // avg 7.9 -> fit 79 (still high)
+      expect(appliedUpdate(lo.calls)!.params[7]).toBe(24);
+      const mid = await apply(appRow(uniformBase(7)), outcome({ score: 7 }));      // fit 70
+      expect(appliedUpdate(mid.calls)!.params[7]).toBe(48);
     });
 
-    it('picks RESUME_REVIEW_NORMAL when the new average is below 8', async () => {
-      const { calls: cs } = await apply(appRow(uniformBase(8)), outcome({ score: 7 }));       // avg 7.9
-      expect(appliedUpdate(cs)!.params[7]).toBe(22);
+    it('the 75 line is on the fit score (avg 7.5), not on an average of 8', async () => {
+      // base 7 x8 + portfolio 10 -> avg 7.3 (fit 73): standard; 8,8,8,8,7,7,7,7 + 8 -> 7.6 (fit 76): high
+      const std = await apply(appRow(uniformBase(7)), outcome({ score: 10 }));
+      expect(appliedUpdate(std.calls)!.params[3]).toBe(73);
+      expect(appliedUpdate(std.calls)!.params[7]).toBe(48);
+      const high = await apply(appRow({ ...uniformBase(8), score_technical: 7, score_experience: 7, score_industry_fit: 7, score_culture_fit: 7 }), outcome({ score: 8 }));
+      expect(appliedUpdate(high.calls)!.params[3]).toBe(76);                 // (60 + 8) / 9 = 7.6
+      expect(appliedUpdate(high.calls)!.params[7]).toBe(24);
     });
 
-    it('is decided from the average alone in JS: the same value is passed whatever the stage (the SQL CASE applies it only at Applied and Screened)', async () => {
-      const early = await apply(appRow({ ...uniformBase(8), stage: 'Applied and Screened' }), outcome({ score: 8 }));
-      const later = await apply(appRow({ ...uniformBase(8), stage: 'Interview Round 1' }), outcome({ score: 8 }));
-      expect(appliedUpdate(early.calls)!.params[7]).toBe(11);
-      expect(appliedUpdate(later.calls)!.params[7]).toBe(11);
-      expect(appliedUpdate(later.calls)!.sql).toContain("sla_hours = CASE WHEN stage='Applied and Screened' THEN $8::int ELSE sla_hours END");
+    it('follows the stage the row is at: a tiered later stage takes 24, a flat stage keeps its own value, every stage at fit 80 agrees with the engine', async () => {
+      for (const stage of STAGE_ORDER) {
+        const r = await apply(appRow({ ...uniformBase(8), stage }), outcome({ score: 8 }));
+        expect([stage, appliedUpdate(r.calls)!.params[7]]).toEqual([stage, getSlaHours(stage, 80)]);
+      }
     });
-  });
-
-  it('with the real constants the parameter is the named constant for each side of the 8.0 line', async () => {
-    const high = await apply(appRow(uniformBase(8)), outcome({ score: 8 }));
-    expect(appliedUpdate(high.calls)!.params[7]).toBe(SLA_HOURS.RESUME_REVIEW_HIGH_FIT);
-    const normal = await apply(appRow(uniformBase(8)), outcome({ score: 7 }));
-    expect(appliedUpdate(normal.calls)!.params[7]).toBe(SLA_HOURS.RESUME_REVIEW_NORMAL);
   });
 });
 

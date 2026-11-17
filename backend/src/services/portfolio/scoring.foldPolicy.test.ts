@@ -15,7 +15,6 @@ import { applyPortfolioOutcome } from './scoring.js';
 import type { PortfolioOutcome } from './scoring.js';
 import { computeAvg } from './rubric.js';
 import { priorityBucketFromScore } from '../resumeIQ.js';
-import { SLA_HOURS } from '../../types/index.js';
 
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
 const APPLIED = 'UPDATE applications SET score_portfolio=$1, score_portfolio_note=$2, score_avg=$3';
@@ -59,7 +58,7 @@ describe("foldPolicy 'upside_only' — a weak sample must never rank someone bel
     expect(u?.params).toEqual([
       5, 'Thin on outcomes', 8, 80, 'Strong Fit',            // score_portfolio + note, then the BASE-ONLY average and what derives from it
       'Base.', [],                                           // no ' Portfolio review: ' mark and no 'Portfolio: ' flag from this review
-      SLA_HOURS.RESUME_REVIEW_HIGH_FIT,
+      24,                                                    // sla_hours: the base-only average is 8.0 -> fit 80 -> the tiered 24h window
       'completed', null, 'A0700',
     ]);
     const act = find(cs, 'INSERT INTO activity_log');
@@ -117,7 +116,7 @@ describe("foldPolicy 'upside_only' — a re-run that does worse must not leave t
     expect(bucket).toBe(priorityBucketFromScore(6));
     expect(summary).toBe('Base.');                                           // ' Portfolio review: Great campaigns.' is gone
     expect(flags).toEqual(['Short tenures']);                                // only OUR flag was removed; the new review adds none
-    expect(sla).toBe(SLA_HOURS.RESUME_REVIEW_NORMAL);
+    expect(sla).toBe(48);
     expect([status, error, id]).toEqual(['completed', null, 'A0700']);
     expect(find(cs, 'INSERT INTO activity_log')?.params[3])
       .toBe("Portfolio 3/10 (completed) — below the candidate's own average, so not folded into the overall score");
@@ -161,12 +160,12 @@ describe("foldPolicy 'upside_only' — a re-run that does worse must not leave t
       outcome({ score: 2 }), { foldPolicy: 'upside_only' },
     );
     const p = find(cs, APPLIED)!.params;
-    expect([p[2], p[3], p[4], p[7]]).toEqual([9, 90, priorityBucketFromScore(9), SLA_HOURS.RESUME_REVIEW_HIGH_FIT]);
+    expect([p[2], p[3], p[4], p[7]]).toEqual([9, 90, priorityBucketFromScore(9), 24]);
   });
 
-  it('the stage guard that lets only a candidate still at Applied and Screened change sla_hours is still in the statement', async () => {
+  it('sla_hours is written for the stage the locked row is at, from the base-only fit score (no SQL stage guard any more)', async () => {
     const u = find((await apply(baseRow(6, FOLDED_AT_9), outcome({ score: 3 }), { foldPolicy: 'upside_only' })).calls, APPLIED)!;
-    expect(u.sql).toContain("sla_hours = CASE WHEN stage='Applied and Screened' THEN $8::int ELSE sla_hours END");
+    expect(u.sql).toContain('sla_hours=$8');
   });
 
   it("a score that IS folded (at or above the average) still replaces the mark and flags of the earlier run, as before", async () => {

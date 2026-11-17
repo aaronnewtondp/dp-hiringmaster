@@ -350,8 +350,7 @@ export const STAGE_ORDER: string[] = [
 
 // ─── SLA definitions ─────────────────────────────────────────────────────────
 export const SLA_HOURS: Record<string, number> = {
-  RESUME_REVIEW_NORMAL:  48,
-  RESUME_REVIEW_HIGH_FIT: 48,  // was 24 — every 24h SLA threshold moved to 48h
+  // (RESUME_REVIEW_NORMAL / _HIGH_FIT were removed 2026-11-16: the five score-tiered stages take their value from getSlaHours in jobs/slaChecker.ts)
   HM_SHORTLIST:          48,
   INTERVIEW_FEEDBACK:    48,   // was 24
   ASSIGNMENT_SEND:       12,

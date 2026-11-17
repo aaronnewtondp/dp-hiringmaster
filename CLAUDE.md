@@ -269,7 +269,7 @@ loaded packages with `require()` through `.github/ci/boot-smoke.cjs`; this is th
 `frontend` (`tsc --noEmit`, `npm test`, `npm run build` — which is `vite build` and does NOT type-check — and a check that `dist/index.html`,
 `sw.js` and `manifest.webmanifest` exist), `tests-typecheck` (type-checks `hms-tests-final` with `tools/ci-lint/tsconfig.playwright.json`:
 Playwright transpiles without checking), `lint-async` (ESLint `no-floating-promises`, `await-thenable`, `no-misused-promises` and a ban on
-`setImmediate(async …)` over `backend/src`, config in `tools/ci-lint/`; findings are reported, not blocking, see the ratchets), `database`
+`setImmediate(async …)` over `backend/src`, config in `tools/ci-lint/`; any finding fails the job), `database`
 (`postgres:16` service: `.github/ci/apply-db.sh` builds the database from `schema.sql` then `seed.sql`, `.github/ci/check-db.sh` runs the guards:
 `format_seq_id` behaves, every prefixed-id sequence is ahead of its table, no two tables share a sequence, no id default goes back to
 `LPAD(nextval())`) and `workflow-lint` (actionlint 1.7.12 pinned by sha256, which also runs shellcheck over the workflows' shell blocks, plus
@@ -281,8 +281,8 @@ required check. Not in CI: the Playwright suite on pull requests (needs a stack 
 **Two ratchets (read before "fixing" a warning).** CI found real defects on its first run; each is recorded, shown as a warning on every run, and does
 not fail the build, while anything NEW does: `.github/ci/known-db-defects.txt` (empty since 2026-11-15, when the two seed.sql sequence defects were fixed and the
 `apply-db.sh` tolerance and `seed-sequence-workaround.sql` were deleted; add a line only for a real, reported database defect, and delete it when fixed — the job prints
-a notice for a line that no longer matches) and `tools/ci-lint/summarize-eslint.mjs` (the async-promise lint's 2 known findings, both in
-the dead `backend/src/jobs/scheduler.ts`; add `--fail` in `ci.yml` once they are gone). `tools/ci-lint/` is a separate package on purpose (Vercel
+a notice for a line that no longer matches) and `tools/ci-lint/summarize-eslint.mjs` (no longer a ratchet since 2026-11-16: the dead `backend/src/jobs/scheduler.ts`, the lint's only 2 findings,
+was deleted with `node-cron`, and `ci.yml` now runs the summary with `--fail`, so ANY async-promise lint finding fails the `lint-async` job). `tools/ci-lint/` is a separate package on purpose (Vercel
 installs from `backend/` and `frontend/`; nothing there may reach a production install).
 
 **`.github/gitleaks.toml` policy.** Extends gitleaks' default rules (`useDefault = true`); exceptions are narrow and **rule-scoped**
@@ -1841,7 +1841,12 @@ Screened, Interview Round 1/2, Founders Round, and Assignment Round, the
 standard 48h SLA drops to 24h for a high-scored candidate
 (`ai_fit_score >= 75`) — both the HR-facing side (shortlist/scheduling/send)
 and the Hiring-Manager-facing side (feedback due). `slaChecker.ts`'s
-`tieredStandardHours()` is the single place this branches; `BREACH_IDLE_HOURS`
+`tieredStandardHours()` is the single place this branches, and since 2026-11-16 the value STORED in `applications.sla_hours` follows it too:
+`getSlaHours(stage, fitScore)` (in `slaChecker.ts`, re-exported by `routes/applications.ts`; `SCORE_TIERED_STAGES` is the five-stage list) returns
+`tieredStandardHours(fit)` (48, or 24 from fit 75) for those five stages and the flat value for every other stage (Reference Check / Offer Released 48,
+other `Interview…` names 48, the rest 72). Every writer uses it: stage moves, interview auto-advance, and the two that write the score later
+(`resumeIQTrigger.ts`, only while the application is still at the stage it scored; `portfolio/scoring.ts`, for the stage the locked row is at), so a score
+that arrives after creation refreshes it. New applications are created at 48 (no score yet). `BREACH_IDLE_HOURS`
 (Idle Candidate) and `BREACH_ASSIGNMENT_FEEDBACK_HOURS` (Assignment Feedback
 Due, 96h) are deliberately untouched — the SOP frames this as a 48h->24h
 change for five named stages, not a blanket halving. Role aging thresholds
@@ -1856,6 +1861,16 @@ a second, Leadership-owned flag (`'Feedback Overdue — Leadership Escalation'`,
 `NON_ACTIONABLE_ALERT_TYPES`) alongside the original Hiring-Manager-owned one,
 which stays open until feedback is actually submitted. This is additional
 visibility, not a replacement.
+
+**Joining risk (2026-11-16).** `checkJoiningRisk` flags an Offer Accepted application 120 h (5 days) after the later of its last HR contact and its arrival at
+Offer Accepted: the stage move INTO Offer Accepted sets `last_hr_contact = GREATEST(last_hr_contact, CURRENT_DATE)` (a more recent real contact is never
+overwritten; an older one or none restarts the clock), and the sweep falls back to `stage_entry_time` for a row with no contact date. `hours_overdue` is the real
+elapsed time past the 120 h and the pending-action text says "since <date>" or "since the offer was accepted". Rows already at Offer Accepted with a NULL
+`last_hr_contact` are flagged only once 5 days have really passed since they reached the stage; HR clears one by logging a contact in the notes.
+**Two consequences to know when reading the data (found in review):** (1) the same stage move also sets `joining_risk_auto_flag = false`, so an application that reaches
+Offer Accepted again (moved back and forward) is not still listed for the previous acceptance's flag; the sweep raises it again if 5 days pass with no contact; (2)
+`last_hr_contact` is now sometimes the SYSTEM's stamp (the day the offer was accepted), not a conversation HR logged: the candidate page's "Last HR contact" can show a
+date nobody phoned on, and no column tells the two apart (a separate column would be a schema change; not done).
 
 **Low Pipeline Roles redefined — twice.** Was "fewer than 5 Active applications,
 any stage/score"; then (SOP v2.1) "fewer than 3 shortlisted **and** scored above 60";
