@@ -427,6 +427,7 @@ live.
       the opened popover is reported covered or clipped by the page card), alone as well as in the full run. Find out whether they need more rows than a
       fresh database has or are a real clipping defect (a related one is already pinned "as TODAY": the Gender header popover is cut off by the table card
       when the list has a single row).
+- [x] **The nightly is green again (2026-11-17).** The 02:00 IST run on `76788d5` passed after the two causes of the 2026-11-16 red were fixed (`spawnSync` ENOBUFS in `api/00`, the stale `e2e/09` pin, #106/#108); nothing else is known to fail it.
 - [ ] **The nightly `EXCLUDE` list may be longer than it needs to be.** On 2026-11-05, on a fresh stack with no credentials, `db/07` (all 17 tests, the three excluded ones
       included), `db/05-aging-roles-no-movement` (13), `api/19-pending-actions-regressions` (9, the excluded "every candidate entry carries application_id" included)
       and the excluded `db/15` "a Drive PDF + a website: pending" all passed when run on their own, once each, although `integration.yml`'s header says they need a
