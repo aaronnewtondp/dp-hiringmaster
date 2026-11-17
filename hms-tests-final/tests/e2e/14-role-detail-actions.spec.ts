@@ -7,6 +7,9 @@
  * Data: written by SQL (helpers/e2e-roles.ts) — a role's JD source, a stored review and a portfolio flag have no API — and removed in
  * afterAll. No Anthropic key, no Google: JD (re)generation cannot succeed here, so what is asserted is that the page shows what the server
  * reports; the one test that needs a real model is tagged @live.
+ *
+ * No test here pins a defect "as TODAY" any more. (Fixed 2026-11-17: the activity timeline refreshes after Change status, and a Hiring
+ * Manager is not offered the edit pencils on a role page; both are asserted as the fixed behaviour below.)
  */
 import { test, expect, Page } from '@playwright/test';
 import { Client } from 'pg';
