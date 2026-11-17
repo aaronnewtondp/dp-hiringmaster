@@ -240,7 +240,7 @@ test.describe('a candidate with no e-mail address — the send is refused before
   test('Assignment round: 201, email.sent=false with the specific message, and the row records that candidate had no address', async ({ request }) => {
     const { hr, application } = await applicationWithoutEmail(request, 'Assignment Round');
     const { round, email } = await newRound(hr, application.id, { round_name: 'Assignment Round', round_type: 'Assignment', ...MAIL });
-    expect(email).toEqual({ sent: false, error: 'Candidate has no email on file — cannot send assignment.' });
+    expect(email).toEqual({ sent: false, error: 'Candidate has no email on file.' });
     const row = await stored(hr, application.id, round.id);
     expect(row.assignment_email_error).toBe('Candidate has no email on file.');
     expect(row.assignment_send_date).toBeNull();
@@ -253,23 +253,27 @@ test.describe('a candidate with no e-mail address — the send is refused before
     const res = await hr.post(`/api/interviews/${round.id}/assignment-send`, { mail_body_content: 'again', assignment_link: 'https://example.com/again' });
     expect(res.status()).toBe(200);
     const body = await res.json();
-    expect(body.email).toEqual({ sent: false, error: 'Candidate has no email on file — cannot send assignment.' });
+    expect(body.email).toEqual({ sent: false, error: 'Candidate has no email on file.' });
     expect(body.round).toMatchObject({ assignment_mail_body: 'again', assignment_link: 'https://example.com/again', assignment_email_error: 'Candidate has no email on file.' });
   });
 
-  test('TODAY: the 201 response\'s own round.assignment_email_error is null for this refusal although the row stores it (only the Gmail-failure path patches the in-memory round)', async ({ request }) => {
+  test('the 201 response\'s own round.assignment_email_error equals the stored one and the response message', async ({ request }) => {
     const { hr, application } = await applicationWithoutEmail(request, 'Assignment Round');
-    const { round } = await newRound(hr, application.id, { round_name: 'Assignment Round', round_type: 'Assignment', ...MAIL });
-    expect(round.assignment_email_error ?? null).toBeNull();
-    expect((await stored(hr, application.id, round.id)).assignment_email_error).toBe('Candidate has no email on file.');
+    const { round, email } = await newRound(hr, application.id, { round_name: 'Assignment Round', round_type: 'Assignment', ...MAIL });
+    expect(round.assignment_email_error).toBe('Candidate has no email on file.');
+    expect(email.error).toBe((await stored(hr, application.id, round.id)).assignment_email_error);
   });
 
-  test('TODAY: this refusal writes no activity row at all (a send that reaches Google and fails logs "Assignment Email Failed"; this one is silent)', async ({ request }) => {
+  test('this refusal writes the same "Assignment Email Failed" activity row as a failed send (and no "Sent" row); a retry logs another', async ({ request }) => {
     const { hr, application } = await applicationWithoutEmail(request, 'Assignment Round');
-    await newRound(hr, application.id, { round_name: 'Assignment Round', round_type: 'Assignment', ...MAIL });
-    const events = await eventTypes(hr, application.id);
-    expect(events).not.toContain('Assignment Email Failed');
+    const { round } = await newRound(hr, application.id, { round_name: 'Assignment Round', round_type: 'Assignment', ...MAIL });
+    let events = await eventTypes(hr, application.id);
+    expect(events.filter(e => e === 'Assignment Email Failed')).toHaveLength(1);
     expect(events).not.toContain('Assignment Email Sent');
+    const res = await hr.post(`/api/interviews/${round.id}/assignment-send`, { mail_body_content: 'again', assignment_link: 'https://example.com/again' });
+    expect(res.status()).toBe(200);
+    events = await eventTypes(hr, application.id);
+    expect(events.filter(e => e === 'Assignment Email Failed')).toHaveLength(2);
   });
 
   test('rejection e-mail: the rejection is committed (200), email.sent=false with the specific message, rejection_email_error is stored, nothing was sent', async ({ request }) => {

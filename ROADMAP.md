@@ -488,9 +488,11 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
 - [x] **`POST /api/interviews/:id/assignment-submit` does not check the round type**: a Standard round accepts an assignment submission (it writes the submission
       onto the round and the application). `assignment-send` does check (400 "not configured as an Assignment round").
       **Fixed 2026-11-16:** `assignment-submit` answers the same 400, before any write.
-- [ ] **A candidate with no e-mail gets an inconsistent answer when an Assignment round is created** (`attemptAssignmentEmail`): the row stores
+- [x] **A candidate with no e-mail gets an inconsistent answer when an Assignment round is created** (`attemptAssignmentEmail`): the row stores
       "Candidate has no email on file." while the response says "Candidate has no email on file — cannot send assignment.", and, unlike a failed send, no
       "Assignment Email Failed" activity-log row is written.
+      **Fixed 2026-11-16:** one message ("Candidate has no email on file.") is stored, logged and returned, the same "Assignment Email Failed" activity row a failed send writes is added
+      (create and `assignment-send` retry share the function), the response's round carries the error, and a blank or whitespace-only address counts as none.
 - [ ] **The rejection/withdrawal reason gate is looser than it reads**: either kind of reason satisfies either status (a `Rejected` with only a withdrawal reason
       is stored with no rejection reason), and a whitespace-only `withdrawal_reason_cat` counts (`applications.access.test.ts`).
 - [x] **`GET /api/candidates/:id/edit-log` returned raw compensation old/new values to a Hiring Manager.** Fixed 2026-11-15: HR-tier sees every row; a Hiring Manager sees the

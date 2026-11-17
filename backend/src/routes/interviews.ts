@@ -31,27 +31,40 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // never sent successfully) — so the send-attempt/state-update/activity-log
 // logic exists exactly once. Never throws; always resolves to a status the
 // caller can surface, same graceful-degradation contract as Calendar sync.
+const NO_EMAIL_MESSAGE = 'Candidate has no email on file.';
+
 async function attemptAssignmentEmail(
   round: InterviewRound,
   app: { candidate_email: string | null; candidate_name: string; role_title: string },
   fields: { mail_body_content: string; cc?: string[]; assignment_link: string; supporting_documentation?: string },
   user: { userId: string; name: string }
 ): Promise<{ sent: boolean; error?: string }> {
-  if (!app.candidate_email) {
+  const app2 = await queryOne<{ candidate_id: string; role_id: string }>(
+    'SELECT candidate_id, role_id FROM applications WHERE id=$1', [round.application_id]
+  );
+
+  // A blank or whitespace-only address counts as none. One message is used
+  // for the stored column, the activity log and the response, so the three
+  // never disagree; a failed send writes the same "Assignment Email Failed"
+  // row.
+  if (!app.candidate_email || !app.candidate_email.trim()) {
     await query(
       `UPDATE interview_rounds SET assignment_email_error=$1, updated_at=NOW() WHERE id=$2`,
-      ['Candidate has no email on file.', round.id]
+      [NO_EMAIL_MESSAGE, round.id]
     );
-    return { sent: false, error: 'Candidate has no email on file — cannot send assignment.' };
+    round.assignment_email_error = NO_EMAIL_MESSAGE;
+    await query(
+      `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [round.application_id, app2?.candidate_id, app2?.role_id,
+       'Assignment Email Failed', NO_EMAIL_MESSAGE, null, user.userId, user.name]
+    );
+    return { sent: false, error: NO_EMAIL_MESSAGE };
   }
 
   const subject = `DigitalPaani ${app.role_title} Assignment - ${app.candidate_name}`;
   const text = `${fields.mail_body_content}\n\nAssignment Link: ${fields.assignment_link}` +
     (fields.supporting_documentation ? `\nSupporting Documentation: ${fields.supporting_documentation}` : '');
-
-  const app2 = await queryOne<{ candidate_id: string; role_id: string }>(
-    'SELECT candidate_id, role_id FROM applications WHERE id=$1', [round.application_id]
-  );
 
   try {
     await sendAssignmentEmail({ to: app.candidate_email, cc: fields.cc, subject, text });

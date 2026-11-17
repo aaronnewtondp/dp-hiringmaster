@@ -547,13 +547,18 @@ describe('POST / — creating a round (HR-tier) and the Assignment e-mail', () =
       expect(fakeDb.tx.committed).toBe(1);
     });
 
-    it('a candidate with no e-mail address gets nothing sent; the reason is stored and returned', async () => {
-      programCreate({ ...CANDIDATE, candidate_email: null });
+    it.each([[null], [''], ['   ']])('a candidate whose e-mail is %j gets nothing sent; ONE message is stored, logged and returned, the round exists (201)', async (mail) => {
+      programCreate({ ...CANDIDATE, candidate_email: mail });
       const res = await create('hr_recruiter', ASSIGNMENT);
       expect(res.status).toBe(201);
+      expect(res.body.round.id).toBe('IR0001');
       expect(h.sendAssignmentEmail).not.toHaveBeenCalled();
-      expect(res.body.email).toEqual({ sent: false, error: 'Candidate has no email on file — cannot send assignment.' });
+      expect(res.body.email).toEqual({ sent: false, error: 'Candidate has no email on file.' });
+      expect(res.body.round.assignment_email_error).toBe('Candidate has no email on file.');
       expect(fakeDb.one(/^UPDATE interview_rounds SET assignment_email_error=\$1, updated_at=NOW\(\) WHERE id=\$2$/).params).toEqual(['Candidate has no email on file.', 'IR0001']);
+      const log = fakeDb.find(SQL.feedbackLog).filter(c => c.params.includes('Assignment Email Failed'));
+      expect(log).toHaveLength(1);
+      expect(log[0].params).toEqual([APP_ID, 'C9001', 'R9001', 'Assignment Email Failed', 'Candidate has no email on file.', null, expect.any(String), expect.any(String)]);
     });
   });
 });
@@ -615,6 +620,18 @@ describe('POST /:id/assignment-send (retry) and /:id/assignment-submit — HR-ti
     expect(res.status).toBe(200);
     expect(res.body.email.sent).toBe(false);
     expect(fakeDb.one(/^UPDATE interview_rounds SET assignment_email_error=\$1, updated_at=NOW\(\) WHERE id=\$2$/).params).toEqual(['still failing', 'IR0002']);
+  });
+
+  it.each([[null], ['  ']])('a retry for a candidate whose e-mail is %j sends nothing and answers, stores and logs the same single message as creation', async (mail) => {
+    programRetry(ASSIGNMENT_ROUND, { candidate_name: 'Candidate Example', candidate_email: mail, role_title: 'Quality Assurance Engineer' });
+    const res = await retry('hr_recruiter');
+    expect(res.status).toBe(200);
+    expect(h.sendAssignmentEmail).not.toHaveBeenCalled();
+    expect(res.body.email).toEqual({ sent: false, error: 'Candidate has no email on file.' });
+    expect(fakeDb.one(/^UPDATE interview_rounds SET assignment_email_error=\$1, updated_at=NOW\(\) WHERE id=\$2$/).params).toEqual(['Candidate has no email on file.', 'IR0002']);
+    const log = fakeDb.find(SQL.feedbackLog).filter(c => c.params.includes('Assignment Email Failed'));
+    expect(log).toHaveLength(1);
+    expect(log[0].params.slice(0, 5)).toEqual([ASSIGNMENT_ROUND.application_id, 'C9001', 'R9001', 'Assignment Email Failed', 'Candidate has no email on file.']);
   });
 
   it('characterization: nothing stops a retry on a round whose e-mail already went out — the "only before it has been sent" rule lives in the UI, the API sends again', async () => {
