@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { expectCpuUnder } from '../testing/timing.js';
 import { FULL_NAME_MAX_CHARS, collapseName, checkFullName, truncateFullName } from './candidateName.js';
 
 afterEach(() => vi.restoreAllMocks());
@@ -64,8 +65,6 @@ describe('truncateFullName (machine paths)', () => {
   });
   it('is fast on a very long input', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const t = Date.now();
-    truncateFullName('ab '.repeat(400_000));
-    expect(Date.now() - t).toBeLessThan(2000);
+    expectCpuUnder(2000, () => truncateFullName('ab '.repeat(400_000)), 'truncateFullName on 1.2 MB');
   });
 });
