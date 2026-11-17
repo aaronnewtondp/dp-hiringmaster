@@ -233,17 +233,21 @@ describe('RoleDetail — compensation is HR-tier only', () => {
     expect(document.body.textContent).not.toContain('10–12');
   });
 
-  it('a Hiring Manager editing the Requirements is not offered the CTC Band and never sends one', async () => {
+  it('a Hiring Manager has no edit pencil on any role section or the approval note (PATCH /roles/:id is HR-tier only), and no CTC Band shown', async () => {
     auth.persona = 'hiring_manager';
     mount();
     await pageReady();
-    fireEvent.click(screen.getByTitle('Edit Requirements'));
+    expect(screen.queryAllByTitle(/^Edit /)).toHaveLength(0);
     expect(screen.queryByText('CTC Band')).toBeNull();
-    expect(screen.queryByDisplayValue('10–12 LPA')).toBeNull();
-    fireEvent.change(screen.getByDisplayValue('3-5 years'), { target: { value: '4-6 years' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(rolesUpdate).toHaveBeenCalledTimes(1));
-    expect(rolesUpdate).toHaveBeenCalledWith(ID, { yoe_required: '4-6 years' });
+    expect(within(section('Requirements')).getByText('3-5 years')).toBeInTheDocument();   // the content itself is still readable
+    expect(rolesUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each(HR_TIER)('%s keeps every edit pencil on the role page', async (persona) => {
+    auth.persona = persona;
+    mount();
+    await pageReady();
+    for (const t of ['Basic Info', 'Requirements', 'Description', 'Dates', 'Links & Assets', 'Approval Note']) expect(screen.getByTitle(`Edit ${t}`)).toBeInTheDocument();
   });
 
   it('HR-tier editing the CTC Band sends it, and only it', async () => {
@@ -369,6 +373,19 @@ describe('RoleDetail — changing the status', () => {
     await waitFor(() => expect(rolesGet.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(plan.mock.calls.length).toBeGreaterThanOrEqual(2));
     expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+  });
+
+  it('re-reads the activity timeline after a status change, so the new "Status Changed" entry shows without a reload', async () => {
+    activity.mockResolvedValueOnce({ data: { activity: [] } });
+    activity.mockResolvedValue({ data: { activity: [{ id: 'L1', event_type: 'Status Changed', event_detail: 'Status → On Hold', performed_by_name: 'Test Person', created_at: '2026-11-17T10:00:00Z' }] } });
+    const select = await openModal();
+    expect(await screen.findByText('No activity logged yet')).toBeInTheDocument();
+    choose(select, 'On Hold');
+    update();
+    await waitFor(() => expect(rolesUpdate).toHaveBeenCalledWith(ID, { status: 'On Hold' }));
+    await waitFor(() => expect(activity.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(await screen.findByText('Status Changed')).toBeInTheDocument();
+    expect(screen.queryByText('No activity logged yet')).toBeNull();
   });
 
   it('while it is being saved the button says "Saving…" and is disabled', async () => {

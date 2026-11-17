@@ -369,7 +369,10 @@ the UPDATE's own `IS DISTINCT FROM`, so simultaneous requests cannot both raise 
 change above). A round with no `interviewer_emails` set at all (e.g.
 Assignment rounds) has no assignee to check, so feedback on those stays open
 to any persona — this isn't a residual gap, it's the correct behavior when
-nobody was specifically assigned. **A Hiring Manager cannot approve a
+nobody was specifically assigned. The candidate page mirrors that rule (`frontend/src/utils/feedbackAccess.ts`
+`canSubmitRoundFeedback`): "Submit feedback" / "Record outcome" are not shown to a Hiring Manager who may not use them, and
+`EditableSection`'s `canEdit` hides the edit pencils on roles and candidate-profile sections for anyone outside HR-tier
+(both PATCH routes are HR-tier). **A Hiring Manager cannot approve a
 role — not even their own.** `PATCH /roles/:id` is `isHRTier`-gated
 end to end (no `isHmForThisRole` carve-out); approver name and date are
 captured from the acting HR-tier user and Open Date copies from Approval
