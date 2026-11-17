@@ -772,7 +772,7 @@ describe('pdfTextStrings - a linear tokenizer, not a regex', () => {
     // memory effects, so the ratio is taken below that point: from 0.5 to 5 MB a perfectly linear tokenizer measured 44x for 10x the input.)
     const big = make(5 * MB);
     expectCpuUnder(3000, () => pdfTextStrings(big, 400_000), `${_name}`);
-    assertLinearOn(_name, make, (content: string) => pdfTextStrings(content, 400_000), MB / 4, 2 * MB, { backstopMs: 1000, floorMs: 60 });   // floorMs 60: a 1-2 ms baseline at 0.25 MB cannot absorb the memory effects at 2 MB (64 ms vs 57 allowed failed on a CI runner); a quadratic tokenizer is still caught by the absolute backstop
+    assertLinearOn(_name, make, (content: string) => pdfTextStrings(content, 400_000), MB / 4, 2 * MB, { backstopMs: 1000, floorMs: 150 });   // floorMs 150 (was 60, then failed CI three times on 2026-11-16 at 137-144 ms against 134-143 allowed: a 3 ms baseline at 0.25 MB cannot absorb the memory effects at 2 MB on a ~5x slower shared runner; this machine measures ~24 ms). A quadratic tokenizer is still caught by the 1 s backstop and the 5 MB bound above.
   });
 });
 
@@ -874,13 +874,22 @@ describe('worker packaging - pdf-parse loads pdf.worker.mjs by a path no tracer 
     expect(matches(vercel.functions['api/index.ts'].includeFiles!, WORKER_FILE)).toBe(true);
   });
 
-  it('the main API ships what the PDF child process loads, too: resume parsing runs the sandbox there (pdf-parse\'s CommonJS entry and pdf.worker.mjs), and no Chromium; it uses a plain "*" glob (the style that already ships the Chromium binaries in production), not braces, because the file that works today must not depend on a pattern form that has never run on Vercel', () => {
+  it('the main API ships what the PDF child process loads, too (pdf-parse\'s CommonJS entry and pdf.worker.mjs), and no Chromium. A brace glob since 2026-11-16: pdfkit 0.20 needed its font files added and the worker\'s brace glob had been proven on Vercel', () => {
     const include = vercel.functions['api/index.ts'].includeFiles!;
     expect(typeof include).toBe('string');
-    expect(include).not.toContain('{');
     expect(matches(include, 'node_modules/pdf-parse/dist/pdf-parse/cjs/index.cjs')).toBe(true);
     expect(matches(include, WORKER_FILE)).toBe(true);
     expect(matches(include, 'node_modules/@sparticuz/chromium/bin/chromium.br')).toBe(false);
+  });
+
+  it('the main API ships pdfkit\'s fonts: pdfkit 0.20 loads them through a #standard-fonts import no tracer follows, and a missing one crashed EVERY request at boot (2026-11-16)', () => {
+    const include = vercel.functions['api/index.ts'].includeFiles!;
+    // The hand-written matcher above needs a slash for "**/", which the real glob does not, so expand the real pattern on disk.
+    const shipped = new Set((fs as unknown as { globSync: (p: string, o: { cwd: string }) => string[] }).globSync(include, { cwd: root }));
+    expect(shipped.has('node_modules/pdfkit/js/standard-fonts/Helvetica.cjs')).toBe(true);
+    const chunk = fs.readdirSync(path.join(root, 'node_modules/pdfkit/js/standard-fonts/chunks')).filter(f => f.endsWith('.cjs'));
+    expect(chunk.length).toBeGreaterThan(0);
+    for (const f of chunk) expect(shipped.has(`node_modules/pdfkit/js/standard-fonts/chunks/${f}`)).toBe(true);
   });
 
   it('the matcher used here rejects what it should', () => {

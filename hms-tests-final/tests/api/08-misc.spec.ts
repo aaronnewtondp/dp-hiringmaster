@@ -59,22 +59,34 @@ test.describe('PATCH /api/applications/:id/notes', () => {
     expect(body).toBeTruthy();
   });
 
-  // The old title said "requires a reason" and the old test accepted 200 OR 400 ("backend may not validate this yet") — it could never fail.
-  // The backend does NOT enforce it (applications.ts PATCH /:id/notes: hr_priority_override_reason is just another optional field), so this
-  // pins what the code does today. If the rule is ever enforced, this test fails: change it to expect 400 and rename it.
-  test('TODAY: an HR priority override WITHOUT a reason is accepted (200); the reason is stored empty and the activity log records an empty reason', async ({ request }) => {
+  test('HR priority override requires a non-blank reason (400, nothing written); a reason alone and clearing the override need none', async ({ request }) => {
     const token = await getToken(request, 'hr');
     const { application } = await createCandidateWithApp(request, token);
-    const res = await authed(request, token).patch(`/api/applications/${application.id}/notes`, {
-      hr_priority_override: 'Critical',
-      // No reason provided
-    });
-    expect(res.status()).toBe(200);
-    const body = await (await authed(request, token).get(`/api/applications/${application.id}`)).json();
-    expect(body.application.hr_priority_override).toBe('Critical');
-    expect(body.application.hr_priority_override_reason).toBeNull();
-    const event = body.activity.find((a: { event_type: string }) => a.event_type === 'Priority Override Set');
-    expect(event).toMatchObject({ event_detail: 'HR Priority → Critical: ', new_value: 'Critical' });
+    const api = authed(request, token);
+    for (const body of [
+      { hr_priority_override: 'Critical' },
+      { hr_priority_override: 'Critical', hr_priority_override_reason: '' },
+      { hr_priority_override: 'Critical', hr_priority_override_reason: '   ' },
+    ]) {
+      const res = await api.patch(`/api/applications/${application.id}/notes`, body);
+      expect(res.status(), JSON.stringify(body)).toBe(400);
+      expect((await res.json()).error).toBe('hr_priority_override_reason is required when setting an HR priority override');
+    }
+    let detail = await (await api.get(`/api/applications/${application.id}`)).json();
+    expect(detail.application.hr_priority_override).toBeNull();
+    expect(detail.activity.find((a: { event_type: string }) => a.event_type === 'Priority Override Set')).toBeUndefined();
+
+    // a reason on its own is not an override change
+    expect((await api.patch(`/api/applications/${application.id}/notes`, { hr_priority_override_reason: 'just a note' })).status()).toBe(200);
+
+    // set with a reason, then clear without one
+    expect((await api.patch(`/api/applications/${application.id}/notes`, { hr_priority_override: 'Critical', hr_priority_override_reason: 'Founder referral' })).status()).toBe(200);
+    detail = await (await api.get(`/api/applications/${application.id}`)).json();
+    expect(detail.application.hr_priority_override).toBe('Critical');
+    expect(detail.activity.find((a: { event_type: string }) => a.event_type === 'Priority Override Set')).toMatchObject({ event_detail: 'HR Priority → Critical: Founder referral' });
+    expect((await api.patch(`/api/applications/${application.id}/notes`, { hr_priority_override: null })).status()).toBe(200);
+    detail = await (await api.get(`/api/applications/${application.id}`)).json();
+    expect(detail.application.hr_priority_override).toBeNull();
   });
 
   test('HR priority override WITH reason succeeds', async ({ request }) => {

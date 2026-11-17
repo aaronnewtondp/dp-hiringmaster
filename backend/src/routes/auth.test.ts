@@ -17,6 +17,7 @@ vi.mock('../db/index.js', async () => (await import('../test/fakeDb.js')).dbModu
 
 import authRouter from './auth.js';
 import { fakeDb } from '../test/fakeDb.js';
+import { invalidateUserAccess } from '../middleware/auth.js';
 import { ApiClient, TEST_JWT_SECRET, buildApp, setEnv } from '../test/routeHarness.js';
 
 const api = new ApiClient(buildApp(app => app.use('/api/auth', authRouter)));
@@ -42,6 +43,7 @@ beforeAll(async () => { await api.start(); });
 afterAll(async () => { await api.stop(); });
 beforeEach(() => {
   fakeDb.reset();
+  invalidateUserAccess();
   google.verifyIdToken.mockReset().mockResolvedValue({ getPayload: () => ({ ...GOOGLE_PAYLOAD }) });
   restoreEnv = setEnv({ JWT_SECRET: TEST_JWT_SECRET, GOOGLE_CLIENT_ID: CLIENT_ID, JWT_EXPIRES_IN: undefined });
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -145,10 +147,10 @@ describe('POST /api/auth/login', () => {
     expect(res.body.token).toBeUndefined();
   });
 
-  it('characterization: an email that is not a string (a number, an object) is a 500 from email.toLowerCase(), not a 400', async () => {
+  it('an email or password that is not a string (a number, an object, an array) is a 400, never a 500', async () => {
     for (const email of [12345, { a: 1 }, ['a@example.test']]) {
       const res = await login({ email, password: PASSWORD });
-      expect([JSON.stringify(email), res.status]).toEqual([JSON.stringify(email), 500]);
+      expect([JSON.stringify(email), res.status]).toEqual([JSON.stringify(email), 400]);
     }
     expect(fakeDb.untouched()).toBe(true);
   });
@@ -401,10 +403,23 @@ describe('GET /api/auth/me and POST /api/auth/logout', () => {
     expect(stillGood.status).toBe(200);
   });
 
-  it('characterization: authentication does not ask the database whether the user still exists or is active — a token for a since-deactivated user keeps working until it expires', async () => {
-    fakeDb.whenOne(USER_LOOKUP, null);                                  // the user is gone / inactive now
+  // authenticate() re-checks users.is_active on every request (PR #55): the lookup is answered by fakeDb, not recorded in the call log.
+  it('a token for a since-deactivated user is refused 401 (authenticate re-checks is_active), and so is one for a user whose row is gone', async () => {
+    invalidateUserAccess('U9001');
+    fakeDb.setUserAccess('U9001', 'inactive');
+    const inactive = await api.get('/api/auth/me', { as: 'hr_recruiter' });
+    expect([inactive.status, inactive.body]).toEqual([401, { error: 'Account is deactivated or no longer exists' }]);
+
+    invalidateUserAccess('U9001');
+    fakeDb.setUserAccess('U9001', 'missing');
+    const gone = await api.get('/api/auth/me', { as: 'hr_recruiter' });
+    expect([gone.status, gone.body]).toEqual([401, { error: 'Account is deactivated or no longer exists' }]);
+  });
+
+  it('a database failure during that check fails closed: 503, never "let them in"', async () => {
+    invalidateUserAccess('U9001');
+    fakeDb.setUserAccess('U9001', 'error');
     const res = await api.get('/api/auth/me', { as: 'hr_recruiter' });
-    expect(res.status).toBe(200);
-    expect(fakeDb.untouched()).toBe(true);
+    expect([res.status, res.body]).toEqual([503, { error: 'Could not verify account status' }]);
   });
 });

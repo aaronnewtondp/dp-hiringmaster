@@ -16,11 +16,18 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// On 401, clear auth and redirect to login
+// Sign-in calls answer 401 for a bad credential: that is not an expired session, so the Login page must get the error.
+const SIGN_IN_PATHS = ['/auth/login', '/auth/google'];
+const isSignInRequest = (url?: string) => {
+  const path = (url ?? '').split('?')[0].replace(/\/+$/, '');
+  return SIGN_IN_PATHS.includes(path);
+};
+
+// On 401 (other than a failed sign-in), clear auth and redirect to login
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    if (err.response?.status === 401 && !isSignInRequest(err.config?.url)) {
       localStorage.removeItem('hms_token');
       localStorage.removeItem('hms_user');
       window.location.href = '/login';

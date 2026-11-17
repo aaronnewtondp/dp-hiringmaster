@@ -111,7 +111,7 @@ describe('Active Candidates — bulk stage change', () => {
     expect(h.advanceStage).not.toHaveBeenCalled();
   });
 
-  it('once a reason is picked, it and the trimmed detail go to every candidate in the batch', async () => {
+  it('once a reason is picked, it and the trimmed detail go only with the candidate who is 15%+ over, not the in-band one selected beside them', async () => {
     await showList();
     const modal = openStageModal('Test Candidate A9001', 'Test Candidate A9002');
     fireEvent.change(within(modal).getByDisplayValue('Applied and Screened'), { target: { value: 'Interview Round 1' } });
@@ -123,7 +123,23 @@ describe('Active Candidates — bulk stage change', () => {
     await waitFor(() => expect(h.advanceStage).toHaveBeenCalledTimes(2));
     const opts = { budgetExceptionReasonCat: OVER_BUDGET_SHORTLIST_REASONS[1], budgetExceptionReasonDetail: 'approved by the founders' };
     expect(h.advanceStage).toHaveBeenCalledWith('A9001', 'Interview Round 1', opts);
-    expect(h.advanceStage).toHaveBeenCalledWith('A9002', 'Interview Round 1', opts);
+    expect(h.advanceStage).toHaveBeenCalledWith('A9002', 'Interview Round 1', { budgetExceptionReasonCat: undefined, budgetExceptionReasonDetail: undefined });
+  });
+
+  it('two over-budget candidates both carry the reason; the panel counts them', async () => {
+    h.list.mockResolvedValue({ data: { applications: [...APPS, app('A9010', { candidate_name: 'Test Candidate A9010', is_severely_over_budget: true })] } });
+    await showList();
+    await screen.findByText('Test Candidate A9010');
+    const modal = openStageModal('Test Candidate A9001', 'Test Candidate A9010', 'Test Candidate A9002');
+    fireEvent.change(within(modal).getByDisplayValue('Applied and Screened'), { target: { value: 'Interview Round 1' } });
+    expect(within(modal).getByText(/2 candidates who are over/)).toBeInTheDocument();
+    fireEvent.change(within(modal).getByDisplayValue('Select reason'), { target: { value: OVER_BUDGET_SHORTLIST_REASONS[0] } });
+    fireEvent.click(within(modal).getByRole('button', { name: 'Update' }));
+    await waitFor(() => expect(h.advanceStage).toHaveBeenCalledTimes(3));
+    const withReason = { budgetExceptionReasonCat: OVER_BUDGET_SHORTLIST_REASONS[0], budgetExceptionReasonDetail: undefined };
+    expect(h.advanceStage).toHaveBeenCalledWith('A9001', 'Interview Round 1', withReason);
+    expect(h.advanceStage).toHaveBeenCalledWith('A9010', 'Interview Round 1', withReason);
+    expect(h.advanceStage).toHaveBeenCalledWith('A9002', 'Interview Round 1', { budgetExceptionReasonCat: undefined, budgetExceptionReasonDetail: undefined });
   });
 
   it('a blank detail is sent as nothing, not as an empty string', async () => {
@@ -209,6 +225,72 @@ describe('Active Candidates — bulk stage change', () => {
     expect(h.toastSuccess).not.toHaveBeenCalled();
   });
 
+  describe('rows refused for a check a written reason bypasses', () => {
+    const PENDING = 'Feedback is still pending for Interview Round 1';
+    const NOREF = 'Add at least one reference check before advancing';
+    const refuse = (message: string) => Object.assign(new Error('refused'), { response: { data: { error: message } } });
+    const startMove = async () => {
+      await showList();
+      const modal = openStageModal('Test Candidate A9001', 'Test Candidate A9002', 'Test Candidate A9003');
+      fireEvent.change(within(modal).getByRole('combobox'), { target: { value: 'Interview Round 2' } });
+      fireEvent.click(within(modal).getByRole('button', { name: 'Update' }));
+      await screen.findByText('Reason to proceed anyway');
+      return modalOf('Update stage');
+    };
+
+    it('never sends skip_reason on the first attempt; lists the refused rows with their reason, keeps the dialog open and leaves other failures out', async () => {
+      h.advanceStage.mockImplementation(async (id: string) => {
+        if (id === 'A9003') throw refuse(PENDING);
+        if (id === 'A9001') throw refuse('HR access required');
+        return { data: {} };
+      });
+      const modal = await startMove();
+      for (const c of h.advanceStage.mock.calls) expect(c[2].skipReason).toBeUndefined();
+      expect(h.toastError).toHaveBeenCalledWith('1 of 3 updated to Interview Round 2');
+      const list = within(modal).getByTestId('bulk-refused-list');
+      expect(list).toHaveTextContent('Test Candidate A9003');
+      expect(list).toHaveTextContent(PENDING);
+      expect(list).not.toHaveTextContent('A9001');
+      expect(within(modal).getByRole('button', { name: 'Retry 1' })).toBeInTheDocument();
+    });
+
+    it('retries ONLY the refused rows, with the reason trimmed as skip_reason', async () => {
+      let pass = 0;
+      h.advanceStage.mockImplementation(async (id: string) => { if (id === 'A9003' && pass === 0) throw refuse(NOREF); return { data: {} }; });
+      const modal = await startMove();
+      pass = 1;
+      h.advanceStage.mockClear();
+      fireEvent.change(within(modal).getByLabelText('Reason to proceed anyway'), { target: { value: '  Interviewed offline  ' } });
+      fireEvent.click(within(modal).getByRole('button', { name: 'Retry 1' }));
+      await waitFor(() => expect(h.toastSuccess).toHaveBeenCalledWith('1 of 1 updated to Interview Round 2'));
+      expect(h.advanceStage).toHaveBeenCalledTimes(1);
+      expect(h.advanceStage).toHaveBeenCalledWith('A9003', 'Interview Round 2', expect.objectContaining({ skipReason: 'Interviewed offline' }));
+      await waitFor(() => expect(screen.queryByText('Update stage')).not.toBeInTheDocument());
+    });
+
+    it('a blank reason is a plain retry: no skip_reason is sent', async () => {
+      const modal = await (async () => { h.advanceStage.mockRejectedValueOnce(refuse(PENDING)); return startMove(); })();
+      h.advanceStage.mockClear();
+      fireEvent.click(within(modal).getByRole('button', { name: 'Retry 1' }));
+      await waitFor(() => expect(h.advanceStage).toHaveBeenCalledTimes(1));
+      expect(h.advanceStage.mock.calls[0][2].skipReason).toBeUndefined();
+    });
+
+    it('a row refused again stays listed; Close ends it without another call', async () => {
+      h.advanceStage.mockImplementation(async (id: string) => { if (id === 'A9003') throw refuse(PENDING); return { data: {} }; });
+      const modal = await startMove();
+      fireEvent.change(within(modal).getByLabelText('Reason to proceed anyway'), { target: { value: 'Interviewed offline' } });
+      fireEvent.click(within(modal).getByRole('button', { name: 'Retry 1' }));
+      await waitFor(() => expect(h.toastError).toHaveBeenCalledWith('0 of 1 updated to Interview Round 2'));
+      expect(within(modal).getByLabelText('Reason to proceed anyway')).toHaveValue('Interviewed offline');
+      expect(within(modal).getByTestId('bulk-refused-list')).toHaveTextContent('Test Candidate A9003');
+      h.advanceStage.mockClear();
+      fireEvent.click(within(modal).getByRole('button', { name: 'Close' }));
+      expect(screen.queryByText('Update stage')).not.toBeInTheDocument();
+      expect(h.advanceStage).not.toHaveBeenCalled();
+    });
+  });
+
   it('Cancel closes the dialog and changes nothing', async () => {
     await showList();
     const modal = openStageModal('Test Candidate A9002');
@@ -286,7 +368,7 @@ describe('Active Candidates — bulk status change', () => {
     fireEvent.change(select, { target: { value: 'Process too slow' } });
     update(modal);
     await waitFor(() => expect(h.updateStatus).toHaveBeenCalledTimes(1));
-    expect(h.updateStatus).toHaveBeenCalledWith('A9002', { new_status: 'Withdrawn', rejection_reason_cats: ['Process too slow'], rejection_reason_cat: 'Process too slow' });
+    expect(h.updateStatus).toHaveBeenCalledWith('A9002', { new_status: 'Withdrawn', withdrawal_reason_cat: 'Process too slow' });
   });
 
   it('Hold for Future carries no reasons, even after Rejected was opened and a reason ticked first', async () => {

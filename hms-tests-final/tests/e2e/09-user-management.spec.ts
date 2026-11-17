@@ -436,7 +436,7 @@ test.describe('one user, from creation to revoked access', () => {
     expect((await userRowByEmail(email))!.id).toBe(userId);
   });
 
-  test('TODAY: clearing the Department field in Edit does not clear it (the UI sends nothing for a blank department, the API reads that as "no change")', async ({ page }) => {
+  test('clearing the Department field in Edit clears it: the UI sends an empty department and the API stores NULL', async ({ page }) => {
     const requests = watchUserRequests(page);
     await openUsers(page);
     await rowOf(page, email).getByRole('button', { name: 'Edit' }).click();
@@ -446,9 +446,9 @@ test.describe('one user, from creation to revoked access', () => {
 
     const patch = requests.filter(r => r.method === 'PATCH');
     expect(patch).toHaveLength(1);
-    expect(patch[0].body, 'a blank department is dropped from the request').not.toHaveProperty('department');
-    expect((await userRowByEmail(email))!.department, 'so the old department is still stored').toBe(`${dept}-moved`);
-    await expect.poll(async () => (await cells(page, email))[3]).toBe(`${dept}-moved`);
+    expect(patch[0].body).toMatchObject({ department: '' });
+    expect((await userRowByEmail(email))!.department, 'the old department is gone from the database').toBeNull();
+    await expect.poll(async () => (await cells(page, email))[3]).toBe('—');
   });
 
   test('Deactivate revokes access: toast, Inactive, a Reactivate button, the row stays in the database, no DELETE is sent, password sign-in is refused', async ({ page, request }) => {
@@ -501,7 +501,7 @@ test.describe('one user, from creation to revoked access', () => {
     expect((await res.json()).user.persona).toBe('leadership');
   });
 
-  test('an e-mail that belongs to another user cannot be edited onto this one (TODAY: refused with a 500 "Internal server error" toast, where Add user answers a clear 400)', async ({ page, request }) => {
+  test('an e-mail that belongs to another user cannot be edited onto this one (TODAY: refused with a 409 "That value already exists." toast that does not name the e-mail, where Add user answers a clear 400 "A user with this email already exists")', async ({ page, request }) => {
     const requests = watchUserRequests(page);
     const answered = page.waitForResponse(r => r.request().method() === 'PATCH' && new URL(r.url()).pathname.startsWith('/api/users/'));
     await openUsers(page);
@@ -511,9 +511,10 @@ test.describe('one user, from creation to revoked access', () => {
 
     await expect(modalHeading(page, 'Edit user')).toBeVisible();                       // refused: the modal stays open
     await expect(page.getByRole('status').filter({ hasText: 'User updated' })).toHaveCount(0);
-    // the requirement above is what matters; the next two lines pin how the refusal looks TODAY (users.ts PATCH has no duplicate check, the unique index throws)
-    expect((await answered).status()).toBe(500);
-    await expect(toast(page, 'Internal server error')).toBeVisible();
+    // the requirement above is what matters; the next two lines pin how the refusal looks TODAY (users.ts PATCH has no duplicate check, the unique index throws; since
+    // 2026-11-15 the error handler maps that unique violation to a generic 409 instead of a 500, but still without saying which value)
+    expect((await answered).status()).toBe(409);
+    await expect(toast(page, 'That value already exists.')).toBeVisible();
     expect(requests.filter(r => r.method === 'PATCH')).toHaveLength(1);
     expect((await userRowByEmail(email))!.id, 'the user keeps their own address').toBe(userId);
     expect((await userRowByEmail(USERS.hm_satyadev.email))!.name, 'and the other user is untouched').not.toBe(name);

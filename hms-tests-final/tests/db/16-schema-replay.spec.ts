@@ -11,13 +11,12 @@
 // constraints for the application status, the portfolio statuses and review kinds, the key indexes and delete rules, the seed counts, and that no
 // sequence is behind its table. It then applies schema.sql a SECOND time and compares the live test database with the replay.
 //
-// PINNED AS "TODAY" (what the files do now, reported as product issues rather than fixed here):
+// WHAT CHANGED (the one remaining "TODAY" pin in this file is the row-level-security one, known and accepted):
 // (The two seed.sql defects that used to be pinned here — `setval(seq, 0)` stopping the script on an empty database, and seq_eval_question /
-// seq_comp_benchmark left behind their seeded ids — were fixed 2026-11-15; the tests below now pin the fixed behaviour.)
-//   * schema.sql is NOT safe to run twice, although its patch section is headed "Safe to run multiple times (all IF NOT EXISTS)": the original
-//     block uses plain CREATE TABLE (42P07 on the first statement) and two patches fail when repeated: `ALTER TABLE roles ALTER COLUMN vacancy_reason TYPE
-//     TEXT[] USING ... string_to_array(vacancy_reason, ...)` (the column is already text[], 42883) and `ALTER TABLE candidates ADD COLUMN gender` (no IF NOT EXISTS);
-//   * pending_actions has no index on application_id / role_id (tests/helpers/sourcing-db.ts exists because of it).
+// seq_comp_benchmark left behind their seeded ids — were fixed 2026-11-15; the tests below now pin the fixed behaviour. Fixed 2026-11-17 and
+// pinned as such below: schema.sql is RE-RUNNABLE — plain CREATE TABLE / CREATE INDEX are IF NOT EXISTS, the updated_at / CTC triggers are
+// dropped before they are created, the vacancy_reason TEXT[] conversion is guarded by a DO block and `ADD COLUMN gender` has IF NOT EXISTS —
+// and pending_actions carries idx_pending_actions_application_id / _role_id.)
 //
 // INTENTIONALLY LOCAL-ONLY, like the other tests/db specs: it creates and drops databases (the connection comes from helpers/db.ts, which refuses
 // a non-local host) and needs a role with CREATEDB — the superuser the Docker image and the CI service give.
@@ -280,9 +279,12 @@ test.describe('Schema replay: schema.sql + seed.sql on an empty database', () =>
       for (const [k, v] of Object.entries(expected)) expect(rule[k], k).toBe(v);
     });
 
-    test('TODAY: pending_actions has no index on application_id or role_id (every row delete scans it; purgeRolesFast exists because of that)', async () => {
+    test('pending_actions has an index on each foreign key, application_id and role_id (fixed 2026-11-17; purgeRolesFast still batches the local clean-up)', async () => {
       const idx = firstPass.indexes.filter(l => l.includes(' ON public.pending_actions ')).map(l => l.split(' :: ')[0]).sort();
-      expect(idx).toEqual(['idx_pending_actions_owner', 'idx_pending_actions_resolved', 'pending_actions_pkey']);
+      expect(idx).toEqual(['idx_pending_actions_application_id', 'idx_pending_actions_owner', 'idx_pending_actions_resolved', 'idx_pending_actions_role_id', 'pending_actions_pkey']);
+      const def = (n: string) => firstPass.indexes.find(l => l.startsWith(`${n} :: `)) ?? '';
+      expect(def('idx_pending_actions_application_id')).toMatch(/USING btree \(application_id\)$/);
+      expect(def('idx_pending_actions_role_id')).toMatch(/USING btree \(role_id\)$/);
     });
 
     test('the triggers: updated_at on four tables, and the CTC-change flag uses the patched function (it records role_id)', async () => {
@@ -389,25 +391,21 @@ test.describe('Schema replay: schema.sql + seed.sql on an empty database', () =>
 
     test.beforeAll(async () => { before = await schemaFingerprint(db); rowsBefore = await rowCounts(); });
 
-    test('TODAY: the original block is NOT idempotent — its first CREATE TABLE fails (42P07) and the whole BEGIN ... COMMIT rolls back, changing nothing', async () => {
+    test('the original block is idempotent (fixed 2026-11-17) — run again as one BEGIN ... COMMIT it succeeds and changes only what the patch section redefines (flag_ctc_change)', async () => {
       const { base } = splitSchemaSql(schemaSql());
       const err = await runAsOneQuery(db, `${base.join(';\n')};`);
-      expect(err?.code).toBe('42P07');
-      expect(err?.message).toMatch(/relation "users" already exists/);
-      expect(diffFingerprints(before, await schemaFingerprint(db), ['before', 'after'])).toEqual([]);
+      expect(err).toBeNull();
+      // The block's own CREATE OR REPLACE puts back the first version of flag_ctc_change(); the patch section (next test) restores the one that records role_id.
+      const diff = diffFingerprints(before, await schemaFingerprint(db), ['before', 'after']);
+      expect(diff.map(l => l.replace(/ md5:\w+$/, ''))).toEqual(['[functions] only in before: flag_ctc_change()', '[functions] only in after: flag_ctc_change()']);
       expect(await rowCounts()).toEqual(rowsBefore);
     });
 
-    test('TODAY: of the patch section exactly two statements fail when it is run again — the vacancy_reason type change (42883) and `ADD COLUMN gender` (42701) — every other statement is a true no-op', async () => {
+    test('the patch section is idempotent too (fixed 2026-11-17) — every statement runs again without an error, including the vacancy_reason conversion and `ADD COLUMN gender`', async () => {
       const { tail } = splitSchemaSql(schemaSql());
       const { errors, executed } = await runStatements(db, tail);
-      expect(errors).toHaveLength(2);
-      expect(errors.map(e => e.code)).toEqual(['42883', '42701']);
-      expect(errors[0].statement.replace(/\s+/g, ' ')).toMatch(/^ALTER TABLE roles ALTER COLUMN vacancy_reason TYPE TEXT\[\] USING /);
-      expect(errors[1].statement).toMatch(/^ALTER TABLE candidates ADD COLUMN gender TEXT CHECK \(gender IN \('M','F'\)\)$/);
-      expect(errors[0].message).toBe('function string_to_array(text[], unknown) does not exist');
-      expect(errors[1].message).toBe('column "gender" of relation "candidates" already exists');
-      expect(executed).toBe(tail.length - 2);
+      expect(errors).toEqual([]);
+      expect(executed).toBe(tail.length);
       expect(diffFingerprints(before, await schemaFingerprint(db), ['before', 'after'])).toEqual([]);   // idempotent in effect: the structure is exactly what it was
       expect(await rowCounts()).toEqual(rowsBefore);                                              // and the data migration at the end of the file touched no row
     });

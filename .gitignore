@@ -36,3 +36,9 @@ playwright-report/
 
 # Docker volumes
 postgres-data/
+
+# The test stack links frontend/node_modules (and backend/node_modules) into a worktree as a SYMLINK; "node_modules/" above only matches a directory, so a
+# symlink was committed twice (#97, and again by mistake in #114 before this line). No trailing slash: matches the link as well.
+/frontend/node_modules
+/backend/node_modules
+/hms-tests-final/node_modules

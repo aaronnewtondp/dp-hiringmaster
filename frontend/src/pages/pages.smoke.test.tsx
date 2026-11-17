@@ -310,14 +310,20 @@ describe.each(PERSONAS)('as %s', persona => {
     }
   });
 
-  it('Candidates — Unmatched Candidates panel: everyone sees the candidate; "Link to role", the suggested-role shortcut and "Delete candidate" only for HR-tier', async () => {
+  it('Candidates — Unmatched Candidates panel: HR-tier only (with "Link to role", the suggested-role shortcut and "Delete candidate"); a Hiring Manager never requests it', async () => {
     h.state.unmatched = true;
     mountAs(persona, <Candidates />);
+    if (!who.hr) {
+      await screen.findByText('Synthetic Candidate One');
+      expect(asked('candidates.unmatched')).toHaveLength(0);
+      expect(screen.queryByText(/Unmatched Candidates/)).toBeNull();
+      return;
+    }
     fireEvent.click(await screen.findByText('Unmatched Candidates (1)'));              // the panel is collapsed on load
     expect(await screen.findByRole('link', { name: 'Synthetic Unlinked' })).toHaveAttribute('href', '/candidates/C9010');
-    expect(present(screen.queryByRole('button', { name: 'Link to role' }))).toBe(who.hr);
-    expect(present(screen.queryByRole('button', { name: 'Link to Smoke Test Engineer' }))).toBe(who.hr);
-    expect(present(screen.queryByTitle('Delete candidate'))).toBe(who.hr);
+    expect(present(screen.queryByRole('button', { name: 'Link to role' }))).toBe(true);
+    expect(present(screen.queryByRole('button', { name: 'Link to Smoke Test Engineer' }))).toBe(true);
+    expect(present(screen.queryByTitle('Delete candidate'))).toBe(true);
   });
 
   // ── TalentPool ─────────────────────────────────────────────────────────────────────────────────
@@ -821,21 +827,12 @@ describe('NewRole — the other required choices', () => {
   });
 });
 
-// ═══ A known defect, pinned ══════════════════════════════════════════════════════════════════════════
-// Agencies.tsx renders an "Add agency" button with no handler: it is shown to everyone who can open the page, does nothing when pressed, and there is no
-// agenciesApi.create call behind it on this page. Reported, not fixed here. When it is wired up this test fails: replace it with a test of the real flow.
-describe('Agencies — "Add agency"', () => {
-  it('TODAY: the button is there and pressing it opens nothing, asks for nothing and says nothing', async () => {
+// ═══ "Add agency" ═══════════════════════════════════════════════════════════════════════════════════
+// The button had no handler (and POST /api/agencies has no UI); it was removed rather than left as a dead control.
+describe('Agencies — no "Add agency" button', () => {
+  it('the page does not draw a button that does nothing', async () => {
     mountAs('hr_recruiter', <Agencies />);
     await screen.findByText('Synthetic Search Partners');
-    const inputsBefore = document.querySelectorAll('input, textarea, select').length;
-    const callsBefore = Object.values(h.calls).flat().length;
-    fireEvent.click(screen.getByRole('button', { name: /Add agency/ }));
-    await drain();
-    expect(document.querySelectorAll('input, textarea, select')).toHaveLength(inputsBefore);
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(Object.values(h.calls).flat()).toHaveLength(callsBefore);
-    expect(toast.error).not.toHaveBeenCalled();
-    expect(toast.success).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /Add agency/ })).toBeNull();
   });
 });

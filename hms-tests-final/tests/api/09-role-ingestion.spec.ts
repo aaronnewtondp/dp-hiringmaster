@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { BASE, ROLE_INGEST_SECRET, uid } from '../helpers/api';
+import { BASE, ROLE_INGEST_SECRET, uid, authed, getToken } from '../helpers/api';
 import { futureDateOnly } from '../helpers/dates';
 
 // ─── POST /api/roles/ingest ─────────────────────────────────────────────────
@@ -38,10 +38,9 @@ test.describe('Role Ingestion Webhook', () => {
       });
       expect(res.status()).toBe(201);
       const { role } = await res.json();
-      // 3+ digits — the seq_role-backed id used to truncate (not error) once
-      // the sequence passed 999, silently colliding with an existing low id;
-      // fixed to pad to 4 digits going forward, so either width is valid.
-      expect(role.id).toMatch(/^R\d{3,}$/);
+      // The id comes from the column default (format_seq_id, 4-digit pad), like POST /roles.
+      // Older roles keep their 3-digit ids, so only NEW ids are asserted to be 4+ digits.
+      expect(role.id).toMatch(/^R\d{4,}$/);
       expect(role.status).toBe('Draft');
       expect(role.title).toBe(`Ingested Test Role ${marker}`);
       expect(role.department).toBe('Engineering');
@@ -91,6 +90,60 @@ test.describe('Role Ingestion Webhook', () => {
       expect(res2.status()).toBe(200);
       const body2 = await res2.json();
       expect(body2.role_id).toBe(role.id);
+    });
+
+    test('an invalid num_openings is a 400 and creates nothing', async ({ request }) => {
+      const hr = await getToken(request, 'hr');
+      for (const bad of ['abc', '0', '-2', '1.5', '100000']) {
+        const marker = uid();
+        const title = `Bad Openings ${bad} ${marker}`;
+        const res = await request.post(`${BASE}/api/roles/ingest`, {
+          headers: { 'x-ingest-secret': ROLE_INGEST_SECRET },
+          data: { timestamp: `${Date.now()}-${marker}`, email: `bad+${marker}@digitalpaani.com`, job_title: title, num_openings: bad },
+        });
+        expect(res.status(), `num_openings ${bad}`).toBe(400);
+        expect((await res.json()).error).toMatch(/num_openings/);
+        const { roles } = await (await authed(request, hr).get('/api/roles')).json();
+        expect(roles.filter((r: { title: string }) => r.title === title)).toHaveLength(0);
+      }
+    });
+
+    test('a numeric-string num_openings ("3") is stored as 3', async ({ request }) => {
+      const marker = uid();
+      const res = await request.post(`${BASE}/api/roles/ingest`, {
+        headers: { 'x-ingest-secret': ROLE_INGEST_SECRET },
+        data: { timestamp: `${Date.now()}-${marker}`, email: `n3+${marker}@digitalpaani.com`, job_title: `Three Openings ${marker}`, num_openings: '3' },
+      });
+      expect(res.status()).toBe(201);
+      expect(Number((await res.json()).role.num_openings)).toBe(3);
+    });
+
+    test('a row with neither timestamp nor email is a 400 (it cannot be de-duplicated)', async ({ request }) => {
+      const res = await request.post(`${BASE}/api/roles/ingest`, {
+        headers: { 'x-ingest-secret': ROLE_INGEST_SECRET },
+        data: { job_title: `No Key Role ${uid()}` },
+      });
+      expect(res.status()).toBe(400);
+      expect((await res.json()).error).toMatch(/de-duplicated/);
+    });
+
+    test('two CONCURRENT posts of one row create exactly one role; the other answers the existing role like a re-fired trigger', async ({ request }) => {
+      const marker = uid();
+      const title = `Concurrent Ingest ${marker}`;
+      const payload = { timestamp: `${Date.now()}-${marker}`, email: `race+${marker}@digitalpaani.com`, job_title: title };
+      const post = () => request.post(`${BASE}/api/roles/ingest`, { headers: { 'x-ingest-secret': ROLE_INGEST_SECRET }, data: payload });
+      const results = await Promise.all([post(), post(), post(), post()]);
+      const statuses = results.map(r => r.status()).sort();
+      expect(statuses).toEqual([200, 200, 200, 201]);
+      const bodies = await Promise.all(results.map(r => r.json()));
+      const created = bodies.find(b => b.role)!;
+      for (const b of bodies.filter(b => !b.role)) {
+        expect(b.message).toMatch(/Already ingested/);
+        expect(b.role_id).toBe(created.role.id);
+      }
+      const hr = await getToken(request, 'hr');
+      const { roles } = await (await authed(request, hr).get('/api/roles')).json();
+      expect(roles.filter((r: { title: string }) => r.title === title)).toHaveLength(1);
     });
 
     test('invalid priority_level falls back to P1', async ({ request }) => {

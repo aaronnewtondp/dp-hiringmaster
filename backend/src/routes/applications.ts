@@ -1,10 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, transaction } from '../db/index.js';
 import { authenticate, requireHR, stripRestrictedFields, isHRTier, canSeeCompForRole } from '../middleware/auth.js';
-import { Application, SLA_HOURS, Candidate, Role } from '../types/index.js';
+import { Application, SLA_HOURS, STAGE_ORDER, Candidate, Role } from '../types/index.js';
 import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
 import { parseRoleFilters, buildRoleFilterSql, toArray } from '../utils/roleFilters.js';
-import { STAGE_SLA_ACTION_TYPES } from '../jobs/slaChecker.js';
+import { STAGE_SLA_ACTION_TYPES, getSlaHours } from '../jobs/slaChecker.js';
 import { isSeverelyOverBudget } from '../utils/budget.js';
 import { sendAssignmentEmail } from '../services/gmailService.js';
 import { joinReasons, normalizeReasons } from '../utils/rejectionReasons.js';
@@ -13,22 +13,8 @@ const router = Router();
 router.use(authenticate);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-export function getSlaHours(stage: string, fitScore?: number | null): number {
-  // Applied and Screened (renamed from plain 'Applied' 2026-09-01, see
-  // STAGE_ORDER) now covers what 'Resume Review' used to (that stage was
-  // retired) — same high-fit/normal threshold, just measured from
-  // application creation instead of a later manual move.
-  if (stage === 'Applied and Screened') {
-    return (fitScore && fitScore >= 75) ? SLA_HOURS.RESUME_REVIEW_HIGH_FIT : SLA_HOURS.RESUME_REVIEW_NORMAL;
-  }
-  if (stage === 'Reference Check') return SLA_HOURS.REF_INIT;
-  if (stage === 'Offer Released') return SLA_HOURS.OFFER_RELEASE;
-  // 'Founders Round' no longer matches startsWith('Interview') after the
-  // rename from 'Interview – Round 3' — treated the same as a plain
-  // interview round for SLA purposes.
-  if (stage.startsWith('Interview') || stage === 'Founders Round') return SLA_HOURS.INTERVIEW_FEEDBACK;
-  return SLA_HOURS.IDLE;
-}
+// getSlaHours lives with the SLA engine (jobs/slaChecker.ts) so the stored value and the breach thresholds share one tiering.
+export { getSlaHours };
 
 async function logActivity(
   client: import('pg').PoolClient,
@@ -253,10 +239,16 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
   // path (single-row, bulk, either page) actually goes through. "Shortlist"
   // now means advancing straight to Interview Round 1 (the old intermediate
   // 'Shortlisted' stage was retired — see STAGE_ORDER).
+  // The reason is stored (and named in the activity log) ONLY for this one case: a move to Interview Round 1 of an application that is really
+  // 15%+ over the band. A client that sends it for any other row or stage (the bulk move sends one reason for the whole selection) has it
+  // ignored here, so an in-band candidate never carries an "over-budget exception". When the comparison cannot be made (no band, no expected
+  // CTC, a band with no number) the row is NOT over budget by isSeverelyOverBudget's own rule, so nothing is stored for it either.
+  let storeBudgetReason = false;
   if (new_stage === 'Interview Round 1') {
     const candidate = await queryOne<{ expected_ctc: number }>('SELECT expected_ctc FROM candidates WHERE id=$1', [app.candidate_id]);
     const role      = await queryOne<{ ctc_band: string }>('SELECT ctc_band FROM roles WHERE id=$1', [app.role_id]);
-    if (isSeverelyOverBudget(candidate?.expected_ctc, role?.ctc_band) && !budget_exception_reason_cat) {
+    storeBudgetReason = isSeverelyOverBudget(candidate?.expected_ctc, role?.ctc_band);
+    if (storeBudgetReason && !budget_exception_reason_cat) {
       res.status(400).json({ error: "This candidate's expected CTC is 15%+ over the role's band — select a reason before shortlisting." });
       return;
     }
@@ -271,6 +263,10 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
     res.status(403).json({ error: 'HR access required' });
     return;
   }
+
+  // Only a real stage may be written (applications.stage is plain TEXT, so nothing else would stop a made-up or retired name). Checked after
+  // the persona gate so an unauthorised caller learns nothing about which names exist.
+  if (typeof new_stage !== 'string' || !STAGE_ORDER.includes(new_stage)) { res.status(400).json({ error: 'Unknown stage' }); return; }
 
   // Every scheduled interview/assignment round must have feedback submitted
   // before advancing further — skip_reason is the existing, deliberate
@@ -300,6 +296,8 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
   }
 
   const slaHours = getSlaHours(new_stage, app.ai_fit_score);
+  const storedReasonCat: string | null = storeBudgetReason ? (budget_exception_reason_cat || null) : null;
+  const storedReasonDetail: string | null = storeBudgetReason ? (budget_exception_reason_detail || null) : null;
 
   // Dashboard's Time to Fill is a literal AVG(offer_accepted_date -
   // role.start_date) — nothing ever stamped this column on the stage
@@ -311,7 +309,13 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
   // Offer Accepted date from a non-skipped progression is never overwritten.
   let offerDateSql = '';
   if (new_stage === 'Offer Released') offerDateSql = ', offer_sent_date=NOW()';
-  if (new_stage === 'Offer Accepted') offerDateSql = ', offer_accepted_date=NOW()';
+  // Joining-risk clock (5 days without HR contact, jobs/slaChecker.ts checkJoiningRisk) starts when the application REACHES Offer
+  // Accepted: last_hr_contact becomes today unless a contact logged today or later is already there (GREATEST — a real, more recent
+  // contact is never overwritten; an older one, or none, is not a contact since the acceptance). The auto flag is reset in the same statement: an
+  // application that reaches Offer Accepted AGAIN (moved back and forward) was flagged for the previous acceptance, and the stamp restarts the
+  // clock, so the old flag must not keep it listed as at risk; the sweep raises it again if 5 days pass with no contact. NOTE for readers of the
+  // data: last_hr_contact is then the system's stamp (the day the offer was accepted), not necessarily a logged conversation.
+  if (new_stage === 'Offer Accepted') offerDateSql = ', offer_accepted_date=NOW(), last_hr_contact=GREATEST(last_hr_contact, CURRENT_DATE), joining_risk_auto_flag=false';
   if (new_stage === 'Joined') offerDateSql = ', offer_accepted_date=COALESCE(offer_accepted_date, NOW())';
 
   // status is a separate field from stage (see CLAUDE.md's application state
@@ -329,7 +333,7 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
        budget_exception_reason_cat=COALESCE($4, budget_exception_reason_cat),
        budget_exception_reason_detail=COALESCE($5, budget_exception_reason_detail)
        WHERE id=$3`,
-      [new_stage, slaHours, req.params.id, budget_exception_reason_cat || null, budget_exception_reason_detail || null]
+      [new_stage, slaHours, req.params.id, storedReasonCat, storedReasonDetail]
     );
     // A stage-SLA pending_action (Idle Candidate, Resume Shortlist Pending,
     // Interview 1/2 Feedback Due, etc.) is only ever valid for the stage it
@@ -354,7 +358,7 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
     await logActivity(client, app.id, app.candidate_id, app.role_id,
       'Stage Changed',
       skip_reason ? `Stage skipped to ${new_stage}. Reason: ${skip_reason}`
-        : budget_exception_reason_cat ? `Stage → ${new_stage} (over-budget exception: ${budget_exception_reason_cat})`
+        : storedReasonCat ? `Stage → ${new_stage} (over-budget exception: ${storedReasonCat})`
         : `Stage → ${new_stage}`,
       app.stage, new_stage, req.user!.userId, req.user!.name
     );
@@ -481,9 +485,16 @@ router.post('/:id/status', async (req: Request, res: Response) => {
     return;
   }
 
-  // Rejection and withdrawal require a reason
-  if ((new_status === 'Rejected' || new_status === 'Withdrawn') && !rejectionReasonText && !withdrawal_reason_cat) {
-    res.status(400).json({ error: 'A reason is required when rejecting or withdrawing a candidate' });
+  // Rejection and withdrawal each require THEIR OWN kind of reason: Rejected needs a non-blank
+  // rejection reason, Withdrawn a non-blank withdrawal_reason_cat (trimmed). One kind no longer
+  // satisfies the other status. Before any write.
+  const withdrawalReason = typeof withdrawal_reason_cat === 'string' ? withdrawal_reason_cat.trim() : '';
+  if (new_status === 'Rejected' && !rejectionReasonText) {
+    res.status(400).json({ error: 'A rejection reason is required when rejecting a candidate (rejection_reason_cats or rejection_reason_cat)' });
+    return;
+  }
+  if (new_status === 'Withdrawn' && !withdrawalReason) {
+    res.status(400).json({ error: 'A withdrawal reason is required when withdrawing a candidate (withdrawal_reason_cat)' });
     return;
   }
 
@@ -516,7 +527,7 @@ router.post('/:id/status', async (req: Request, res: Response) => {
        withdrawal_reason_cat=$4, withdrawal_reason_detail=$5,
        last_updated=NOW()${clearJoiningRisk} WHERE id=$6`,
       [new_status, rejectionReasonText, rejection_reason_detail || null,
-       withdrawal_reason_cat || null, withdrawal_reason_detail || null, req.params.id]
+       withdrawalReason || null, withdrawal_reason_detail || null, req.params.id]
     );
     await logActivity(client, app.id, app.candidate_id, app.role_id,
       'Status Changed',
@@ -552,26 +563,40 @@ router.post('/:id/screening', async (req: Request, res: Response) => {
   if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
 
   // HR-tier can set any screening status; a Hiring Manager can set only the
-  // one transition they own (HM Shortlisted); everyone else (interviewer)
-  // can set none. Previously only the HM Shortlisted value was gated at
-  // all — every other value was silently open to any persona.
-  const isHMShortlistByHM = new_screening_status === 'HM Shortlisted' && req.user!.persona === 'hiring_manager';
-  if (!isHRTier(req.user!.persona) && !isHMShortlistByHM) {
-    res.status(403).json({ error: 'Only HR/Leadership can set this screening status.' });
-    return;
+  // one transition they own (HM Shortlisted), and only on a role that names
+  // them (same whole-name rule as comp visibility, co-Hiring-Managers included);
+  // everyone else can set none. Decided before any write.
+  if (!isHRTier(req.user!.persona)) {
+    if (new_screening_status !== 'HM Shortlisted' || req.user!.persona !== 'hiring_manager') {
+      res.status(403).json({ error: 'Only HR/Leadership can set this screening status.' });
+      return;
+    }
+    const roleRow = await queryOne<{ hiring_manager_name: string | null }>(
+      'SELECT hiring_manager_name FROM roles WHERE id = $1', [app.role_id]
+    );
+    if (!canSeeCompForRole(req.user!.persona, req.user!.name, roleRow?.hiring_manager_name)) {
+      res.status(403).json({ error: 'Only the Hiring Manager named on this role (or HR/Leadership) can shortlist for it.' });
+      return;
+    }
   }
 
-  await transaction(async (client) => {
-    await client.query(
-      'UPDATE applications SET recruiter_screening_status=$1, last_updated=NOW() WHERE id=$2',
+  // Repeating 'HM Shortlisted' resolves nothing new: it used to add another open
+  // "Schedule interview" action and another activity row each time. The check is the
+  // UPDATE's own WHERE clause, so two simultaneous shortlists cannot both pass it.
+  // Other values keep their behaviour (a repeat of those creates no duplicate action).
+  const isShortlist = new_screening_status === 'HM Shortlisted';
+  const changed = await transaction(async (client) => {
+    const upd = await client.query(
+      `UPDATE applications SET recruiter_screening_status=$1, last_updated=NOW() WHERE id=$2${isShortlist ? ' AND recruiter_screening_status IS DISTINCT FROM $1' : ''}`,
       [new_screening_status, req.params.id]
     );
+    if (isShortlist && upd.rowCount === 0) return false;
     await logActivity(client, app.id, app.candidate_id, app.role_id,
       'Recruiter Screening Status Changed', `Screening → ${new_screening_status}`,
       app.recruiter_screening_status, new_screening_status, req.user!.userId, req.user!.name
     );
     // If HM Shortlisted, resolve HM pending action and create HR schedule action
-    if (new_screening_status === 'HM Shortlisted') {
+    if (isShortlist) {
       await client.query(
         `UPDATE pending_actions SET resolved=true, resolved_at=NOW()
          WHERE application_id=$1 AND action_type='HM shortlist review' AND resolved=false`,
@@ -585,7 +610,17 @@ router.post('/:id/screening', async (req: Request, res: Response) => {
         [req.params.id, cand.rows[0]?.full_name, role.rows[0]?.title]
       );
     }
+    return true;
   });
+
+  if (!changed) {
+    const current = await queryOne<Application>('SELECT * FROM applications WHERE id = $1', [req.params.id]);
+    res.json({
+      success: true, new_screening_status, unchanged: true,
+      application: current ? stripRestrictedFields(current as unknown as Record<string, unknown>, req.user!.persona, isHRTier(req.user!.persona)) : null,
+    });
+    return;
+  }
 
   res.json({ success: true, new_screening_status });
 });
@@ -604,10 +639,31 @@ router.patch('/:id/notes', requireHR, async (req: Request, res: Response) => {
   for (const field of allowed) {
     if (req.body[field] !== undefined) {
       updates.push(`${field} = $${i++}`);
-      values.push(req.body[field]);
+      // An empty-string override means "clear": store NULL (the column's CHECK rejects '').
+      values.push(field === 'hr_priority_override' && req.body[field] === '' ? null : req.body[field]);
     }
   }
   if (!updates.length) { res.status(400).json({ error: 'No valid fields' }); return; }
+
+  // Setting or CHANGING the HR priority override needs a non-blank reason (trimmed), checked before any write. The reason may arrive in this
+  // request or already be stored on the application: the candidate page sends only the keys that changed, so moving the select from High to
+  // Critical carries no reason of its own. Re-sending the value that is already stored is not a change and needs none; clearing the override
+  // (null, an empty string or 'Normal') needs none; a body that carries only the reason is not an override change.
+  const overrideValue = req.body.hr_priority_override;
+  const clearsOverride = overrideValue === null || overrideValue === '' || overrideValue === 'Normal';
+  let effectiveReason: string | null = typeof req.body.hr_priority_override_reason === 'string' && req.body.hr_priority_override_reason.trim()
+    ? req.body.hr_priority_override_reason : null;
+  if (overrideValue !== undefined && !clearsOverride) {
+    const stored = await queryOne<{ hr_priority_override: string | null; hr_priority_override_reason: string | null }>(
+      'SELECT hr_priority_override, hr_priority_override_reason FROM applications WHERE id=$1', [req.params.id]);
+    const storedReason = stored?.hr_priority_override_reason?.trim() ? stored.hr_priority_override_reason : null;
+    effectiveReason = effectiveReason ?? storedReason;
+    const unchanged = stored?.hr_priority_override === overrideValue;
+    if (!effectiveReason && !unchanged) {
+      res.status(400).json({ error: 'hr_priority_override_reason is required when setting an HR priority override' });
+      return;
+    }
+  }
 
   // joining_risk_auto_flag is otherwise write-once (only ever set true, by
   // slaChecker.ts's checkJoiningRisk) — logging fresh HR contact here is the
@@ -628,7 +684,7 @@ router.patch('/:id/notes', requireHR, async (req: Request, res: Response) => {
     const app = await queryOne<Application>('SELECT candidate_id, role_id FROM applications WHERE id=$1', [req.params.id]);
     await transaction(async (client) => {
       await logActivity(client, String(req.params.id), app!.candidate_id, app!.role_id,
-        'Priority Override Set', `HR Priority → ${req.body.hr_priority_override}: ${req.body.hr_priority_override_reason || ''}`,
+        'Priority Override Set', `HR Priority → ${req.body.hr_priority_override}: ${effectiveReason || ''}`,
         null, req.body.hr_priority_override, req.user!.userId, req.user!.name
       );
     });

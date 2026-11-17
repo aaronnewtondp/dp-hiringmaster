@@ -16,6 +16,7 @@ vi.mock('../services/resumeIQTrigger.js', () => ({ runResumeIQScoring: (...a: un
 vi.mock('../utils/genderClassifier.js', () => ({ classifyGender: (...a: unknown[]) => h.classify(...a) }));
 
 import router, { PROFILE_FIELDS, toNum, toStr } from './candidateIngest.js';
+import { FULL_NAME_MAX_CHARS } from '../utils/candidateName.js';
 
 const SECRET = 'test-only-candidate-ingest-secret';
 let server: http.Server;
@@ -203,10 +204,33 @@ describe('a new applicant', () => {
     expect(p.slice(2, 16)).toEqual(new Array(14).fill(null));
   });
 
-  it('full_name is stored as typed (not trimmed here) and is what the gender classifier reads', async () => {
-    await ingest({ email: 'a@example.test', full_name: 'Synthetic  Applicant' });
-    expect((insertCandidate()[1] as unknown[])[0]).toBe('Synthetic  Applicant');
-    expect(h.classify).toHaveBeenCalledWith('Synthetic  Applicant');
+  it('full_name is stored cleaned (whitespace collapsed) and is what the gender classifier reads', async () => {
+    await ingest({ email: 'a@example.test', full_name: ' Synthetic  Applicant ' });
+    expect((insertCandidate()[1] as unknown[])[0]).toBe('Synthetic Applicant');
+    expect(h.classify).toHaveBeenCalledWith('Synthetic Applicant');
+  });
+
+  it('a very long full_name never loses the applicant: it is cut to the cap with a warning, on a new and on a repeat applicant', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const long = 'Anuradha '.repeat(2000);
+    const r = await ingest({ email: 'a@example.test', full_name: long });
+    expect(r.status).toBe(201);
+    const stored = (insertCandidate()[1] as unknown[])[0] as string;
+    expect(Array.from(stored).length).toBeLessThanOrEqual(FULL_NAME_MAX_CHARS);
+    expect(stored.startsWith('Anuradha Anuradha')).toBe(true);
+    expect(h.classify).toHaveBeenCalledWith(stored);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    h.clientQuery.mockClear();
+    db.existingCandidate = { id: 'C5', email: 'a@example.test', gender: null };
+    await ingest({ email: 'a@example.test', full_name: long });
+    expect(Array.from(updateCandidate()[1].at(0) as string).length).toBeLessThanOrEqual(FULL_NAME_MAX_CHARS);
+  });
+
+  it('a full_name of only whitespace is a missing name: 400, nothing runs', async () => {
+    const r = await ingest({ email: 'a@example.test', full_name: '  \t ' });
+    expect(r.status).toBe(400);
+    expect(h.transaction).not.toHaveBeenCalled();
   });
 
   it('an unknown name (classifier says null) is stored with gender null, never guessed', async () => {

@@ -67,10 +67,8 @@ export interface BackendFacts {
   slaEscalationHours: number;
   /** routes/interviews.ts: the assignment deadline is the send time plus this many hours. */
   slaAssignmentDeadlineHours: number;
-  /** jobs/slaChecker.ts checkJoiningRisk: no HR contact for more than this many days. */
+  /** types/index.ts SLA_HOURS.JOINING_CONTACT / 24 (jobs/slaChecker.ts checkJoiningRisk): no HR contact for more than this many days. */
   joiningRiskDays: number;
-  /** ... and the hours its pending action is stored with, which is what the Hiring Funnel Snapshot shows as "Overdue 5D". */
-  joiningRiskStoredHours: number;
   /** routes/dashboard.ts: the red ! on an Aging role. */
   noMovementDays: number;
   /** ... and it fires only when the last movement is STRICTLY older than that (>), so the text says "more than". */
@@ -112,7 +110,9 @@ export function backendFacts(): BackendFacts {
   const sla = 'backend/src/jobs/slaChecker.ts';
   const slaSrc = readRepoFile(sla);
   const tiered = slice(sla, slaSrc, /export function tieredStandardHours\b/, /\n\}/);
+  // checkJoiningRisk must still read its threshold from SLA_HOURS.JOINING_CONTACT (through JOINING_CONTACT_HOURS): if it stops, the marker figure would drift unnoticed.
   const joining = slice(sla, slaSrc, /async function checkJoiningRisk\b/, /\n\}\n/);
+  if (!/\bJOINING_CONTACT_HOURS\b/.test(joining)) fail(sla, 'checkJoiningRisk using JOINING_CONTACT_HOURS (the 5-day threshold)');
 
   const dash = 'backend/src/routes/dashboard.ts';
   const dashSrc = readRepoFile(dash);
@@ -137,8 +137,7 @@ export function backendFacts(): BackendFacts {
     slaAssignmentFeedbackHours: numberConst(sla, slaSrc, 'BREACH_ASSIGNMENT_FEEDBACK_HOURS'),
     slaEscalationHours: numberConst(sla, slaSrc, 'LEADERSHIP_ESCALATION_HOURS'),
     slaAssignmentDeadlineHours: firstNumber(interviews, readRepoFile(interviews), /new Date\(Date\.now\(\)\s*\+\s*60\s*\*\s*60\s*\*\s*1000\s*\*\s*(\d+)\)/, 'the assignment deadline (`Date.now() + 60 * 60 * 1000 * <hours>`)'),
-    joiningRiskDays: firstNumber(sla, joining, /INTERVAL\s*'(\d+)\s*days'/, "`INTERVAL '<n> days'` in checkJoiningRisk"),
-    joiningRiskStoredHours: firstNumber(sla, joining, /\$3,\s*(\d+),\s*\$4\)/, 'the hours_overdue value stored for the joining-risk action'),
+    joiningRiskDays: firstNumber(types, typesSrc, /\bJOINING_CONTACT:\s*(\d+)\s*,/, '`JOINING_CONTACT: <hours>,` in SLA_HOURS') / 24,
     noMovementDays: numberConst(dash, dashSrc, 'NO_MOVEMENT_DAYS'),
     noMovementIsStrict: noMovementCompare![1] === '>',
     slaCheckThrottleMinutes: numberConst(dash, dashSrc, 'SLA_CHECK_THROTTLE_MS') / 60000,

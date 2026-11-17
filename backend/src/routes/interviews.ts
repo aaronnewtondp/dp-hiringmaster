@@ -11,16 +11,6 @@ import { getSlaHours } from './applications.js';
 const router = Router();
 router.use(authenticate);
 
-async function nextRoundId(client?: import('pg').PoolClient): Promise<string> {
-  const q = client
-    ? client.query("SELECT id FROM interview_rounds ORDER BY id DESC LIMIT 1")
-    : queryOne<{ id: string }>("SELECT id FROM interview_rounds ORDER BY id DESC LIMIT 1");
-  const last = await q;
-  const row = client ? (last as import('pg').QueryResult).rows[0] : last as { id: string } | null;
-  const num = row ? parseInt(row.id.replace('IR', '')) + 1 : 1;
-  return `IR${String(num).padStart(4, '0')}`;
-}
-
 // ─── GET /api/interviews?application_id=A001 ─────────────────────────────────
 router.get('/', async (req: Request, res: Response) => {
   const { application_id } = req.query;
@@ -41,27 +31,40 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // never sent successfully) — so the send-attempt/state-update/activity-log
 // logic exists exactly once. Never throws; always resolves to a status the
 // caller can surface, same graceful-degradation contract as Calendar sync.
+const NO_EMAIL_MESSAGE = 'Candidate has no email on file.';
+
 async function attemptAssignmentEmail(
   round: InterviewRound,
   app: { candidate_email: string | null; candidate_name: string; role_title: string },
   fields: { mail_body_content: string; cc?: string[]; assignment_link: string; supporting_documentation?: string },
   user: { userId: string; name: string }
 ): Promise<{ sent: boolean; error?: string }> {
-  if (!app.candidate_email) {
+  const app2 = await queryOne<{ candidate_id: string; role_id: string }>(
+    'SELECT candidate_id, role_id FROM applications WHERE id=$1', [round.application_id]
+  );
+
+  // A blank or whitespace-only address counts as none. One message is used
+  // for the stored column, the activity log and the response, so the three
+  // never disagree; a failed send writes the same "Assignment Email Failed"
+  // row.
+  if (!app.candidate_email || !app.candidate_email.trim()) {
     await query(
       `UPDATE interview_rounds SET assignment_email_error=$1, updated_at=NOW() WHERE id=$2`,
-      ['Candidate has no email on file.', round.id]
+      [NO_EMAIL_MESSAGE, round.id]
     );
-    return { sent: false, error: 'Candidate has no email on file — cannot send assignment.' };
+    round.assignment_email_error = NO_EMAIL_MESSAGE;
+    await query(
+      `INSERT INTO activity_log (application_id, candidate_id, role_id, event_type, event_detail, new_value, performed_by, performed_by_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [round.application_id, app2?.candidate_id, app2?.role_id,
+       'Assignment Email Failed', NO_EMAIL_MESSAGE, null, user.userId, user.name]
+    );
+    return { sent: false, error: NO_EMAIL_MESSAGE };
   }
 
   const subject = `DigitalPaani ${app.role_title} Assignment - ${app.candidate_name}`;
   const text = `${fields.mail_body_content}\n\nAssignment Link: ${fields.assignment_link}` +
     (fields.supporting_documentation ? `\nSupporting Documentation: ${fields.supporting_documentation}` : '');
-
-  const app2 = await queryOne<{ candidate_id: string; role_id: string }>(
-    'SELECT candidate_id, role_id FROM applications WHERE id=$1', [round.application_id]
-  );
 
   try {
     await sendAssignmentEmail({ to: app.candidate_email, cc: fields.cc, subject, text });
@@ -168,14 +171,13 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
   if (!app) { res.status(404).json({ error: 'Application not found' }); return; }
 
   const round = await transaction(async (client) => {
-    const id = await nextRoundId(client);
     const r = await client.query(
       `INSERT INTO interview_rounds
-         (id, application_id, round_name, round_type, round_number,
+         (application_id, round_name, round_type, round_number,
           interviewer_emails, scheduled_date, interview_mode, focus_areas, duration_minutes,
           assignment_mail_body, assignment_cc, assignment_link, assignment_supporting_docs)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
-      [id, application_id, round_name, round_type,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [application_id, round_name, round_type,
        round_number || 1, interviewer_emails || null, scheduled_date, interview_mode,
        focus_areas || [], duration_minutes,
        mail_body_content || null, cc || null, assignment_link || null, supporting_documentation || null]
@@ -352,6 +354,40 @@ router.patch('/:id/feedback', async (req: Request, res: Response) => {
     assignment_outcome, score_technical_accuracy, score_problem_solving,
     score_clarity, score_practical_thinking, score_completeness, assignment_notes,
   } = req.body;
+
+  // A submission must say SOMETHING. An empty body used to be accepted: it marked the round Submitted with every field NULL, which also
+  // resolved the overdue-feedback breach, so a stray or scripted PATCH silenced the SLA with no feedback on record. "Something" is judged on the
+  // fields this round type actually stores: the assignment outcome/scores/notes for an Assignment round, the form's fields for any other.
+  const filled = (v: unknown): boolean =>
+    v === undefined || v === null ? false
+    : typeof v === 'string' ? v.trim() !== ''
+    : Array.isArray(v) ? v.some(filled)
+    : typeof v === 'object' ? Object.keys(v as object).length > 0
+    : true;
+  const submitted = isAssignment
+    ? [assignment_outcome, score_technical_accuracy, score_problem_solving, score_clarity, score_practical_thinking, score_completeness, assignment_notes]
+    : [eval_areas_assessed, scores_per_area, confidence_level, overall_assessment, strengths_observed, key_concerns,
+       unresolved_questions, suggested_probe_areas, round_recommendation, notes];
+  if (!submitted.some(filled)) {
+    res.status(400).json({ error: 'Feedback is empty: fill in at least one field before submitting.' });
+    return;
+  }
+
+  // Scores are 1-5 (the assignment columns carry a CHECK for it; the per-area scores live in JSONB and carried none, so a 99 used to be
+  // averaged in and could trip the "above 2.5" auto-advance). Refuse anything else here, before it is stored or acted on.
+  const outOfScale = (v: unknown) => typeof v !== 'number' || !Number.isFinite(v) || v < 1 || v > 5;
+  if (scores_per_area !== undefined && scores_per_area !== null) {
+    if (typeof scores_per_area !== 'object' || Array.isArray(scores_per_area) || Object.values(scores_per_area).some(outOfScale)) {
+      res.status(400).json({ error: 'scores_per_area must map each area to a number from 1 to 5.' });
+      return;
+    }
+  }
+  for (const [name, v] of Object.entries({ score_technical_accuracy, score_problem_solving, score_clarity, score_practical_thinking, score_completeness })) {
+    if (v !== undefined && v !== null && (!Number.isInteger(v) || (v as number) < 1 || (v as number) > 5)) {
+      res.status(400).json({ error: `${name} must be a whole number from 1 to 5.` });
+      return;
+    }
+  }
 
   // Compute weighted average (Standard rounds)
   let overall_round_score: number | null = null;
@@ -568,6 +604,10 @@ router.post('/:id/assignment-submit', requireHR, async (req: Request, res: Respo
 
   const round = await queryOne<InterviewRound>('SELECT * FROM interview_rounds WHERE id=$1', [req.params.id]);
   if (!round) { res.status(404).json({ error: 'Round not found' }); return; }
+  if (round.round_type !== 'Assignment') {
+    res.status(400).json({ error: 'This round is not configured as an Assignment round' });
+    return;
+  }
 
   await transaction(async (client) => {
     await client.query(

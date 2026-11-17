@@ -386,7 +386,7 @@ describe('Ready for Review — acting on a selection', () => {
     await waitFor(() => expect(screen.queryByText(/selected$/)).not.toBeInTheDocument());
   });
 
-  it('a selection containing a 15%+ over-budget candidate asks once for a reason that then applies to every one of them', async () => {
+  it('a selection containing a 15%+ over-budget candidate asks once for a reason that then goes only with the ones who are over budget', async () => {
     await showRows();
     tick('Test Candidate A9001'); tick('Test Candidate A9002');
     fireEvent.click(within(bar(2)).getByRole('button', { name: 'Shortlist' }));
@@ -397,7 +397,7 @@ describe('Ready for Review — acting on a selection', () => {
     await waitFor(() => expect(h.advanceStage).toHaveBeenCalledTimes(2));
     const opts = { budgetExceptionReasonCat: OVER_BUDGET_SHORTLIST_REASONS[1], budgetExceptionReasonDetail: '' };
     expect(h.advanceStage).toHaveBeenCalledWith('A9001', 'Interview Round 1', opts);
-    expect(h.advanceStage).toHaveBeenCalledWith('A9002', 'Interview Round 1', opts);
+    expect(h.advanceStage).toHaveBeenCalledWith('A9002', 'Interview Round 1', NO_BUDGET);
     await waitFor(() => expect(h.toastSuccess).toHaveBeenCalledWith('2 of 2 shortlisted'));
   });
 

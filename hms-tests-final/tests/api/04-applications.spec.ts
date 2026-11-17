@@ -33,12 +33,10 @@ test.describe('Applications — 3-field state model', () => {
   test('stage advances correctly through the full pipeline sequence', async ({ request }) => {
     const { api, appId } = await freshApp(request);
     const stages = [
-      'Resume Review', 'Screening Call', 'Interview Round 1',
-      'Interview Round 2', 'Final Interview', 'Reference Check', 'Offer',
+      'Interview Round 1', 'Interview Round 2', 'Assignment Round', 'Founders Round',
+      'Reference Check', 'Pre-Joining Documents', 'Offer Discussion',
     ];
-    // This test is about generic stage-field mechanics (accepts arbitrary
-    // sequential values — 'Screening Call'/'Final Interview' aren't even in
-    // the real STAGES enum), not the real business flow, so skip_reason
+    // Every value must be a real STAGES value (the route answers 400 "Unknown stage" otherwise). This walks the real order, so skip_reason
     // bypasses the mandatory-feedback and mandatory-reference-check gates
     // (backend/src/routes/applications.ts) that a real pipeline walk
     // through Interview Round 1/2 and Reference Check would otherwise hit.
@@ -47,7 +45,7 @@ test.describe('Applications — 3-field state model', () => {
       expect(res.status(), `Advancing to ${stage}`).toBe(200);
     }
     const body = await (await api.get(`/api/applications/${appId}`)).json();
-    expect(body.application.stage).toBe('Offer');
+    expect(body.application.stage).toBe('Offer Discussion');
   });
 
   test('SLA hours are set correctly on the Applied and Screened stage at creation (no manual Resume Review move needed)', async ({ request }) => {

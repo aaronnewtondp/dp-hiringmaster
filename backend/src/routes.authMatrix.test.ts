@@ -227,15 +227,14 @@ describe('the route table is exactly the documented one', () => {
   });
 
   it('apart from routes and routers the app holds only the documented middleware, in this order — a plain app.use(path, handler) would answer outside the table above', () => {
-    // body parsers / helmet / cors, then the two rate limiters (the second pair of '<anonymous>' at the end are the 404 and the error
-    // handler). A new entry here means someone mounted a handler that listRoutes cannot enumerate: give it authenticate and a row in
+    // body parsers / helmet / cors, then the two rate limiters (the final '<anonymous>' is the error handler; the 404 is Express's own). A new entry here means someone mounted a handler that listRoutes cannot enumerate: give it authenticate and a row in
     // GATES by making it a router, or write it down here on purpose.
     expect(listMiddleware(app)).toEqual([
       { path: '*', name: 'helmetMiddleware' },
       { path: '*', name: 'corsMiddleware' }, { path: '*', name: 'jsonParser' },
       { path: '*', name: '<anonymous>' },   // server.ts: req.body defaults to {} (Express 5 leaves it undefined on a bodyless request)
       { path: '/api/auth', name: '<anonymous>' }, { path: '/api', name: '<anonymous>' },
-      { path: '*', name: '<anonymous>' }, { path: '*', name: '<anonymous>' },
+      { path: '*', name: '<anonymous>' },
     ]);
   });
 

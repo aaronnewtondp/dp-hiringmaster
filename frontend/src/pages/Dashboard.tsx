@@ -38,7 +38,7 @@ const SLA_BREACH_TYPES_INFO = (
       <li><b>Interview/Founders Feedback Due</b> (Hiring Manager) — feedback not submitted within {SLA_STANDARD_HOURS}h of the interview ({SLA_HIGH_SCORE_HOURS}h if fit score ≥{SLA_HIGH_SCORE_FIT}); feedback still outstanding {SLA_ESCALATION_HOURS}h after the interview also raises a Leadership-owned "Feedback Overdue — Leadership Escalation" alert alongside it</li>
       <li><b>Assignment Feedback Due</b> (Hiring Manager) — feedback not submitted within {SLA_ASSIGNMENT_FEEDBACK_HOURS}h of the assignment being sent (untouched by the score-tiering above)</li>
       <li><b>Assignment deadline breached</b> (HR/Admin) — the candidate hasn't submitted within {SLA_ASSIGNMENT_DEADLINE_HOURS}h of the assignment being sent</li>
-      <li><b>Joining risk — no contact</b> (HR/Admin) — a candidate at Offer Accepted whose last logged HR contact is more than {SLA_JOINING_RISK_DAYS} days old, or who has none logged (flagged at the next check, not after {SLA_JOINING_RISK_DAYS} days). There is no screen for logging HR contact yet, so it clears when the candidate joins or leaves Active.</li>
+      <li><b>Joining risk — no contact</b> (HR/Admin) — a candidate at Offer Accepted with no HR contact for more than {SLA_JOINING_RISK_DAYS} days, counted from the last logged contact or, if none, from the day the offer was accepted. There is no screen for logging HR contact yet, so it clears when the candidate joins or leaves Active.</li>
     </ul>
     <p>HR/Admin and Hiring Manager show who owns the overdue step. Top type / Top stage = the breach type and stage with the most open breaches. For a Hiring Manager this card counts only breaches assigned to them; the sections below show every breach on their roles.</p>
   </div>
@@ -62,7 +62,10 @@ export default function Dashboard() {
   // every metric/section below is computed only over roles matching these.
   const [departments, setDepartments] = usePersistedState<string[]>('dashboard.departments', []);
   const [locations,   setLocations]   = usePersistedState<string[]>('dashboard.locations', []);
-  const [modes,        setModes]      = usePersistedState<string[]>('dashboard.modes', []);
+  const [storedModes,  setModes]      = usePersistedState<string[]>('dashboard.modes', []);
+  // A Hiring Manager gets no Recruitment Mode filter (its options come from roles/filter-options, which is not loaded for them),
+  // so a mode remembered from another sign-in in this browser must not act as an invisible filter.
+  const modes = isLockedToOwnRole ? [] : storedModes;
   const [filterPriorities, setFilterPriorities] = usePersistedState<string[]>('dashboard.priorities', []);
   const [roleIds,      setRoleIds]    = usePersistedState<string[]>('dashboard.roleIds', []);
 
@@ -83,7 +86,7 @@ export default function Dashboard() {
   // this persona anyway, so sending it would just be misleading.
   if (roleIds.length && !isLockedToOwnRole) filterParams.role_id = roleIds;
 
-  const { data, isLoading, error } = useQuery<{ data: DashboardData }>({
+  const { data, isLoading, error, refetch, isFetching } = useQuery<{ data: DashboardData }>({
     queryKey: ['dashboard', departments, locations, modes, filterPriorities, roleIds],
     queryFn:  () => dashboardApi.get(filterParams),
     refetchInterval: DASHBOARD_REFRESH_MS,
@@ -92,7 +95,9 @@ export default function Dashboard() {
   if (isLoading) return (
     <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>
   );
-  if (error || !data) return (
+  // Only a load with nothing to show replaces the page. When a background refresh fails, react-query keeps the last good `data`:
+  // the page stays and a notice (below) says the numbers may be out of date.
+  if (!data) return (
     <EmptyState title="Failed to load dashboard" message="Check your connection and try again" />
   );
 
@@ -127,11 +132,24 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {error && (
+        <div role="alert" data-testid="dashboard-refresh-error"
+             className="flex items-center justify-between gap-3 flex-wrap rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <span>Couldn't refresh the dashboard — the numbers below may be out of date.</span>
+          <button type="button" onClick={() => { void refetch(); }} disabled={isFetching}
+                  className="text-xs font-medium underline hover:no-underline disabled:opacity-50">
+            {isFetching ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      )}
+
       {/* Master filters — every section below reflects these */}
       <div className="flex items-center gap-2 flex-wrap">
         <MultiSelectFilter label="Department"       options={DEPARTMENTS}       selected={departments}      onChange={setDepartments} />
         <MultiSelectFilter label="Location"         options={LOCATIONS}         selected={locations}        onChange={setLocations} />
-        <MultiSelectFilter label="Recruitment Mode" options={modeOptions}       selected={modes}             onChange={setModes} />
+        {!isLockedToOwnRole && (
+          <MultiSelectFilter label="Recruitment Mode" options={modeOptions}       selected={modes}             onChange={setModes} />
+        )}
         <MultiSelectFilter label="Priority"         options={PRIORITIES}        selected={filterPriorities} onChange={setFilterPriorities} />
         {isLockedToOwnRole ? (
           <span

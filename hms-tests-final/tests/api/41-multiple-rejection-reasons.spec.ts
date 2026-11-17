@@ -95,6 +95,24 @@ test.describe('Rejection with multiple reasons', () => {
     expect((await api.post(`/api/applications/${appId}/status`, { new_status: 'Withdrawn', withdrawal_reason_cat: 'Accepted another offer' })).status()).toBe(200);
   });
 
+  test('each status needs its OWN kind of reason: the other kind, or a whitespace-only withdrawal reason, is a 400 and writes nothing', async ({ request }) => {
+    const { api, appId } = await freshApp(request);
+    const rej = await api.post(`/api/applications/${appId}/status`, { new_status: 'Rejected', withdrawal_reason_cat: 'Accepted another offer' });
+    expect(rej.status()).toBe(400);
+    expect((await rej.json()).error).toContain('rejection reason is required');
+    for (const body of [{ rejection_reason_cats: ['Skills gap'] }, { rejection_reason_cat: 'Skills gap' }, { withdrawal_reason_cat: '   ' }]) {
+      const res = await api.post(`/api/applications/${appId}/status`, { new_status: 'Withdrawn', ...body });
+      expect(res.status(), JSON.stringify(body)).toBe(400);
+      expect((await res.json()).error).toContain('withdrawal reason is required');
+    }
+    const app = await stored(api, appId);
+    expect(app.status).toBe('Active');
+    expect(app.rejection_reason_cat).toBeNull();
+    expect(app.withdrawal_reason_cat).toBeNull();
+    expect((await api.post(`/api/applications/${appId}/status`, { new_status: 'Withdrawn', withdrawal_reason_cat: '  Accepted another offer ' })).status()).toBe(200);
+    expect((await stored(api, appId)).withdrawal_reason_cat).toBe('Accepted another offer');
+  });
+
   test('a Hiring Manager may still reject from Applied and Screened, with several reasons', async ({ request }) => {
     const hr = await getToken(request, 'hr');
     const { application } = await createCandidateWithApp(request, hr);

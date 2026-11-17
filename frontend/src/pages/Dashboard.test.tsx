@@ -220,6 +220,18 @@ describe('Dashboard — a Hiring Manager is locked to their own role', () => {
     expect(screen.getByRole('button', { name: /^Department/ })).toBeInTheDocument();     // the other filters are still theirs to use
   });
 
+  it('draws no Recruitment Mode filter (its options are not loaded for them), and a remembered mode is not an invisible filter', async () => {
+    sessionStorage.setItem('hms:dashboard.modes', JSON.stringify(['Agency']));
+    mount();
+    await ready();
+    expect(screen.queryByRole('button', { name: /^Recruitment Mode/ })).toBeNull();
+    expect(lastParams()).not.toHaveProperty('recruitment_mode');
+    expect(screen.queryByRole('button', { name: /Clear all/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /^Department/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Location/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Priority/ })).toBeInTheDocument();
+  });
+
   it('never sends a role_id, even when one is left over from an earlier session', async () => {
     sessionStorage.setItem('hms:dashboard.roleIds', JSON.stringify(['R9002']));
     mount();
@@ -292,14 +304,33 @@ describe('Dashboard — loading and failing', () => {
     expect(screen.queryByTestId('funnel-snapshot')).toBeNull();
   });
 
-  it('a refresh that fails after the page has loaded also ends in "Failed to load dashboard": the numbers already shown are not kept', async () => {
+  it('a refresh that fails after the page has loaded keeps the page and its numbers, and says so in a notice with Retry', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    mount();
+    await ready();
+    expect(screen.queryByTestId('dashboard-refresh-error')).toBeNull();
+    dashboardGet.mockImplementation(async () => { throw new Error('Network Error'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60 * 1000); });
+    const notice = await screen.findByTestId('dashboard-refresh-error');
+    expect(notice).toHaveTextContent(/Couldn't refresh the dashboard/);
+    expect(screen.queryByText('Failed to load dashboard')).toBeNull();
+    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument();
+    expect(screen.getByTestId('funnel-snapshot')).toBeInTheDocument();
+  });
+
+  it('Retry re-reads the dashboard and the notice goes away once it works', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     mount();
     await ready();
     dashboardGet.mockImplementation(async () => { throw new Error('Network Error'); });
     await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60 * 1000); });
-    expect(await screen.findByText('Failed to load dashboard')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { level: 1, name: 'Dashboard' })).toBeNull();
+    await screen.findByTestId('dashboard-refresh-error');
+    const calls = dashboardGet.mock.calls.length;
+    dashboardGet.mockImplementation(async () => dashboardData());
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(dashboardGet.mock.calls.length).toBeGreaterThan(calls));
+    await waitFor(() => expect(screen.queryByTestId('dashboard-refresh-error')).toBeNull());
+    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument();
   });
 
   it('re-reads the dashboard every 5 minutes, and not before', async () => {

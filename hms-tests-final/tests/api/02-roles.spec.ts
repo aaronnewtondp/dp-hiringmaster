@@ -83,6 +83,21 @@ test.describe('Roles API', () => {
 
   test.describe('POST /api/roles', () => {
 
+    test('a create body that names a status other than Draft is a 400 and writes nothing: a new role is always a Draft, and the caller is told (it used to get a silent Draft)', async ({ request }) => {
+      const token = await getToken(request, 'hr');
+      const title = `Status Refused Role ${uid()}`;
+      for (const status of ['Approved', 'Bogus']) {
+        const res = await authed(request, token).post('/api/roles', { title, priority: 'P2', status });
+        expect(res.status(), status).toBe(400);
+        expect((await res.json()).error, status).toMatch(/Draft/);
+      }
+      const list = await (await authed(request, token).get('/api/roles')).json();
+      expect((list.roles as Array<{ title: string }>).some(r => r.title === title), 'nothing was created').toBe(false);
+      const ok = await authed(request, token).post('/api/roles', { title, priority: 'P2', status: 'Draft' });
+      expect(ok.status()).toBe(201);
+      expect((await ok.json()).role.status).toBe('Draft');
+    });
+
     test('HR creates a role and gets R-series ID', async ({ request }) => {
       const token = await getToken(request, 'hr');
       const res   = await authed(request, token).post('/api/roles', {

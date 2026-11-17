@@ -1,5 +1,5 @@
 import { query, queryOne, transaction } from '../db/index.js';
-import { Priority } from '../types/index.js';
+import { Priority, SLA_HOURS } from '../types/index.js';
 import { computeAging } from '../utils/aging.js';
 
 const CHECK_NAMES = [
@@ -8,7 +8,7 @@ const CHECK_NAMES = [
   'checkRoleAging', 'checkJoiningRisk',
 ] as const;
 
-// ─── Main SLA check — called by scheduler every 15 minutes ───────────────────
+// ─── Main SLA check — called by the compute-on-read sweep (dashboard.ts) and Vercel Cron ───────────────────
 export async function runSlaCheck(): Promise<void> {
   const start = Date.now();
   console.log(`[SLA] Running check at ${new Date().toISOString()}`);
@@ -88,6 +88,22 @@ export const BREACH_HIGH_SCORE_HOURS = 24;
 
 export function tieredStandardHours(aiFitScore: number | null): number {
   return aiFitScore != null && aiFitScore >= HIGH_SCORE_THRESHOLD ? BREACH_HIGH_SCORE_HOURS : BREACH_STANDARD_HOURS;
+}
+
+// The five stages whose standard window is score-tiered (the list above). `getSlaHours` stores for exactly these the same value the
+// engine breaches at, so applications.sla_hours and the breach rows can never disagree (2026-11-16: the stored value used to stay 48 for a
+// high-fit candidate while the engine breached at 24).
+export const SCORE_TIERED_STAGES = ['Applied and Screened', 'Interview Round 1', 'Interview Round 2', 'Founders Round', 'Assignment Round'] as const;
+
+// The value stored in applications.sla_hours whenever an application enters a stage (or its fit score is written). Pure.
+export function getSlaHours(rawStage: string, fitScore?: number | null): number {
+  const stage = typeof rawStage === 'string' ? rawStage : '';
+  if ((SCORE_TIERED_STAGES as readonly string[]).includes(stage)) return tieredStandardHours(fitScore ?? null);
+  if (stage === 'Reference Check') return SLA_HOURS.REF_INIT;
+  if (stage === 'Offer Released') return SLA_HOURS.OFFER_RELEASE;
+  // Any other 'Interview…' name (a legacy 'Interview – Round 3') is treated as a plain interview round.
+  if (stage.startsWith('Interview')) return SLA_HOURS.INTERVIEW_FEEDBACK;
+  return SLA_HOURS.IDLE;
 }
 
 type Owner = 'HR / Recruiter' | 'Hiring Manager';
@@ -674,25 +690,44 @@ async function checkRoleAging(): Promise<void> {
 }
 
 // ─── 6. Joining risk — no HR contact in 5 days after Offer Accepted ──────────
+// The 5-day "no HR contact" clock starts at the later of the last logged contact and the moment the application reached Offer Accepted
+// (applications.ts stamps last_hr_contact on that move; stage_entry_time is the fallback for a row that has no contact date, e.g. one
+// that reached Offer Accepted before that stamp existed). Exported pure helpers so the wording and the overdue maths are unit-tested.
+export const JOINING_CONTACT_HOURS = SLA_HOURS.JOINING_CONTACT;
+
+export function joiningRiskHoursOverdue(clockStart: Date | string, now: Date = new Date()): number {
+  const elapsed = (now.getTime() - new Date(clockStart).getTime()) / 3600000;
+  return Math.max(0, Math.round((elapsed - JOINING_CONTACT_HOURS) * 10) / 10);
+}
+
+export function joiningRiskDescription(candidateName: string, lastHrContact: Date | string | null): string {
+  if (lastHrContact == null) return `No HR contact logged since the offer was accepted (5+ days) for ${candidateName} (Offer Accepted)`;
+  const d = new Date(lastHrContact);
+  const day = Number.isNaN(d.getTime()) ? '' : ` since ${d.toISOString().slice(0, 10)}`;
+  return `No HR contact logged${day} (5+ days) for ${candidateName} (Offer Accepted)`;
+}
+
 async function checkJoiningRisk(): Promise<void> {
-  const atRisk = await query<{ id: string; candidate_id: string; role_id: string }>(`
+  const atRisk = await query<{ id: string; candidate_id: string; role_id: string; last_hr_contact: string | null; clock_start: string }>(`
     UPDATE applications
     SET joining_risk_auto_flag = true
     WHERE stage = 'Offer Accepted'
       AND status = 'Active'
       AND joining_risk_auto_flag = false
-      AND (last_hr_contact IS NULL OR last_hr_contact < NOW() - INTERVAL '5 days')
-    RETURNING id, candidate_id, role_id
-  `);
+      AND COALESCE(last_hr_contact::timestamptz, stage_entry_time) < NOW() - make_interval(hours => $1::int)
+    RETURNING id, candidate_id, role_id, last_hr_contact::text AS last_hr_contact,
+              COALESCE(last_hr_contact::timestamptz, stage_entry_time) AS clock_start
+  `, [JOINING_CONTACT_HOURS]);
 
   for (const app of atRisk) {
     const cand = await queryOne<{ full_name: string }>('SELECT full_name FROM candidates WHERE id=$1', [app.candidate_id]);
     const role = await queryOne<{ title: string }>('SELECT title FROM roles WHERE id=$1', [app.role_id]);
+    const name = cand?.full_name || '';
     await query(
       `INSERT INTO pending_actions (owner_type, priority_level, action_type, description, application_id, candidate_name, role_title, hours_overdue, role_id)
-       VALUES ('HR / Recruiter','High','Joining risk — no contact',
-         'No HR contact logged in 5+ days for '||$2||' (Offer Accepted)', $1, $2, $3, 120, $4)`,
-      [app.id, cand?.full_name || '', role?.title || '', app.role_id]
+       VALUES ('HR / Recruiter','High','Joining risk — no contact', $5, $1, $2, $3, $6, $4)`,
+      [app.id, name, role?.title || '', app.role_id,
+       joiningRiskDescription(name, app.last_hr_contact), joiningRiskHoursOverdue(app.clock_start)]
     );
   }
 }

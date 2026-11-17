@@ -110,8 +110,8 @@ describe('Dashboard — what the markers say', () => {
     expect(tip).toContain(`feedback not submitted within ${b.slaAssignmentFeedbackHours}h of the assignment being sent (untouched by the score-tiering above)`);
     expect(tip).toContain(`hasn't submitted within ${b.slaAssignmentDeadlineHours}h of the assignment being sent`);
     expect(tip).toContain('Joining risk — no contact');
-    expect(tip).toContain(`last logged HR contact is more than ${b.joiningRiskDays} days old, or who has none logged`);
-    expect(tip).toContain(`flagged at the next check, not after ${b.joiningRiskDays} days`);
+    expect(tip).toContain(`no HR contact for more than ${b.joiningRiskDays} days, counted from the last logged contact or, if none, from the day the offer was accepted`);
+    expect(tip).not.toContain('flagged at the next check');
     expect(tip).not.toContain('(HR)');
     expect(tip).toContain('(HR/Admin)');
   });

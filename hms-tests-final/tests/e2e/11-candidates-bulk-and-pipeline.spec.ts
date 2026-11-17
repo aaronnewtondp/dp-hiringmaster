@@ -15,7 +15,7 @@ import { authed, getToken, uid } from '../helpers/api';
 import { withDb } from '../helpers/db';
 import {
   test, expect, Cleanup, createRole, createApplicant, moveToStage, getApp, dialogWith, toastWith, recordRequests, queryValues,
-  isPost, hrApi, setRoleStatus, Applicant,
+  isPost, hrApi, setRoleStatus, Applicant, createStandardRound,
 } from '../helpers/e2e-candidates';
 import type { Page, APIRequestContext, Locator } from '@playwright/test';
 
@@ -213,7 +213,7 @@ test.describe('Active Candidates: bulk stage', () => {
     await expect(dialogWith(page, 'Update stage').getByRole('combobox').nth(1)).toHaveValue('');   // the reason was reset
   });
 
-  test('TODAY with one over-budget row in a mixed selection, the reason is sent for, and stored on, every selected application', async ({ page, request }) => {
+  test('with one over-budget row in a mixed selection, the reason is sent for, and stored on, that row only', async ({ page, request }) => {
     const b = await makeBatch(request, ['M', 'F', 'M-over']);
     const posts = recordRequests(page, isPost('/stage'));
     await openCandidates(page, 'hr', b, 3);
@@ -226,10 +226,51 @@ test.describe('Active Candidates: bulk stage', () => {
     await expect(toastWith(page, '3 of 3 updated to Interview Round 1')).toBeVisible();
 
     expect(posts.bodies()).toHaveLength(3);
-    for (const body of posts.bodies()) expect(body).toMatchObject({ budget_exception_reason_cat: 'Leadership-approved exception' });
-    for (const p of b.people) {                                                      // TODAY: in-band candidates carry an "over-budget exception" too
-      expect((await getApp(request, p.appId)).budget_exception_reason_cat).toBe('Leadership-approved exception');
+    const withReason = posts.bodies().filter(body => 'budget_exception_reason_cat' in body);
+    expect(withReason).toEqual([{ new_stage: 'Interview Round 1', budget_exception_reason_cat: 'Leadership-approved exception' }]);
+    for (const p of b.people) {
+      const stored = (await getApp(request, p.appId)).budget_exception_reason_cat;
+      if (p === b.people[2]) expect(stored).toBe('Leadership-approved exception');
+      else expect(stored).toBeFalsy();                                               // in-band candidates carry no "over-budget exception"
     }
+  });
+
+  test('the server ignores a reason sent for a row that is not over budget (it does not trust the client to filter)', async ({ request }) => {
+    const b = await makeBatch(request, ['M']);
+    const res = await (await hrApi(request)).post(`/api/applications/${b.people[0].appId}/stage`, { new_stage: 'Interview Round 1', budget_exception_reason_cat: 'Leadership-approved exception' });
+    expect(res.status()).toBe(200);
+    expect((await getApp(request, b.people[0].appId)).budget_exception_reason_cat).toBeFalsy();
+  });
+
+  test('a row refused for pending feedback is listed; HR retries just that row with a written reason: skip_reason is sent only then and logged', async ({ page, request }) => {
+    const b = await makeBatch(request, ['M', 'F', 'U']);
+    const pending = b.people[1];
+    await createStandardRound(request, pending.appId, { round_name: `Bulk Pending ${b.marker}` });
+    const posts = recordRequests(page, isPost('/stage'));
+    await openCandidates(page, 'hr', b, 3);
+    await headerCheckbox(page).check();
+    await page.getByRole('button', { name: 'Change Stage' }).click();
+    const dialog = dialogWith(page, 'Update stage');
+    await dialog.getByRole('combobox').selectOption('Interview Round 2');
+    await dialog.getByRole('button', { name: 'Update', exact: true }).click();
+
+    // The others moved; the dialog stays open and lists the refused row with the server's reason and a reason box.
+    await expect(toastWith(page, '2 of 3 updated to Interview Round 2')).toBeVisible();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId('bulk-refused-list')).toContainText(pending.name);
+    await expect(dialog.getByTestId('bulk-refused-list')).toContainText('Feedback is still pending for');
+    expect((await getApp(request, pending.appId)).stage).toBe('Applied and Screened');
+    for (const body of posts.bodies()) expect(body).toEqual({ new_stage: 'Interview Round 2' });   // never a skip_reason on the first attempt
+
+    await dialog.getByLabel('Reason to proceed anyway').fill('Panel feedback was given verbally');
+    await dialog.getByRole('button', { name: 'Retry 1', exact: true }).click();
+    await expect(toastWith(page, '1 of 1 updated to Interview Round 2')).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    expect(posts.bodies().length).toBe(4);
+    expect(posts.bodies()[3]).toEqual({ new_stage: 'Interview Round 2', skip_reason: 'Panel feedback was given verbally' });
+    expect((await getApp(request, pending.appId)).stage).toBe('Interview Round 2');
+    const detail = await (await (await hrApi(request)).get(`/api/applications/${pending.appId}`)).json() as { activity: unknown };
+    expect(JSON.stringify(detail.activity)).toContain('Stage skipped to Interview Round 2. Reason: Panel feedback was given verbally');
   });
 
   test('a row the server refuses is reported in the count and the others still move', async ({ page, request }) => {
@@ -307,7 +348,7 @@ test.describe('Active Candidates: bulk status', () => {
     await expect(rowOf(page, b.search)).toHaveCount(3);                               // Hold for Future is not archived: all three rows stay
   });
 
-  test('TODAY bulk withdraw takes one reason from a dropdown and stores it in the rejection column, like the single flow', async ({ page, request }) => {
+  test('bulk withdraw takes one reason from a dropdown and stores it in the withdrawal column, like the single flow', async ({ page, request }) => {
     const b = await makeBatch(request, ['M', 'F']);
     const posts = recordRequests(page, isPost('/status'));
     await openCandidates(page, 'hr', b, 2);
@@ -322,13 +363,13 @@ test.describe('Active Candidates: bulk status', () => {
     await expect(toastWith(page, '2 of 2 updated to Withdrawn')).toBeVisible();
 
     for (const body of posts.bodies()) {
-      expect(body).toEqual({ new_status: 'Withdrawn', rejection_reason_cats: ['Accepted another offer'], rejection_reason_cat: 'Accepted another offer' });
+      expect(body).toEqual({ new_status: 'Withdrawn', withdrawal_reason_cat: 'Accepted another offer' });
     }
     for (const p of b.people) {
       const app = await getApp(request, p.appId);
       expect(app.status).toBe('Withdrawn');
-      expect(app.rejection_reason_cat).toBe('Accepted another offer');
-      expect(app.withdrawal_reason_cat).toBeNull();                                  // TODAY: see the single-withdraw test in e2e/10
+      expect(app.withdrawal_reason_cat).toBe('Accepted another offer');
+      expect(app.rejection_reason_cat).toBeNull();
     }
   });
 });

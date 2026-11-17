@@ -79,6 +79,30 @@ jobs:
       - name: Load the compiled server and the lazily-loaded packages with require()
         run: node ../.github/ci/boot-smoke.cjs
 
+  trace-boot:
+    name: Backend boots from its traced Vercel bundle (nft)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.11.0   # Vercel's "22.x" is older than 22.12, as in backend-compat
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            tools/ci-lint/package-lock.json
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix tools/ci-lint
+      - name: Compile (dist/ is git-ignored)
+        run: npx tsc --outDir dist
+        working-directory: backend
+      - name: Trace the server like Vercel, copy only that file set outside the repo, boot it there, render both JD PDFs, read one back
+        run: node ../.github/ci/trace-boot-smoke.mjs
+        working-directory: backend
+
   frontend:
     name: Frontend (type-check, unit tests, production build)
     runs-on: ubuntu-latest
@@ -150,9 +174,8 @@ jobs:
         run: |
           npm ci --prefix backend
           npm ci --prefix tools/ci-lint
-      # Findings do not fail this job: 2 are known, both in backend/src/jobs/scheduler.ts (dead code, try/catch bodies).
-      # ESLint itself failing (exit 2, or no report) DOES fail it, so a broken config cannot pass as "no findings".
-      # To make findings blocking, add --fail to the summarize step once those two are resolved.
+      # ANY finding fails this job (the run is at zero since backend/src/jobs/scheduler.ts was deleted, 2026-11-16).
+      # ESLint itself failing (exit 2, or no report) also fails it, so a broken config cannot pass as "no findings".
       - name: ESLint (no-floating-promises, await-thenable, no-misused-promises, no setImmediate(async))
         run: |
           report="$RUNNER_TEMP/eslint.json"
@@ -162,7 +185,7 @@ jobs:
             echo "::error::ESLint itself failed (exit $rc); this is a tooling failure, not a finding"
             exit 1
           fi
-          node tools/ci-lint/summarize-eslint.mjs "$report"
+          node tools/ci-lint/summarize-eslint.mjs "$report" --fail
 
   database:
     name: Database (schema, seed, id-sequence guards)
@@ -229,7 +252,7 @@ jobs:
   ci-ok:
     name: CI passed
     if: always()
-    needs: [backend, backend-compat, frontend, tests-typecheck, lint-async, database, workflow-lint]
+    needs: [backend, backend-compat, trace-boot, frontend, tests-typecheck, lint-async, database, workflow-lint]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

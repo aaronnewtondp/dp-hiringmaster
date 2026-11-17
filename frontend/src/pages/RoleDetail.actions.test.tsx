@@ -233,17 +233,21 @@ describe('RoleDetail — compensation is HR-tier only', () => {
     expect(document.body.textContent).not.toContain('10–12');
   });
 
-  it('a Hiring Manager editing the Requirements is not offered the CTC Band and never sends one', async () => {
+  it('a Hiring Manager has no edit pencil on any role section or the approval note (PATCH /roles/:id is HR-tier only), and no CTC Band shown', async () => {
     auth.persona = 'hiring_manager';
     mount();
     await pageReady();
-    fireEvent.click(screen.getByTitle('Edit Requirements'));
+    expect(screen.queryAllByTitle(/^Edit /)).toHaveLength(0);
     expect(screen.queryByText('CTC Band')).toBeNull();
-    expect(screen.queryByDisplayValue('10–12 LPA')).toBeNull();
-    fireEvent.change(screen.getByDisplayValue('3-5 years'), { target: { value: '4-6 years' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(rolesUpdate).toHaveBeenCalledTimes(1));
-    expect(rolesUpdate).toHaveBeenCalledWith(ID, { yoe_required: '4-6 years' });
+    expect(within(section('Requirements')).getByText('3-5 years')).toBeInTheDocument();   // the content itself is still readable
+    expect(rolesUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each(HR_TIER)('%s keeps every edit pencil on the role page', async (persona) => {
+    auth.persona = persona;
+    mount();
+    await pageReady();
+    for (const t of ['Basic Info', 'Requirements', 'Description', 'Dates', 'Links & Assets', 'Approval Note']) expect(screen.getByTitle(`Edit ${t}`)).toBeInTheDocument();
   });
 
   it('HR-tier editing the CTC Band sends it, and only it', async () => {
@@ -276,6 +280,35 @@ describe('RoleDetail — approving a role', () => {
     expect(plan).toHaveBeenCalledWith(ID);
     // the re-read role is Approved, so the button is gone
     await waitFor(() => expect(button('Approve Role')).toBeNull());
+  });
+
+  describe('the JD generation that the Approve Role button carries (it used to be ignored: a failed generation was invisible there)', () => {
+    const approve = async (response: unknown) => {
+      rolesUpdate.mockResolvedValue({ data: response });
+      mount();
+      fireEvent.click(await screen.findByRole('button', { name: 'Approve Role' }));
+      await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledWith('Role approved'));
+    };
+
+    it('jdGeneration.generated: a second success message says both JDs were generated', async () => {
+      await approve({ role: serverRole, jdGeneration: { generated: true } });
+      expect(vi.mocked(toast.success).mock.calls.map(c => c[0])).toEqual(['Role approved', 'Long-form and social JDs generated']);
+      expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+    });
+
+    it('a generation that failed: the role IS approved, and an error says why, in the same words as the Change status window', async () => {
+      await approve({ role: serverRole, jdGeneration: { generated: false, error: 'Drive quota exceeded' } });
+      expect(vi.mocked(toast.success).mock.calls.map(c => c[0])).toEqual(['Role approved']);
+      expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith('JD generation failed: Drive quota exceeded');
+      await waitFor(() => expect(rolesGet.mock.calls.length).toBeGreaterThanOrEqual(2));      // the role is still re-read, so the page shows the approval
+    });
+
+    it('no jdGeneration (a role whose JD was written by hand, or one that already has links): no message about JDs, good or bad', async () => {
+      await approve({ role: serverRole });
+      expect(vi.mocked(toast.success).mock.calls.map(c => c[0])).toEqual(['Role approved']);
+      expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+    });
   });
 
   it('while it is being saved the button says "Approving…", is disabled and cannot send a second request', async () => {
@@ -340,6 +373,19 @@ describe('RoleDetail — changing the status', () => {
     await waitFor(() => expect(rolesGet.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(plan.mock.calls.length).toBeGreaterThanOrEqual(2));
     expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+  });
+
+  it('re-reads the activity timeline after a status change, so the new "Status Changed" entry shows without a reload', async () => {
+    activity.mockResolvedValueOnce({ data: { activity: [] } });
+    activity.mockResolvedValue({ data: { activity: [{ id: 'L1', event_type: 'Status Changed', event_detail: 'Status → On Hold', performed_by_name: 'Test Person', created_at: '2026-11-17T10:00:00Z' }] } });
+    const select = await openModal();
+    expect(await screen.findByText('No activity logged yet')).toBeInTheDocument();
+    choose(select, 'On Hold');
+    update();
+    await waitFor(() => expect(rolesUpdate).toHaveBeenCalledWith(ID, { status: 'On Hold' }));
+    await waitFor(() => expect(activity.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(await screen.findByText('Status Changed')).toBeInTheDocument();
+    expect(screen.queryByText('No activity logged yet')).toBeNull();
   });
 
   it('while it is being saved the button says "Saving…" and is disabled', async () => {

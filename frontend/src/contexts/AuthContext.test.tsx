@@ -1,4 +1,4 @@
-import { Component, useEffect, type ReactNode } from 'react';
+import { useEffect } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
@@ -80,6 +80,8 @@ describe('AuthContext — flag derivation (is / canHR / canLead / isSuperAdmin)'
     // 'interviewer' was a real persona until it was merged into hiring_manager; a token issued before that must not become HR-tier by accident.
     seed(userOf(persona));
     mount();
+    expect(state()).toBe('out');                                      // not adopted at all, and the stored session is dropped
+    expect(localStorage.getItem('hms_user')).toBeNull();
     expect({ canHR: latest.canHR, canLead: latest.canLead, isSuperAdmin: latest.isSuperAdmin }).toEqual({ canHR: false, canLead: false, isSuperAdmin: false });
     for (const p of PERSONAS) expect(latest.is(p)).toBe(false);
   });
@@ -120,11 +122,12 @@ describe('AuthContext — restoring the session from localStorage', () => {
     expect(latest).toMatchObject({ user: null, token: null, loading: false });
   });
 
-  it('a token without a user stays signed out (and the stray token is not adopted)', () => {
+  it('a token without a user stays signed out (and the stray token is not adopted, and is cleared)', () => {
     seed(undefined, 'tok-only');
     mount();
     expect(state()).toBe('out');
     expect(latest.token).toBeNull();
+    expect(localStorage.getItem('hms_token')).toBeNull();
   });
 
   it('a user without a token stays signed out', () => {
@@ -151,72 +154,71 @@ describe('AuthContext — restoring the session from localStorage', () => {
   });
 });
 
-// ═══ A corrupt stored user ═══════════════════════════════════════════════════════════════════════════
-// TWO KNOWN GAPS in how the stored `hms_user` is read (reported, not fixed here). AuthContext.tsx parses it with a bare JSON.parse inside the mount effect:
-//  1. Anything that is not valid JSON throws out of the effect and takes the whole tree down (App renders AuthProvider at the root: a white screen that
-//     survives reloads until the user clears site data).
-//  2. Anything that IS valid JSON is adopted as the user, whatever it is. A string, a number, an array or `true` is truthy, so App's `if (!user)` passes: the
-//     person is treated as signed in, with no persona and so no rights (the signed-in layout opens and every restricted control is hidden).
-// Each gap has a test that pins what happens today, so a change in behaviour cannot go unnoticed, and a WANTED test written as `it.fails`, which turns red the
-// day the gap is closed — at which point delete the TODAY test and change `it.fails` to `it`.
-class Boundary extends Component<{ children: ReactNode }, { error: Error | null }> {
-  state = { error: null as Error | null };
-  static getDerivedStateFromError(error: Error) { return { error }; }
-  render() { return this.state.error ? <div data-testid="crashed">{this.state.error.name}</div> : this.props.children; }
-}
-const mountInBoundary = () => {
-  vi.spyOn(console, 'error').mockImplementation(() => {});          // React logs the caught error; the test asserts on it instead
-  return render(<Boundary><AuthProvider><Probe /></AuthProvider></Boundary>);
-};
+// ═══ A corrupt or malformed stored user ══════════════════════════════════════════════════════════════
+// The stored hms_user is trusted only if it is an object with a known persona and string id / email / name. Anything else (corrupt JSON, valid JSON of the
+// wrong shape, a user with an unknown persona) clears both session keys and starts signed out: no throw, no white screen that survives reloads.
 const NO_RIGHTS = { canHR: false, canLead: false, isSuperAdmin: false };
+const mountQuiet = () => {
+  const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const r = mount();
+  return { r, err };
+};
 
 describe('AuthContext — a corrupt hms_user in localStorage', () => {
-  it.each(['{not json', 'undefined', '<html>', '{"id":'])('TODAY: %j throws a SyntaxError out of the provider (the error boundary, not the page, catches it)', corrupt => {
+  it.each(['{not json', 'undefined', '<html>', '{"id":'])('%j starts signed out, without throwing, and clears the stored session', corrupt => {
     localStorage.setItem('hms_token', 'tok'); localStorage.setItem('hms_user', corrupt);
-    mountInBoundary();
-    expect(screen.getByTestId('crashed')).toHaveTextContent('SyntaxError');
-    expect(screen.queryByTestId('probe')).toBeNull();                // the provider's children never rendered
+    const { err } = mountQuiet();
+    expect(state()).toBe('out');
+    expect(latest).toMatchObject({ user: null, token: null, loading: false, ...NO_RIGHTS });
+    expect(localStorage.getItem('hms_token')).toBeNull();
+    expect(localStorage.getItem('hms_user')).toBeNull();
+    expect(err).not.toHaveBeenCalled();
   });
 
-  it('an empty stored user is "no stored user" (it is falsy, so JSON.parse never sees it): signed out, not a crash', () => {
-    localStorage.setItem('hms_token', 'tok'); localStorage.setItem('hms_user', '');
-    mountInBoundary();
-    expect(screen.queryByTestId('crashed')).toBeNull();
+  it('the cleared session does not come back on the next load (the crash used to survive reloads)', () => {
+    localStorage.setItem('hms_token', 'tok'); localStorage.setItem('hms_user', '{not json');
+    mountQuiet().r.unmount();
+    mountQuiet();
     expect(state()).toBe('out');
   });
 
-  it.fails('WANTED: a corrupt hms_user leaves the user signed out instead of crashing the app (fails today — see the note above)', () => {
-    localStorage.setItem('hms_token', 'tok'); localStorage.setItem('hms_user', '{not json');
-    mountInBoundary();
-    expect(screen.queryByTestId('crashed')).toBeNull();
+  it('an empty stored user is "no stored user": signed out', () => {
+    localStorage.setItem('hms_token', 'tok'); localStorage.setItem('hms_user', '');
+    mountQuiet();
     expect(state()).toBe('out');
   });
 });
 
 describe('AuthContext — a stored hms_user that is valid JSON but not a user', () => {
-  it.each(['null', '0', 'false', '""'])('%s parses to something falsy: nobody is signed in', raw => {
+  it.each(['null', '0', 'false', '""', '"just a string"', '42', '[]', '[{"persona":"hr_recruiter"}]', 'true', '{}'])('%s: signed out, session cleared', raw => {
     seed(raw);
-    mountInBoundary();
-    expect(screen.queryByTestId('crashed')).toBeNull();
-    expect(state()).toBe('out');
-    expect(latest).toMatchObject(NO_RIGHTS);
-  });
-
-  it.each(['"just a string"', '42', '[]', 'true'])('TODAY: %s is adopted as the user — treated as signed in, with no persona and so no rights', raw => {
-    seed(raw);
-    mountInBoundary();
-    expect(screen.queryByTestId('crashed')).toBeNull();
-    expect(state()).toBe('in:undefined');                            // signed in (App's `!user` check passes) but with no persona at all
-    expect(latest.user).toEqual(JSON.parse(raw));                    // taken as it came, not checked to be a user
-    expect(latest).toMatchObject(NO_RIGHTS);
-    for (const p of PERSONAS) expect(latest.is(p)).toBe(false);
-  });
-
-  it.fails('WANTED: a stored value that is not a user object leaves the user signed out (fails today — see the note above)', () => {
-    seed('"just a string"');
-    mountInBoundary();
+    mountQuiet();
     expect(state()).toBe('out');
     expect(latest.user).toBeNull();
+    expect(latest).toMatchObject(NO_RIGHTS);
+    expect(localStorage.getItem('hms_token')).toBeNull();
+    expect(localStorage.getItem('hms_user')).toBeNull();
+  });
+
+  it.each([
+    ['no id',       { name: 'N', email: 'e@example.test', persona: 'hr_recruiter' }],
+    ['no email',    { id: 'u', name: 'N', persona: 'hr_recruiter' }],
+    ['no name',     { id: 'u', email: 'e@example.test', persona: 'hr_recruiter' }],
+    ['numeric id',  { id: 7, name: 'N', email: 'e@example.test', persona: 'hr_recruiter' }],
+    ['no persona',  { id: 'u', name: 'N', email: 'e@example.test' }],
+    ['persona that is not a string', { id: 'u', name: 'N', email: 'e@example.test', persona: ['hr_recruiter'] }],
+  ])('an object with %s is refused', (_n, obj) => {
+    seed(obj);
+    mountQuiet();
+    expect(state()).toBe('out');
+    expect(localStorage.getItem('hms_user')).toBeNull();
+  });
+
+  it('a well-formed user with extra fields is kept as it came', () => {
+    seed(userOf('hiring_manager', { department: 'Engineering' }));
+    mountQuiet();
+    expect(state()).toBe('in:hiring_manager');
+    expect(latest.user).toMatchObject({ department: 'Engineering' });
   });
 });
 

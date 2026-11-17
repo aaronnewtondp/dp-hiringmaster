@@ -112,11 +112,11 @@ test.describe('/api/comp-benchmarks', () => {
     expect(all.benchmarks.length).toBeGreaterThan(1);
   });
 
-  test('TODAY: a non-numeric band is a 500 (the DECIMAL cast) and the row is unchanged; an inverted band (min above max) is accepted', async ({ request }) => {
+  test('a non-numeric band is a 400 (the DECIMAL cast, mapped by the error handler) and the row is unchanged; TODAY: an inverted band (min above max) is accepted', async ({ request }) => {
     const bench = await ownBenchmark('invalid');
     const api = authed(request, await getToken(request, 'hr'));
     const bad = await api.patch(`/api/comp-benchmarks/${bench.id}`, { internal_band_min: 'abc' });
-    expect(bad.status()).toBe(500);
+    expect(bad.status()).toBe(400);
     expect((await stored(bench.id)).internal_band_min).toBe(bench.internal_band_min);
 
     const inverted = await api.patch(`/api/comp-benchmarks/${bench.id}`, { internal_band_min: 90, internal_band_max: 10 });
@@ -187,10 +187,10 @@ test.describe('/api/eval-questions', () => {
     expect(await ids('&experience_level=Senior')).toEqual([specific.id, generic.id].sort());
   });
 
-  test('TODAY: a question_type outside the allowed list is a 500 (CHECK constraint), not a 400, and nothing is stored', async ({ request }) => {
+  test('a question_type outside the allowed list is a 400 (CHECK constraint, mapped by the error handler) and nothing is stored', async ({ request }) => {
     const area = `Gate Area ${tag} invalid`;
     const res = await authed(request, await getToken(request, 'hr')).post('/api/eval-questions', { evaluation_area: area, question_text: 'q?', question_type: 'Quiz' });
-    expect(res.status()).toBe(500);
+    expect(res.status()).toBe(400);
     const count = await withDb(async c => (await c.query('SELECT count(*)::int AS n FROM eval_questions WHERE evaluation_area = $1', [area])).rows[0].n);
     expect(count).toBe(0);
   });
@@ -303,7 +303,7 @@ test.describe('/api/agencies', () => {
     expect(created).toBe(0);
   });
 
-  test('TODAY: an unknown agency\'s edit-log is 200 { logs: [] } (no 404), and an invalid contract_status is a 500 on POST and on PATCH (CHECK constraint) that leaves the row unchanged', async ({ request }) => {
+  test('an invalid contract_status is a 400 on POST and on PATCH (CHECK constraint) that leaves the row unchanged; TODAY: an unknown agency\'s edit-log is 200 { logs: [] } (no 404)', async ({ request }) => {
     const api = authed(request, await getToken(request, 'hr'));
     const unknown = await api.get(`/api/agencies/AGN-NOPE-${uid()}/edit-log`);
     expect(unknown.status()).toBe(200);
@@ -311,13 +311,13 @@ test.describe('/api/agencies', () => {
 
     const agency = await addAgency(api, 'invalid');
     const patch = await api.patch(`/api/agencies/${agency.id}`, { contract_status: 'Retired', notes: 'should roll back' });
-    expect(patch.status()).toBe(500);
+    expect(patch.status()).toBe(400);
     const row = await withDb(async c => (await c.query('SELECT contract_status, notes FROM agencies WHERE id = $1', [agency.id])).rows[0]);
     expect(row).toEqual({ contract_status: 'Active', notes: null });
     expect((await (await api.get(`/api/agencies/${agency.id}/edit-log`)).json()).logs).toHaveLength(0);
 
     const post = await api.post('/api/agencies', { name: `Gate Agency ${tag} invalid-create`, contract_status: 'Retired' });
-    expect(post.status()).toBe(500);
+    expect(post.status()).toBe(400);
   });
 });
 
@@ -409,12 +409,12 @@ test.describe('/api/assignment-repo', () => {
     expect((await unknown.json()).error).toBe('Not found');
   });
 
-  test('TODAY: a difficulty_level or experience_level outside the allowed list is a 500 (CHECK constraint), not a 400', async ({ request }) => {
+  test('a difficulty_level or experience_level outside the allowed list is a 400 (CHECK constraint, mapped by the error handler)', async ({ request }) => {
     const api = authed(request, await getToken(request, 'hr'));
     const post = await api.post('/api/assignment-repo', { name: `Gate Assignment ${tag} invalid`, problem_statement: 'x', difficulty_level: 'Extreme' });
-    expect(post.status()).toBe(500);
+    expect(post.status()).toBe(400);
     const a = await addAssignment(api, 'invalid-patch');
     const patch = await api.patch(`/api/assignment-repo/${a.id}`, { experience_level: 'Principal' });
-    expect(patch.status()).toBe(500);
+    expect(patch.status()).toBe(400);
   });
 });
