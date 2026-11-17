@@ -54,7 +54,7 @@ function namedCheck(name: string): string[] {
 }
 /** The values of the inline `<column> ... CHECK (<column> IN (...))` of a table's CREATE TABLE. */
 function inlineCheck(table: string, column: string): string[] {
-  const start = SCHEMA.indexOf(`CREATE TABLE ${table} (`);
+  const start = SCHEMA.indexOf(`CREATE TABLE IF NOT EXISTS ${table} (`);
   const m = new RegExp(`\\n\\s*${column}\\s+TEXT[^\\n]*CHECK \\(${column} IN \\(([\\s\\S]*?)\\)\\)`).exec(SCHEMA.slice(start));
   return nonEmpty(`${table}.${column} CHECK`, start >= 0 && m ? quoted(m[1]) : []);
 }

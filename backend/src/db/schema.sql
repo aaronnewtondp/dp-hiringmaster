@@ -18,7 +18,7 @@ CREATE SEQUENCE IF NOT EXISTS seq_eval_question  START 1 INCREMENT 1;
 CREATE SEQUENCE IF NOT EXISTS seq_comp_benchmark START 1 INCREMENT 1;
 
 -- ─── Users ───────────────────────────────────────────────────────────────────
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name           TEXT NOT NULL,
   email          TEXT UNIQUE NOT NULL,
@@ -34,7 +34,7 @@ CREATE TABLE users (
 );
 
 -- ─── Roles ───────────────────────────────────────────────────────────────────
-CREATE TABLE roles (
+CREATE TABLE IF NOT EXISTS roles (
   id                       TEXT PRIMARY KEY DEFAULT 'R' || LPAD(nextval('seq_role')::TEXT, 3, '0'),
   title                    TEXT NOT NULL,
   department               TEXT,
@@ -80,11 +80,11 @@ CREATE TABLE roles (
   updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_roles_status   ON roles(status);
-CREATE INDEX idx_roles_priority ON roles(priority);
+CREATE INDEX IF NOT EXISTS idx_roles_status   ON roles(status);
+CREATE INDEX IF NOT EXISTS idx_roles_priority ON roles(priority);
 
 -- ─── Role Edit Log ────────────────────────────────────────────────────────────
-CREATE TABLE role_edit_log (
+CREATE TABLE IF NOT EXISTS role_edit_log (
   id           BIGSERIAL PRIMARY KEY,
   role_id      TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
   field_name   TEXT NOT NULL,
@@ -95,10 +95,10 @@ CREATE TABLE role_edit_log (
   note         TEXT
 );
 
-CREATE INDEX idx_role_edit_log_role ON role_edit_log(role_id);
+CREATE INDEX IF NOT EXISTS idx_role_edit_log_role ON role_edit_log(role_id);
 
 -- ─── Candidates ───────────────────────────────────────────────────────────────
-CREATE TABLE candidates (
+CREATE TABLE IF NOT EXISTS candidates (
   id                   TEXT PRIMARY KEY DEFAULT 'C' || LPAD(nextval('seq_candidate')::TEXT, 4, '0'),
   full_name            TEXT NOT NULL,
   email                TEXT,
@@ -118,14 +118,14 @@ CREATE TABLE candidates (
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX idx_candidates_email      ON candidates(email) WHERE email IS NOT NULL;
-CREATE INDEX        idx_candidates_name       ON candidates(full_name);
-CREATE INDEX        idx_candidates_skills     ON candidates USING GIN(parsed_skills);
-CREATE INDEX        idx_candidates_industries ON candidates USING GIN(parsed_industries);
-CREATE INDEX        idx_candidates_tags       ON candidates USING GIN(hr_tags);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_candidates_email      ON candidates(email) WHERE email IS NOT NULL;
+CREATE INDEX IF NOT EXISTS        idx_candidates_name       ON candidates(full_name);
+CREATE INDEX IF NOT EXISTS        idx_candidates_skills     ON candidates USING GIN(parsed_skills);
+CREATE INDEX IF NOT EXISTS        idx_candidates_industries ON candidates USING GIN(parsed_industries);
+CREATE INDEX IF NOT EXISTS        idx_candidates_tags       ON candidates USING GIN(hr_tags);
 
 -- ─── Agencies ─────────────────────────────────────────────────────────────────
-CREATE TABLE agencies (
+CREATE TABLE IF NOT EXISTS agencies (
   id                          TEXT PRIMARY KEY DEFAULT 'AGN' || LPAD(nextval('seq_agency')::TEXT, 3, '0'),
   name                        TEXT NOT NULL,
   contact_name                TEXT,
@@ -150,7 +150,7 @@ CREATE TABLE agencies (
 -- Same shape as role_edit_log, added for Phase 3 inline editing (Roles,
 -- Candidates, Agencies) so all three entities get a consistent audit trail.
 -- Must come after both candidates and agencies (FK references).
-CREATE TABLE candidate_edit_log (
+CREATE TABLE IF NOT EXISTS candidate_edit_log (
   id           BIGSERIAL PRIMARY KEY,
   candidate_id TEXT NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
   field_name   TEXT NOT NULL,
@@ -161,9 +161,9 @@ CREATE TABLE candidate_edit_log (
   note         TEXT
 );
 
-CREATE INDEX idx_candidate_edit_log_candidate ON candidate_edit_log(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_candidate_edit_log_candidate ON candidate_edit_log(candidate_id);
 
-CREATE TABLE agency_edit_log (
+CREATE TABLE IF NOT EXISTS agency_edit_log (
   id         BIGSERIAL PRIMARY KEY,
   agency_id  TEXT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
   field_name TEXT NOT NULL,
@@ -174,10 +174,10 @@ CREATE TABLE agency_edit_log (
   note       TEXT
 );
 
-CREATE INDEX idx_agency_edit_log_agency ON agency_edit_log(agency_id);
+CREATE INDEX IF NOT EXISTS idx_agency_edit_log_agency ON agency_edit_log(agency_id);
 
 -- ─── Assignment Repository (must come BEFORE interview_rounds) ────────────────
-CREATE TABLE assignment_repo (
+CREATE TABLE IF NOT EXISTS assignment_repo (
   id                TEXT PRIMARY KEY DEFAULT 'ASN' || LPAD(nextval('seq_assignment')::TEXT, 3, '0'),
   name              TEXT NOT NULL,
   role_category     TEXT,
@@ -194,7 +194,7 @@ CREATE TABLE assignment_repo (
 );
 
 -- ─── Applications ─────────────────────────────────────────────────────────────
-CREATE TABLE applications (
+CREATE TABLE IF NOT EXISTS applications (
   id                            TEXT PRIMARY KEY DEFAULT 'A' || LPAD(nextval('seq_application')::TEXT, 4, '0'),
   candidate_id                  TEXT NOT NULL REFERENCES candidates(id),
   role_id                       TEXT NOT NULL REFERENCES roles(id),
@@ -266,15 +266,15 @@ CREATE TABLE applications (
   UNIQUE(candidate_id, role_id)
 );
 
-CREATE INDEX idx_applications_candidate ON applications(candidate_id);
-CREATE INDEX idx_applications_role      ON applications(role_id);
-CREATE INDEX idx_applications_stage     ON applications(stage);
-CREATE INDEX idx_applications_status    ON applications(status);
-CREATE INDEX idx_applications_sla       ON applications(sla_breach) WHERE sla_breach = true;
-CREATE INDEX idx_applications_founder   ON applications(founder_review_flag) WHERE founder_review_flag = true;
+CREATE INDEX IF NOT EXISTS idx_applications_candidate ON applications(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_applications_role      ON applications(role_id);
+CREATE INDEX IF NOT EXISTS idx_applications_stage     ON applications(stage);
+CREATE INDEX IF NOT EXISTS idx_applications_status    ON applications(status);
+CREATE INDEX IF NOT EXISTS idx_applications_sla       ON applications(sla_breach) WHERE sla_breach = true;
+CREATE INDEX IF NOT EXISTS idx_applications_founder   ON applications(founder_review_flag) WHERE founder_review_flag = true;
 
 -- ─── Interview Rounds (after assignment_repo so FK works) ─────────────────────
-CREATE TABLE interview_rounds (
+CREATE TABLE IF NOT EXISTS interview_rounds (
   id                            TEXT PRIMARY KEY DEFAULT 'IR' || LPAD(nextval('seq_interview')::TEXT, 4, '0'),
   application_id                TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
   round_name                    TEXT NOT NULL,
@@ -315,11 +315,11 @@ CREATE TABLE interview_rounds (
   updated_at                    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_rounds_application ON interview_rounds(application_id);
-CREATE INDEX idx_rounds_status      ON interview_rounds(feedback_status);
+CREATE INDEX IF NOT EXISTS idx_rounds_application ON interview_rounds(application_id);
+CREATE INDEX IF NOT EXISTS idx_rounds_status      ON interview_rounds(feedback_status);
 
 -- ─── Reference Checks ─────────────────────────────────────────────────────────
-CREATE TABLE ref_checks (
+CREATE TABLE IF NOT EXISTS ref_checks (
   id                  TEXT PRIMARY KEY DEFAULT 'RC' || LPAD(nextval('seq_refcheck')::TEXT, 3, '0'),
   application_id      TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
   reference_contacts  TEXT,
@@ -333,7 +333,7 @@ CREATE TABLE ref_checks (
 );
 
 -- ─── Eval Questions ───────────────────────────────────────────────────────────
-CREATE TABLE eval_questions (
+CREATE TABLE IF NOT EXISTS eval_questions (
   id                  TEXT PRIMARY KEY DEFAULT 'Q' || LPAD(nextval('seq_eval_question')::TEXT, 3, '0'),
   evaluation_area  TEXT NOT NULL,
   role_category    TEXT NOT NULL DEFAULT 'All',
@@ -348,7 +348,7 @@ CREATE TABLE eval_questions (
 );
 
 -- ─── Comp Benchmarks ──────────────────────────────────────────────────────────
-CREATE TABLE comp_benchmarks (
+CREATE TABLE IF NOT EXISTS comp_benchmarks (
   id                    TEXT PRIMARY KEY DEFAULT 'BEN' || LPAD(nextval('seq_comp_benchmark')::TEXT, 3, '0'),
   role_category       TEXT NOT NULL,
   experience_range    TEXT NOT NULL,
@@ -363,7 +363,7 @@ CREATE TABLE comp_benchmarks (
 );
 
 -- ─── Activity Log ─────────────────────────────────────────────────────────────
-CREATE TABLE activity_log (
+CREATE TABLE IF NOT EXISTS activity_log (
   id                BIGSERIAL PRIMARY KEY,
   application_id    TEXT REFERENCES applications(id) ON DELETE SET NULL,
   candidate_id      TEXT REFERENCES candidates(id) ON DELETE SET NULL,
@@ -377,12 +377,12 @@ CREATE TABLE activity_log (
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_activity_log_application ON activity_log(application_id);
-CREATE INDEX idx_activity_log_candidate   ON activity_log(candidate_id);
-CREATE INDEX idx_activity_log_created     ON activity_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_log_application ON activity_log(application_id);
+CREATE INDEX IF NOT EXISTS idx_activity_log_candidate   ON activity_log(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_activity_log_created     ON activity_log(created_at DESC);
 
 -- ─── Pending Actions ──────────────────────────────────────────────────────────
-CREATE TABLE pending_actions (
+CREATE TABLE IF NOT EXISTS pending_actions (
   id             BIGSERIAL PRIMARY KEY,
   owner_type     TEXT NOT NULL,
   priority_level TEXT NOT NULL DEFAULT 'High' CHECK (priority_level IN ('Critical','High','Normal')),
@@ -397,11 +397,11 @@ CREATE TABLE pending_actions (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_pending_actions_owner    ON pending_actions(owner_type);
-CREATE INDEX idx_pending_actions_resolved ON pending_actions(resolved) WHERE resolved = false;
+CREATE INDEX IF NOT EXISTS idx_pending_actions_owner    ON pending_actions(owner_type);
+CREATE INDEX IF NOT EXISTS idx_pending_actions_resolved ON pending_actions(resolved) WHERE resolved = false;
 
 -- ─── Notification Log ─────────────────────────────────────────────────────────
-CREATE TABLE notification_log (
+CREATE TABLE IF NOT EXISTS notification_log (
   id             BIGSERIAL PRIMARY KEY,
   application_id TEXT REFERENCES applications(id) ON DELETE SET NULL,
   method         TEXT NOT NULL CHECK (method IN ('email','whatsapp','sms','call')),
@@ -418,9 +418,13 @@ RETURNS TRIGGER AS $$
 BEGIN NEW.updated_at = NOW(); RETURN NEW; END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS roles_updated_at ON roles;
 CREATE TRIGGER roles_updated_at      BEFORE UPDATE ON roles      FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS applications_updated_at ON applications;
 CREATE TRIGGER applications_updated_at BEFORE UPDATE ON applications FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS candidates_updated_at ON candidates;
 CREATE TRIGGER candidates_updated_at BEFORE UPDATE ON candidates  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+DROP TRIGGER IF EXISTS interview_rounds_updated_at ON interview_rounds;
 CREATE TRIGGER interview_rounds_updated_at BEFORE UPDATE ON interview_rounds FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 CREATE OR REPLACE FUNCTION flag_ctc_change()
@@ -436,6 +440,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS roles_ctc_change ON roles;
 CREATE TRIGGER roles_ctc_change AFTER UPDATE ON roles FOR EACH ROW EXECUTE FUNCTION flag_ctc_change();
 
 
@@ -547,9 +552,16 @@ ALTER TABLE roles
 -- own multi-select needs the same array shape. USING splits any existing
 -- scalar value back into its real selections rather than wrapping the whole
 -- joined string as one element.
-ALTER TABLE roles
-  ALTER COLUMN vacancy_reason TYPE TEXT[]
-  USING CASE WHEN vacancy_reason IS NULL THEN NULL ELSE string_to_array(vacancy_reason, ', ') END;
+-- Guarded so a second run (the column is already text[]) is a no-op instead of an error.
+DO $$
+BEGIN
+  IF (SELECT data_type FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'roles' AND column_name = 'vacancy_reason') <> 'ARRAY' THEN
+    ALTER TABLE roles
+      ALTER COLUMN vacancy_reason TYPE TEXT[]
+      USING CASE WHEN vacancy_reason IS NULL THEN NULL ELSE string_to_array(vacancy_reason, ', ') END;
+  END IF;
+END $$;
 
 -- ── users: OAuth columns (google_id, avatar_url, auth_provider) ────────────────
 -- Only needed if this hasn't already been applied — safe no-op otherwise.
@@ -675,6 +687,12 @@ ALTER TABLE applications
 ALTER TABLE pending_actions
   ADD COLUMN IF NOT EXISTS role_id TEXT REFERENCES roles(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS responsible_person TEXT;
+
+-- Foreign-key indexes (2026-11-17). pending_actions.application_id and .role_id both reference a parent table
+-- (ON DELETE CASCADE / SET NULL) and had no index, so every delete of an application or role scanned the whole
+-- table. Already applied to production and local Docker the same day; IF NOT EXISTS keeps this a no-op there.
+CREATE INDEX IF NOT EXISTS idx_pending_actions_application_id ON pending_actions(application_id);
+CREATE INDEX IF NOT EXISTS idx_pending_actions_role_id        ON pending_actions(role_id);
 
 CREATE OR REPLACE FUNCTION flag_ctc_change()
 RETURNS TRIGGER AS $$
@@ -1090,7 +1108,7 @@ CREATE TRIGGER sourcing_commitments_updated_at BEFORE UPDATE ON sourcing_commitm
 -- filterable state, not an error — never coerced to M or F anywhere this is
 -- read. Plain nullable/editable like any other candidate field, not a
 -- read-only computed column, since HR can always correct a wrong auto-tag.
-ALTER TABLE candidates ADD COLUMN gender TEXT CHECK (gender IN ('M','F'));
+ALTER TABLE candidates ADD COLUMN IF NOT EXISTS gender TEXT CHECK (gender IN ('M','F'));
 
 -- ─── Portfolio review — 9th ResumeIQ dimension (2026-09-30) ────────────────────
 -- For roles flagged `portfolio_analysis_enabled` (Senior UX/Product Designer,

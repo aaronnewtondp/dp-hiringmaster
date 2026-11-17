@@ -453,11 +453,18 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       series ends `setval(seq, COALESCE(max, 1), max IS NOT NULL)` (rows: next id is max + 1 as before; none: next id is 1), and the two sequences are advanced past `Q013` / `BEN012`.
       A fresh `docker-compose up` on a new volume now initialises (verified with `postgres:16-alpine`, `ON_ERROR_STOP`, zero errors). The CI and test-stack tolerances,
       `known-db-defects.txt`'s two lines and `.github/ci/seed-sequence-workaround.sql` are gone; `db/16-schema-replay` pins the fixed behaviour.
-- [ ] **`schema.sql` is not re-runnable** although its patch section is headed "Safe to run multiple times": the original block uses plain `CREATE TABLE`
-      (42P07 on the first statement) and two patches fail when repeated (`ALTER COLUMN vacancy_reason TYPE TEXT[] USING string_to_array(...)` when it is
-      already `text[]`, and `ADD COLUMN gender` without `IF NOT EXISTS`). Pinned by `db/16`.
-- [ ] **`pending_actions` has foreign keys to `applications` and `roles` with no index on `application_id` / `role_id`**, so every delete of an application or
-      role scans the table (`hms-tests-final/tests/helpers/sourcing-db.ts` `purgeRolesFast` exists because of it; pinned by `db/16`).
+- [x] **`schema.sql` is not re-runnable** although its patch section is headed "Safe to run multiple times": the original block used plain `CREATE TABLE`
+      (42P07 on the first statement) and two patches failed when repeated (`ALTER COLUMN vacancy_reason TYPE TEXT[] USING string_to_array(...)` when it is
+      already `text[]`, and `ADD COLUMN gender` without `IF NOT EXISTS`).
+      **Fixed 2026-11-17:** every `CREATE TABLE` and `CREATE [UNIQUE] INDEX` is `IF NOT EXISTS`, the five `updated_at` / CTC triggers are `DROP TRIGGER IF EXISTS` first, the
+      `vacancy_reason` conversion runs inside a `DO` block only while the column is not already an array, and `ADD COLUMN gender` is `IF NOT EXISTS`. Verified with real Postgres:
+      a fresh build's structure is identical to the one from `main` plus exactly the two new indexes, a second apply exits 0 with `ON_ERROR_STOP`, and the structure after it equals
+      the structure before. Pinned by `db/16-schema-replay` (the old "TODAY" pins now assert re-runnability) and by `.github/ci/apply-db.sh`, which applies `schema.sql` a second time in CI.
+      (Re-running only the first `BEGIN ... COMMIT` block puts back the first `flag_ctc_change()`; the patch section that follows restores the one that records `role_id`, so the whole file converges.)
+- [x] **`pending_actions` has foreign keys to `applications` and `roles` with no index on `application_id` / `role_id`**, so every delete of an application or
+      role scans the table (`hms-tests-final/tests/helpers/sourcing-db.ts` `purgeRolesFast` exists because of it).
+      **Fixed 2026-11-17:** `idx_pending_actions_application_id` and `idx_pending_actions_role_id` exist in production and local Docker (applied 2026-11-17, schema first) and are now
+      in `schema.sql` (`CREATE INDEX IF NOT EXISTS`, right after `role_id` is added). `purgeRolesFast` stays (one transaction is still cheaper for hundreds of deletes, and older local databases may lack the indexes); `db/16` pins both indexes.
 - [x] **`db.transaction()` can mask the original error** (`backend/src/db/index.ts`): its `catch` awaits `client.query('ROLLBACK')` before rethrowing, so a failed
       ROLLBACK (a dropped connection) replaces the real error, and `client.release()` returns the broken client to the pool without `release(err)`.
       **Fixed 2026-11-16:** the original error is always rethrown, a failed ROLLBACK is logged with `console.error` and the client is released with `release(err)` so pg discards it
