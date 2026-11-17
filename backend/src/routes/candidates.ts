@@ -7,6 +7,7 @@ import { isSeverelyOverBudget } from '../utils/budget.js';
 import { runResumeIQScoring } from '../services/resumeIQTrigger.js';
 import { fetchUnmatchedCandidates } from '../utils/unmatchedCandidates.js';
 import { classifyGender } from '../utils/genderClassifier.js';
+import { checkFullName, FULL_NAME_MAX_CHARS } from '../utils/candidateName.js';
 
 const router = Router();
 router.use(authenticate);
@@ -232,13 +233,20 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
     preferred_location, source, sourced_by_agency_id,
   } = req.body;
 
-  if (!full_name) { res.status(400).json({ error: 'full_name required' }); return; }
+  const nameCheck = checkFullName(full_name);
+  if (!nameCheck.ok) {
+    res.status(400).json({
+      error: nameCheck.reason === 'empty' ? 'full_name required' : `full_name must be at most ${FULL_NAME_MAX_CHARS} characters`,
+    });
+    return;
+  }
+  const cleanName = nameCheck.name;
 
   // Auto-tagged from full_name — see genderClassifier.ts's own header for
   // methodology and why an unrecognized/ambiguous name deliberately stays
   // null ("Unknown") rather than being guessed. req.body.gender lets a
   // caller (e.g. a future form field) override this outright.
-  const gender = req.body.gender ?? classifyGender(full_name);
+  const gender = req.body.gender ?? classifyGender(cleanName);
 
   // Same gate as PATCH /:id — 'source' is optional, but 'Agency' requires
   // naming which agency sourced this candidate.
@@ -275,7 +283,7 @@ router.post('/', requireHR, async (req: Request, res: Response) => {
        )
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
       [
-        full_name, email?.toLowerCase(), phone, linkedin_url,
+        cleanName, email?.toLowerCase(), phone, linkedin_url,
         current_ctc_fixed ?? null, current_ctc_variable ?? null, current_esops ?? null, expected_ctc ?? null,
         notice_period_days ?? null, current_company ?? null, current_industry ?? null, current_designation ?? null,
         current_location ?? null, years_of_experience ?? null, resume_drive_link ?? null, languages_known ?? null,
@@ -396,6 +404,17 @@ router.patch('/:id', requireHR, async (req: Request, res: Response) => {
   // already does this, but the server shouldn't rely on that alone.
   if (req.body.source !== undefined && req.body.source !== 'Agency' && req.body.sourced_by_agency_id === undefined) {
     req.body.sourced_by_agency_id = null;
+  }
+
+  if (req.body.full_name !== undefined) {
+    const nameCheck = checkFullName(req.body.full_name);
+    if (!nameCheck.ok) {
+      res.status(400).json({
+        error: nameCheck.reason === 'empty' ? 'full_name cannot be empty' : `full_name must be at most ${FULL_NAME_MAX_CHARS} characters`,
+      });
+      return;
+    }
+    req.body.full_name = nameCheck.name;
   }
 
   const allowedFields = [

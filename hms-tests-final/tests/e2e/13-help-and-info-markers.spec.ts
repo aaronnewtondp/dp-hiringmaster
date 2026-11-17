@@ -297,6 +297,24 @@ test.describe('info markers', () => {
     }
   });
 
+  // Regression for "marker 2 of 7" / "marker 8 of 13" (ROADMAP, 2026-11-17): the popover hangs BELOW its marker, so a marker scrolled only just
+  // into view (the bottom edge of the viewport) has its whole popover under the fold. That depends on the viewport height and the page length, which
+  // is why it failed on some machines and not others; no card was clipping anything. A short viewport reproduces it whatever the data.
+  test('on a short window every non-header popover is fully on screen (the marker is scrolled to the middle, not to the edge)', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 500 });
+    await gotoAs(page, 'hr', '/dashboard');
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
+    await page.waitForLoadState('networkidle');
+    const markers = infoMarkers(page.locator('main'));
+    const n = await settledCount(markers);
+    expect(n).toBeGreaterThanOrEqual(5);
+    for (let i = 0; i < n; i++) {
+      const marker = markers.nth(i);
+      if (await marker.locator('xpath=ancestor::th').count()) continue;                              // header popovers: the Gender pin below
+      await readMarkerByHover(page, marker, `short window: marker ${i + 1} of ${n}`, { checkReachable: true });
+    }
+  });
+
   // TODAY: the table card clips what hangs below its header row. With a long list the popover covers the rows below the header and is
   // fine; narrow the list to ONE row (search by the fixture's name) and the Gender popover is cut off at the card's bottom edge, mid-sentence.
   // When the card stops clipping, this test fails: rename it and assert the popover is reachable.

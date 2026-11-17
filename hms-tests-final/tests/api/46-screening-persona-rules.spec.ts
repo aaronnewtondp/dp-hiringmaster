@@ -240,7 +240,7 @@ test.describe('POST /api/applications/:id/status — the Hiring Manager carve-ou
     const rejected = await newApplicationAt(request, 'Applied and Screened', 'R006');
     const noReason = await alex.post(`/api/applications/${rejected.application.id}/status`, { new_status: 'Rejected' });
     expect(noReason.status()).toBe(400);
-    expect((await noReason.json()).error).toBe('A reason is required when rejecting or withdrawing a candidate');
+    expect((await noReason.json()).error).toBe('A rejection reason is required when rejecting a candidate (rejection_reason_cats or rejection_reason_cat)');
     const withReason = await alex.post(`/api/applications/${rejected.application.id}/status`, { new_status: 'Rejected', rejection_reason_cats: ['Skills Mismatch'] });
     expect(withReason.status()).toBe(200);
     expect((await applicationRow(rejected.application.id)).status).toBe('Rejected');

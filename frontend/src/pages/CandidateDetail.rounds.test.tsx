@@ -178,14 +178,57 @@ describe('Candidate page — interview rounds', () => {
     expect(within(row).getByText(status)).toBeInTheDocument();
   });
 
-  it.each(['hr_recruiter', 'hiring_manager', 'leadership', 'super_admin'] as const)('%s can Submit feedback on a round that has none yet (the interviewer is rarely HR)', async persona => {
+  it.each(['hr_recruiter', 'leadership', 'super_admin'] as const)('%s can Submit feedback on any round, whoever is listed on it (relaying scores given verbally)', async persona => {
     h.persona = persona;
-    await show(application('A9001', { stage: 'Interview Round 1' }), { A9001: [STANDARD] });
+    await show(application('A9001', { stage: 'Interview Round 1' }), { A9001: [STANDARD] });   // listed: panel@example.test, not this user
     fireEvent.click(await screen.findByRole('button', { name: 'Submit feedback' }));
     const dialog = screen.getByTestId('feedback-modal');
     expect(dialog).toHaveAttribute('data-round', 'IR1');
     expect(dialog).toHaveAttribute('data-candidate', 'Test Candidate');
     expect(dialog).toHaveAttribute('data-role', 'Test Role Alpha');
+  });
+
+  // The backend rule in PATCH /interviews/:id/feedback: a non-HR user needs their e-mail on the round, unless nobody was assigned.
+  describe('a Hiring Manager (the button mirrors the server\'s interviewer check)', () => {
+    beforeEach(() => { h.persona = 'hiring_manager'; });
+
+    it('listed on the round (any letter case) can Submit feedback', async () => {
+      await show(application('A9001', { stage: 'Interview Round 1' }), { A9001: [round('IR1', { interviewer_emails: ['other@example.test', 'Reviewer@Example.TEST'] })] });
+      fireEvent.click(await screen.findByRole('button', { name: 'Submit feedback' }));
+      expect(screen.getByTestId('feedback-modal')).toHaveAttribute('data-round', 'IR1');
+    });
+
+    it('NOT listed on the round is not offered Submit feedback (the server would answer 403)', async () => {
+      await show(application('A9001', { stage: 'Interview Round 1' }), { A9001: [STANDARD] });
+      await screen.findByText('Round 1 — Technical');
+      expect(screen.queryByRole('button', { name: 'Submit feedback' })).toBeNull();
+    });
+
+    it.each([['an empty list', []], ['no list at all', undefined], ['a null list', null]])('on a round with %s (nobody assigned) can Submit feedback', async (_n, emails) => {
+      await show(application('A9001', { stage: 'Interview Round 1' }), { A9001: [round('IR1', { interviewer_emails: emails })] });
+      fireEvent.click(await screen.findByRole('button', { name: 'Submit feedback' }));
+      expect(screen.getByTestId('feedback-modal')).toBeInTheDocument();
+    });
+
+    it('is offered it only on the rounds they are listed on', async () => {
+      await show(application('A9001', { stage: 'Interview Round 2' }), { A9001: [
+        STANDARD,
+        round('IR2', { round_number: 2, round_name: 'Panel', interviewer_emails: ['reviewer@example.test'] }),
+      ] });
+      await screen.findByText('Round 2 — Panel');
+      const buttons = screen.getAllByRole('button', { name: 'Submit feedback' });
+      expect(buttons).toHaveLength(1);
+      fireEvent.click(buttons[0]);
+      expect(screen.getByTestId('feedback-modal')).toHaveAttribute('data-round', 'IR2');
+    });
+
+    it('is not offered Record outcome on an Assignment round with other interviewers listed', async () => {
+      await show(application('A9001', { stage: 'Assignment Round' }), { A9001: [ASSIGNMENT({
+        assignment_send_date: '2026-10-20T10:00:00Z', assignment_submission_date: '2026-10-21T10:00:00Z', interviewer_emails: ['panel@example.test'],
+      })] });
+      await screen.findByText(/Take-home/);
+      expect(screen.queryByRole('button', { name: /Record outcome/ })).toBeNull();
+    });
   });
 
   it('a round with feedback already submitted offers no Submit feedback, and a successful submit reloads the rounds', async () => {
@@ -196,6 +239,16 @@ describe('Candidate page — interview rounds', () => {
     const before = h.roundsList.mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: 'succeed-feedback' }));
     await waitFor(() => expect(h.roundsList.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it('feedback that auto-advances the application shows the new stage without a reload (the candidate is refetched, not only the rounds)', async () => {
+    await show(application('A9001', { stage: 'Interview Round 1' }), { A9001: [STANDARD] });
+    fireEvent.click(await screen.findByRole('button', { name: 'Submit feedback' }));
+    h.get.mockResolvedValue({ data: { candidate: candidate(), applications: [application('A9001', { stage: 'Interview Round 2' })] } });
+    const before = h.get.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'succeed-feedback' }));
+    await waitFor(() => expect(h.get.mock.calls.length).toBeGreaterThan(before));
+    await waitFor(() => expect(screen.getAllByText('Interview Round 2').length).toBeGreaterThan(0));
   });
 
   it('a submitted round shows its verdict and score, and expands to the full written feedback', async () => {

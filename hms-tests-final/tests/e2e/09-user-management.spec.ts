@@ -436,7 +436,7 @@ test.describe('one user, from creation to revoked access', () => {
     expect((await userRowByEmail(email))!.id).toBe(userId);
   });
 
-  test('TODAY: clearing the Department field in Edit does not clear it (the UI sends nothing for a blank department, the API reads that as "no change")', async ({ page }) => {
+  test('clearing the Department field in Edit clears it: the UI sends an empty department and the API stores NULL', async ({ page }) => {
     const requests = watchUserRequests(page);
     await openUsers(page);
     await rowOf(page, email).getByRole('button', { name: 'Edit' }).click();
@@ -446,9 +446,9 @@ test.describe('one user, from creation to revoked access', () => {
 
     const patch = requests.filter(r => r.method === 'PATCH');
     expect(patch).toHaveLength(1);
-    expect(patch[0].body, 'a blank department is dropped from the request').not.toHaveProperty('department');
-    expect((await userRowByEmail(email))!.department, 'so the old department is still stored').toBe(`${dept}-moved`);
-    await expect.poll(async () => (await cells(page, email))[3]).toBe(`${dept}-moved`);
+    expect(patch[0].body).toMatchObject({ department: '' });
+    expect((await userRowByEmail(email))!.department, 'the old department is gone from the database').toBeNull();
+    await expect.poll(async () => (await cells(page, email))[3]).toBe('—');
   });
 
   test('Deactivate revokes access: toast, Inactive, a Reactivate button, the row stays in the database, no DELETE is sent, password sign-in is refused', async ({ page, request }) => {

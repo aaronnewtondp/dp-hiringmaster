@@ -371,15 +371,19 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
 
   // 15%+ over-budget candidates need an explicit reason before shortlisting
   // (backend enforces this too — this is just so the user isn't surprised by
-  // a 400). One shared reason applies to the whole batch when bulk-acting,
-  // same as bulk Reject's single reason-for-the-batch pattern. "Shortlist"
+  // a 400). When bulk-acting, one reason is collected for the batch but is
+  // sent only with the rows that are really 15%+ over budget (optsFor).
+  // "Shortlist"
   // now advances straight to Interview Round 1 — 'Shortlisted' was retired
   // as its own intermediate stage.
   const shortlistIds = async (ids: string[], reasonCat?: string, reasonDetail?: string) => {
-    const opts = { budgetExceptionReasonCat: reasonCat, budgetExceptionReasonDetail: reasonDetail };
+    // The reason goes only with the rows that really are 15%+ over (the server ignores it for any other row).
+    const optsFor = (id: string) => apps.find(x => x.id === id)?.is_severely_over_budget
+      ? { budgetExceptionReasonCat: reasonCat, budgetExceptionReasonDetail: reasonDetail }
+      : { budgetExceptionReasonCat: undefined, budgetExceptionReasonDetail: undefined };
     if (ids.length === 1) {
       try {
-        await applicationsApi.advanceStage(ids[0], 'Interview Round 1', opts);
+        await applicationsApi.advanceStage(ids[0], 'Interview Round 1', optsFor(ids[0]));
         toast.success('Candidate shortlisted');
         refreshApps();
       } catch (err: unknown) {
@@ -387,7 +391,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
         toast.error(msg || 'Action failed');
       }
     } else {
-      await runBulk(id => applicationsApi.advanceStage(id, 'Interview Round 1', opts), ids, 'shortlisted');
+      await runBulk(id => applicationsApi.advanceStage(id, 'Interview Round 1', optsFor(id)), ids, 'shortlisted');
     }
   };
 

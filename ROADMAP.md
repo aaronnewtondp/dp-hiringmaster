@@ -204,7 +204,7 @@ live.
       tier; three are now below 4.0. **Decision (Aaron, 2026-10-25): keep the fold policy as it is** (`'always'`;
       the `upside_only` knob stays in code, unused). No spot-check by the hiring manager is scheduled. Numbers,
       outcomes and what the real worker showed: CLAUDE.md "Production state"; steps and queries: the runbook.
-- [ ] **Work-sample review — follow-ups, not built.** cap `candidates.full_name` at ingest; network-level egress
+- [ ] **Work-sample review — follow-ups, not built.** (**Fixed 2026-11-17:** `candidates.full_name` is capped at 200 characters in all creation paths and PATCH, and each link's `creditQuoteGiven` / verified `creditQuote` is stored; see CLAUDE.md known gaps (26) and the creditQuote notes.) Still open: network-level egress
       filtering or a validating proxy for the browser (socket/popup/teardown SSRF is only mitigated for R019 and not
       at all for R007's capture); the form's privacy-notice check and the optional dedicated Anthropic key
       (`PORTFOLIO_ANTHROPIC_API_KEY`) are not recorded as settled before the backfill; whether the quote matcher is
@@ -251,8 +251,10 @@ live.
       allowed; a ~5x slower shared runner than a developer machine): its `floorMs` went from 60 to 150; a quadratic tokenizer is still caught by the 1 s backstop and the 5 MB bound.
 - [x] **googleapis 189's `GoogleAuth({ credentials })` deprecation warning** (`driveService.ts` read-only client): now a `JWT` client from the key's email and private
       key, the replacement the library names and what the write, Calendar and Gmail clients already use. No warning is emitted any more.
-- [ ] `pdf.scanCharge.test.ts` "scanPdfContentStreamsAsync and the cooperative text scan the same" is timing-sensitive and already flaky on
-      untouched `main` (5 of 8 runs failed): it expects a 6,000-stream scan to outlast one 20 ms slice, which a fast machine does not.
+- [x] **Fixed 2026-11-17:** `pdf.scanCharge.test.ts` "scanPdfContentStreamsAsync and the cooperative text scan the same" was timing-sensitive (it expected a
+      6,000-stream scan to outlast one 20 ms slice). PR #31 had already put the deadline assertions on a clock where every read is a slice later; a new test now
+      pins verdict + work-tally parity of the async scan against the sync scan and the real yielding by counting event-loop turns. 50/50 runs, 10/10 under 8 busy
+      processes; mutations (a driver that never yields; an async path that stops early) fail it.
 - [ ] **Drive auto-folder creation** on Role and Candidate creation — every
       role/candidate should get a Drive folder automatically; currently none
       do. (`driveService.ts` already has working Drive API access via the
@@ -423,15 +425,24 @@ live.
       smoke projects all list tests": the self-test captures `playwright test --list --reporter=json` through `spawnSync`, whose default `maxBuffer` is 1 MiB; the
       listing passed 1 MiB at about 1,100 tests, the child was killed with `ENOBUFS` and `status` was `null`. It failed on every machine (so also locally, where it was
       noted as "fails on main too"). Fixed 2026-11-16 with `maxBuffer: 256 MiB`, and the assertion now prints the spawn error. Spec 00: 33 of 33.
-- [ ] **Two `e2e/13-help-and-info-markers` checks failed on a fresh local stack** ("Candidates: marker 2 of 7", "Dashboard (Hiring Manager): marker 8 of 13":
-      the opened popover is reported covered or clipped by the page card), alone as well as in the full run. Find out whether they need more rows than a
-      fresh database has or are a real clipping defect (a related one is already pinned "as TODAY": the Gender header popover is cut off by the table card
-      when the list has a single row).
-- [ ] **The nightly `EXCLUDE` list may be longer than it needs to be.** On 2026-11-05, on a fresh stack with no credentials, `db/07` (all 17 tests, the three excluded ones
-      included), `db/05-aging-roles-no-movement` (13), `api/19-pending-actions-regressions` (9, the excluded "every candidate entry carries application_id" included)
-      and the excluded `db/15` "a Drive PDF + a website: pending" all passed when run on their own, once each, although `integration.yml`'s header says they need a
-      real key, a long-lived database, a multi-line queue error or are racy. Re-measure a few times, then trim the regex (do not add an entry without a measured
-      reason, as the header says).
+- [x] **Two `e2e/13-help-and-info-markers` checks failed on a fresh local stack** ("Candidates: marker 2 of 7", "Dashboard (Hiring Manager): marker 8 of 13").
+      **Fixed 2026-11-17:** not a clipping defect and not a data-volume dependence. The test helper `readMarkerByHover` used `scrollIntoViewIfNeeded()`, which scrolls
+      the least it can and so leaves a marker on the viewport's bottom edge; the popover hangs BELOW its marker, so it then lay wholly under the fold
+      (`popoverReachable`: "entirely outside the viewport"). Which markers hit it depends on the window height and the page length. Measured on a fresh stack with the
+      old helper: Dashboard (HR and Hiring Manager) failed on 2 markers at 500 px and 900 px, 1 at 600 px, 2 at 768 px, none at 650-720/800 px (the default 720 passes,
+      which is why it varied by machine); with 45 extra candidates the default height still passed, so row count is not the cause; with the marker centred, every
+      non-header marker passed at all eight heights (that height sweep was run on the Dashboard only; the Candidates "marker 2 of 7" failure was not re-measured at other heights, it is covered by the same helper change and the new 500 px test). The helper now centres the marker (as a person scrolling to read it would); no component changed. New test "on a
+      short window every non-header popover is fully on screen" (500 px) fails with the old helper and passes now. The related Gender header clipping below is a
+      different cause and stays open.
+- [ ] **A table-header info popover is cut off by the table card when the list is short** (Candidates, Archived Pipeline, Ready for Review with a single row; pinned as
+      "TODAY" in `e2e/13`). Cause: the table wrapper is `card overflow-x-auto`, and a non-visible `overflow-x` makes `overflow-y` clip too, so a popover hanging below the
+      header row is cut at the card's bottom edge when there are no rows to hang over. Roles and Agencies are fine with several rows. A fix means rendering the popover
+      outside the card (a portal with fixed positioning in `InfoTooltip`, which the tests and every page that finds it as the next sibling would have to follow) or giving the
+      card a minimum height; neither was done because both change a shared component or the look.
+- [x] **The nightly is green again (2026-11-17).** The 02:00 IST run on `76788d5` passed after the two causes of the 2026-11-16 red were fixed (`spawnSync` ENOBUFS in `api/00`, the stale `e2e/09` pin, #106/#108); nothing else is known to fail it.
+- [x] **The nightly `EXCLUDE` list was longer than it needed to be.** **Fixed 2026-11-17:** measured on a disposable stack with no credentials: `api/10` + `api/19` + `api/30` five times on a fresh database
+      each (15 passed, 5 of 5), then the whole `api` + `db` selection three times with `--grep-invert '@live'` alone (931 passed, 1 skipped each time, 1-2.3 minutes). The regex is now just `@live`: the
+      three other entries were stale (`api/10`'s real-key test and `api/30`'s live-estimate test are tagged `@live` already, `api/19`'s test builds its own breach). `integration.yml`'s header carries the measurement.
 - [x] Stale comments in the CI files fixed: the "659 tests" count (`.github/README.md`, CLAUDE.md), `audit.yml`'s "Dependabot alerts are off", and the
       `frontend/src/services/api.ts` comments about axios array params (bracket form `key[]=a&key[]=b`; `api.test.ts` pins the real format).
 
@@ -453,11 +464,18 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       series ends `setval(seq, COALESCE(max, 1), max IS NOT NULL)` (rows: next id is max + 1 as before; none: next id is 1), and the two sequences are advanced past `Q013` / `BEN012`.
       A fresh `docker-compose up` on a new volume now initialises (verified with `postgres:16-alpine`, `ON_ERROR_STOP`, zero errors). The CI and test-stack tolerances,
       `known-db-defects.txt`'s two lines and `.github/ci/seed-sequence-workaround.sql` are gone; `db/16-schema-replay` pins the fixed behaviour.
-- [ ] **`schema.sql` is not re-runnable** although its patch section is headed "Safe to run multiple times": the original block uses plain `CREATE TABLE`
-      (42P07 on the first statement) and two patches fail when repeated (`ALTER COLUMN vacancy_reason TYPE TEXT[] USING string_to_array(...)` when it is
-      already `text[]`, and `ADD COLUMN gender` without `IF NOT EXISTS`). Pinned by `db/16`.
-- [ ] **`pending_actions` has foreign keys to `applications` and `roles` with no index on `application_id` / `role_id`**, so every delete of an application or
-      role scans the table (`hms-tests-final/tests/helpers/sourcing-db.ts` `purgeRolesFast` exists because of it; pinned by `db/16`).
+- [x] **`schema.sql` is not re-runnable** although its patch section is headed "Safe to run multiple times": the original block used plain `CREATE TABLE`
+      (42P07 on the first statement) and two patches failed when repeated (`ALTER COLUMN vacancy_reason TYPE TEXT[] USING string_to_array(...)` when it is
+      already `text[]`, and `ADD COLUMN gender` without `IF NOT EXISTS`).
+      **Fixed 2026-11-17:** every `CREATE TABLE` and `CREATE [UNIQUE] INDEX` is `IF NOT EXISTS`, the five `updated_at` / CTC triggers are `DROP TRIGGER IF EXISTS` first, the
+      `vacancy_reason` conversion runs inside a `DO` block only while the column is not already an array, and `ADD COLUMN gender` is `IF NOT EXISTS`. Verified with real Postgres:
+      a fresh build's structure is identical to the one from `main` plus exactly the two new indexes, a second apply exits 0 with `ON_ERROR_STOP`, and the structure after it equals
+      the structure before. Pinned by `db/16-schema-replay` (the old "TODAY" pins now assert re-runnability) and by `.github/ci/apply-db.sh`, which applies `schema.sql` a second time in CI.
+      (Re-running only the first `BEGIN ... COMMIT` block puts back the first `flag_ctc_change()`; the patch section that follows restores the one that records `role_id`, so the whole file converges.)
+- [x] **`pending_actions` has foreign keys to `applications` and `roles` with no index on `application_id` / `role_id`**, so every delete of an application or
+      role scans the table (`hms-tests-final/tests/helpers/sourcing-db.ts` `purgeRolesFast` exists because of it).
+      **Fixed 2026-11-17:** `idx_pending_actions_application_id` and `idx_pending_actions_role_id` exist in production and local Docker (applied 2026-11-17, schema first) and are now
+      in `schema.sql` (`CREATE INDEX IF NOT EXISTS`, right after `role_id` is added). `purgeRolesFast` stays (one transaction is still cheaper for hundreds of deletes, and older local databases may lack the indexes); `db/16` pins both indexes.
 - [x] **`db.transaction()` can mask the original error** (`backend/src/db/index.ts`): its `catch` awaits `client.query('ROLLBACK')` before rethrowing, so a failed
       ROLLBACK (a dropped connection) replaces the real error, and `client.release()` returns the broken client to the pool without `release(err)`.
       **Fixed 2026-11-16:** the original error is always rethrown, a failed ROLLBACK is logged with `console.error` and the client is released with `release(err)` so pg discards it
@@ -482,9 +500,10 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       stays. **Still from the token:** `name` and `email` (a rename reaches the person at their next sign-in; HM role matching compares the token name) and the
       sign-in response's `user` object, so the UI's menu keeps the old persona until the person signs in again, while every API call already enforces the new one.
       Pinned by `auth.activeCheck.test.ts` and the two persona tests in `db/17`; `forgeToken` now defaults to a seeded user holding the forged persona.
-- [ ] **HR priority override does not require a reason although the test says it does.** `PATCH /api/applications/:id/notes` accepts `hr_priority_override` with no
+- [x] **HR priority override does not require a reason although the test says it does.** `PATCH /api/applications/:id/notes` accepts `hr_priority_override` with no
       `hr_priority_override_reason` (200; the activity line just ends in an empty reason), while `api/08-misc` is titled "HR priority override requires a reason"
       and asserts `[400, 200]` ("backend may not validate this yet"), so it cannot fail. Decide the rule; make the test exact.
+      **Fixed 2026-11-16:** setting or changing the override needs a non-blank (trimmed) `hr_priority_override_reason`, else 400 before any write; clearing it (`null`, `''` stored as NULL, or `'Normal'`) needs none, and a reason alone is not an override change. `api/08-misc` is exact now. The candidate page DOES set it (Screening & Risk Notes: a Priority Override select and a reason field, saved as only the keys that changed), so the reason may also already be stored on the application: a change with no reason in the request is accepted when a non-blank one is on record, re-sending the stored value is not a change, and the activity line carries the effective reason (found in review: the first version returned 400 for a select-only change).
 - [x] **The Hiring Manager is not scoped on `POST /api/applications/:id/screening`.** Any Hiring Manager can set `HM Shortlisted` on any application, whatever the
       role's `hiring_manager_name` (verified: a Hiring Manager named on another role did it), unlike comp visibility and the dashboard, which are per role.
       **Fixed 2026-11-16:** a Hiring Manager may set `HM Shortlisted` only on a role whose `hiring_manager_name` names them (`canSeeCompForRole`, co-Hiring-Managers included), else 403 before any write; HR-tier is unchanged.
@@ -499,8 +518,9 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       "Assignment Email Failed" activity-log row is written.
       **Fixed 2026-11-16:** one message ("Candidate has no email on file.") is stored, logged and returned, the same "Assignment Email Failed" activity row a failed send writes is added
       (create and `assignment-send` retry share the function), the response's round carries the error, and a blank or whitespace-only address counts as none.
-- [ ] **The rejection/withdrawal reason gate is looser than it reads**: either kind of reason satisfies either status (a `Rejected` with only a withdrawal reason
+- [x] **The rejection/withdrawal reason gate is looser than it reads**: either kind of reason satisfies either status (a `Rejected` with only a withdrawal reason
       is stored with no rejection reason), and a whitespace-only `withdrawal_reason_cat` counts (`applications.access.test.ts`).
+      **Fixed 2026-11-16:** `Rejected` needs a non-blank rejection reason and `Withdrawn` a non-blank (trimmed, stored trimmed) `withdrawal_reason_cat`, each a 400 before any write naming the missing one. The single and bulk Withdraw flows now send `withdrawal_reason_cat` (`statusReasonFields`), so withdrawals are stored in the withdrawal column. **Deploy the frontend first**: an old bundle sends a withdrawal's reason in the rejection fields and gets a 400 from the new backend.
 - [x] **`GET /api/candidates/:id/edit-log` returned raw compensation old/new values to a Hiring Manager.** Fixed 2026-11-15: HR-tier sees every row; a Hiring Manager sees the
       `current_ctc_fixed` / `current_ctc_variable` / `current_esops` / `expected_ctc` rows only when named on a role the candidate has an application on (the rule of `GET /:id`).
       Pinned in `routes.authMatrix.test.ts`. `requireLeadership` is still exported but mounted on no route.
@@ -524,20 +544,32 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       message (`api.test.ts`). **Fixed 2026-11-16:** a 401 from `/auth/login` or `/auth/google` is rejected to the caller with no redirect and no storage clearing, so Login shows the server's message; every other 401 is unchanged.
 - [x] **The "Add agency" button has no handler** (`pages/Agencies.tsx`): it is drawn for every persona, including one who cannot load the list, and does nothing
       (`pages.smoke.test.tsx`, `e2e/16`). **Fixed 2026-11-16:** the dead button was removed (agencies cannot be added from the UI; `POST /api/agencies` still exists server-side).
-- [ ] **Axios array parameters are bracket-serialized** (`gender[]=UNKNOWN`, `or_role_id[]=R019`), not repeated keys as the comments in `services/api.ts` say.
+- [x] **Axios array parameters are bracket-serialized** (`gender[]=UNKNOWN`, `or_role_id[]=R019`), not repeated keys as the comments in `services/api.ts` say.
       Express's `qs` reads both, so nothing is broken, but anything that matches request URLs (a proxy rule, a Playwright route) must use the real form.
-- [ ] **`frontend/tsconfig.json` has duplicate keys** (`strict`, `noUnusedLocals`, `noUnusedParameters` each appear twice); `strict` is false.
-- [ ] **`Candidates.tsx` calls `GET /api/candidates/unmatched` for every persona** (the query has no `enabled`), although the route is HR-tier only: a Hiring Manager's
+      **Fixed 2026-11-17:** the wire format is kept (`api.test.ts` pins it); the `services/api.ts` comments already say bracket form, and the last wrong wordings (CLAUDE.md's "`or_role_id` (repeatable)", the e2e `queryValues` helper comment) now state the real form.
+- [x] **`frontend/tsconfig.json` has duplicate keys** (`strict`, `noUnusedLocals`, `noUnusedParameters` each appear twice); `strict` is false.
+      **Fixed 2026-11-17:** no duplicate keys remain in `frontend/tsconfig.json` or `tsconfig.node.json` (the effective values are unchanged: `strict`, `noUnusedLocals`, `noUnusedParameters` all false); `tsc --noEmit` and `npm run build` behave as before.
+- [x] **`Candidates.tsx` calls `GET /api/candidates/unmatched` for every persona** (the query has no `enabled`), although the route is HR-tier only: a Hiring Manager's
       page makes a request that is always a 403 (verified).
-- [ ] **A failed background refresh replaces the whole Dashboard** (`pages/Dashboard.tsx`): the `error || !data` test shows "Failed to load dashboard" even
+      **Fixed 2026-11-17:** the query is `enabled: canHR` and the panel renders only for HR-tier (Hiring Managers make no request and see no panel); Help and the User Access Guide say so (`Candidates.unmatched.test.tsx`, `Candidates.test.tsx`, `pages.smoke.test.tsx`).
+- [x] **A failed background refresh replaces the whole Dashboard** (`pages/Dashboard.tsx`): the `error || !data` test shows "Failed to load dashboard" even
       though react-query still holds the last good `data` when a `refetchInterval` refresh fails.
+      **Fixed 2026-11-17:** "Failed to load dashboard" shows only when there is no data; when a refresh fails with data in hand the page stays and an amber notice with Retry says the numbers may be out of date (`Dashboard.test.tsx`).
 - [x] **A Hiring Manager sees a Recruitment Mode filter with no options** on the Dashboard: the `roles/filter-options` query is disabled for them
       (`enabled: !isLockedToOwnRole`), but the filter is still drawn, with an empty list. **Fixed 2026-11-16:** the filter is no longer drawn for a Hiring Manager, and a remembered mode is ignored for them.
-- [ ] **Smaller pinned UI behaviours** (each in the listed spec's header): the Stage modal has no skip-reason control; a candidate page keeps the old stage until
-      reloaded after an auto-advance; a Hiring Manager not on a round still sees "Submit feedback" and the edit pencils on roles and candidates (every save is
-      a 403); a role's activity timeline does not refresh after Change status; the bulk over-budget reason is sent for, and stored on, every selected row; bulk
-      withdraw stores its reason in the rejection column; clearing a user's Department in Edit does not clear it; the first tap on an info marker on a phone
-      opens nothing (`e2e/10`, `e2e/11`, `e2e/14`, `e2e/09`, `e2e-mobile/15`).
+- [x] **Smaller pinned UI behaviours** (each in the listed spec's header; `e2e/09`, `e2e/10`, `e2e/11`, `e2e/14`, `e2e-mobile/15`). All seven are fixed 2026-11-17 (the Hiring Manager controls, the role timeline and the bulk over-budget reason are the entries below). **Fixed 2026-11-17 (the other four of the original list):** the Stage modal now offers a "Reason to proceed anyway" box once the server has refused a move for pending feedback or a missing reference check, and sends it as `skip_reason` (the bypass the API always had; blank = plain retry); the candidate page (and My Tasks) refresh the candidate and the applications lists after feedback or an assignment outcome, so an auto-advance shows the new stage with no reload; clearing a user's Department in Edit sends `''`, which the API stores as NULL; the first tap on an info marker on a phone opens it (`InfoTooltip` ignores the mouseenter a touch/pen tap emulates; Escape also closes). Pins rewritten in `e2e/09`, `e2e/10`, `e2e-mobile/15`. Open question: the API does NOT require a reason for skipping stages (only to bypass those two blocks), so no reason is demanded for a forward jump.
+      **Bulk Change Stage, fixed 2026-11-17:** on Active Candidates, rows the server refuses for those two checks (recognised by `utils/stageGate.ts`, the one definition the Stage modal now shares) are listed in the dialog with the reason; one "Reason to proceed anyway" box (HR-tier only, same wording) and "Retry N" resend only those rows with `skip_reason` (never on the first attempt; blank = plain retry); rows refused for anything else stay failed and are not offered again. The per-row over-budget reason is untouched. The Ready for Review inline stage edit already opens the shared `StageChangeModal`, so it had the box since #119 (its bulk Shortlist is Applied and Screened to Interview Round 1, which those two checks do not stop). Pinned by `Candidates.bulk.test.tsx`, `stageGate.test.ts`, `e2e/11`.
+- [x] **The bulk over-budget reason was sent for, and stored on, every selected row** (Candidates bulk Change Stage to Interview Round 1, `e2e/11`). **Fixed 2026-11-17:**
+      `POST /applications/:id/stage` now stores the reason (and names it in the activity text) only when the move is to Interview Round 1 AND the row is really 15%+ over the
+      band (`isSeverelyOverBudget`, the one definition); for any other row or stage it is ignored, so a client that sends it for everyone cannot mark an in-band candidate as an
+      exception. A row whose band or expected CTC is missing/unparseable is not over budget by that same rule, so nothing is stored for it. The bulk modal sends the reason only with
+      the rows whose `is_severely_over_budget` is true (still asked once, still mandatory while any selected row is over; not asked when none is). The `e2e/11` TODAY pin was converted.
+- [x] **A Hiring Manager was offered buttons the server refuses; a role's timeline went stale after Change status.** **Fixed 2026-11-17:** "Submit feedback" / "Record outcome" on a
+      candidate's round show only when `canSubmitRoundFeedback` (`utils/feedbackAccess.ts`, a mirror of `PATCH /interviews/:id/feedback`: HR-tier, or the user's e-mail on the round,
+      or nobody listed); `EditableSection` takes `canEdit` and the role page (and its Approval Note pencil) and the four candidate-profile sections pass `canHR`, since both
+      `PATCH /roles/:id` and `PATCH /candidates/:id` are HR-tier (a Leadership user who is also a role's HM is HR-tier and keeps every pencil); `handleStatusUpdate` now also
+      invalidates `['role-activity', id]`. Pinned by `feedbackAccess.test.ts`, `CandidateDetail.rounds/.test.tsx`, `RoleDetail.actions.test.tsx`, `EditableSection.test.tsx`;
+      `e2e/10` and `e2e/14` no longer pin the old behaviour.
 - [x] **Approve Role hid a JD-generation failure** (`RoleDetail.tsx` `handleApprove`). Fixed 2026-11-16: the PATCH returns `jdGeneration` (30 s of Claude, two PDFs, two Drive
       uploads, awaited inline) and the button now reports it through the same `reportJdGeneration` the Change status window uses ("Long-form and social JDs generated",
       or "JD generation failed: <reason>" while the role stays approved; nothing for a role whose JD is hand-written or already has links). Pinned by `RoleDetail.actions.test.tsx`.

@@ -20,3 +20,9 @@ echo "::endgroup::"
 echo "::group::Apply seed.sql"
 psql -v ON_ERROR_STOP=1 -q -f "$seed" >/dev/null
 echo "::endgroup::"
+
+# schema.sql is re-runnable (2026-11-17): applying it a SECOND time to the finished database must succeed and change nothing.
+# A new plain CREATE TABLE / CREATE INDEX / ADD COLUMN / CREATE TRIGGER without a guard fails here, not on the next real re-apply.
+echo "::group::Re-apply schema.sql (must be a no-op)"
+psql -v ON_ERROR_STOP=1 -q -f "$schema"
+echo "::endgroup::"

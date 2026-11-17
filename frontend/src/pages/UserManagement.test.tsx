@@ -350,6 +350,15 @@ describe('UserManagement — editing a user', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('clearing the department sends an empty string, which the API stores as NULL (it used to be left out, so the old one stayed)', async () => {
+    await open('test.self@example.test');
+    setIn('Department', '   ');
+    fireEvent.click(within(modal()).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith('u-self', {
+      name: 'Test Self', email: 'test.self@example.test', persona: 'hr_recruiter', department: '',
+    }));
+  });
+
   it('while the change is being saved the dialog\'s button is disabled, so a second click sends nothing, and the dialog closes when it is done', async () => {
     let done!: (v: unknown) => void;
     update.mockReturnValue(new Promise(r => { done = r; }));

@@ -11,8 +11,9 @@ import LinkToRoleModal from '../components/shared/LinkToRoleModal.tsx';
 import MultiSelectFilter from '../components/shared/MultiSelectFilter.tsx';
 import RejectionEmailDraft, { RejectionEmailState } from '../components/shared/RejectionEmailDraft.tsx';
 import ReasonCheckboxList from '../components/shared/ReasonCheckboxList.tsx';
-import { reasonFields } from '../utils/rejectionReasons.ts';
+import { statusReasonFields } from '../utils/rejectionReasons.ts';
 import { interpolateRejectionDraft } from '../utils/rejectionEmailTemplates.ts';
+import { isSkippableStageGate, apiErrorMessage } from '../utils/stageGate.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { usePersistedState } from '../hooks/usePersistedState.ts';
 import { formatDistanceToNow } from 'date-fns';
@@ -40,6 +41,8 @@ const HEADER_HOVER: Record<string, string> = {
   'Notice Period': NOTICE_PERIOD_INFO,
   'Last Updated': lastUpdatedInfo(true),
 };
+
+interface BulkRefusal { id: string; name: string; message: string }
 
 type SortKey = 'fit' | 'application_date' | 'last_updated';
 
@@ -101,6 +104,9 @@ export default function Candidates() {
   const [bulkRejectionCats, setBulkRejectionCats] = useState<string[]>([]); // Rejected: one or more
   const [bulkRejectionDetail, setBulkRejectionDetail] = useState('');
   const [bulkRejectionEmail, setBulkRejectionEmail] = useState<RejectionEmailState>({ enabled: false, subject: '', body: '' });
+  // Rows the server refused for pending feedback / a missing reference check (the two checks a written reason bypasses), and that reason.
+  const [bulkRefused,       setBulkRefused]       = useState<BulkRefusal[]>([]);
+  const [bulkSkipReason,    setBulkSkipReason]    = useState('');
   const [bulkBudgetReasonCat,    setBulkBudgetReasonCat]    = useState('');
   const [bulkBudgetReasonDetail, setBulkBudgetReasonDetail] = useState('');
   const [bulkSaving,        setBulkSaving]        = useState(false);
@@ -165,9 +171,12 @@ export default function Candidates() {
   // via the merged "Unmatched Candidates" panel (GET /api/candidates/
   // unmatched, see backend/src/utils/unmatchedCandidates.ts). Real
   // server-side pagination, not a client-filtered flat page.
+  // The route is HR-tier only (requireHR), so a Hiring Manager never asks:
+  // the request would always be a 403, and the panel is not theirs to see.
   const { data: unmatchedData, isLoading: unmatchedLoading } = useQuery<{ data: { submissions: UnmatchedCandidate[]; total: number } }>({
     queryKey: ['candidates', 'unmatched', unmatchedOffset],
     queryFn:  () => candidatesApi.unmatched({ limit: String(UNMATCHED_PAGE_SIZE), offset: String(unmatchedOffset) }),
+    enabled:  canHR,
   });
 
   useEffect(() => {
@@ -272,29 +281,58 @@ export default function Candidates() {
   const bulkNeedsBudgetReason = bulkStageValue === 'Interview Round 1' &&
     all.some(a => selectedIds.has(a.id) && a.is_severely_over_budget);
 
-  const handleBulkStage = async () => {
+  // The reason answers "why shortlist this over-budget person", so it goes only with the rows that really are 15%+ over (the server ignores it
+  // for any other row, and does not trust this filter either).
+  const overBudgetIds = new Set(all.filter(a => selectedIds.has(a.id) && a.is_severely_over_budget).map(a => a.id));
+
+  const closeBulkStageModal = () => {
+    setShowBulkStageModal(false);
+    setBulkBudgetReasonCat('');
+    setBulkBudgetReasonDetail('');
+    setBulkRefused([]);
+    setBulkSkipReason('');
+  };
+
+  // `retryIds` is set for the retry of the rows the server refused for a skippable check: only those rows go, and only that attempt may
+  // carry the written reason (skip_reason). The first attempt never sends one, and a blank reason is a plain retry.
+  const handleBulkStage = async (retryIds?: string[]) => {
     if (bulkNeedsBudgetReason && !bulkBudgetReasonCat) {
       toast.error('Select a reason before shortlisting — at least one selected candidate is 15%+ over budget');
       return;
     }
     setBulkSaving(true);
-    const ids = Array.from(selectedIds);
+    const ids = retryIds ?? Array.from(selectedIds);
+    const skipReason = retryIds && canHR ? bulkSkipReason.trim() || undefined : undefined;
     let succeeded = 0;
+    const refused: BulkRefusal[] = [];
     for (let i = 0; i < ids.length; i += BULK_CONCURRENCY) {
       const batch = ids.slice(i, i + BULK_CONCURRENCY);
       const settled = await Promise.allSettled(batch.map(id => applicationsApi.advanceStage(id, bulkStageValue, {
-        budgetExceptionReasonCat: bulkNeedsBudgetReason ? bulkBudgetReasonCat : undefined,
-        budgetExceptionReasonDetail: bulkNeedsBudgetReason ? bulkBudgetReasonDetail.trim() || undefined : undefined,
+        skipReason,
+        budgetExceptionReasonCat: bulkNeedsBudgetReason && overBudgetIds.has(id) ? bulkBudgetReasonCat : undefined,
+        budgetExceptionReasonDetail: bulkNeedsBudgetReason && overBudgetIds.has(id) ? bulkBudgetReasonDetail.trim() || undefined : undefined,
       })));
-      succeeded += settled.filter(r => r.status === 'fulfilled').length;
+      settled.forEach((r, k) => {
+        if (r.status === 'fulfilled') { succeeded++; return; }
+        const message = apiErrorMessage(r.reason);
+        if (canHR && isSkippableStageGate(message)) {
+          const row = all.find(a => a.id === batch[k]);
+          refused.push({ id: batch[k], name: row?.candidate_name ?? batch[k], message: message! });
+        }
+      });
     }
     toast[succeeded === ids.length ? 'success' : 'error'](`${succeeded} of ${ids.length} updated to ${bulkStageValue}`);
-    setShowBulkStageModal(false);
-    setBulkBudgetReasonCat('');
-    setBulkBudgetReasonDetail('');
-    setSelectedIds(new Set());
     qc.invalidateQueries({ queryKey: ['applications'] });
     setBulkSaving(false);
+    if (refused.length > 0) {
+      // Stay open: list the rows refused for a skippable check so HR can retry just those with a reason. Rows refused for any other
+      // reason stay failed (counted in the toast above) and are not offered again.
+      // The typed reason is kept: a row refused again must not make HR retype it.
+      setBulkRefused(refused);
+      return;
+    }
+    closeBulkStageModal();
+    setSelectedIds(new Set());
   };
 
   const handleBulkStatus = async () => {
@@ -315,7 +353,7 @@ export default function Candidates() {
         : null;
       return applicationsApi.updateStatus(id, {
         new_status: bulkStatusValue,
-        ...reasonFields(reasons),
+        ...statusReasonFields(bulkStatusValue, reasons),
         rejection_reason_detail: bulkRejectionDetail || undefined,
         send_rejection_email: perRecipient ? true : undefined,
         rejection_email_subject: perRecipient?.subject,
@@ -360,7 +398,7 @@ export default function Candidates() {
           applications never belongs to any role, so this is meaningless
           (always empty) once a Role filter is active — hide it rather than
           show a confusing "0", same as before the merge). */}
-      {roleIds.length === 0 && (unmatchedTotal > 0 || unmatchedLoading) && (
+      {canHR && roleIds.length === 0 && (unmatchedTotal > 0 || unmatchedLoading) && (
         <div className="card border-amber-200">
           <div
             role="button"
@@ -680,14 +718,35 @@ export default function Candidates() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
             <h3 className="text-base font-semibold mb-1">Update stage</h3>
-            <p className="text-sm font-mono text-gray-500 mb-4">{selectedIds.size} candidates</p>
-            <select value={bulkStageValue} onChange={e => setBulkStageValue(e.target.value)} className="select mb-4">
+            <p className="text-sm font-mono text-gray-500 mb-4">{bulkRefused.length > 0 ? `${bulkRefused.length} of ${selectedIds.size} not moved` : `${selectedIds.size} candidates`}</p>
+            <select value={bulkStageValue} onChange={e => setBulkStageValue(e.target.value)} disabled={bulkRefused.length > 0} className="select mb-4">
               {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
-            {bulkNeedsBudgetReason && (
+            {bulkRefused.length > 0 && (
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-100 rounded-lg">
+                <p className="text-xs text-amber-800 mb-2">
+                  {bulkRefused.length === 1 ? 'This move is' : 'These moves are'} blocked by a check. To proceed anyway, write a reason: it is saved in each candidate's activity log. Leave it empty to try again once the check is met. Any other candidate that failed is not listed here.
+                </p>
+                <ul className="mb-3 text-xs text-gray-700 legacy-space-y-1 max-h-32 overflow-y-auto" data-testid="bulk-refused-list">
+                  {bulkRefused.map(r => <li key={r.id}><span className="font-medium">{r.name}</span> — {r.message}</li>)}
+                </ul>
+                <label htmlFor="bulk-stage-skip-reason" className="block text-xs font-medium text-gray-600 mb-1.5">
+                  Reason to proceed anyway
+                </label>
+                <textarea
+                  id="bulk-stage-skip-reason"
+                  value={bulkSkipReason}
+                  onChange={e => setBulkSkipReason(e.target.value)}
+                  placeholder="Why is this check being bypassed?"
+                  className="input text-sm h-16 resize-none"
+                />
+              </div>
+            )}
+            {bulkRefused.length === 0 && bulkNeedsBudgetReason && (
               <div className="mb-4 legacy-space-y-3 p-3 bg-amber-50 border border-amber-100 rounded-lg">
                 <p className="text-xs text-amber-800">
-                  At least one selected candidate is 15%+ over the role's compensation band — select a reason to proceed.
+                  At least one selected candidate is 15%+ over the role's compensation band — select a reason to proceed. It is recorded only for
+                  the {overBudgetIds.size === 1 ? 'one candidate who is' : `${overBudgetIds.size} candidates who are`} over, not for the others.
                 </p>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1.5">Reason <span className="text-red-500">*</span></label>
@@ -708,8 +767,17 @@ export default function Candidates() {
               </div>
             )}
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowBulkStageModal(false); setBulkBudgetReasonCat(''); setBulkBudgetReasonDetail(''); }} className="btn-secondary">Cancel</button>
-              <button onClick={handleBulkStage} disabled={bulkSaving || (bulkNeedsBudgetReason && !bulkBudgetReasonCat)} className="btn-primary">{bulkSaving ? 'Updating…' : 'Update'}</button>
+              {bulkRefused.length > 0 ? (
+                <>
+                  <button onClick={() => { closeBulkStageModal(); setSelectedIds(new Set()); }} className="btn-secondary">Close</button>
+                  <button onClick={() => handleBulkStage(bulkRefused.map(r => r.id))} disabled={bulkSaving} className="btn-primary">{bulkSaving ? 'Updating…' : `Retry ${bulkRefused.length}`}</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={closeBulkStageModal} className="btn-secondary">Cancel</button>
+                  <button onClick={() => handleBulkStage()} disabled={bulkSaving || (bulkNeedsBudgetReason && !bulkBudgetReasonCat)} className="btn-primary">{bulkSaving ? 'Updating…' : 'Update'}</button>
+                </>
+              )}
             </div>
           </div>
         </div>

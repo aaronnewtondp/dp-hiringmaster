@@ -1,6 +1,7 @@
 // Fast cleanup of throwaway roles (and everything hanging off them) for the LOCAL sourcing specs.
 //
-// Why this exists: `pending_actions` has foreign keys to applications and roles with NO index on them, so on a local database that has
+// Why this exists: `pending_actions` has foreign keys to applications and roles; since 2026-11-17 schema.sql indexes both (idx_pending_actions_application_id / _role_id), but a database built before that
+// may lack them, and a few hundred deletes are still cheaper in one batch. Originally: it had NO index on them, so on a local database that has
 // seen months of test churn (millions of rows) every single deleted application or role costs a sequential scan of that table (~0.5 s each).
 // A spec that makes a few hundred applications then spends minutes in afterAll and trips Playwright's hook timeout. Here the whole purge
 // runs in ONE transaction with foreign-key triggers off (`session_replication_role = replica`, local Postgres is a superuser), and the rows

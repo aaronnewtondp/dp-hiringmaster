@@ -620,10 +620,10 @@ describe('Help — questions added after the October 2026 audit', () => {
     expect(t).toMatch(/an Approved role isn't offered until then/);
   });
 
-  it('candidate page: what is where, and that the pencil is shown to everyone but saving is HR/Admin, Leadership and Super Admin only', () => {
+  it('candidate page: what is where, and that the pencil is shown only to HR/Admin, Leadership and Super Admin', () => {
     mount();
     const t = answerTo('What is on a candidate\'s page?');
-    expect(t).toMatch(/only HR\/Admin, Leadership and Super Admin can save changes — for anyone else the save is refused/);
+    expect(t).toMatch(/shown only to HR\/Admin, Leadership and Super Admin \(a Hiring Manager sees these sections read-only\)/);
     expect(t).toMatch(/The Activity timeline at the bottom logs every change/);
   });
 
@@ -649,6 +649,7 @@ describe('Help — questions added after the October 2026 audit', () => {
     expect(t).toMatch(/Every interview or assignment round already created for the application must have its feedback submitted/);
     expect(t).toMatch(/A candidate leaving Reference Check needs at least one reference check on file/);
     expect(t).toMatch(/needs an over-budget reason/);
+    expect(t).toMatch(/Reason to proceed anyway/);
     expect(t).toMatch(/HMS doesn't generate offer letters or a pre-joining document checklist/);
   });
 

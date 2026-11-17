@@ -134,7 +134,7 @@ export async function runAsOneQuery(client: PgClient, sql: string): Promise<{ co
 }
 
 /**
- * schema.sql is two scripts in one file: the original create-from-scratch block (BEGIN ... COMMIT, plain CREATE TABLE) and the patch history
+ * schema.sql is two scripts in one file: the original create-from-scratch block (BEGIN ... COMMIT, CREATE TABLE IF NOT EXISTS) and the patch history
  * appended after it. The split is at the first COMMIT.
  */
 export function splitSchemaSql(sql: string): { base: string[]; tail: string[] } {

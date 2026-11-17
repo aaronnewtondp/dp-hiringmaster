@@ -18,6 +18,7 @@ import { LOW_PIPELINE_MAX_SHORTLISTED, LOW_PIPELINE_MAX_ACTIVE } from './lowPipe
 import { SOURCING_CHANNELS } from './sourcingConfig.js';
 import { splitHiringManagerNames, isNamedHiringManager } from './hiringManagers.js';
 import { REASON_DELIMITER, splitReasons, joinReasons, normalizeReasons } from './rejectionReasons.js';
+import { FULL_NAME_MAX_CHARS } from './candidateName.js';
 import { parseCtcBandMax, isSeverelyOverBudget, OVER_BUDGET_TOLERANCE } from './budget.js';
 
 const ROOT = path.resolve(__dirname, '../../..');
@@ -54,7 +55,7 @@ function namedCheck(name: string): string[] {
 }
 /** The values of the inline `<column> ... CHECK (<column> IN (...))` of a table's CREATE TABLE. */
 function inlineCheck(table: string, column: string): string[] {
-  const start = SCHEMA.indexOf(`CREATE TABLE ${table} (`);
+  const start = SCHEMA.indexOf(`CREATE TABLE IF NOT EXISTS ${table} (`);
   const m = new RegExp(`\\n\\s*${column}\\s+TEXT[^\\n]*CHECK \\(${column} IN \\(([\\s\\S]*?)\\)\\)`).exec(SCHEMA.slice(start));
   return nonEmpty(`${table}.${column} CHECK`, start >= 0 && m ? quoted(m[1]) : []);
 }
@@ -302,6 +303,16 @@ describe('budget: frontend = backend', () => {
     expect(isSeverelyOverBudget(27.6, '18-24 LPA')).toBe(true);
     expect(isSeverelyOverBudget(null, '18-24 LPA')).toBe(false);
     expect(isSeverelyOverBudget(30, null)).toBe(false);
+  });
+});
+
+describe('candidateName: frontend cap = backend cap', () => {
+  it('FULL_NAME_MAX_CHARS is the same number, so the input stops where the server would refuse', () => {
+    expect(loadFrontend('frontend/src/utils/candidateName.ts').FULL_NAME_MAX_CHARS).toBe(FULL_NAME_MAX_CHARS);
+  });
+  it('the Add candidate input and the inline Full Name editor use it', () => {
+    expect(read('frontend/src/pages/NewCandidate.tsx')).toMatch(/maxLength=\{FULL_NAME_MAX_CHARS\}/);
+    expect(read('frontend/src/pages/CandidateDetail.tsx')).toMatch(/key: 'full_name', label: 'Full Name', type: 'text', maxLength: FULL_NAME_MAX_CHARS/);
   });
 });
 

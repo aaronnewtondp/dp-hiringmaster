@@ -239,10 +239,16 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
   // path (single-row, bulk, either page) actually goes through. "Shortlist"
   // now means advancing straight to Interview Round 1 (the old intermediate
   // 'Shortlisted' stage was retired — see STAGE_ORDER).
+  // The reason is stored (and named in the activity log) ONLY for this one case: a move to Interview Round 1 of an application that is really
+  // 15%+ over the band. A client that sends it for any other row or stage (the bulk move sends one reason for the whole selection) has it
+  // ignored here, so an in-band candidate never carries an "over-budget exception". When the comparison cannot be made (no band, no expected
+  // CTC, a band with no number) the row is NOT over budget by isSeverelyOverBudget's own rule, so nothing is stored for it either.
+  let storeBudgetReason = false;
   if (new_stage === 'Interview Round 1') {
     const candidate = await queryOne<{ expected_ctc: number }>('SELECT expected_ctc FROM candidates WHERE id=$1', [app.candidate_id]);
     const role      = await queryOne<{ ctc_band: string }>('SELECT ctc_band FROM roles WHERE id=$1', [app.role_id]);
-    if (isSeverelyOverBudget(candidate?.expected_ctc, role?.ctc_band) && !budget_exception_reason_cat) {
+    storeBudgetReason = isSeverelyOverBudget(candidate?.expected_ctc, role?.ctc_band);
+    if (storeBudgetReason && !budget_exception_reason_cat) {
       res.status(400).json({ error: "This candidate's expected CTC is 15%+ over the role's band — select a reason before shortlisting." });
       return;
     }
@@ -290,6 +296,8 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
   }
 
   const slaHours = getSlaHours(new_stage, app.ai_fit_score);
+  const storedReasonCat: string | null = storeBudgetReason ? (budget_exception_reason_cat || null) : null;
+  const storedReasonDetail: string | null = storeBudgetReason ? (budget_exception_reason_detail || null) : null;
 
   // Dashboard's Time to Fill is a literal AVG(offer_accepted_date -
   // role.start_date) — nothing ever stamped this column on the stage
@@ -325,7 +333,7 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
        budget_exception_reason_cat=COALESCE($4, budget_exception_reason_cat),
        budget_exception_reason_detail=COALESCE($5, budget_exception_reason_detail)
        WHERE id=$3`,
-      [new_stage, slaHours, req.params.id, budget_exception_reason_cat || null, budget_exception_reason_detail || null]
+      [new_stage, slaHours, req.params.id, storedReasonCat, storedReasonDetail]
     );
     // A stage-SLA pending_action (Idle Candidate, Resume Shortlist Pending,
     // Interview 1/2 Feedback Due, etc.) is only ever valid for the stage it
@@ -350,7 +358,7 @@ router.post('/:id/stage', async (req: Request, res: Response) => {
     await logActivity(client, app.id, app.candidate_id, app.role_id,
       'Stage Changed',
       skip_reason ? `Stage skipped to ${new_stage}. Reason: ${skip_reason}`
-        : budget_exception_reason_cat ? `Stage → ${new_stage} (over-budget exception: ${budget_exception_reason_cat})`
+        : storedReasonCat ? `Stage → ${new_stage} (over-budget exception: ${storedReasonCat})`
         : `Stage → ${new_stage}`,
       app.stage, new_stage, req.user!.userId, req.user!.name
     );
@@ -477,9 +485,16 @@ router.post('/:id/status', async (req: Request, res: Response) => {
     return;
   }
 
-  // Rejection and withdrawal require a reason
-  if ((new_status === 'Rejected' || new_status === 'Withdrawn') && !rejectionReasonText && !withdrawal_reason_cat) {
-    res.status(400).json({ error: 'A reason is required when rejecting or withdrawing a candidate' });
+  // Rejection and withdrawal each require THEIR OWN kind of reason: Rejected needs a non-blank
+  // rejection reason, Withdrawn a non-blank withdrawal_reason_cat (trimmed). One kind no longer
+  // satisfies the other status. Before any write.
+  const withdrawalReason = typeof withdrawal_reason_cat === 'string' ? withdrawal_reason_cat.trim() : '';
+  if (new_status === 'Rejected' && !rejectionReasonText) {
+    res.status(400).json({ error: 'A rejection reason is required when rejecting a candidate (rejection_reason_cats or rejection_reason_cat)' });
+    return;
+  }
+  if (new_status === 'Withdrawn' && !withdrawalReason) {
+    res.status(400).json({ error: 'A withdrawal reason is required when withdrawing a candidate (withdrawal_reason_cat)' });
     return;
   }
 
@@ -512,7 +527,7 @@ router.post('/:id/status', async (req: Request, res: Response) => {
        withdrawal_reason_cat=$4, withdrawal_reason_detail=$5,
        last_updated=NOW()${clearJoiningRisk} WHERE id=$6`,
       [new_status, rejectionReasonText, rejection_reason_detail || null,
-       withdrawal_reason_cat || null, withdrawal_reason_detail || null, req.params.id]
+       withdrawalReason || null, withdrawal_reason_detail || null, req.params.id]
     );
     await logActivity(client, app.id, app.candidate_id, app.role_id,
       'Status Changed',
@@ -624,10 +639,31 @@ router.patch('/:id/notes', requireHR, async (req: Request, res: Response) => {
   for (const field of allowed) {
     if (req.body[field] !== undefined) {
       updates.push(`${field} = $${i++}`);
-      values.push(req.body[field]);
+      // An empty-string override means "clear": store NULL (the column's CHECK rejects '').
+      values.push(field === 'hr_priority_override' && req.body[field] === '' ? null : req.body[field]);
     }
   }
   if (!updates.length) { res.status(400).json({ error: 'No valid fields' }); return; }
+
+  // Setting or CHANGING the HR priority override needs a non-blank reason (trimmed), checked before any write. The reason may arrive in this
+  // request or already be stored on the application: the candidate page sends only the keys that changed, so moving the select from High to
+  // Critical carries no reason of its own. Re-sending the value that is already stored is not a change and needs none; clearing the override
+  // (null, an empty string or 'Normal') needs none; a body that carries only the reason is not an override change.
+  const overrideValue = req.body.hr_priority_override;
+  const clearsOverride = overrideValue === null || overrideValue === '' || overrideValue === 'Normal';
+  let effectiveReason: string | null = typeof req.body.hr_priority_override_reason === 'string' && req.body.hr_priority_override_reason.trim()
+    ? req.body.hr_priority_override_reason : null;
+  if (overrideValue !== undefined && !clearsOverride) {
+    const stored = await queryOne<{ hr_priority_override: string | null; hr_priority_override_reason: string | null }>(
+      'SELECT hr_priority_override, hr_priority_override_reason FROM applications WHERE id=$1', [req.params.id]);
+    const storedReason = stored?.hr_priority_override_reason?.trim() ? stored.hr_priority_override_reason : null;
+    effectiveReason = effectiveReason ?? storedReason;
+    const unchanged = stored?.hr_priority_override === overrideValue;
+    if (!effectiveReason && !unchanged) {
+      res.status(400).json({ error: 'hr_priority_override_reason is required when setting an HR priority override' });
+      return;
+    }
+  }
 
   // joining_risk_auto_flag is otherwise write-once (only ever set true, by
   // slaChecker.ts's checkJoiningRisk) — logging fresh HR contact here is the
@@ -648,7 +684,7 @@ router.patch('/:id/notes', requireHR, async (req: Request, res: Response) => {
     const app = await queryOne<Application>('SELECT candidate_id, role_id FROM applications WHERE id=$1', [req.params.id]);
     await transaction(async (client) => {
       await logActivity(client, String(req.params.id), app!.candidate_id, app!.role_id,
-        'Priority Override Set', `HR Priority → ${req.body.hr_priority_override}: ${req.body.hr_priority_override_reason || ''}`,
+        'Priority Override Set', `HR Priority → ${req.body.hr_priority_override}: ${effectiveReason || ''}`,
         null, req.body.hr_priority_override, req.user!.userId, req.user!.name
       );
     });
