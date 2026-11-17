@@ -376,10 +376,13 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
   // now advances straight to Interview Round 1 — 'Shortlisted' was retired
   // as its own intermediate stage.
   const shortlistIds = async (ids: string[], reasonCat?: string, reasonDetail?: string) => {
-    const opts = { budgetExceptionReasonCat: reasonCat, budgetExceptionReasonDetail: reasonDetail };
+    // The reason goes only with the rows that really are 15%+ over (the server ignores it for any other row).
+    const optsFor = (id: string) => apps.find(x => x.id === id)?.is_severely_over_budget
+      ? { budgetExceptionReasonCat: reasonCat, budgetExceptionReasonDetail: reasonDetail }
+      : { budgetExceptionReasonCat: undefined, budgetExceptionReasonDetail: undefined };
     if (ids.length === 1) {
       try {
-        await applicationsApi.advanceStage(ids[0], 'Interview Round 1', opts);
+        await applicationsApi.advanceStage(ids[0], 'Interview Round 1', optsFor(ids[0]));
         toast.success('Candidate shortlisted');
         refreshApps();
       } catch (err: unknown) {
@@ -387,7 +390,7 @@ export default function ScorecardSummary({ personaScope, onCountChange }: {
         toast.error(msg || 'Action failed');
       }
     } else {
-      await runBulk(id => applicationsApi.advanceStage(id, 'Interview Round 1', opts), ids, 'shortlisted');
+      await runBulk(id => applicationsApi.advanceStage(id, 'Interview Round 1', optsFor(id)), ids, 'shortlisted');
     }
   };
 

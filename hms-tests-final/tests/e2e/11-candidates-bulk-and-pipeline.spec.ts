@@ -213,7 +213,7 @@ test.describe('Active Candidates: bulk stage', () => {
     await expect(dialogWith(page, 'Update stage').getByRole('combobox').nth(1)).toHaveValue('');   // the reason was reset
   });
 
-  test('TODAY with one over-budget row in a mixed selection, the reason is sent for, and stored on, every selected application', async ({ page, request }) => {
+  test('with one over-budget row in a mixed selection, the reason is sent for, and stored on, that row only', async ({ page, request }) => {
     const b = await makeBatch(request, ['M', 'F', 'M-over']);
     const posts = recordRequests(page, isPost('/stage'));
     await openCandidates(page, 'hr', b, 3);
@@ -226,10 +226,20 @@ test.describe('Active Candidates: bulk stage', () => {
     await expect(toastWith(page, '3 of 3 updated to Interview Round 1')).toBeVisible();
 
     expect(posts.bodies()).toHaveLength(3);
-    for (const body of posts.bodies()) expect(body).toMatchObject({ budget_exception_reason_cat: 'Leadership-approved exception' });
-    for (const p of b.people) {                                                      // TODAY: in-band candidates carry an "over-budget exception" too
-      expect((await getApp(request, p.appId)).budget_exception_reason_cat).toBe('Leadership-approved exception');
+    const withReason = posts.bodies().filter(body => 'budget_exception_reason_cat' in body);
+    expect(withReason).toEqual([{ new_stage: 'Interview Round 1', budget_exception_reason_cat: 'Leadership-approved exception' }]);
+    for (const p of b.people) {
+      const stored = (await getApp(request, p.appId)).budget_exception_reason_cat;
+      if (p === b.people[2]) expect(stored).toBe('Leadership-approved exception');
+      else expect(stored).toBeFalsy();                                               // in-band candidates carry no "over-budget exception"
     }
+  });
+
+  test('the server ignores a reason sent for a row that is not over budget (it does not trust the client to filter)', async ({ request }) => {
+    const b = await makeBatch(request, ['M']);
+    const res = await (await hrApi(request)).post(`/api/applications/${b.people[0].appId}/stage`, { new_stage: 'Interview Round 1', budget_exception_reason_cat: 'Leadership-approved exception' });
+    expect(res.status()).toBe(200);
+    expect((await getApp(request, b.people[0].appId)).budget_exception_reason_cat).toBeFalsy();
   });
 
   test('a row the server refuses is reported in the count and the others still move', async ({ page, request }) => {

@@ -537,8 +537,13 @@ named: fixing the issue turns that test red on purpose (see the "TODAY" / `chara
       (`enabled: !isLockedToOwnRole`), but the filter is still drawn, with an empty list. **Fixed 2026-11-16:** the filter is no longer drawn for a Hiring Manager, and a remembered mode is ignored for them.
 - [ ] **Smaller pinned UI behaviours** (each in the listed spec's header): the Stage modal has no skip-reason control; a candidate page keeps the old stage until
       reloaded after an auto-advance; a Hiring Manager not on a round still sees "Submit feedback" and the edit pencils on roles and candidates (every save is
-      a 403); a role's activity timeline does not refresh after Change status; the bulk over-budget reason is sent for, and stored on, every selected row; clearing a user's Department in Edit does not clear it; the first tap on an info marker on a phone
+      a 403); a role's activity timeline does not refresh after Change status; clearing a user's Department in Edit does not clear it; the first tap on an info marker on a phone
       opens nothing (`e2e/10`, `e2e/11`, `e2e/14`, `e2e/09`, `e2e-mobile/15`).
+- [x] **The bulk over-budget reason was sent for, and stored on, every selected row** (Candidates bulk Change Stage to Interview Round 1, `e2e/11`). **Fixed 2026-11-17:**
+      `POST /applications/:id/stage` now stores the reason (and names it in the activity text) only when the move is to Interview Round 1 AND the row is really 15%+ over the
+      band (`isSeverelyOverBudget`, the one definition); for any other row or stage it is ignored, so a client that sends it for everyone cannot mark an in-band candidate as an
+      exception. A row whose band or expected CTC is missing/unparseable is not over budget by that same rule, so nothing is stored for it. The bulk modal sends the reason only with
+      the rows whose `is_severely_over_budget` is true (still asked once, still mandatory while any selected row is over; not asked when none is). The `e2e/11` TODAY pin was converted.
 - [x] **Approve Role hid a JD-generation failure** (`RoleDetail.tsx` `handleApprove`). Fixed 2026-11-16: the PATCH returns `jdGeneration` (30 s of Claude, two PDFs, two Drive
       uploads, awaited inline) and the button now reports it through the same `reportJdGeneration` the Change status window uses ("Long-form and social JDs generated",
       or "JD generation failed: <reason>" while the role stays approved; nothing for a role whose JD is hand-written or already has links). Pinned by `RoleDetail.actions.test.tsx`.
