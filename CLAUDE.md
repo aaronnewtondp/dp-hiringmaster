@@ -170,7 +170,7 @@ New pure logic worth testing should be `export`ed even if only used inside its m
 `services/jdContent.ts`'s `finalizeJdContent`).
 
 **Vitest (frontend).** `vitest.config.ts`: jsdom, `src/test/setup.ts` (jest-dom matchers, RTL cleanup after each test, `asyncUtilTimeout` 5 s;
-no console filter: the React Router 6 future-flag filter was deleted with React 19, nothing prints). Fixtures and mocks live in `src/test/` (`authMock.ts`, `candidateFixtures.ts`,
+no console filter: the React Router 6 future-flag filter was deleted with React 19, and no Router future-flag line prints. One pre-existing warning still does, identical on React 18: `Candidates.headers.test.tsx` prints a DOM-nesting warning (`<div>` in `<p>`, `InfoTooltip` inside a `<p>` in `Candidates.tsx`; React 19 words it as "hydration error", the app does no SSR); not a regression, not fixed). Fixtures and mocks live in `src/test/` (`authMock.ts`, `candidateFixtures.ts`,
 `candidateDetailFixtures.ts`, `helpers.ts`, `loadTolerance.ts` for the large page tests, `backendSource.ts`). Per-page `*.markers.test.tsx` pin
 the info-marker texts against the backend's real numbers; `pages.smoke.test.tsx` renders every page.
 
