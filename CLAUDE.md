@@ -70,7 +70,7 @@ various hiring managers per role.
 ### Stack
 | Layer | Technology |
 |---|---|
-| Frontend | React 18 + TypeScript + Vite + TailwindCSS 4 (see "Tailwind 4 compatibility" below) |
+| Frontend | React 19 + TypeScript + Vite + TailwindCSS 4 (see "Tailwind 4 compatibility" below) |
 | Backend | Node.js + Express + TypeScript |
 | Local DB | PostgreSQL 16 via Docker |
 | Production DB | Supabase (Postgres) |
@@ -169,8 +169,8 @@ and say so; the day the behaviour is fixed they change with it (the frontend one
 New pure logic worth testing should be `export`ed even if only used inside its module (`jobs/slaChecker.ts`'s `tieredStandardHours`,
 `services/jdContent.ts`'s `finalizeJdContent`).
 
-**Vitest (frontend).** `vitest.config.ts`: jsdom, `src/test/setup.ts` (jest-dom matchers, RTL cleanup after each test, `asyncUtilTimeout` 5 s,
-React Router's two future-flag warnings filtered). Fixtures and mocks live in `src/test/` (`authMock.ts`, `candidateFixtures.ts`,
+**Vitest (frontend).** `vitest.config.ts`: jsdom, `src/test/setup.ts` (jest-dom matchers, RTL cleanup after each test, `asyncUtilTimeout` 5 s;
+no console filter: the React Router 6 future-flag filter was deleted with React 19, and no Router future-flag line prints. One pre-existing warning still does, identical on React 18: `Candidates.headers.test.tsx` prints a DOM-nesting warning (`<div>` in `<p>`, `InfoTooltip` inside a `<p>` in `Candidates.tsx`; React 19 words it as "hydration error", the app does no SSR); not a regression, not fixed). Fixtures and mocks live in `src/test/` (`authMock.ts`, `candidateFixtures.ts`,
 `candidateDetailFixtures.ts`, `helpers.ts`, `loadTolerance.ts` for the large page tests, `backendSource.ts`). Per-page `*.markers.test.tsx` pin
 the info-marker texts against the backend's real numbers; `pages.smoke.test.tsx` renders every page.
 

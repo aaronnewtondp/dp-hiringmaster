@@ -8,7 +8,7 @@ the architecture and its rules (read it first); `ROADMAP.md` is the phase-by-pha
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 18 + TypeScript + Vite + TailwindCSS, TanStack Query, installable PWA (no offline mode) |
+| Frontend | React 19 + TypeScript + Vite + TailwindCSS, TanStack Query, installable PWA (no offline mode) |
 | Backend | Node.js 22 + Express + TypeScript (run with `tsx`, no build step locally) |
 | Database | PostgreSQL 16 — Docker locally, Supabase in production; `backend/src/db/schema.sql` is the permanent record of the schema |
 | Auth | Google OAuth restricted to `@digitalpaani.com`, exchanged for an HMS JWT (24 h); four personas: `hr_recruiter` (shown as HR/Admin), `hiring_manager`, `leadership`, `super_admin` |
