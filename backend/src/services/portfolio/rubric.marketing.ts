@@ -408,17 +408,19 @@ const DOUBLE_QUOTE_RE = new RegExp(`"([^"]*)"|${LDQ}([^${RDQ}]*)${RDQ}`, 'g');
 const SINGLE_QUOTE_RE = /(?<![\p{L}\p{N}])'(?=\p{L})(.{1,300}?)'(?![\p{L}\p{N}])/gu;
 const CURLY_SINGLE_QUOTE_RE = new RegExp(`(?<![\\p{L}\\p{N}])${LSQ}(?=\\p{L})([^${LSQ}\\n]{1,300}?)${RSQ}(?![\\p{L}\\p{N}])`, 'gu');
 
-// ── Stray straight double quotes. The model writes an inch mark (5" tall), or leaves a quote open or unclosed, and pairing marks left to
-// right then pairs the WRONG ones: the prose between them (3+ words) becomes a "quote" that is not on the page and an honest verbatim
-// quote is zeroed as invented. A straight mark is therefore read by its surroundings first, and only a mark PROVABLY not part of a pair is
-// ignored (turned into a space: it was punctuation to the matcher anyway):
-//  - open-looking: after whitespace, the start of the text or ( [ { <, and followed by a non-space  ->  can only open a quote
-//  - close-looking: followed by whitespace, the end or ) ] } > . , ; : ! ?, and not after whitespace  ->  can only close one
-//  - anything else (a mark inside a word, one with spaces on both sides, one that looks both ways) toggles, as it always did.
-// A closer with nothing open is stray (an inch mark, a dangling quote), and an opener that meets another opener before any closer is stray
-// (its text runs on into prose), the later one wins. A well-formed string is untouched, so its verdict is exactly the old one. A pair that
-// is well-formed but wrong (`"Monsoon is 5" and "Real quote here"`) is NOT repaired: nothing proves which mark is the stray one, and every
-// fragment that is read as a quote still has to be found.
+// ── Stray straight double quotes. The model writes an inch mark (5" tall) or a dangling mark, and pairing marks left to right then pairs
+// the WRONG ones: prose between two marks (3+ words) becomes a "quote" that is not on the page and an honest verbatim quote is zeroed as
+// invented. The repair must never be able to STOP a check the old pairing made on a fabricated quote, so it is deliberately narrow: a mark
+// is ignored (turned into a space, same length) only when ALL of these hold:
+//  - it looks like a closer (followed by whitespace, the end or ) ] } > . , ; : ! ? and not after whitespace) and nothing is open,
+//  - it follows a letter or digit (an inch mark, `the brand" is`), never punctuation or a bracket, and
+//  - the NEXT straight mark in the text looks like an opener (after whitespace, the start or ( [ { < and followed by a non-space) or there
+//    is none. Text between a stray and a following opener is outside any quote. A next mark that looks like a closer could be the end of
+//    a real quote, so then nothing is repaired and the old pairing stands.
+// An opener that meets another opener, a mark inside a word, one with spaces on both sides and one that looks both ways all toggle exactly
+// as they always did (so `"fabricated words "nested" end"` keeps every fragment it had), and a well-formed string is untouched. A dangling
+// opener at the very end has no partner and is blanked (it checked nothing before either). Known limit, kept on purpose: an unclosed
+// opener before a real quote (`Header says "Monsoon Edit and the footer says "Copyright"`) is still paired as before.
 const OPEN_BEFORE_RE = /[([{<]/;
 const CLOSE_AFTER_RE = /[)\]}>.,;:!?]/;
 const isSpaceOrEdge = (c: string | undefined): boolean => c === undefined || /\s/.test(c);
@@ -426,28 +428,25 @@ const isSpaceOrEdge = (c: string | undefined): boolean => c === undefined || /\s
 /** `evidence` with every provably stray straight double quote replaced by a space (same length). */
 export function repairStrayQuotes(evidence: string): string {
   if (!evidence.includes('"')) return evidence;
-  const chars = evidence.split('');
-  let pending = -1;
-  for (let i = 0; i < chars.length; i++) {
+  const marks: { i: number; role: 'open' | 'close' | 'either'; wordBefore: boolean }[] = [];
+  for (let i = 0; i < evidence.length; i++) {
     if (evidence[i] !== '"') continue;
     const prev = i > 0 ? evidence[i - 1] : undefined;
     const next = i + 1 < evidence.length ? evidence[i + 1] : undefined;
     const openLook = (isSpaceOrEdge(prev) || OPEN_BEFORE_RE.test(prev as string)) && !isSpaceOrEdge(next);
     const closeLook = (isSpaceOrEdge(next) || CLOSE_AFTER_RE.test(next as string)) && !isSpaceOrEdge(prev);
-    const role: 'open' | 'close' | 'either' = openLook && !closeLook ? 'open' : closeLook && !openLook ? 'close' : 'either';
-    if (role === 'open') {
-      if (pending >= 0) chars[pending] = ' ';
-      pending = i;
-    } else if (role === 'close') {
-      if (pending >= 0) pending = -1;
-      else chars[i] = ' ';
-    } else if (pending >= 0) {
-      pending = -1;
-    } else {
-      pending = i;
-    }
+    marks.push({ i, role: openLook && !closeLook ? 'open' : closeLook && !openLook ? 'close' : 'either', wordBefore: prev !== undefined && /[\p{L}\p{N}]/u.test(prev) });
   }
-  if (pending >= 0) chars[pending] = ' ';
+  const chars = evidence.split('');
+  let pending = -1;   // index (into marks) of the mark that is open, or -1
+  for (let k = 0; k < marks.length; k++) {
+    const m = marks[k];
+    if (pending >= 0) { pending = -1; continue; }   // anything while a mark is open closes it, as the old pairing did
+    const nextRole = k + 1 < marks.length ? marks[k + 1].role : 'open';
+    if (m.role === 'close' && m.wordBefore && nextRole === 'open') chars[m.i] = ' ';
+    else pending = k;
+  }
+  if (pending >= 0 && pending === marks.length - 1) chars[marks[pending].i] = ' ';
   return chars.join('');
 }
 
