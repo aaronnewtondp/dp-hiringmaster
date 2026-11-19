@@ -501,7 +501,7 @@ describe('Help — workflow and section answers that were wrong, stale or mislea
   it('scheduling: who can, what is required, India time and the candidate invited only with an email on file', () => {
     mount();
     const t = answerTo('What happens when I schedule an interview round?');
-    expect(t).toMatch(/at least one interviewer email and a date and time \(India time\) are required/);
+    expect(t).toMatch(/at least one interviewer \(picked from a searchable list of colleagues[^)]*not listed\) and a date and time \(India time\) are required/);
     expect(t).toMatch(/the candidate \(only if they have an email on file\)/);
   });
 

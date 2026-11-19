@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { interviewsApi } from '../services/api.ts';
 import { Spinner } from './shared/Badges.tsx';
+import InterviewerMultiSelect from './shared/InterviewerMultiSelect.tsx';
 
 interface Props {
   applicationId:  string;
@@ -12,14 +13,12 @@ interface Props {
   onSuccess:      () => void;
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 // Standard rounds only — Assignment rounds are created via
 // SendAssignmentModal.tsx instead (they never had a calendar sync to
 // schedule; that button now composes and sends an email).
 export default function ScheduleRoundModal({ applicationId, nextRoundNumber, defaultRoundName, onClose, onSuccess }: Props) {
   const [roundName,         setRoundName]         = useState(defaultRoundName || '');
-  const [interviewerEmails, setInterviewerEmails] = useState('');
+  const [interviewerEmails, setInterviewerEmails] = useState<string[]>([]);
   const [scheduledDate,     setScheduledDate]     = useState('');
   const [interviewMode,     setInterviewMode]     = useState<'In-person' | 'Video' | 'Phone'>('Video');
   const [durationMinutes,   setDurationMinutes]   = useState(60);
@@ -29,10 +28,8 @@ export default function ScheduleRoundModal({ applicationId, nextRoundNumber, def
     if (!roundName.trim()) { toast.error('Round name is required'); return; }
     if (!scheduledDate) { toast.error('Scheduled date & time is required — without it no calendar invite can go out'); return; }
 
-    const emails = interviewerEmails.split(',').map(e => e.trim()).filter(Boolean);
-    if (!emails.length) { toast.error('At least one interviewer email is required — that\'s who the calendar invite goes to'); return; }
-    const invalid = emails.find(e => !EMAIL_RE.test(e));
-    if (invalid) { toast.error(`"${invalid}" doesn't look like a valid email address`); return; }
+    const emails = interviewerEmails;
+    if (!emails.length) { toast.error('At least one interviewer is required — that\'s who the calendar invite goes to'); return; }
 
     setSaving(true);
     try {
@@ -82,13 +79,8 @@ export default function ScheduleRoundModal({ applicationId, nextRoundNumber, def
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1.5">Interviewer emails <span className="text-red-500">*</span></label>
-            <input
-              value={interviewerEmails}
-              onChange={e => setInterviewerEmails(e.target.value)}
-              placeholder="e.g. alex@digitalpaani.com, satyadev@digitalpaani.com"
-              className="input text-sm"
-            />
+            <label htmlFor="interviewers" className="block text-xs font-medium text-gray-600 mb-1.5">Interviewers <span className="text-red-500">*</span></label>
+            <InterviewerMultiSelect id="interviewers" selected={interviewerEmails} onChange={setInterviewerEmails} />
             <p className="text-[11px] text-gray-400 mt-1">Required — this is who the calendar invite blocks time for.</p>
           </div>
           <div>
