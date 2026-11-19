@@ -59,6 +59,7 @@ describe('InterviewerMultiSelect', () => {
     expect(screen.getAllByRole('option')).toHaveLength(2);
     fireEvent.change(screen.getByLabelText('Search interviewers'), { target: { value: 'qqq' } });
     expect(screen.getByText(/No one matches/)).toBeInTheDocument();
+    expect(screen.getByText(/type their full email address/)).toBeInTheDocument();
   });
   it('clears the selection, and closes on Escape', () => {
     const onChange = vi.fn();
@@ -72,5 +73,25 @@ describe('InterviewerMultiSelect', () => {
   it('shows an address that is not in the directory as itself (an older round keeps its person)', () => {
     render(<Harness initial={['someone.else@example.test']} />);
     expect(screen.getByTitle('someone.else@example.test')).toHaveTextContent('someone.else@example.test');
+  });
+  it('adds an email that is not in the directory (button or Enter), once, only when it is a real address', () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: /select interviewers/i }));
+    const box = screen.getByLabelText('Search interviewers');
+    fireEvent.change(box, { target: { value: 'not-an-email' } });
+    expect(screen.queryByText(/as an interviewer/)).toBeNull();
+    fireEvent.change(box, { target: { value: 'Outside.Person@Example.com' } });
+    fireEvent.click(screen.getByText(/as an interviewer/));
+    expect(onChange).toHaveBeenLastCalledWith(['outside.person@example.com']);
+    expect(screen.getByTitle('outside.person@example.com')).toBeInTheDocument();
+    // typed again: already chosen, so no second offer; a listed address is never offered either (pick it from the list)
+    fireEvent.change(box, { target: { value: 'outside.person@example.com' } });
+    expect(screen.queryByText(/as an interviewer/)).toBeNull();
+    fireEvent.change(box, { target: { value: 'aaron.newton@digitalpaani.com' } });
+    expect(screen.queryByText(/as an interviewer/)).toBeNull();
+    fireEvent.change(box, { target: { value: 'second@example.test' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(onChange).toHaveBeenLastCalledWith(['outside.person@example.com', 'second@example.test']);
   });
 });

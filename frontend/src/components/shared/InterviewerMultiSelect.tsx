@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, X } from 'lucide-react';
 import { filterInterviewers, Interviewer, INTERVIEWERS } from '../../data/interviewers.ts';
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 interface Props {
   /** Selected EMAIL addresses (what the API stores). */
   selected: string[];
@@ -12,7 +14,7 @@ interface Props {
 
 /**
  * Pick one or more interviewers from the company directory (data/interviewers.ts): the chosen people as removable chips, a dropdown button, and a
- * searchable checkbox list of "Name — email". Values are emails. Rendered inline (no portal) so it works inside a modal.
+ * searchable checkbox list of "Name — email"; a full email address that is not in the list can be typed and added. Values are emails. Rendered inline (no portal) so it works inside a modal.
  */
 export default function InterviewerMultiSelect({ selected, onChange, options = INTERVIEWERS, id }: Props) {
   const [open, setOpen] = useState(false);
@@ -31,6 +33,10 @@ export default function InterviewerMultiSelect({ selected, onChange, options = I
   const nameOf = (email: string) => options.find(o => o.email === email)?.name ?? email;
   const toggle = (email: string) => onChange(selected.includes(email) ? selected.filter(e => e !== email) : [...selected, email]);
   const shown = filterInterviewers(options, query);
+  // Someone who is not in the directory (an outside interviewer, a new joiner): typing a full email address offers to add it as typed.
+  const typed = query.trim().toLowerCase();
+  const canAddTyped = EMAIL_RE.test(typed) && !options.some(o => o.email === typed) && !selected.includes(typed);
+  const addTyped = () => { onChange([...selected, typed]); setQuery(''); };
 
   return (
     <div ref={root} className="relative">
@@ -57,10 +63,16 @@ export default function InterviewerMultiSelect({ selected, onChange, options = I
       {open && (
         <div className="absolute z-20 mt-1 w-full bg-white rounded-lg border border-gray-200 shadow-lg" role="listbox" aria-multiselectable="true" aria-label="Interviewers">
           <div className="p-2 border-b border-gray-100">
-            <input autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder="Search by name or email" aria-label="Search interviewers" className="input text-sm w-full" />
+            <input autoFocus value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (canAddTyped) addTyped(); } }}
+              placeholder="Search by name, or type an email address" aria-label="Search interviewers" className="input text-sm w-full" />
           </div>
           <div className="max-h-56 overflow-y-auto py-1">
-            {shown.length === 0 && <div className="px-3 py-2 text-xs text-gray-400">No one matches “{query.trim()}”.</div>}
+            {canAddTyped && (
+              <button type="button" onClick={addTyped} className="w-full text-left px-3 py-1.5 text-xs text-dp-700 hover:bg-dp-50 border-b border-gray-100">
+                Add <span className="font-medium">{typed}</span> as an interviewer
+              </button>
+            )}
+            {shown.length === 0 && !canAddTyped && <div className="px-3 py-2 text-xs text-gray-400">No one matches “{query.trim()}”. To add someone who is not listed, type their full email address.</div>}
             {shown.map(p => (
               <label key={p.email} role="option" aria-selected={selected.includes(p.email)} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-gray-50 cursor-pointer">
                 <input type="checkbox" checked={selected.includes(p.email)} onChange={() => toggle(p.email)} className="rounded-sm border-gray-300 text-dp-600 focus:ring-dp-500" />
