@@ -508,6 +508,34 @@ WHERE a.role_id = 'R019' AND a.portfolio_analysis_status = 'completed' AND pa.an
                   FROM jsonb_array_elements(CASE WHEN jsonb_typeof(pa.analysis->'criteria') = 'array' THEN pa.analysis->'criteria' ELSE '[]'::jsonb END) c
                   WHERE c->>'group' IN ('direct', 'quality') AND COALESCE((c->>'assessable')::boolean, true))
 ORDER BY a.id;
+
+-- M9 (measurement, not a tripwire): why quotes are rejected. `analysis.quoteChecks` (reviews made after the stray-quote fix of 2026-11-19) holds one
+-- record per rejected ('invented') or near-matched ('near') quoted fragment: criterion, ref, outcome, chars, words, itemHadMedia, itemTextTruncated and
+-- wouldPassWith {entities, ampersand, copyright, strayQuotes, unmasked} (would the quote have been found after that ONE extra folding). It never holds
+-- the quote or any page text. Read it as: a large `had_media` share means the model quotes words it SAW in a screenshot or page image (they can never be
+-- found in extracted text: a prompt question, not a matcher bug); a `would_pass_*` share is a matcher gap that one folding closes; `unexplained` is the
+-- rest. Reviews that were not scored carry no quoteChecks.
+WITH q AS (
+  SELECT a.id AS application_id, c AS chk
+  FROM applications a JOIN portfolio_analyses pa ON pa.application_id = a.id,
+       jsonb_array_elements(CASE WHEN jsonb_typeof(pa.analysis->'quoteChecks') = 'array' THEN pa.analysis->'quoteChecks' ELSE '[]'::jsonb END) c
+  WHERE a.role_id = 'R019' AND pa.analysis->>'kind' = 'marketing_work'
+)
+SELECT chk->>'outcome'                                                                    AS outcome,
+       chk->>'criterion'                                                                  AS criterion,
+       count(*)                                                                           AS rejected_quotes,
+       count(DISTINCT application_id)                                                     AS reviews,
+       count(*) FILTER (WHERE (chk->>'itemHadMedia')::boolean)                            AS had_media,
+       count(*) FILTER (WHERE (chk->>'itemTextTruncated')::boolean)                       AS text_truncated,
+       count(*) FILTER (WHERE (chk->'wouldPassWith'->>'entities')::boolean)               AS would_pass_entities,
+       count(*) FILTER (WHERE (chk->'wouldPassWith'->>'ampersand')::boolean)              AS would_pass_ampersand,
+       count(*) FILTER (WHERE (chk->'wouldPassWith'->>'copyright')::boolean)              AS would_pass_copyright,
+       count(*) FILTER (WHERE (chk->'wouldPassWith'->>'strayQuotes')::boolean)            AS would_pass_stray_quotes,
+       count(*) FILTER (WHERE (chk->'wouldPassWith'->>'unmasked')::boolean)               AS would_pass_unmasked,
+       count(*) FILTER (WHERE NOT (SELECT bool_or(v::boolean) FROM jsonb_each_text(chk->'wouldPassWith') AS w(k, v))
+                        AND NOT (chk->>'itemHadMedia')::boolean)                          AS unexplained_text_only,
+       round(avg((chk->>'words')::int), 1)                                                AS avg_words
+FROM q GROUP BY 1, 2 ORDER BY 1, 3 DESC;
 ```
 
    What to look for:
