@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { enforceEvidenceRules, type EvidenceContext } from './rubric.marketing.js';
+import { enforceEvidenceRules, repairStrayQuotes, type EvidenceContext } from './rubric.marketing.js';
 import type { CriterionResult, CriterionVerdict } from './types.js';
 import { cpuTimed, scaled } from '../../testing/timing.js';
 
@@ -588,5 +588,112 @@ describe('the matcher stays fast on hostile text', () => {
     ['200,000 "nine nine" with a long quote of nines', 'nine nine '.repeat(40000), rep(40, () => 'nine')],
   ])('%s', (_name, text, quote) => {
     expect(timed(text, quote)).toBeLessThan(scaled(2500));
+  });
+});
+
+// ─── Stray straight double quotes (an inch mark, a dangling quote) must not make an honest quote "invented" ─────────────
+// quotedFragments paired straight marks left to right, so one stray mark paired every later one with the wrong partner and the PROSE between
+// two marks (3+ words) was held to the page as if it were a quote. repairStrayQuotes ignores a mark only when it provably is not part of a pair.
+describe('stray straight double quotes', () => {
+  const PAGE = 'Studio Aqua 2024 | Monsoon Edit | We launched the Clean Water Week campaign across 40 sites. Copyright 2024 Studio. Our identity is bold.';
+
+  it('REPRODUCTION 1: an inch mark before a real quote (5" tall with tagline "We launched ... campaign")', () => {
+    const evidence = 'Banner is 5" tall with tagline "We launched the Clean Water Week campaign" and shows 3 campaigns';
+    expect(kindOf(evidence, PAGE)).toBe('exact');
+    // the exact shape of the report
+    expect(kindOf('... 5" tall with tagline "We launched ... campaign" shows 3 campaigns', 'We launched a big Clean Water Week campaign')).toBe('exact');
+  });
+
+  it('REPRODUCTION 2: an unclosed opening quote before a real quote (Header says "Monsoon Edit and the footer says "Copyright 2024 Studio")', () => {
+    const evidence = 'Header says "Monsoon Edit and the footer says "Copyright 2024 Studio"';
+    expect(kindOf(evidence, PAGE)).toBe('exact');
+  });
+
+  it('the repair is only ever for a provable stray: a fabricated quote beside the same stray marks is still invented', () => {
+    expect(kindOf('Banner is 5" tall with tagline "We won the national award for water" and shows 3 campaigns', PAGE)).toBe('absent');
+    expect(kindOf('Header says "Monsoon Edit and the footer says "Copyright 2031 Another Studio"', PAGE)).toBe('absent');
+    // a pair that is well-formed but wrong is not repaired (nothing says which mark is the stray one): the prose between is held to the page
+    expect(kindOf('Header says "Monsoon is 5" and "We launched the Clean Water Week campaign"', PAGE)).toBe('absent');
+  });
+
+  it('a closing quote after a digit is still a closing quote', () => {
+    expect(kindOf('Says "the campaign reached 40 sites in 2024" in the intro', 'the campaign reached 40 sites in 2024')).toBe('exact');
+    expect(kindOf('Says "the campaign reached 90 sites in 2024" in the intro', 'the campaign reached 40 sites in 2024')).toBe('absent');
+  });
+
+  it('repairStrayQuotes: what it changes and what it leaves alone', () => {
+    expect(repairStrayQuotes('no marks at all')).toBe('no marks at all');
+    expect(repairStrayQuotes('a "well formed quote here" and "another one here"')).toBe('a "well formed quote here" and "another one here"');
+    expect(repairStrayQuotes('5" tall with "a real quote here"')).toBe('5  tall with "a real quote here"');
+    expect(repairStrayQuotes('says "open and then "a real quote here"')).toBe('says  open and then "a real quote here"');
+    expect(repairStrayQuotes('"a real quote here" then "dangling')).toBe('"a real quote here" then  dangling');
+    expect(repairStrayQuotes('the brand" is "a real quote here"')).toBe('the brand  is "a real quote here"');
+  });
+
+  // ── Seeded property tests ────────────────────────────────────────────────────────────────────────────
+  const rng = (seed: number) => () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const WORDS = ['water', 'brand', 'launch', 'reach', 'campaign', 'identity', 'tagline', 'film', 'event', 'story', 'refill', 'impact', 'site', 'team', 'bold', 'clean', 'river', 'pledge', 'summit', 'week'];
+  const phrase = (r: () => number, n: number) => Array.from({ length: n }, () => WORDS[Math.floor(r() * WORDS.length)]).join(' ');
+  const pick = <T,>(r: () => number, xs: readonly T[]): T => xs[Math.floor(r() * xs.length)];
+
+  it('differential: a string with no stray mark is never changed (20,000 seeded well-formed evidence strings), so its verdict is exactly the old one', () => {
+    const r = rng(20261119);
+    let changed = 0;
+    for (let n = 0; n < 20000; n++) {
+      const parts: string[] = [phrase(r, 1 + Math.floor(r() * 4))];
+      const quotes = Math.floor(r() * 4);
+      for (let q = 0; q < quotes; q++) {
+        const body = phrase(r, 3 + Math.floor(r() * 5)) + pick(r, ['', ' 2024', ' in 5 months', ' 12K']);
+        const form = pick(r, ['straight', 'straight', 'straight', 'curly', 'single', 'nested', 'punct', 'paren']);
+        const tail = pick(r, [' ', ',', '.', ' ', ';']);
+        if (form === 'straight') parts.push(`says "${body}"${tail}`);
+        else if (form === 'curly') parts.push(`says “${body}”${tail}`);
+        else if (form === 'single') parts.push(`says '${body}'${tail}`);
+        else if (form === 'nested') parts.push(`says “${body} and "${phrase(r, 3)}" too”${tail}`);
+        else if (form === 'punct') parts.push(`says "${body}."${tail}`);
+        else parts.push(`("${body}")${tail}`);
+        parts.push(phrase(r, Math.floor(r() * 4)));
+      }
+      const evidence = parts.join(' ').replace(/\s+/g, ' ').trim();
+      if (repairStrayQuotes(evidence) !== evidence) changed++;
+    }
+    expect(changed).toBe(0);
+  });
+
+  const stray = (r: () => number): { before: string; between: string; after: string } => {
+    // provable strays only: inch marks and dangling closers anywhere outside a pair, one dangling opener (before the quote, no marks in its prose)
+    // or at the very end. Up to three marks in all.
+    let budget = Math.floor(r() * 4);
+    let before = ''; let after = '';
+    const inch = () => `${1 + Math.floor(r() * 9)}" ${pick(r, ['tall', 'wide', 'banner', 'poster'])}`;
+    const dangling = () => `${pick(r, WORDS)}" ${pick(r, ['is', 'was', 'and'])}`;
+    while (budget > 0 && r() < 0.5) { before += ` ${pick(r, [inch, dangling])()} ${phrase(r, 1)}`; budget--; }
+    let between = '';
+    if (budget > 0 && r() < 0.5) { between = ` says "${phrase(r, 4)} then `; budget--; }
+    while (budget > 0 && r() < 0.6) { after += ` ${pick(r, [inch, dangling])()} ${phrase(r, 1)}`; budget--; }
+    if (budget > 0) after += ` then "${phrase(r, 3)}`;
+    return { before, between, after };
+  };
+
+  it('property: an honest verbatim quote embedded in prose with 0-3 provable stray marks is always found (3,000 seeded cases)', () => {
+    const r = rng(777);
+    for (let n = 0; n < 3000; n++) {
+      const quote = phrase(r, 3 + Math.floor(r() * 6));
+      const { before, between, after } = stray(r);
+      const evidence = `${phrase(r, 2)}${before}${between}"${quote}" shows ${phrase(r, 2)}${after}`.replace(/\s+/g, ' ');
+      const page = `Studio page. ${phrase(r, 3)} ${quote} ${phrase(r, 3)}`;
+      expect(kindOf(evidence, page), evidence).toBe('exact');
+    }
+  });
+
+  it('property: a fabricated quote, with or without the same stray marks, is never accepted (3,000 seeded cases)', () => {
+    const r = rng(4242);
+    for (let n = 0; n < 3000; n++) {
+      const fake = `${phrase(r, 2)} zebra unicorn ${phrase(r, 2)}`;   // two words the page never has
+      const { before, between, after } = stray(r);
+      const evidence = `${phrase(r, 2)}${before}${between}"${fake}" shows ${phrase(r, 2)}${after}`.replace(/\s+/g, ' ');
+      const page = `Studio page. ${phrase(r, 6)} ${phrase(r, 6)} ${phrase(r, 6)}`;
+      expect(kindOf(evidence, page), evidence).toBe('absent');
+    }
   });
 });

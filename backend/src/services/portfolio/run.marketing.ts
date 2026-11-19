@@ -224,8 +224,10 @@ export function withoutModelJudgement(records: readonly PortfolioReviewed[], sho
  * campaigns it showed. Otherwise the card reads "profile page, not a work sample" beside "credited to the candidate, 5 campaigns seen".
  */
 function withoutWorkClaims(analysis: PortfolioAnalysisResult): PortfolioAnalysisResult {
+  const { quoteChecks: _quoteChecks, ...rest } = analysis;   // diagnostics of verdicts that were not applied
+  void _quoteChecks;
   return {
-    ...analysis,
+    ...rest,
     portfolios: (Array.isArray(analysis.portfolios) ? analysis.portfolios : []).map(rec => {
       const out: PortfolioReviewed = { ...rec, belongsToCandidate: null };
       delete out.attribution;

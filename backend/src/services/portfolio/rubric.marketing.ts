@@ -5,7 +5,8 @@
 // the verdict claims), and a handful of hard caps sit on top. The checklist and the blend are this module's own maths
 // (single rounding, attribution counted once, claims never earning points); the verdict values come from the designer
 // review's table (rubric.ts) so both kinds stay on one scale.
-import { CriterionResult, CriterionVerdict } from './types.js';
+import { CriterionResult, CriterionVerdict, QuoteCheck } from './types.js';
+import { maskNameTokens } from './protectedAttributes.js';
 import { checklistScore, clampScore, stringList } from './rubric.js';
 
 export type EvidenceBasis = 'seen' | 'read' | 'claimed' | 'none';
@@ -221,6 +222,8 @@ export interface EvidenceContext {
     hasMedia?: boolean;
   }>;
   claimText: string;
+  /** The candidate's form name, used ONLY by the `unmasked` diagnostic of a rejected quote (never to change a verdict). */
+  candidateName?: string;
 }
 
 type EvidenceItem = EvidenceContext['acquired'][number];
@@ -405,8 +408,52 @@ const DOUBLE_QUOTE_RE = new RegExp(`"([^"]*)"|${LDQ}([^${RDQ}]*)${RDQ}`, 'g');
 const SINGLE_QUOTE_RE = /(?<![\p{L}\p{N}])'(?=\p{L})(.{1,300}?)'(?![\p{L}\p{N}])/gu;
 const CURLY_SINGLE_QUOTE_RE = new RegExp(`(?<![\\p{L}\\p{N}])${LSQ}(?=\\p{L})([^${LSQ}\\n]{1,300}?)${RSQ}(?![\\p{L}\\p{N}])`, 'gu');
 
+// ── Stray straight double quotes. The model writes an inch mark (5" tall), or leaves a quote open or unclosed, and pairing marks left to
+// right then pairs the WRONG ones: the prose between them (3+ words) becomes a "quote" that is not on the page and an honest verbatim
+// quote is zeroed as invented. A straight mark is therefore read by its surroundings first, and only a mark PROVABLY not part of a pair is
+// ignored (turned into a space: it was punctuation to the matcher anyway):
+//  - open-looking: after whitespace, the start of the text or ( [ { <, and followed by a non-space  ->  can only open a quote
+//  - close-looking: followed by whitespace, the end or ) ] } > . , ; : ! ?, and not after whitespace  ->  can only close one
+//  - anything else (a mark inside a word, one with spaces on both sides, one that looks both ways) toggles, as it always did.
+// A closer with nothing open is stray (an inch mark, a dangling quote), and an opener that meets another opener before any closer is stray
+// (its text runs on into prose), the later one wins. A well-formed string is untouched, so its verdict is exactly the old one. A pair that
+// is well-formed but wrong (`"Monsoon is 5" and "Real quote here"`) is NOT repaired: nothing proves which mark is the stray one, and every
+// fragment that is read as a quote still has to be found.
+const OPEN_BEFORE_RE = /[([{<]/;
+const CLOSE_AFTER_RE = /[)\]}>.,;:!?]/;
+const isSpaceOrEdge = (c: string | undefined): boolean => c === undefined || /\s/.test(c);
+
+/** `evidence` with every provably stray straight double quote replaced by a space (same length). */
+export function repairStrayQuotes(evidence: string): string {
+  if (!evidence.includes('"')) return evidence;
+  const chars = evidence.split('');
+  let pending = -1;
+  for (let i = 0; i < chars.length; i++) {
+    if (evidence[i] !== '"') continue;
+    const prev = i > 0 ? evidence[i - 1] : undefined;
+    const next = i + 1 < evidence.length ? evidence[i + 1] : undefined;
+    const openLook = (isSpaceOrEdge(prev) || OPEN_BEFORE_RE.test(prev as string)) && !isSpaceOrEdge(next);
+    const closeLook = (isSpaceOrEdge(next) || CLOSE_AFTER_RE.test(next as string)) && !isSpaceOrEdge(prev);
+    const role: 'open' | 'close' | 'either' = openLook && !closeLook ? 'open' : closeLook && !openLook ? 'close' : 'either';
+    if (role === 'open') {
+      if (pending >= 0) chars[pending] = ' ';
+      pending = i;
+    } else if (role === 'close') {
+      if (pending >= 0) pending = -1;
+      else chars[i] = ' ';
+    } else if (pending >= 0) {
+      pending = -1;
+    } else {
+      pending = i;
+    }
+  }
+  if (pending >= 0) chars[pending] = ' ';
+  return chars.join('');
+}
+
 /** Quoted fragments of at least 3 words: double-quoted, curly double-quoted, single-quoted or curly single-quoted. */
-function quotedFragments(evidence: string): string[] {
+function quotedFragments(raw: string): string[] {
+  const evidence = repairStrayQuotes(raw);
   const out: string[] = [];
   const add = (frag: string) => {
     if (frag.split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length >= 3) out.push(frag);
@@ -550,6 +597,81 @@ function quoteFound(fragment: string, views: TextView[]): QuoteFound {
   return near ? { kind: 'near', share } : { kind: 'exact' };
 }
 
+// ── Diagnostics for a rejected quote (stored as analysis.quoteChecks). The matcher's verdict is final and is never touched by any of this: for
+// each fragment that came out 'invented' or 'near' the matcher is run again after ONE extra folding, and only the yes/no is kept. Nothing
+// of the fragment or the page is recorded (not even a hash: a hash of a short quote can be guessed), only lengths and flags. Measures what
+// fraction of rejections a known cause explains (entities, & vs and, (c) vs a copyright sign, quote marks inside the fragment, the name
+// placeholder) and how many sit on items that also sent media (words read off an image can never be found in the text).
+export const QUOTE_CHECKS_MAX = 40;
+
+const NAMED_ENTITIES: Readonly<Record<string, string>> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', copy: '©', reg: '®', hellip: '…', mdash: '—', ndash: '–',
+  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', trade: '™',
+};
+function decodeEntities(s: string): string {
+  if (!s.includes('&')) return s;
+  return s.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|([a-z]{2,8}));/gi, (m, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
+    const code = dec !== undefined ? Number(dec) : hex !== undefined ? parseInt(hex, 16) : NaN;
+    if (Number.isFinite(code)) return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+    return NAMED_ENTITIES[(name ?? '').toLowerCase()] ?? m;
+  });
+}
+const foldAmpersand = (s: string): string => (s.includes('&') ? s.replace(/&/g, ' and ') : s);   // linear: the spaces around it are collapsed later anyway
+const foldCopyright = (s: string): string => s.replace(/\(c\)|©/gi, ' copyright ');
+const QUOTE_MARKS_RE = /["“”]/;
+const countWords = (f: string): number => f.split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length;
+
+type RejectedOutcome = 'invented' | 'near';
+type Folding = 'entities' | 'ampersand' | 'copyright';
+const FOLDINGS: Readonly<Record<Folding, (s: string) => string>> = { entities: decodeEntities, ampersand: foldAmpersand, copyright: foldCopyright };
+
+/** Builds the stored record for one rejected fragment. Never throws and never reads anything back into a verdict. */
+function quoteCheckFor(
+  criterion: string, fragment: string, outcome: RejectedOutcome,
+  cited: { refs: string[]; items: EvidenceItem[]; answer: boolean }, candidateName: string, answerText: string,
+): QuoteCheck {
+  const texts: Array<{ id: string; text: string }> = [
+    ...cited.items.map(i => ({ id: i.ref, text: typeof i.text === 'string' ? i.text : '' })),
+    ...(cited.answer ? [{ id: 'answer', text: answerText }] : []),
+  ];
+  const cache = new Map<string, TextView[]>();
+  const viewsWith = (name: Folding | 'plain'): TextView[] => {
+    let v = cache.get(name);
+    if (v === undefined) { v = texts.map(t => textView(name === 'plain' ? t.text : FOLDINGS[name](t.text))); cache.set(name, v); }
+    return v;
+  };
+  const passes = (kinds: QuoteFound[]): boolean => (outcome === 'invented' ? kinds.every(k => k.kind !== 'absent') : kinds.every(k => k.kind === 'exact'));
+  const guarded = (run: () => boolean): boolean => { try { return run(); } catch { return false; } };
+  const folded = (name: Folding): boolean => guarded(() => {
+    const f = FOLDINGS[name](fragment);
+    // A folding that changes neither the fragment nor any cited text cannot change the outcome: no need to read the texts again (this is
+    // what keeps a rejected quote over a huge hostile page as cheap as it was).
+    if (f === fragment && texts.every(t => FOLDINGS[name](t.text) === t.text)) return false;
+    return passes([quoteFound(f, viewsWith(name))]);
+  });
+  const strayQuotes = guarded(() => {
+    if (!QUOTE_MARKS_RE.test(fragment)) return false;
+    const pieces = fragment.split(/["“”]/).filter(p => countWords(p) >= 3);
+    return pieces.length > 0 && passes(pieces.map(p => quoteFound(p, viewsWith('plain'))));
+  });
+  const unmasked = guarded(() => {
+    if (candidateName === '') return false;
+    const remasked = maskNameTokens(fragment, candidateName);
+    return remasked !== fragment && passes([quoteFound(remasked, viewsWith('plain'))]);
+  });
+  const anyMedia = cited.items.some(i => i.hasMedia !== false || i.nativeDocument === true);
+  return {
+    criterion,
+    ref: cited.refs[0] ?? 'answer',
+    outcome,
+    chars: [...fragment].length,
+    words: countWords(fragment),
+    itemHadMedia: anyMedia,
+    itemTextTruncated: cited.items.some(i => i.textTruncated === true),
+    wouldPassWith: { entities: folded('entities'), ampersand: folded('ampersand'), copyright: folded('copyright'), strayQuotes, unmasked },
+  };
+}
+
 /**
  * Holds the model's verdicts to the evidence it was actually given. Applied per criterion, in this order (each rule
  * works on the verdict the previous ones left), recording a note for every change:
@@ -588,7 +710,8 @@ function quoteFound(fragment: string, views: TextView[]): QuoteFound {
  */
 export function enforceEvidenceRules(
   criteria: CriterionResult[], ctx: EvidenceContext,
-): { criteria: CriterionResult[]; notes: string[] } {
+): { criteria: CriterionResult[]; notes: string[]; quoteChecks: QuoteCheck[] } {
+  const quoteChecks: QuoteCheck[] = [];
   const byRef = new Map<string, EvidenceItem>();
   for (const a of ctx.acquired) byRef.set(String(a.ref).trim().toLowerCase(), a);
   const hasAnswer = typeof ctx.claimText === 'string' && ctx.claimText.trim().length > 0;
@@ -691,6 +814,13 @@ export function enforceEvidenceRules(
         const unverifiable = items.some(i => i.nativeDocument === true && (i.textTruncated === true || viewOf(i.ref, i.text).empty));
         const searched = [...items.map(i => viewOf(i.ref, i.text)), ...(viaAnswer ? [viewOf('answer', ctx.claimText)] : [])];
         const found = unverifiable ? [] : fragments.map(f => quoteFound(f, searched));
+        // Diagnostics only (analysis.quoteChecks): measurements of each rejected fragment, never its text; nothing below reads them.
+        found.forEach((f, k) => {
+          if (f.kind === 'exact' || quoteChecks.length >= QUOTE_CHECKS_MAX) return;
+          try {
+            quoteChecks.push(quoteCheckFor(c.id, fragments[k], f.kind === 'absent' ? 'invented' : 'near', { refs: sources, items, answer: viaAnswer }, typeof ctx.candidateName === 'string' ? ctx.candidateName : '', ctx.claimText));
+          } catch { /* a diagnostic must never change a review */ }
+        });
         if (found.some(f => f.kind === 'absent')) {
           const from = c.verdict;
           c.verdict = 'not_evidenced';
@@ -709,7 +839,7 @@ export function enforceEvidenceRules(
     }
     return settled();
   });
-  return { criteria: out, notes };
+  return { criteria: out, notes, quoteChecks };
 }
 
 // ─── Scores ──────────────────────────────────────────────────────────────────
