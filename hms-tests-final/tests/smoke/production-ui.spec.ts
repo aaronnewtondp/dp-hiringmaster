@@ -20,6 +20,15 @@ test.setTimeout(120_000);          // the first dashboard load after idle runs t
 
 type Key = 'smoke_lead' | 'smoke_hm';
 
+/**
+ * `/api/auth/me` answers with the TOKEN's payload (`userId`, email, name, persona), but what the app keeps in localStorage after a real
+ * sign-in is the login response's user object (`id`, name, email, persona, …), and `AuthContext` drops a stored user without a string
+ * `id` (since 2026-11-16). Build the stored shape the way a real sign-in leaves it.
+ */
+function sessionUser(me: { userId: string; name: string; email: string; persona: string }) {
+  return { id: me.userId, name: me.name, email: me.email, persona: me.persona, department: null, avatar_url: null };
+}
+
 async function openAs(page: Page, request: APIRequestContext, key: Key, path: string) {
   const token = await getToken(request, key);
   const me = await (await authed(request, token).get('/api/auth/me')).json();
@@ -31,7 +40,7 @@ async function openAs(page: Page, request: APIRequestContext, key: Key, path: st
     localStorage.setItem('hms_token', token);
     localStorage.setItem('hms_user', JSON.stringify(user));
     sessionStorage.clear();
-  }, { token, user: me.user });
+  }, { token, user: sessionUser(me.user) });
   await page.goto(`${FRONTEND_BASE}${path}`);
   return problems;
 }
@@ -102,6 +111,13 @@ test.describe('help page (read-only)', () => {
       const problems = await openAs(page, request, key, '/help');
       await expect(page.getByRole('heading', { name: 'Help & FAQ', level: 1 })).toBeVisible({ timeout: 60_000 });
       await expect(groupHeadings(page).first()).toBeVisible();
+      // The Sourcing group is gated on GET /api/sourcing/status, which answers well after the first groups render (about 1 s against
+      // production, ~0.1 s for the page itself): read the groups only once the real status is reflected, or this reads 4 groups too early.
+      const realStatus = await (await authed(request, await getToken(request, key)).get('/api/sourcing/status')).json() as { enabled?: boolean };
+      await expect.poll(async () => (await groupTitles(page)).some(t => /sourcing/i.test(t)), {
+        message: `the Sourcing group should be ${realStatus.enabled === true ? 'present' : 'absent'} once the page has the status`,
+        timeout: 30_000,
+      }).toBe(realStatus.enabled === true);
       const real = await groupTitles(page);
       expect(real.length, 'groups on the page').toBeGreaterThanOrEqual(2);
 
