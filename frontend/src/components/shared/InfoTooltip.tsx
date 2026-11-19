@@ -56,9 +56,12 @@ export default function InfoTooltip({ text, className = '', align = 'center', wi
         // uppercase/tracking-wide/font-medium (table-th), which would
         // otherwise cascade into the popover and turn a normal-case
         // sentence into unreadable all-caps.
-        <div className={`absolute z-50 top-full mt-1.5 ${width} p-2.5 rounded-lg bg-gray-900 text-white text-[11px] normal-case font-normal tracking-normal leading-relaxed shadow-lg ${alignClass}`}>
+        // A <span>, not a <div>: the marker sits inside <p>, headings and other spans (page subtitles, column headers),
+        // where a <div> is invalid HTML (React warns "<div> cannot be a descendant of <p>"). `absolute` already makes
+        // it display:block, so the look is identical; `block` just says so. `text` must therefore be phrasing content.
+        <span className={`block absolute z-50 top-full mt-1.5 ${width} p-2.5 rounded-lg bg-gray-900 text-white text-[11px] normal-case font-normal tracking-normal leading-relaxed shadow-lg ${alignClass}`}>
           {text}
-        </div>
+        </span>
       )}
     </span>
   );

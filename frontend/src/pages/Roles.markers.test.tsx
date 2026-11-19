@@ -33,7 +33,7 @@ const th = (label: string) => screen.getAllByRole('columnheader').find(h => h.qu
 const markerOf = (label: string): string => {
   const cell = th(label);
   fireEvent.mouseEnter(cell.querySelector('[aria-label="More info"]')!);
-  return cell.querySelector('div.absolute')!.textContent!;
+  return cell.querySelector('span.absolute.z-50')!.textContent!;
 };
 
 beforeEach(() => {

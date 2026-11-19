@@ -46,7 +46,7 @@ function mount() {
 }
 const tipOf = (title: HTMLElement): string => {
   fireEvent.mouseEnter(title.parentElement!.querySelector('[aria-label="More info"]')!);
-  return title.parentElement!.querySelector('div.absolute')!.textContent!;
+  return title.parentElement!.querySelector('span.absolute.z-50')!.textContent!;
 };
 
 beforeEach(() => {

@@ -46,7 +46,7 @@ describe('Role page — markers', () => {
     mount();
     const title = await screen.findByText('Dates');
     fireEvent.mouseEnter(title.parentElement!.querySelector('[aria-label="More info"]')!);
-    const tip = title.parentElement!.querySelector('div.absolute')!.textContent!;
+    const tip = title.parentElement!.querySelector('span.absolute.z-50')!.textContent!;
     expect(tip).toContain("Open Date is set automatically when the role is approved and can't be edited");
     expect(tip).toContain('Close Target is when the role should be filled');
     expect(tip).toContain('counts the days past it, so moving it out clears an alert');

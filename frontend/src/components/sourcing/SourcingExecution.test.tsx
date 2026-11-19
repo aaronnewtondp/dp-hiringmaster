@@ -117,6 +117,6 @@ describe('Dashboard → Sourcing execution — the marker', () => {
     expect(label).toBeInTheDocument();
     const card = label.closest('.card')!;
     fireEvent.mouseEnter(card.querySelector('[aria-label="More info"]')!);
-    expect(card.querySelector('div.absolute')!.textContent).toContain(`share of tasks finished in the last ${days} days by their due date`);
+    expect(card.querySelector('span.absolute.z-50')!.textContent).toContain(`share of tasks finished in the last ${days} days by their due date`);
   });
 });

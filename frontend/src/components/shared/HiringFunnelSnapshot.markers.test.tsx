@@ -64,7 +64,7 @@ describe('HiringFunnelSnapshot — the marker', () => {
     mount();
     const heading = await screen.findByText('Hiring Funnel Snapshot');
     fireEvent.mouseEnter(heading.parentElement!.querySelector('[aria-label="More info"]')!);
-    const tip = heading.parentElement!.querySelector('div.absolute')!.textContent!;
+    const tip = heading.parentElement!.querySelector('span.absolute.z-50')!.textContent!;
     expect(tip).toContain('how far past its SLA limit each one was when HMS last checked');
     expect(tip).toContain("'Joining risk — no contact' and 'Assignment deadline breached' show how late they were when they were first flagged");
     expect(tip).not.toContain("always shows");

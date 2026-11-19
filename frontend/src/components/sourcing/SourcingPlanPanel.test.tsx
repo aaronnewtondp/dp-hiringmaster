@@ -337,7 +337,7 @@ describe('SourcingPlanPanel — the qualified-candidate target', () => {
     mount(view({ output: [{ tag: 'Naukri/IIMjobs', applications: 12, qualified: 5 }] }));
     const heading = await screen.findByText('Applications by source');
     fireEvent.mouseEnter(heading.parentElement!.querySelector('[aria-label="More info"]')!);
-    const tip = heading.parentElement!.querySelector('div.absolute')!.textContent!;
+    const tip = heading.parentElement!.querySelector('span.absolute.z-50')!.textContent!;
     expect(tip).toContain('so it is what applicants chose, not a measurement');
     expect(tip).toContain("It is not the candidate's Source field, which is what feeds Source quality on the Dashboard");
   });
