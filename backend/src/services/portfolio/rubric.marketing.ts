@@ -450,16 +450,49 @@ export function repairStrayQuotes(evidence: string): string {
   return chars.join('');
 }
 
-/** Quoted fragments of at least 3 words: double-quoted, curly double-quoted, single-quoted or curly single-quoted. */
+/**
+ * Quoted fragments of at least 3 words: double-quoted, curly double-quoted, single-quoted or curly single-quoted.
+ *
+ * The result is the UNION of two pairings, de-duplicated, and every fragment in it must be found for a verdict to stand:
+ *  (a) what the ORIGINAL pairing (the code before the stray-quote work, run on the unrepaired text) produces, keeping a straight-double-quoted
+ *      fragment only when its opening mark LOOKS like an opener (not after a letter or digit, and followed by a non-space) and its closing mark
+ *      LOOKS like a closer (not before a letter or digit, and after a non-space). A fragment opened by an inch mark (`5"`, a digit before it) or
+ *      by a mark inside a word, or closed by a mark that starts a word, is exactly what the old pairing got wrong, so it is no longer required;
+ *  (b) what the pairing over the repaired text produces (provably stray marks blanked), which finds the honest quote the old pairing lost.
+ * So a fragment whose delimiters look genuine is checked exactly as before, wherever stray marks sit around it (blanking a stray can flip the
+ * pairing of every later mark, which is why (b) alone could drop a check); the only checks given up are those resting on a stray-looking mark.
+ * Curly double and both single-quote kinds are unambiguous or already context-guarded and are kept as before.
+ */
 function quotedFragments(raw: string): string[] {
-  const evidence = repairStrayQuotes(raw);
   const out: string[] = [];
+  const seen = new Set<string>();
   const add = (frag: string) => {
-    if (frag.split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length >= 3) out.push(frag);
+    if (seen.has(frag)) return;
+    if (frag.split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length >= 3) { seen.add(frag); out.push(frag); }
   };
+  const wordChar = (c: string | undefined): boolean => c !== undefined && /[\p{L}\p{N}]/u.test(c);
+  // (a) the original pairing, genuine-looking straight delimiters only
+  for (const m of raw.matchAll(DOUBLE_QUOTE_RE)) {
+    if (m[1] !== undefined) {
+      const open = m.index as number;
+      const close = open + m[0].length - 1;
+      const pOpen = open > 0 ? raw[open - 1] : undefined;
+      const nOpen = raw[open + 1];
+      const pClose = raw[close - 1];
+      const nClose = close + 1 < raw.length ? raw[close + 1] : undefined;
+      const opens = !wordChar(pOpen) && !isSpaceOrEdge(nOpen);
+      const closes = !wordChar(nClose) && !isSpaceOrEdge(pClose);
+      if (!opens || !closes) continue;
+      add(m[1]);
+    } else add(m[2] ?? '');
+  }
+  // (b) the repaired pairing
+  const evidence = repairStrayQuotes(raw);
   for (const m of evidence.matchAll(DOUBLE_QUOTE_RE)) add(m[1] ?? m[2] ?? '');
-  for (const m of evidence.matchAll(SINGLE_QUOTE_RE)) add(m[1] ?? '');
-  for (const m of evidence.matchAll(CURLY_SINGLE_QUOTE_RE)) add(m[1] ?? '');
+  for (const src of [raw, evidence]) {
+    for (const m of src.matchAll(SINGLE_QUOTE_RE)) add(m[1] ?? '');
+    for (const m of src.matchAll(CURLY_SINGLE_QUOTE_RE)) add(m[1] ?? '');
+  }
   return out;
 }
 

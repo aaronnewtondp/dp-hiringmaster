@@ -717,3 +717,94 @@ describe('stray straight double quotes', () => {
     }
   });
 });
+
+// ─── The union rule: a fragment whose delimiters look genuine is checked exactly as the original pairing checked it ─────────────────
+// Review 2: blanking a stray inch mark flips the pairing parity of every LATER mark, so an unclosed honest opener after it swallowed the opener of
+// the next real quote and a properly delimited FABRICATED quote that the original code rejected was never checked. quotedFragments is now the
+// union of the original pairing (kept only where its opening mark looks like an opener and its closing mark like a closer) and the repaired one.
+describe('stray quotes: no genuinely delimited fragment ever escapes its check (union of the original and the repaired pairing)', () => {
+  const PAGE = 'The poster was 5" tall and 12.5" wide. Built the identity from zero in 2021 with a team of four.';
+
+  it('REVIEW 2 REPRODUCTION: a stray inch mark, an unclosed honest opener, then a delimited fabricated quote is invented', () => {
+    const ev = 'The poster is 5" tall; headline "Built the identity from zero in 2021\n"tripled revenue within one quarter"';
+    expect(kindOf(ev, PAGE)).toBe('absent');
+    // the variant on one line
+    expect(kindOf('The poster is 5" tall; headline "Built the identity from zero in 2021 and "tripled revenue within one quarter" end', PAGE)).toBe('absent');
+    expect(kindOf('The poster is 5" tall; headline "Built the identity from zero in 2021 and "tripled revenue within one quarter" end', PAGE, 'partial')).toBe('absent');
+  });
+
+  it('the same shape with a REAL second quote is found (the delimited quote is on the page)', () => {
+    expect(kindOf('The poster is 5" tall; headline "Built the identity from zero in 2021\n"a team of four"', PAGE)).toBe('exact');
+  });
+
+  it('REVIEW 1: a fabricated quote wrapping nested quotes keeps every fragment it had', () => {
+    for (const ev of [
+      '"fabricated invented claim words here "nested" end"', '"fabricated invented claim words here "x" more"', 'He said "fabricated invented claim words here "x" end',
+      '5" and "fabricated invented claim words "nested" end"',
+    ]) expect(kindOf(ev, PAGE), ev).toBe('absent');
+  });
+
+  it('the documented false-invented repairs still hold', () => {
+    expect(kindOf('Banner is 5" tall with tagline "Built the identity from zero in 2021" and shows 3 campaigns', PAGE)).toBe('exact');
+    expect(kindOf('the brand" is "Built the identity from zero in 2021"', PAGE)).toBe('exact');
+  });
+
+  // The independent reference for the corpus: the ORIGINAL pairing's regexes (copied, not imported), fragments with genuine-looking straight delimiters.
+  const LDQ_ = '“', RDQ_ = '”';
+  const OLD_DQ = new RegExp(`"([^"]*)"|${LDQ_}([^${RDQ_}]*)${RDQ_}`, 'g');
+  const words3 = (f: string) => f.split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length >= 3;
+  const wc = (c?: string) => c !== undefined && /[\p{L}\p{N}]/u.test(c);
+  const sp = (c?: string) => c === undefined || /\s/.test(c);
+  const genuineOld = (raw: string): string[] => {
+    const out: string[] = [];
+    for (const m of raw.matchAll(OLD_DQ)) {
+      if (m[1] !== undefined) {
+        const o = m.index as number, c = o + m[0].length - 1;
+        if (wc(raw[o - 1]) || sp(raw[o + 1]) || wc(raw[c + 1]) || sp(raw[c - 1])) continue;
+        if (words3(m[1])) out.push(m[1]);
+      } else if (words3(m[2] ?? '')) out.push(m[2]);
+    }
+    return out;
+  };
+  /** The rule every case must satisfy: accepted (exact/near) only if each genuinely delimited fragment of the original pairing is, on its own, found. */
+  const holdsUnion = (ev: string, page: string): boolean => {
+    const rejected = (e: string): boolean => { const r = enforceEvidenceRules([read(e)], ctxOf(page)); return r.criteria[0].verdict === 'not_evidenced' && /not found/.test(r.notes.join(' | ')); };
+    if (rejected(ev)) return true;
+    return genuineOld(ev).every(f => !f.includes('"') && !rejected(`"${f}"`));
+  };
+
+  it.each([
+    'The poster is 5" tall; headline "Built the identity from zero in 2021\n"tripled revenue within one quarter"',
+    'x" and the headline "Built the identity from zero in 2021 and "tripled revenue within one quarter" end',
+    '8" wide "we built the identity "invented tripled revenue growth" more words" end',
+    'a 5" tall "stray opener words here\n"fabricated invented claim words here"',
+    '12.5" wide ("unclosed honest words here\n"fabricated invented claim words here".',
+    'see "unclosed honest words here . . . "fabricated invented claim words here", 5" tall',
+  ])('regression shape: %s', ev => { expect(holdsUnion(ev, PAGE), ev).toBe(true); expect(kindOf(ev, PAGE)).toBe('absent'); });
+
+  it('property: over 3,000 seeded strings of stray, unclosed, nested and delimited marks, nothing is accepted unless every genuinely delimited original fragment is found', () => {
+    let seed = 130130;
+    const r = () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const pk = <T,>(xs: readonly T[]): T => xs[Math.floor(r() * xs.length)];
+    const W = ['built', 'identity', 'zero', 'team', 'four', 'poster', 'tall', 'wide', '2021'];
+    const ph = (n: number) => Array.from({ length: n }, () => pk(W)).join(' ');
+    for (let n = 0; n < 3000; n++) {
+      const honest = 'Built the identity from zero in 2021';
+      const fake = `${ph(2)} zebra unicorn ${ph(1)}`;
+      const parts: string[] = [];
+      for (let i = 0, k = 2 + Math.floor(r() * 4); i < k; i++) {
+        parts.push(pk([`${1 + Math.floor(r() * 9)}" tall`, `"${honest}`, `"${fake}"`, `"${honest}"`, '"', `x" ${ph(1)}`, `"${fake} "${ph(3)}" end"`, ph(3), '12.5" wide', `(" ${ph(3)}`, '\n']));
+      }
+      const ev = parts.join(pk([' ', ' ', '\n', ''])).slice(0, 300);
+      expect(holdsUnion(ev, PAGE), ev).toBe(true);
+    }
+  });
+
+  it('stays linear on 100 KB of mixed quote marks', () => {
+    const unit = ['5" tall ', 'say "a b c" ', '" ', ' "x', '“q w e” ', '(" ', 'w" ', '""', '\n'];
+    const build = (size: number) => { let s = '', i = 0; while (s.length < size) s += unit[(i++ * 7 + (i >> 3)) % unit.length]; return s; };
+    const t = (size: number) => cpuTimed(() => enforceEvidenceRules([read(build(size))], ctxOf('some page text here'))).ms;
+    expect(t(100000)).toBeLessThan(scaled(2500));
+    expect(t(200000)).toBeLessThan(scaled(2500));
+  });
+});
