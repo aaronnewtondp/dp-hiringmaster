@@ -18,7 +18,7 @@ async function loadLogin(clientId: string) {
   vi.resetModules();
   return (await import('./Login.tsx')).default;
 }
-function renderLogin(Login: () => JSX.Element) {
+function renderLogin(Login: () => React.JSX.Element) {
   return render(
     <MemoryRouter initialEntries={['/login']}>
       <Routes>

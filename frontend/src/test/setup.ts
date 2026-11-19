@@ -15,11 +15,3 @@ afterEach(() => {
 // is EXPECTED to appear. It cannot make an absence assertion pass: those are structural (`queryBy…` is null, a spy was not called
 // after the work that would have called it has provably run — see `drain` in ./helpers.ts).
 configure({ asyncUtilTimeout: 5000 });
-
-// React Router v6 prints two "Future Flag Warning" lines per <MemoryRouter> (32 lines from 16 files per run), which buries any real
-// warning. Only those two exact notices are dropped; every other console.warn still goes through.
-const realWarn = console.warn.bind(console);
-console.warn = (...args: unknown[]) => {
-  if (typeof args[0] === 'string' && args[0].includes('React Router Future Flag Warning')) return;
-  realWarn(...args);
-};

@@ -48,7 +48,7 @@ function ModalShell({ title, subtitle, onClose, footer, children, wide }: {
 }
 
 // The hint is linked with aria-describedby (not folded into the <label>), so the control's accessible NAME is just its label.
-function Field({ label, optional, hint, children }: { label: string; optional?: boolean; hint?: string; children: ReactElement }) {
+function Field({ label, optional, hint, children }: { label: string; optional?: boolean; hint?: string; children: ReactElement<{ id?: string; 'aria-describedby'?: string }> }) {
   const id = useId();
   const hintId = `${id}-hint`;
   return (
