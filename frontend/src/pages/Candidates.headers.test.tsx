@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { backendFacts, overBudgetPercent } from '../test/backendSource.ts';
+import { nestingWarnings, openEveryMarker, expectPhrasingOnlyPopovers, watchConsoleErrors } from '../test/domNesting.ts';
 
 // Active Candidates' column headers: every name is written out in full and wraps at its spaces instead of
 // being truncated ("Notice", "Preferred Location", "Resume Link", "Application Date" used to be cut off).
@@ -79,7 +80,7 @@ describe('Active Candidates — column headers', () => {
 const markerOf = (label: string): string => {
   const th = screen.getAllByRole('columnheader').find(h => h.querySelector('span')?.textContent === label)!;
   fireEvent.mouseEnter(th.querySelector('[aria-label="More info"]')!);
-  return th.querySelector('div.absolute')!.textContent!;
+  return th.querySelector('span.absolute.z-50')!.textContent!;
 };
 
 describe('Active Candidates — what the markers and hovers say', () => {
@@ -136,7 +137,7 @@ describe('Active Candidates — what the markers and hovers say', () => {
     await screen.findByText('Candidate A1');
     const title = screen.getByText('Active Candidates');
     fireEvent.mouseEnter(title.parentElement!.querySelector('[aria-label="More info"]')!);
-    const tip = title.parentElement!.querySelector('div.absolute')!.textContent!;
+    const tip = title.parentElement!.querySelector('span.absolute.z-50')!.textContent!;
     expect(tip).toContain('Rejected and Withdrawn applications are not here');
     expect(tip).toContain('Hold for Future, Joined or Closed are listed too');
     expect(tip).toContain('choose Active in the Status filter');
@@ -159,5 +160,19 @@ describe('Active Candidates — what the markers and hovers say', () => {
     const tip = screen.getByRole('button', { name: 'SLA breached only' }).getAttribute('title')!;
     expect(tip).toContain('Only applications with the red SLA tag');
     expect(tip).toContain('putting it on hold does not clear it');
+  });
+});
+
+describe('Active Candidates — opening every info marker is valid HTML', () => {
+  it('prints no DOM-nesting warning (a <div> popover inside the page subtitle <p> used to)', async () => {
+    const spy = watchConsoleErrors();
+    try {
+      mount();
+      await screen.findByText('Candidate A1');
+      const n = openEveryMarker(document.body);
+      expect(n).toBeGreaterThan(0);
+      expect(nestingWarnings(spy)).toEqual([]);
+      expectPhrasingOnlyPopovers(document.body, n);
+    } finally { spy.mockRestore(); }
   });
 });

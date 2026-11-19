@@ -43,7 +43,7 @@ describe('Agency Repository', () => {
     await screen.findByText('Test Agency');
     const cell = th('Hires');
     fireEvent.mouseEnter(cell.querySelector('[aria-label="More info"]')!);
-    const tip = cell.querySelector('div.absolute')!.textContent!;
+    const tip = cell.querySelector('span.absolute.z-50')!.textContent!;
     expect(tip).toContain('Offer Accepted or Joined');                              // routes/agencies.ts TOTAL_HIRED_SUBQUERY: stage IN (...), no status test
     expect(tip).toContain('counted once per candidate');
     expect(tip).toContain('a candidate who accepted and later withdrew still counts');
@@ -67,7 +67,7 @@ describe('Agency page', () => {
     expect(screen.getByText('3 hired')).toBeInTheDocument();
     const box = screen.getByText('3 hired').parentElement!;
     fireEvent.mouseEnter(box.querySelector('[aria-label="More info"]')!);
-    const tip = box.querySelector('div.absolute')!.textContent!;
+    const tip = box.querySelector('span.absolute.z-50')!.textContent!;
     expect(tip).toContain("whose Sourcing Agency is this agency");                    // hired: candidates.sourced_by_agency_id
     expect(tip).toContain("application's own Agency field");                           // submitted: applications.agency_id, which no screen sets
     expect(tip).toContain('No screen in HMS fills that field in');
@@ -81,7 +81,7 @@ describe('Agency page', () => {
     expect(screen.queryByText('Specialisations')).not.toBeInTheDocument();
     const title = screen.getByText('Contract');
     fireEvent.mouseEnter(title.parentElement!.querySelector('[aria-label="More info"]')!);
-    expect(title.parentElement!.querySelector('div.absolute')!.textContent).toContain("doesn't block anything in HMS");
+    expect(title.parentElement!.querySelector('span.absolute.z-50')!.textContent).toContain("doesn't block anything in HMS");
   });
 });
 

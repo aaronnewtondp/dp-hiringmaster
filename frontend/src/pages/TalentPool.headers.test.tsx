@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { nestingWarnings, openEveryMarker, expectPhrasingOnlyPopovers, watchConsoleErrors } from '../test/domNesting.ts';
 
 // Archived Pipeline's column headers: every name is written out in full and wraps at its spaces instead of
 // being truncated. Same rule as Ready for Review (ScorecardSummary.headers.test.tsx) and Active Candidates.
@@ -58,7 +59,7 @@ describe('Archived Pipeline — column headers', () => {
     expect(labels()).not.toContain('Last Added');
     const th = screen.getAllByRole('columnheader').find(h => h.querySelector('span')?.textContent === 'Last Updated')!;
     fireEvent.mouseEnter(th.querySelector('[aria-label="More info"]')!);
-    const tip = th.querySelector('div.absolute')!.textContent!;
+    const tip = th.querySelector('span.absolute.z-50')!.textContent!;
     expect(tip).toContain('stage, status, screening status, notes, Founder flag or assignment submission');
     expect(tip).toContain('Scheduling an interview, submitting feedback and ResumeIQ scoring do not change it');
   });
@@ -86,7 +87,7 @@ describe('Archived Pipeline — column headers', () => {
     await screen.findByText('Archived Person');
     const actions = screen.getAllByRole('columnheader').find(h => h.querySelector('span')?.textContent === 'Actions')!;
     fireEvent.mouseEnter(actions.querySelector('[aria-label="More info"]')!);
-    const popover = actions.querySelector('div.absolute')!;
+    const popover = actions.querySelector('span.absolute.z-50')!;
     expect(popover.className).toContain('right-0');
     expect(popover.className).not.toContain('-translate-x-1/2'); // not the centered default
   });
@@ -96,7 +97,7 @@ describe('Archived Pipeline — what the markers and hovers say', () => {
   const markerOf = (label: string): string => {
     const th = screen.getAllByRole('columnheader').find(h => h.querySelector('span')?.textContent === label)!;
     fireEvent.mouseEnter(th.querySelector('[aria-label="More info"]')!);
-    return th.querySelector('div.absolute')!.textContent!;
+    return th.querySelector('span.absolute.z-50')!.textContent!;
   };
 
   it('Fit says the same as on Active Candidates: 0-100, the Average Score x 10, its colours and the 75 line', async () => {
@@ -126,5 +127,19 @@ describe('Archived Pipeline — what the markers and hovers say', () => {
     expect(tip).toContain('Exact match, including capital letters');
     expect(tip).toContain('HR Tags on the candidate page');
     expect(tip).toContain('Tags added inside Screening & Risk Notes belong to the application and are not searched');
+  });
+});
+
+describe('Archived Pipeline — opening every info marker is valid HTML', () => {
+  it('prints no DOM-nesting warning (a <div> popover inside the page subtitle <p> used to)', async () => {
+    const spy = watchConsoleErrors();
+    try {
+      mount();
+      await screen.findByText('Archived Person');
+      const n = openEveryMarker(document.body);
+      expect(n).toBeGreaterThan(0);
+      expect(nestingWarnings(spy)).toEqual([]);
+      expectPhrasingOnlyPopovers(document.body, n);
+    } finally { spy.mockRestore(); }
   });
 });

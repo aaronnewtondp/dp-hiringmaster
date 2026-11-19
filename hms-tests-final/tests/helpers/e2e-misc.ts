@@ -77,8 +77,8 @@ export async function openWithSession(page: Page, session: { token: string; user
 /** Every "i" marker under `scope`: a <button aria-label="More info">. */
 export const infoMarkers = (scope: Page | Locator): Locator => scope.getByRole('button', { name: 'More info', exact: true });
 
-/** The popover a marker opens: the <div> right after its button (it exists only while the popover is open). */
-export const markerPopover = (marker: Locator): Locator => marker.locator('xpath=following-sibling::div');
+/** The popover a marker opens: the <span> right after its button (it exists only while the popover is open). */
+export const markerPopover = (marker: Locator): Locator => marker.locator('xpath=following-sibling::span');
 
 /**
  * Is the open popover actually REACHABLE, not just present in the DOM? A popover inside a table header that has `overflow-hidden` is in the

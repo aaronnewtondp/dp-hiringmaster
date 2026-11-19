@@ -286,7 +286,7 @@ describe('SlaBreachesByRole — the marker', () => {
     mount(DATA);
     const heading = await screen.findByText('SLA breaches by role');
     fireEvent.mouseEnter(heading.parentElement!.querySelector('[aria-label="More info"]')!);
-    const tip = heading.parentElement!.querySelector('div.absolute')!.textContent!;
+    const tip = heading.parentElement!.querySelector('span.absolute.z-50')!.textContent!;
     expect(tip).toContain('always counts both HR/Admin and Hiring Manager breaches (the owner buttons don\'t apply)');
     expect(tip).not.toMatch(/HR \/ Recruiter|both HR and/);
     expect(tip).toContain('each role that is Approved, Live – Sourcing, Under Review or On Hold');

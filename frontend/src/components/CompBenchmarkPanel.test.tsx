@@ -14,7 +14,7 @@ describe('CompBenchmarkPanel — the marker', () => {
     render(<CompBenchmarkPanel roleId="R001" />);
     const heading = screen.getByText('Internal Compensation Benchmarking');
     fireEvent.mouseEnter(heading.parentElement!.querySelector('[aria-label="More info"]')!);
-    const tip = heading.parentElement!.querySelector('div.absolute')!.textContent!;
+    const tip = heading.parentElement!.querySelector('span.absolute.z-50')!.textContent!;
     expect(tip).toContain('not any one candidate');
     expect(tip).toContain('when one exists for exactly this role title');
     expect(tip).toContain("the one for the role's experience range, otherwise the first on file");

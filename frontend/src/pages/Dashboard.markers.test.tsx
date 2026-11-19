@@ -58,7 +58,7 @@ function markerText(label: string | RegExp): string {
   const heading = screen.getAllByText(label)[0];
   const button = heading.parentElement!.querySelector('[aria-label="More info"]')!;
   fireEvent.mouseEnter(button);
-  return heading.parentElement!.querySelector('div.absolute')!.textContent!;
+  return heading.parentElement!.querySelector('span.absolute.z-50')!.textContent!;
 }
 
 beforeEach(() => {

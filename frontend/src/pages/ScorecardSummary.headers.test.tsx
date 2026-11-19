@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { backendFacts, overBudgetPercent } from '../test/backendSource.ts';
+import { nestingWarnings, openEveryMarker, expectPhrasingOnlyPopovers, watchConsoleErrors } from '../test/domNesting.ts';
 
 // The Ready for Review table's column headers: every name is written out in full (they used to be
 // "Tech", "Exp", "Ind", "Cult", "Traj", "Lead", "Comm", "Port", "Avg", "App. Age" — several clipped, and
@@ -138,9 +139,23 @@ describe('Ready for Review — filter and CTC explanations', () => {
     await screen.findByText('Candidate A1');
     const th = screen.getAllByRole('columnheader').find(h => h.querySelector('span')?.textContent === 'Current CTC → Expected CTC')!;
     fireEvent.mouseEnter(th.querySelector('[aria-label="More info"]')!);
-    const tip = th.querySelector('div.absolute')!.textContent!;
+    const tip = th.querySelector('span.absolute.z-50')!.textContent!;
     expect(tip).toContain('Current CTC (Fixed and Variable breakup) in LPA');
     expect(tip).toContain('can include variable pay');
     expect(tip).not.toContain('Current fixed CTC');
+  });
+});
+
+describe('Ready for Review — opening every info marker is valid HTML', () => {
+  it('prints no DOM-nesting warning (a <div> popover inside the page subtitle <p> used to)', async () => {
+    const spy = watchConsoleErrors();
+    try {
+      mount();
+      await screen.findByText('Candidate A1');
+      const n = openEveryMarker(document.body);
+      expect(n).toBeGreaterThan(0);
+      expect(nestingWarnings(spy)).toEqual([]);
+      expectPhrasingOnlyPopovers(document.body, n);
+    } finally { spy.mockRestore(); }
   });
 });
