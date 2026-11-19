@@ -147,7 +147,7 @@ describe('Ready for Review — filter and CTC explanations', () => {
 });
 
 describe('Ready for Review — opening every info marker is valid HTML', () => {
-  it('prints no DOM-nesting warning (a <div> popover inside the page subtitle <p> used to)', async () => {
+  it('prints no DOM-nesting warning (a <div> popover inside a <p>, <span> or <th> would)', async () => {
     const spy = watchConsoleErrors();
     try {
       mount();
