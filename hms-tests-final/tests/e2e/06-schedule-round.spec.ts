@@ -55,18 +55,21 @@ async function openCandidateAndExpand(page: Page, candidate: { id: string; full_
 
 // Fills whichever ScheduleRoundModal fields are provided. Locators match the
 // exact markup in frontend/src/components/ScheduleRoundModal.tsx: the round
-// name and interviewer-emails inputs are found by their exact placeholder
-// text (their <label>s wrap a nested <span>* so a plain text-is() match on
-// the label would be brittle); the datetime-local input has no placeholder,
+// name input is found by its exact placeholder text (its <label> wraps a
+// nested <span>* so a plain text-is() match on the label would be brittle);
+// the interviewers are picked in the multi-select (open it, tick each person
+// by NAME, close it); the datetime-local input has no placeholder,
 // so it's found via its label as a direct sibling, same pattern as
 // 04-inline-editing.spec.ts's sectionCard() field lookups.
 async function fillScheduleModal(
   page: Page,
-  { roundName, interviewerEmails, scheduledDate }: { roundName: string; interviewerEmails?: string; scheduledDate?: string }
+  { roundName, interviewers, scheduledDate }: { roundName: string; interviewers?: string[]; scheduledDate?: string }
 ) {
   await page.getByPlaceholder('e.g. Technical Deep-Dive, Founder Round…').fill(roundName);
-  if (interviewerEmails !== undefined) {
-    await page.getByPlaceholder('e.g. alex@digitalpaani.com, satyadev@digitalpaani.com').fill(interviewerEmails);
+  if (interviewers && interviewers.length) {
+    await page.locator('#interviewers').click();
+    for (const name of interviewers) await page.getByRole('option', { name: new RegExp(name) }).getByRole('checkbox').check();
+    await page.keyboard.press('Escape');                      // closes the list; the chips show the choice
   }
   if (scheduledDate !== undefined) {
     await page.locator('label:text-is("Scheduled date & time") + input').fill(scheduledDate);
@@ -98,7 +101,8 @@ test.describe('Schedule Round Modal E2E', () => {
     const typedDate = typed.slice(0, 10);
     await fillScheduleModal(page, {
       roundName,
-      interviewerEmails: `e2e-test-interviewer+${uid()}@example.com`,
+      // Picked from the directory list, so it has to be a real mailbox: the organizer herself (this test already deletes the event it creates).
+      interviewers: ['Aaron Newton'],
       scheduledDate: typed,
     });
     const created = page.waitForRequest(r => r.method() === 'POST' && r.url().endsWith('/api/interviews'));
@@ -134,27 +138,22 @@ test.describe('Schedule Round Modal E2E', () => {
     }
   });
 
-  test('an invalid interviewer email blocks submission', async ({ page }) => {
+  test('submitting with no interviewer selected is blocked', async ({ page }) => {
     const { candidate, application } = await createTestApplication(page, 'Interview Round 1');
     await loginViaApi(page, 'hr');
     await openCandidateAndExpand(page, candidate);
 
     await page.getByRole('button', { name: 'Schedule round' }).click();
 
-    const roundName = `E2E Invalid Email Round ${uid()}`;
-    // scheduledDate must be filled here — handleSubmit() in
-    // ScheduleRoundModal.tsx checks it BEFORE the email-format check (see
-    // its own validation order), so omitting it makes the "Scheduled date &
-    // time is required" toast fire instead of the email-format one this test
-    // actually means to exercise. A far-future placeholder value is enough:
-    // the invalid email still blocks handleSubmit() before interviewsApi.
-    // schedule() is ever called, so no real round/Calendar event is created.
-    await fillScheduleModal(page, { roundName, interviewerEmails: 'not-an-email', scheduledDate: futureLocalDateTime(60, { hour: 14 }) });
+    const roundName = `E2E No Interviewer Round ${uid()}`;
+    // scheduledDate must be filled here — handleSubmit() in ScheduleRoundModal.tsx checks it BEFORE the interviewer check, so omitting it
+    // makes the "Scheduled date & time is required" toast fire instead of the one this test means to exercise. The missing interviewer
+    // blocks handleSubmit() before interviewsApi.schedule() is ever called, so no real round/Calendar event is created.
+    await fillScheduleModal(page, { roundName, scheduledDate: futureLocalDateTime(60, { hour: 14 }) });
     await page.getByRole('button', { name: 'Schedule', exact: true }).click();
 
-    // Client-side EMAIL_RE check in ScheduleRoundModal.tsx fires before the
-    // request is ever sent — exact toast text from handleSubmit().
-    await expect(page.getByText('"not-an-email" doesn\'t look like a valid email address')).toBeVisible({ timeout: 5000 });
+    // Client-side check in ScheduleRoundModal.tsx fires before the request is ever sent — exact toast text from handleSubmit().
+    await expect(page.getByText('At least one interviewer is required')).toBeVisible({ timeout: 5000 });
 
     // Modal is still open — no success toast, submission never reached the API.
     await expect(page.getByRole('heading', { name: 'Schedule interview round' })).toBeVisible();
