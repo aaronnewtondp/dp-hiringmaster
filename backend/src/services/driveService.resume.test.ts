@@ -3,7 +3,7 @@
 //   text null + no linksError = the resume could not be read, nobody's fault but the file's (neutral: profile-only scoring, no portfolio dimension, never a 0);
 //   text null + linksError    = OUR failure (retryable, and a portfolio-review role records a visible 'failed');
 //   text + linksError         = the text was read but the hyperlinks could not be.
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import PDFDocument from 'pdfkit';
 import type { ResumePdfRead } from './pdfSandbox/resume.js';
 
@@ -86,8 +86,8 @@ function serve(bytes: Buffer, meta: Partial<typeof drive.meta> = {}) {
   drive.meta = { mimeType: 'application/pdf', name: 'resume.pdf', size: String(bytes.length), ...meta };
 }
 
-let warn: ReturnType<typeof vi.spyOn>;
-let error: ReturnType<typeof vi.spyOn>;
+let warn: MockInstance<typeof console.warn>;
+let error: MockInstance<typeof console.error>;
 beforeEach(() => {
   drive.mediaCalls = 0; drive.fail = null; drive.doc = { text: 'Google Doc text', html: '' };
   reader.override = null; reader.calls = []; reader.capMs = NORMAL_CAP_MS; reader.last = 'the reader was not called';

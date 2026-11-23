@@ -154,8 +154,8 @@ and `e2e-mobile` projects create, change and delete rows (the `db` specs also re
 with "Project(s) api not found" instead of running. Against production the one project that exists is `smoke`. Never point the others at
 Supabase or the live Vercel URL, and never at the developer's own `dp_hms_db` unless that is the intent (use a disposable stack, below).
 
-**Vitest (backend).** `vitest.config.ts`: `src/**/*.test.ts`, `testTimeout`/`hookTimeout` 30 s (a hang detector, not a performance assertion),
-`poolOptions.forks.minForks: 1` so `--maxWorkers=N` works. Route tests run the REAL Express routers, the real `authenticate`/`require*`
+**Vitest (backend).** vitest 5.1 (2026-11-23; was 2.1.9), `vitest.config.mts` (`.mts` because the package is CommonJS and Vite 8 warns about ESM syntax in a `.ts` config): `src/**/*.test.ts`, `testTimeout`/`hookTimeout` 30 s (a hang detector, not a performance assertion),
+no pool options (`--maxWorkers=N` works as it is on vitest 5; the old `poolOptions.forks.minForks: 1` workaround was removed in vitest 4 and only printed a DEPRECATED line). vitest 5 needs Node `^22.12 || ^24 || >=26` and `@types/node` `^22`: the `backend` job runs it on 22.x; `backend-compat` and `trace-boot` (Node 22.11.0) only `npm ci` (an EBADENGINE warning, no engine-strict) and never run it. A mock-typing helper is `type MockInstance<typeof fn>`, not `ReturnType<typeof vi.spyOn>` (on vitest 5 its `mock.calls` come out untyped, which `tsc` rejects in a callback). Route tests run the REAL Express routers, the real `authenticate`/`require*`
 middleware and real JWTs through `src/test/routeHarness.ts`, with only the database (`src/test/fakeDb.ts`: records every statement, answers
 programmed replies, answers `authenticate()`'s `SELECT is_active FROM users WHERE id=$1` by default, `setUserAccess` overrides it) and the outside
 world (`src/test/externalMocks.ts`) replaced; a hand-written db mock must answer that lookup too (`src/test/accessLookup.ts`).
