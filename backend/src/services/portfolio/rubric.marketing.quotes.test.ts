@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { enforceEvidenceRules, type EvidenceContext } from './rubric.marketing.js';
+import { enforceEvidenceRules, repairStrayQuotes, type EvidenceContext } from './rubric.marketing.js';
 import type { CriterionResult, CriterionVerdict } from './types.js';
 import { cpuTimed, scaled } from '../../testing/timing.js';
 
@@ -588,5 +588,223 @@ describe('the matcher stays fast on hostile text', () => {
     ['200,000 "nine nine" with a long quote of nines', 'nine nine '.repeat(40000), rep(40, () => 'nine')],
   ])('%s', (_name, text, quote) => {
     expect(timed(text, quote)).toBeLessThan(scaled(2500));
+  });
+});
+
+// ─── Stray straight double quotes (an inch mark, a dangling quote) must not make an honest quote "invented" ─────────────
+// quotedFragments paired straight marks left to right, so one stray mark paired every later one with the wrong partner and the PROSE between
+// two marks (3+ words) was held to the page as if it were a quote. repairStrayQuotes ignores a mark only when it provably is not part of a pair.
+describe('stray straight double quotes', () => {
+  const PAGE = 'Studio Aqua 2024 | Monsoon Edit | We launched the Clean Water Week campaign across 40 sites. Copyright 2024 Studio. Our identity is bold.';
+
+  it('REPRODUCTION 1: an inch mark before a real quote (5" tall with tagline "We launched ... campaign")', () => {
+    const evidence = 'Banner is 5" tall with tagline "We launched the Clean Water Week campaign" and shows 3 campaigns';
+    expect(kindOf(evidence, PAGE)).toBe('exact');
+    // the exact shape of the report
+    expect(kindOf('... 5" tall with tagline "We launched ... campaign" shows 3 campaigns', 'We launched a big Clean Water Week campaign')).toBe('exact');
+  });
+
+  it('an unclosed opening quote before a real quote keeps the old pairing (a known, conservative limit: nothing proves which mark is stray)', () => {
+    expect(kindOf('Header says "Monsoon Edit and the footer says "Copyright 2024 Studio"', PAGE)).toBe('absent');
+  });
+
+  it('the repair is only ever for a provable stray: a fabricated quote beside the same stray marks is still invented', () => {
+    expect(kindOf('Banner is 5" tall with tagline "We won the national award for water" and shows 3 campaigns', PAGE)).toBe('absent');
+    // a pair that is well-formed but wrong is not repaired (nothing says which mark is the stray one): the prose between is held to the page
+    expect(kindOf('Header says "Monsoon is 5" and "We launched the Clean Water Week campaign"', PAGE)).toBe('absent');
+  });
+
+  it('a closing quote after a digit is still a closing quote', () => {
+    expect(kindOf('Says "the campaign reached 40 sites in 2024" in the intro', 'the campaign reached 40 sites in 2024')).toBe('exact');
+    expect(kindOf('Says "the campaign reached 90 sites in 2024" in the intro', 'the campaign reached 40 sites in 2024')).toBe('absent');
+  });
+
+  it('repairStrayQuotes: what it changes and what it leaves alone', () => {
+    expect(repairStrayQuotes('no marks at all')).toBe('no marks at all');
+    expect(repairStrayQuotes('a "well formed quote here" and "another one here"')).toBe('a "well formed quote here" and "another one here"');
+    expect(repairStrayQuotes('5" tall with "a real quote here"')).toBe('5  tall with "a real quote here"');
+    expect(repairStrayQuotes('"a real quote here" then "dangling')).toBe('"a real quote here" then  dangling');
+    expect(repairStrayQuotes('the brand" is "a real quote here"')).toBe('the brand  is "a real quote here"');
+    // an opener that meets an opener, and a next mark that could close a quote: the old pairing stands
+    expect(repairStrayQuotes('says "open and then "a real quote here"')).toBe('says "open and then "a real quote here ');
+    expect(repairStrayQuotes('5" invented words here" and "real quote words"')).toBe('5" invented words here" and "real quote words"');
+  });
+
+  // Deliberate trade-off (the PR's purpose): prose between a stray mark and the NEXT opener (`5\" tall with tagline \"We launched...\"`) is outside any quote and is not held to the page.
+  // Otherwise the repair may only ever ADD checks: shapes that wrap a fabricated sentence in other marks keep the verdict the old pairing gave.
+  it('fabricated text wrapped in nested, overlapping or punctuation-adjacent marks is still invented', () => {
+    const FAKE = 'fabricated invented claim words here';
+    const PG = 'We launched the Monsoon campaign in 2024 and grew reach strongly. The footer says Copyright 2024 Studio. Banner is 5 inches tall.';
+    for (const ev of [
+      `"${FAKE} "nested" end"`, `"${FAKE} "x" more"`, `"${FAKE} "quoted" tail"`, `He said "${FAKE} "x" end`,
+      `"${FAKE} ""`, `(" ${FAKE} ")`, `x." ${FAKE}" and "real quote words"`, `5" ${FAKE}" and "We launched the Monsoon campaign"`,
+    ]) expect(kindOf(ev, PG), ev).toBe('absent');
+  });
+
+  // ── Seeded property tests ────────────────────────────────────────────────────────────────────────────
+  const rng = (seed: number) => () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const WORDS = ['water', 'brand', 'launch', 'reach', 'campaign', 'identity', 'tagline', 'film', 'event', 'story', 'refill', 'impact', 'site', 'team', 'bold', 'clean', 'river', 'pledge', 'summit', 'week'];
+  const phrase = (r: () => number, n: number) => Array.from({ length: n }, () => WORDS[Math.floor(r() * WORDS.length)]).join(' ');
+  const pick = <T,>(r: () => number, xs: readonly T[]): T => xs[Math.floor(r() * xs.length)];
+
+  it('differential: a string with no stray mark is never changed (20,000 seeded well-formed evidence strings), so its verdict is exactly the old one', () => {
+    const r = rng(20261119);
+    let changed = 0;
+    for (let n = 0; n < 20000; n++) {
+      const parts: string[] = [phrase(r, 1 + Math.floor(r() * 4))];
+      const quotes = Math.floor(r() * 4);
+      for (let q = 0; q < quotes; q++) {
+        const body = phrase(r, 3 + Math.floor(r() * 5)) + pick(r, ['', ' 2024', ' in 5 months', ' 12K']);
+        const form = pick(r, ['straight', 'straight', 'straight', 'curly', 'single', 'nested', 'punct', 'paren']);
+        const tail = pick(r, [' ', ',', '.', ' ', ';']);
+        if (form === 'straight') parts.push(`says "${body}"${tail}`);
+        else if (form === 'curly') parts.push(`says “${body}”${tail}`);
+        else if (form === 'single') parts.push(`says '${body}'${tail}`);
+        else if (form === 'nested') parts.push(`says “${body} and "${phrase(r, 3)}" too”${tail}`);
+        else if (form === 'punct') parts.push(`says "${body}."${tail}`);
+        else parts.push(`("${body}")${tail}`);
+        parts.push(phrase(r, Math.floor(r() * 4)));
+      }
+      const evidence = parts.join(' ').replace(/\s+/g, ' ').trim();
+      if (repairStrayQuotes(evidence) !== evidence) changed++;
+    }
+    expect(changed).toBe(0);
+  });
+
+  const stray = (r: () => number): { before: string; between: string; after: string } => {
+    // provable strays only: at most one inch mark / dangling closer before the quote and one after, or one dangling opener at the very end
+    const inch = () => `${1 + Math.floor(r() * 9)}" ${pick(r, ['tall', 'wide', 'banner', 'poster'])}`;
+    const dangling = () => `${pick(r, WORDS)}" ${pick(r, ['is', 'was', 'and'])}`;
+    const before = r() < 0.5 ? ` ${pick(r, [inch, dangling])()} ${phrase(r, 1)}` : '';
+    let after = '';
+    const k = r();
+    if (k < 0.35) after = ` ${pick(r, [inch, dangling])()} ${phrase(r, 1)}`;
+    else if (k < 0.6) after = ` then "${phrase(r, 3)}`;
+    return { before, between: '', after };
+  };
+
+  it('property: an honest verbatim quote embedded in prose with provable stray marks is always found (3,000 seeded cases)', () => {
+    const r = rng(777);
+    for (let n = 0; n < 3000; n++) {
+      const quote = phrase(r, 3 + Math.floor(r() * 6));
+      const { before, between, after } = stray(r);
+      const evidence = `${phrase(r, 2)}${before}${between} "${quote}" shows ${phrase(r, 2)}${after}`.replace(/\s+/g, ' ');
+      const page = `Studio page. ${phrase(r, 3)} ${quote} ${phrase(r, 3)}`;
+      expect(kindOf(evidence, page), evidence).toBe('exact');
+    }
+  });
+
+  it('property: a fabricated quote, with or without the same stray marks, is never accepted (3,000 seeded cases)', () => {
+    const r = rng(4242);
+    for (let n = 0; n < 3000; n++) {
+      const fake = `${phrase(r, 2)} zebra unicorn ${phrase(r, 2)}`;   // two words the page never has
+      const { before, between, after } = stray(r);
+      const evidence = `${phrase(r, 2)}${before}${between} "${fake}" shows ${phrase(r, 2)}${after}`.replace(/\s+/g, ' ');
+      const page = `Studio page. ${phrase(r, 6)} ${phrase(r, 6)} ${phrase(r, 6)}`;
+      expect(kindOf(evidence, page), evidence).toBe('absent');
+    }
+  });
+
+  it('property: a fabricated sentence inside nested/overlapping marks is never LESS checked than the old pairing (2,000 seeded shapes)', () => {
+    const r = rng(99);
+    const forms = [(f: string, n: string) => `"${f} "${n}" end"`, (f: string, n: string) => `"${f} "${n}" more words"`, (f: string, n: string) => `He said "${f} "${n}" end`,
+      (f: string) => `"${f} ""`, (f: string) => `(" ${f} ")`, (f: string, n: string) => `5" ${f}" and "${n} a real quote"`, (f: string, n: string) => `x." ${f}" and "${n} real words"`];
+    const page = 'Studio page. ' + phrase(rng(5), 40);
+    for (let n = 0; n < 2000; n++) {
+      const fake = `${phrase(r, 2)} zebra unicorn ${phrase(r, 2)}`;
+      const ev = pick(r, forms)(fake, phrase(r, 2));
+      expect(kindOf(ev, page), ev).toBe('absent');
+    }
+  });
+});
+
+// ─── The union rule: a fragment whose delimiters look genuine is checked exactly as the original pairing checked it ─────────────────
+// Review 2: blanking a stray inch mark flips the pairing parity of every LATER mark, so an unclosed honest opener after it swallowed the opener of
+// the next real quote and a properly delimited FABRICATED quote that the original code rejected was never checked. quotedFragments is now the
+// union of the original pairing (kept only where its opening mark looks like an opener and its closing mark like a closer) and the repaired one.
+describe('stray quotes: no genuinely delimited fragment ever escapes its check (union of the original and the repaired pairing)', () => {
+  const PAGE = 'The poster was 5" tall and 12.5" wide. Built the identity from zero in 2021 with a team of four.';
+
+  it('REVIEW 2 REPRODUCTION: a stray inch mark, an unclosed honest opener, then a delimited fabricated quote is invented', () => {
+    const ev = 'The poster is 5" tall; headline "Built the identity from zero in 2021\n"tripled revenue within one quarter"';
+    expect(kindOf(ev, PAGE)).toBe('absent');
+    // the variant on one line
+    expect(kindOf('The poster is 5" tall; headline "Built the identity from zero in 2021 and "tripled revenue within one quarter" end', PAGE)).toBe('absent');
+    expect(kindOf('The poster is 5" tall; headline "Built the identity from zero in 2021 and "tripled revenue within one quarter" end', PAGE, 'partial')).toBe('absent');
+  });
+
+  it('the same shape with a REAL second quote is found (the delimited quote is on the page)', () => {
+    expect(kindOf('The poster is 5" tall; headline "Built the identity from zero in 2021\n"a team of four"', PAGE)).toBe('exact');
+  });
+
+  it('REVIEW 1: a fabricated quote wrapping nested quotes keeps every fragment it had', () => {
+    for (const ev of [
+      '"fabricated invented claim words here "nested" end"', '"fabricated invented claim words here "x" more"', 'He said "fabricated invented claim words here "x" end',
+      '5" and "fabricated invented claim words "nested" end"',
+    ]) expect(kindOf(ev, PAGE), ev).toBe('absent');
+  });
+
+  it('the documented false-invented repairs still hold', () => {
+    expect(kindOf('Banner is 5" tall with tagline "Built the identity from zero in 2021" and shows 3 campaigns', PAGE)).toBe('exact');
+    expect(kindOf('the brand" is "Built the identity from zero in 2021"', PAGE)).toBe('exact');
+  });
+
+  // The independent reference for the corpus: the ORIGINAL pairing's regexes (copied, not imported), fragments with genuine-looking straight delimiters.
+  const LDQ_ = '“', RDQ_ = '”';
+  const OLD_DQ = new RegExp(`"([^"]*)"|${LDQ_}([^${RDQ_}]*)${RDQ_}`, 'g');
+  const words3 = (f: string) => f.split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length >= 3;
+  const wc = (c?: string) => c !== undefined && /[\p{L}\p{N}]/u.test(c);
+  const sp = (c?: string) => c === undefined || /\s/.test(c);
+  const genuineOld = (raw: string): string[] => {
+    const out: string[] = [];
+    for (const m of raw.matchAll(OLD_DQ)) {
+      if (m[1] !== undefined) {
+        const o = m.index as number, c = o + m[0].length - 1;
+        if (wc(raw[o - 1]) || sp(raw[o + 1]) || wc(raw[c + 1]) || sp(raw[c - 1])) continue;
+        if (words3(m[1])) out.push(m[1]);
+      } else if (words3(m[2] ?? '')) out.push(m[2]);
+    }
+    return out;
+  };
+  /** The rule every case must satisfy: accepted (exact/near) only if each genuinely delimited fragment of the original pairing is, on its own, found. */
+  const holdsUnion = (ev: string, page: string): boolean => {
+    const rejected = (e: string): boolean => { const r = enforceEvidenceRules([read(e)], ctxOf(page)); return r.criteria[0].verdict === 'not_evidenced' && /not found/.test(r.notes.join(' | ')); };
+    if (rejected(ev)) return true;
+    return genuineOld(ev).every(f => !f.includes('"') && !rejected(`"${f}"`));
+  };
+
+  it.each([
+    'The poster is 5" tall; headline "Built the identity from zero in 2021\n"tripled revenue within one quarter"',
+    'x" and the headline "Built the identity from zero in 2021 and "tripled revenue within one quarter" end',
+    '8" wide "we built the identity "invented tripled revenue growth" more words" end',
+    'a 5" tall "stray opener words here\n"fabricated invented claim words here"',
+    '12.5" wide ("unclosed honest words here\n"fabricated invented claim words here".',
+    'see "unclosed honest words here . . . "fabricated invented claim words here", 5" tall',
+  ])('regression shape: %s', ev => { expect(holdsUnion(ev, PAGE), ev).toBe(true); expect(kindOf(ev, PAGE)).toBe('absent'); });
+
+  it('property: over 3,000 seeded strings of stray, unclosed, nested and delimited marks, nothing is accepted unless every genuinely delimited original fragment is found', () => {
+    let seed = 130130;
+    const r = () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const pk = <T,>(xs: readonly T[]): T => xs[Math.floor(r() * xs.length)];
+    const W = ['built', 'identity', 'zero', 'team', 'four', 'poster', 'tall', 'wide', '2021'];
+    const ph = (n: number) => Array.from({ length: n }, () => pk(W)).join(' ');
+    for (let n = 0; n < 3000; n++) {
+      const honest = 'Built the identity from zero in 2021';
+      const fake = `${ph(2)} zebra unicorn ${ph(1)}`;
+      const parts: string[] = [];
+      for (let i = 0, k = 2 + Math.floor(r() * 4); i < k; i++) {
+        parts.push(pk([`${1 + Math.floor(r() * 9)}" tall`, `"${honest}`, `"${fake}"`, `"${honest}"`, '"', `x" ${ph(1)}`, `"${fake} "${ph(3)}" end"`, ph(3), '12.5" wide', `(" ${ph(3)}`, '\n']));
+      }
+      const ev = parts.join(pk([' ', ' ', '\n', ''])).slice(0, 300);
+      expect(holdsUnion(ev, PAGE), ev).toBe(true);
+    }
+  });
+
+  it('stays linear on 100 KB of mixed quote marks', () => {
+    const unit = ['5" tall ', 'say "a b c" ', '" ', ' "x', '“q w e” ', '(" ', 'w" ', '""', '\n'];
+    const build = (size: number) => { let s = '', i = 0; while (s.length < size) s += unit[(i++ * 7 + (i >> 3)) % unit.length]; return s; };
+    const t = (size: number) => cpuTimed(() => enforceEvidenceRules([read(build(size))], ctxOf('some page text here'))).ms;
+    expect(t(100000)).toBeLessThan(scaled(2500));
+    expect(t(200000)).toBeLessThan(scaled(2500));
   });
 });
