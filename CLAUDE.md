@@ -305,7 +305,7 @@ rotate it, then remove it; rewriting history does not un-expose it.
 (backend|frontend|tests|ci-lint|actions)". Ecosystems: npm in `/backend`, `/frontend`, `/hms-tests-final`, `/tools/ci-lint`, and `github-actions`. The
 pinned packages are ignored by `update-types` (not by name, so a security PR for them is not suppressed — unverified on GitHub's side, check the
 first one): `puppeteer-core` and `@sparticuz/chromium` (an exact-pinned pair, moved together after the Lambda-image check), `@anthropic-ai/sdk`
-(stays on 0.24.x: minor and major), `pdf-parse` (minor and major), `@types/node` (major), and `typescript` in `tools/ci-lint` (major). Every update PR
+(stays on 0.24.x: minor and major), `pdf-parse` (minor and major), `@types/node` (major), `typescript` in `tools/ci-lint` (major), and, in `/frontend`, `lucide-react` (major: 1.x redraws about 20 of the 58 icons the app uses) and `@babel/plugin-transform-runtime` (major: 8.x needs Babel 8, `workbox-build` still needs 7; the package is only an install-time pin). Every update PR
 runs the full CI, including the Node 22.11 load check and the dependency review.
 
 **Reading a failure.** Actions tab > the run > `CI passed` lists each needed job with its result: open the one that is not `success`. `backend` /
