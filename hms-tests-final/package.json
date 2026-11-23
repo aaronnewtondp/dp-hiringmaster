@@ -19,7 +19,7 @@
     "stack:env":   "bash scripts/test-stack.sh env ${STACK:-0}"
   },
   "devDependencies": {
-    "@playwright/test": "^1.65.0",
+    "@playwright/test": "^1.65.1",
     "googleapis": "^189.0.0",
     "pg": "^8.23.1",
     "@types/pg": "^8.23.1"
