@@ -129,4 +129,26 @@ export interface PortfolioAnalysisResult {
   // How the evidence was checked, for audit and never a score cap: verdicts lowered because a quote or source did not hold up,
   // the fairness-filter note, a document retried as text, media left out for size. A criterion id may prefix a note ('mh3: …').
   evidenceNotes?:    string[];
+  // Marketing review only. One small record per quoted fragment that the matcher rejected ('invented') or held at 'near', for diagnosis
+  // only (at most 40): never the fragment or any text of the page, only measurements. Changes no verdict, score or note. Dropped when
+  // the review is not scored. The card ignores it.
+  quoteChecks?:      QuoteCheck[];
+}
+
+/** What is stored about one rejected quote (see rubric.marketing.ts `enforceEvidenceRules`). Measurements only: no text. */
+export interface QuoteCheck {
+  /** Criterion id (mh3, nh9, eq_recency ...). */
+  criterion:  string;
+  /** The first cited source: a ref (L1, L2.1 ...) or 'answer'. */
+  ref:        string;
+  outcome:    'invented' | 'near';
+  /** Length of the fragment in characters (code points) and in words. */
+  chars:      number;
+  words:      number;
+  /** Any cited item sent screenshots or a document to the model (so the words may have been read off an image). */
+  itemHadMedia:       boolean;
+  /** Any cited item's text is a cut of a longer extraction. */
+  itemTextTruncated:  boolean;
+  /** Would the fragment have been found (invented -> not absent, near -> exact) after that ONE extra folding? Diagnostic only. */
+  wouldPassWith: { entities: boolean; ampersand: boolean; copyright: boolean; strayQuotes: boolean; unmasked: boolean };
 }
