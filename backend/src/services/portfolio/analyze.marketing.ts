@@ -24,7 +24,7 @@ import type { NameSignal } from './protectedAttributes.js';
 import { stringList } from './rubric.js';
 import {
   MARKETING_CRITERIA, MARKETING_NICE_TO_HAVES, RawMarketingOutput, applyMarketingCaps, countReturnedCriteria, enforceEvidenceRules,
-  normalizeMarketingCriteria, normalizeNiceToHaves, scoreMarketing,
+  normalizeMarketingCriteria, normalizeNiceToHaves, scoreMarketing, QUOTE_CHECKS_MAX,
 } from './rubric.marketing.js';
 import { hasReadableText, wellFormed } from './text.js';
 import type { CriterionResult, PortfolioAnalysisResult, PortfolioReviewed, PortfolioSignals } from './types.js';
@@ -1122,6 +1122,8 @@ function buildResult(a: MarketingAnalyzeInput, asm: Assembled, parsed: RawMarket
       nativeDocument: s.nativeDocument, textTruncated: s.textTruncated, hasMedia: s.hasMedia,
     })),
     claimText: asm.answer,
+    // Only for the `unmasked` diagnostic of a rejected quote; never changes a verdict.
+    candidateName: str(a.candidateName) || str(a.candidate?.full_name),
   };
   // With no model call there is no "reviewer" that failed to return anything: say that no review was run.
   const missing = noModel ? 'No review was run' : undefined;
@@ -1239,6 +1241,7 @@ function buildResult(a: MarketingAnalyzeInput, asm: Assembled, parsed: RawMarket
   const summary = noModel ? 'No work could be opened and read, so nothing was reviewed or scored.' : fair.one(clip(raw.summary, 600));
 
   // ── Audit notes (never shown as caps): how the evidence was checked and what was done to the input
+  const quoteChecks = [...checked.quoteChecks, ...checkedNice.quoteChecks].slice(0, QUOTE_CHECKS_MAX);
   const evidenceNotes = [...checked.notes, ...checkedNice.notes, ...otherNotes, ...auditNotes, ...(scoring?.notes ?? []), ...asm.notes, ...meta.notes];
   if (asm.trimmed) evidenceNotes.push('Some images or document pages were left out to stay within the size limit');
   if (!requirementListsMatch(a.role)) evidenceNotes.push(REQUIREMENT_LIST_NOTE);
@@ -1268,6 +1271,7 @@ function buildResult(a: MarketingAnalyzeInput, asm: Assembled, parsed: RawMarket
     ...(meta.usage ? { usage: meta.usage } : {}),
     caps: capped.caps,
     evidenceNotes,
+    ...(quoteChecks.length ? { quoteChecks } : {}),
   };
 }
 

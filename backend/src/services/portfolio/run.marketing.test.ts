@@ -1873,6 +1873,27 @@ describe('runMarketingReview: a review that is not scored carries nothing the mo
       expect(out.campaigns ?? []).toEqual([]);
     });
 
+    it('drops quoteChecks (diagnostics of verdicts that were not applied), even when the criteria are kept for audit', () => {
+      const withChecks = { ...model, quoteChecks: [{ criterion: 'mh3', ref: 'L1', outcome: 'invented' as const, chars: 30, words: 5, itemHadMedia: true, itemTextTruncated: false,
+        wouldPassWith: { entities: false, ampersand: false, copyright: false, strayQuotes: false, unmasked: false } }] };
+      const out = discardedAnalysis(withChecks, base, 'Nothing was scored.', { criteria: withChecks.criteria, scoreNote: 'Not assessable' }, UNASSESSABLE_REASON);
+      expect(out).not.toHaveProperty('quoteChecks');
+      expect(JSON.stringify(out)).not.toContain('quoteChecks');
+      expect(out.criteria).toEqual(withChecks.criteria);
+    });
+
+    it('a review that is stored as no_portfolio drops quoteChecks too, and a completed one keeps them', async () => {
+      const checks = [{ criterion: 'mh3', ref: 'L1', outcome: 'near' as const, chars: 30, words: 5, itemHadMedia: false, itemTextTruncated: false,
+        wouldPassWith: { entities: true, ampersand: false, copyright: false, strayQuotes: false, unmasked: false } }];
+      vi.mocked(analyzeMarketing).mockResolvedValue(analysisOf({ portfolios: [shownStub(acq('L1', DOC), 'irrelevant')], quoteChecks: checks }));
+      expect(await runWith([DOC])).toEqual({ ran: true, status: 'no_portfolio' });
+      expect(applied().out.analysis).not.toHaveProperty('quoteChecks');
+      vi.mocked(applyPortfolioOutcome).mockClear();
+      vi.mocked(analyzeMarketing).mockResolvedValue(analysisOf({ quoteChecks: checks }));
+      expect(await runWith([DOC])).toEqual({ ran: true, status: 'completed' });
+      expect(applied().out.analysis!.quoteChecks).toEqual(checks);
+    });
+
     it('falls back to code\'s own records when the analyzer recorded none', () => {
       const out = discardedAnalysis(analysisOf({ portfolios: [] }), base, 'Nothing was scored.');
       expect(out.portfolios.map(p => p.ref)).toEqual(['L1']);
