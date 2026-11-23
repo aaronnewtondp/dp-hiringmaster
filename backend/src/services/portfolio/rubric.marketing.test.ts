@@ -1068,7 +1068,7 @@ describe('enforceEvidenceRules — order and interaction', () => {
   });
 
   it('an empty criteria list is fine', () => {
-    expect(enforceEvidenceRules([], ctx())).toEqual({ criteria: [], notes: [] });
+    expect(enforceEvidenceRules([], ctx())).toEqual({ criteria: [], notes: [], quoteChecks: [] });
   });
 });
 
