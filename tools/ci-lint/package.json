@@ -5,10 +5,10 @@
   "description": "CI-only checks for the HMS repo (type-aware async lint of backend/src, type-check of the Playwright suite). Kept apart from backend/, frontend/ and hms-tests-final/ on purpose: Vercel installs from those three, and nothing here may ever reach a production install. Commands run from the repo root, see README.md.",
   "type": "module",
   "devDependencies": {
-    "@vercel/nft": "1.11.10",
+    "@vercel/nft": "1.11.11",
     "eslint": "10.15.0",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.72.2"
+    "typescript-eslint": "8.73.0"
   },
   "engines": {
     "node": "22.x"
