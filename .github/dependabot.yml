@@ -91,9 +91,10 @@ updates:
       # lucide-react 1.x redraws about 20 of the 58 icons the app imports (10 of them clearly: Menu, MessageSquare, Megaphone,
       # CalendarPlus ...). Every import still resolves and the tests pass, so a bump looks green, but the app is meant to look
       # exactly as it does: adopting 1.x is a deliberate visual change (accept the new look, or keep the old shapes as local
-      # components), checked with before/after screenshots. Minor and patch releases of 0.x stay allowed. (Dependabot #138, 2026-11-23.)
+      # components), checked with before/after screenshots. The 0.x line is not safe either: 0.408 -> 0.577 (Dependabot #148) redesigned
+      # glyphs too, so every release is ignored until someone does that comparison on purpose. (Dependabot #138, 2026-11-23; #148, 2026-11-24.)
       - dependency-name: lucide-react
-        update-types: ["version-update:semver-major"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
       # @babel/plugin-transform-runtime is not imported or configured anywhere: it is an install-time resolver pin
       # (commit c838678). 8.x needs @babel/core 8 while workbox-build (through vite-plugin-pwa) still requires @babel/core 7, so
       # `npm install` fails with ERESOLVE. Revisit when workbox-build supports Babel 8. (Dependabot #139, 2026-11-23.)
